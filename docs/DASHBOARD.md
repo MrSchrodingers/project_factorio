@@ -38,6 +38,27 @@ Os assets são obtidos da distribuição oficial Linux demo do Factorio 2.0.73 e
 na máquina de runtime. Eles não são versionados nem redistribuídos pelo repositório. O Git
 contém apenas o código que resolve e renderiza esses arquivos locais.
 
+## Princípios visuais do v0.5
+
+O control plane não tenta reproduzir a tela do jogo pixel a pixel. Ele usa os assets do
+runtime para construir uma câmera tática legível para observabilidade:
+
+1. a fábrica é o foco e o viewport auto-enquadra as entidades construídas;
+2. terrain/resource layers dão contexto sem competir com máquinas e logística;
+3. o grid de debug fica fora do modo padrão;
+4. recursos são patches contínuos, não uma matriz de quadrados;
+5. sprites de mundo reais têm prioridade sobre ícones de inventário;
+6. labels aparecem sob demanda por hover/click, não permanentemente;
+7. estados físicos não são animados quando o Factorio está pausado entre ações FLE;
+8. o dashboard explica ausência de infraestrutura em vez de esconder o fato. No checkpoint
+   atual existem zero belts e o estágio seguinte é A* logistics;
+9. controles avançados continuam recolhidos para preservar hierarchy visual;
+10. motion é usado para feedback de UI (timeline, progresso, live state, frame transition),
+    com respeito a prefers-reduced-motion.
+
+A navegação do mapa suporta pan, zoom, reset, double-click para fit e fullscreen. Clicar em
+uma máquina abre uma ficha contextual com prototype, tipo, posição e direção.
+
 ## Production Statistics
 
 O bloco de produção segue o modelo do menu P do Factorio. Ele lê diretamente

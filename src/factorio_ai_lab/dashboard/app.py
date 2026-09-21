@@ -25,7 +25,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Factorio AI Lab Dashboard",
-    version="0.4.0",
+    version="0.5.0",
     lifespan=lifespan,
 )
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

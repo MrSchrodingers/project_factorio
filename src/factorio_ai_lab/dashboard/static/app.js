@@ -104,9 +104,15 @@ function updateEntityMix() {
   }
 
   const types = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 10);
-  $("entityTypes").innerHTML = types
-    .map(([name, count]) => "<span>" + escapeHtml(name) + " × " + count + "</span>")
-    .join("");
+  const beltCount = Object.entries(counts)
+    .filter(([name]) => name.includes("belt"))
+    .reduce((sum, [, count]) => sum + count, 0);
+  const pills = types
+    .map(([name, count]) => "<span>" + escapeHtml(name) + " × " + count + "</span>");
+  if (beltCount === 0) {
+    pills.push('<span class="next-stage-pill">0 belts · next: A* logistics</span>');
+  }
+  $("entityTypes").innerHTML = pills.join("");
 
   if (!positions.length) {
     setText("boundsText", "bounds --");
@@ -121,58 +127,82 @@ function updateEntityMix() {
   );
 }
 
-function renderOfficialAssets() {
+function renderWorldHotspots() {
   const overlay = $("worldAssetOverlay");
   if (!overlay) return;
   overlay.innerHTML = "";
 
-  const official = state.status && state.status.render
-    && state.status.render.official_assets;
-  if (!official || !official.ready) return;
-
   const entities = Array.isArray(state.world && state.world.entities)
     ? state.world.entities
     : [];
-  if (!entities.length) return;
+  const built = entities
+    .filter((entity) => getName(entity) !== "character")
+    .map((entity) => ({ entity, position: getPosition(entity) }))
+    .filter((item) => item.position);
 
-  const character = entities.find((entity) => getName(entity) === "character");
-  const characterPosition = getPosition(character);
-  const allPositions = entities.map(getPosition).filter(Boolean);
-  if (!allPositions.length) return;
+  if (!built.length) return;
 
-  const center = characterPosition || {
-    x: allPositions.reduce((sum, p) => sum + p.x, 0) / allPositions.length,
-    y: allPositions.reduce((sum, p) => sum + p.y, 0) / allPositions.length,
+  const center = {
+    x: built.reduce((sum, item) => sum + item.position.x, 0) / built.length,
+    y: built.reduce((sum, item) => sum + item.position.y, 0) / built.length,
   };
+  const extent = Math.max(
+    ...built.map((item) =>
+      Math.max(
+        Math.abs(item.position.x - center.x),
+        Math.abs(item.position.y - center.y)
+      )
+    )
+  );
+  const radius = Math.min(34, Math.max(12, extent + 7.5));
 
   const stage = $("worldStage");
   const rect = stage.getBoundingClientRect();
   const square = Math.min(rect.width, rect.height);
   const offsetX = (rect.width - square) / 2;
   const offsetY = (rect.height - square) / 2;
-  const radius = 22;
   const span = radius * 2;
 
-  for (const entity of entities) {
-    const position = getPosition(entity);
-    const name = getName(entity);
-    if (!position || name === "character") continue;
-
+  for (const { entity, position } of built) {
     const dx = position.x - center.x;
     const dy = position.y - center.y;
     if (Math.abs(dx) > radius || Math.abs(dy) > radius) continue;
 
-    const img = document.createElement("img");
-    img.className = "world-asset";
-    img.alt = "";
-    img.title = name;
-    img.src = "/api/assets/icon/" + encodeURIComponent(name) + ".png";
-    img.style.left = (offsetX + ((dx + radius) / span) * square) + "px";
-    img.style.top = (offsetY + ((dy + radius) / span) * square) + "px";
-    img.onerror = () => img.remove();
-    overlay.appendChild(img);
+    const name = getName(entity);
+    const hotspot = document.createElement("button");
+    hotspot.type = "button";
+    hotspot.className = "entity-hotspot " + categoryFor(name);
+    hotspot.dataset.label = name;
+    hotspot.setAttribute("aria-label", "Inspect " + name);
+    hotspot.style.left = (
+      offsetX + ((dx + radius) / span) * square
+    ) + "px";
+    hotspot.style.top = (
+      offsetY + ((dy + radius) / span) * square
+    ) + "px";
+
+    hotspot.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const inspector = $("worldInspector");
+      $("worldInspectorIcon").src =
+        "/api/assets/icon/" + encodeURIComponent(name) + ".png";
+      setText("worldInspectorName", name);
+      const direction = Number(entity.direction || 0);
+      const type = entity.type || categoryFor(name);
+      setText(
+        "worldInspectorMeta",
+        type + " · x " + formatNumber(position.x)
+          + " · y " + formatNumber(position.y)
+          + " · dir " + direction
+      );
+      inspector.hidden = false;
+    });
+
+    overlay.appendChild(hotspot);
   }
 }
+
+
 
 function drawStructuredFallback() {
   const canvas = $("worldFallback");
@@ -248,33 +278,38 @@ function refreshWorldFrame(force = false) {
   state.frameLoading = true;
   const probe = new Image();
   probe.onload = () => {
-    $("worldFrame").src = probe.src;
-    $("worldFrame").style.display = "block";
+    const frame = $("worldFrame");
+    frame.classList.add("frame-updating");
+    frame.src = probe.src;
+    frame.style.display = "block";
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => frame.classList.remove("frame-updating"));
+    });
     $("worldFallback").style.display = "none";
     $("worldEmpty").style.display = "none";
     state.frameTick = key;
     state.frameLoadedAt = Date.now();
     state.frameLoading = false;
-    setClassText("renderBadge", "official asset map", "badge live");
+    setClassText("renderBadge", "live world", "badge live");
     const official = render.official_assets || {};
     setText(
       "frameSource",
       official.ready
-        ? "Factorio 2.0.73 assets · terrain + " + formatNumber(official.icon_count || 0, 0) + " icons"
+        ? "Factorio 2.0.73 · live world sprites"
         : "structured map · local assets pending"
     );
     const rendererName = render.renderer || "";
-    if (rendererName === "official-asset-world-map") {
-      $("worldAssetOverlay").innerHTML = "";
+    if (rendererName.startsWith("official-asset-world-map")) {
+      renderWorldHotspots();
     } else {
-      renderOfficialAssets();
+      renderWorldHotspots();
     }
   };
   probe.onerror = () => {
     $("worldFrame").style.display = "none";
     $("worldFallback").style.display = "block";
     drawStructuredFallback();
-    renderOfficialAssets();
+    renderWorldHotspots();
     $("worldEmpty").style.display = ((state.world && state.world.entity_count) || 0) ? "none" : "grid";
     state.frameTick = key;
     state.frameLoading = false;
@@ -322,6 +357,27 @@ function installWorldControls() {
   $("zoomIn").addEventListener("click", () => setWorldZoom(state.worldZoom * 1.25));
   $("zoomOut").addEventListener("click", () => setWorldZoom(state.worldZoom / 1.25));
   $("zoomReset").addEventListener("click", resetWorldView);
+  $("worldInspectorClose").addEventListener("click", () => {
+    $("worldInspector").hidden = true;
+  });
+  stage.addEventListener("click", (event) => {
+    if (!event.target.closest(".entity-hotspot")
+        && !event.target.closest("#worldInspector")) {
+      $("worldInspector").hidden = true;
+    }
+  });
+
+  $("worldFullscreen").addEventListener("click", async () => {
+    try {
+      if (document.fullscreenElement === stage) {
+        await document.exitFullscreen();
+      } else {
+        await stage.requestFullscreen();
+      }
+    } catch (error) {
+      console.warn("fullscreen unavailable", error);
+    }
+  });
 
   stage.addEventListener("wheel", (event) => {
     event.preventDefault();
@@ -827,7 +883,11 @@ function updateKpis() {
   const onlineRows = online.history || [];
 
   setText("entityCount", formatNumber(world.entity_count || 0, 0));
-  setText("worldTick", "tick " + formatNumber(world.tick, 0));
+  const tickText = "game " + formatNumber(world.tick, 0)
+    + (world.experiment_tick !== undefined
+      ? " · FLE " + formatNumber(world.experiment_tick, 0)
+      : "");
+  setText("worldTick", tickText);
   setText("probeLatency", formatNumber(world.latency_ms, 1) + " ms");
 
   const primaryOutput = Object.entries(outputs).sort((a, b) => Number(b[1]) - Number(a[1]))[0];
@@ -854,9 +914,20 @@ function updateKpis() {
       : "no real-world trials yet"
   );
 
+  const recentTicks = (state.history || [])
+    .slice(-4)
+    .map((point) => Number(point.tick))
+    .filter(Number.isFinite);
+  const simulating = recentTicks.length >= 2
+    && new Set(recentTicks).size > 1;
+  const factorioLabel = !factorio.connected
+    ? "Factorio offline"
+    : simulating
+      ? "Factorio · simulating"
+      : "Factorio · paused between actions";
   setClassText(
     "factorioStatus",
-    factorio.connected ? "Factorio online" : "Factorio offline",
+    factorioLabel,
     factorio.connected ? "hud-chip good" : "hud-chip bad"
   );
   setClassText("llmStatus", llm.connected ? "Qwen ready" : "offline", llm.connected ? "good" : "bad");
@@ -897,7 +968,7 @@ function applyPayload(payload) {
   updateKpis();
   updateMission();
   updateEntityMix();
-  renderOfficialAssets();
+  renderWorldHotspots();
   renderCurriculum();
   renderTimeline();
   renderKnowledge();
@@ -991,7 +1062,7 @@ function connectSocket() {
 
 window.addEventListener("resize", () => {
   drawStructuredFallback();
-  renderOfficialAssets();
+  renderWorldHotspots();
   drawOfflineLearning();
   drawOnlineLearning();
   drawHistory();
@@ -1009,5 +1080,5 @@ Promise.all([loadConfig(), loadInitialState(), loadProduction()])
   .finally(connectSocket);
 
 setInterval(updateFrameAge, 1000);
-setInterval(() => refreshWorldFrame(true), 5000);
+setInterval(() => refreshWorldFrame(true), 2000);
 setInterval(() => loadProduction(state.productionPrecision), 4000);

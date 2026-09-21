@@ -176,7 +176,8 @@ for name,count in pairs(fluid_stats.output_counts) do
 end
 rcon.print(helpers.table_to_json({
   connected=true,
-  tick=storage.elapsed_ticks or game.tick,
+  tick=game.tick,
+  experiment_tick=storage.elapsed_ticks or 0,
   entities=entities,
   production=production
 }))

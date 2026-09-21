@@ -61,7 +61,7 @@ Por isso o primeiro modelo sugerido é **Qwen3-4B GGUF Q4_K_M via llama.cpp**. N
 9B v2 pode entrar como benchmark secundário quantizado; modelos MoE de ~30B ficam fora do
 baseline de RAM.
 
-## Estado do marco v0.4.0
+## Estado do marco v0.5.0
 
 O laboratório executa Factorio 2.0.73 via FLE, mantém checkpoints transacionais e possui
 um control plane web com telemetria ao vivo. O LLM baseline é Qwen3-4B Q4_K_M local em
@@ -86,6 +86,14 @@ O primeiro currículo online validado executou 8 trials reais de placement, prom
 east_near, persistiu uma segunda célula de mineração e aceitou uma célula de fundição que
 produziu 36 iron plates. O próximo objetivo registrado pelo research loop é projetar a
 extração por belts usando A*.
+
+O marco v0.5.0 redesenha a experiência de observabilidade com foco em legibilidade do
+mundo. O renderer deixou de usar ícones de inventário e grids de debug como visualização
+principal: ele auto-enquadra a fábrica, usa sprites de mundo reais para as entidades
+suportadas, compõe patches orgânicos de recursos, remove ruído natural do modo padrão e
+mantém inspeção contextual por hotspot. A UI também diferencia explicitamente o que já
+existe no checkpoint aceito do que é o próximo estágio de pesquisa; no estado atual há
+zero belts persistidos e a logística por A* é a próxima etapa.
 
 ## Comandos principais
 

@@ -1,19 +1,20 @@
 from __future__ import annotations
 
 import hashlib
-import math
 import threading
 import time
 from io import BytesIO
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageDraw, ImageEnhance, ImageFont
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
 
 ASSET_ROOT = Path(
-    "/home/ti/.local/share/factorio-ai/assets/demo-2.0.73/factorio/data/base/graphics"
+    "/home/ti/.local/share/factorio-ai/assets/demo-2.0.73/"
+    "factorio/data/base/graphics"
 )
 ICON_DIR = ASSET_ROOT / "icons"
+ENTITY_DIR = ASSET_ROOT / "entity"
 TERRAIN_GRASS = ASSET_ROOT / "terrain/grass-2.png"
 TERRAIN_DIRT = ASSET_ROOT / "terrain/dirt-1.png"
 FLE_ICON_DIR = Path("/home/ti/.fle/spritemaps/__base__/graphics/icons")
@@ -24,19 +25,52 @@ ICON_ALIASES = {
 }
 
 RESOURCE_COLORS = {
-    "iron-ore": (92, 123, 150, 215),
-    "copper-ore": (190, 108, 62, 215),
-    "coal": (42, 43, 46, 220),
-    "stone": (167, 150, 116, 220),
-    "uranium-ore": (83, 166, 73, 220),
-    "crude-oil": (36, 32, 29, 230),
+    "iron-ore": (91, 132, 160),
+    "copper-ore": (178, 91, 52),
+    "coal": (48, 50, 52),
+    "stone": (160, 143, 105),
+    "uranium-ore": (80, 162, 66),
+    "crude-oil": (42, 36, 31),
+}
+
+DRILL_SPECS = {
+    0: ("N", 173, 188),
+    4: ("E", 185, 168),
+    8: ("S", 174, 174),
+    12: ("W", 180, 176),
+}
+
+BELT_ROW_BY_DIRECTION = {
+    0: 2,   # north
+    4: 0,   # east
+    8: 3,   # south
+    12: 1,  # west
+}
+
+DIRECTION_VECTORS = {
+    0: (0.0, -1.0),
+    4: (1.0, 0.0),
+    8: (0.0, 1.0),
+    12: (-1.0, 0.0),
 }
 
 
 def _safe_name(name: str) -> bool:
     return bool(name) and all(
-        character in "abcdefghijklmnopqrstuvwxyz0123456789-" for character in name
+        character in "abcdefghijklmnopqrstuvwxyz0123456789-"
+        for character in name
     )
+
+
+def _cardinal_direction(raw: Any) -> int:
+    try:
+        direction = int(raw or 0) % 16
+    except (TypeError, ValueError):
+        return 0
+    return min((0, 4, 8, 12), key=lambda value: min(
+        abs(direction - value),
+        16 - abs(direction - value),
+    ))
 
 
 def resolve_official_icon(entity_name: str) -> Path | None:
@@ -88,18 +122,21 @@ def _position(item: dict[str, Any]) -> tuple[float, float] | None:
 
 
 class WorldFrameRenderer:
-    """Raster world view using locally installed official Factorio art assets."""
+    """Readable tactical world view using local Factorio 2.0.73 art assets."""
 
-    def __init__(self, viewport_radius: float = 42.0) -> None:
+    def __init__(self, viewport_radius: float = 34.0) -> None:
         self.viewport_radius = viewport_radius
         self._lock = threading.Lock()
         self._cache_key: tuple[Any, ...] | None = None
         self._cache_png: bytes | None = None
         self._last_error: str | None = None
         self._icon_cache: dict[tuple[str, int], Image.Image] = {}
-        self._terrain_cache: dict[str, Image.Image] = {}
+        self._sprite_cache: dict[tuple[Any, ...], Image.Image] = {}
+        self._terrain_tiles: dict[str, list[Image.Image]] = {}
+        self._background_cache: Image.Image | None = None
         self._asset_count_checked_at = 0.0
         self._asset_count = 0
+        self._last_radius = viewport_radius
 
     def _asset_count_now(self) -> int:
         now = time.monotonic()
@@ -114,10 +151,10 @@ class WorldFrameRenderer:
         assets = official_asset_status()
         return {
             "ready": bool(assets["ready"]),
-            "renderer": "official-asset-world-map",
+            "renderer": "official-asset-world-map-v2",
             "asset_count": self._asset_count_now(),
             "sprite_count": self._asset_count_now(),
-            "viewport_radius": self.viewport_radius,
+            "viewport_radius": round(self._last_radius, 2),
             "last_error": self._last_error,
             "official_assets": assets,
         }
@@ -138,13 +175,10 @@ class WorldFrameRenderer:
             for item in world.get("entities", [])
             if isinstance(item, dict)
         )
-        center = map_context.get("center")
         return (
             world.get("tick"),
             entities,
-            repr(center),
             len(map_context.get("resources", [])),
-            len(map_context.get("natural", [])),
             len(map_context.get("water_tiles", [])),
             repr(run.get("stage")) if isinstance(run, dict) else None,
         )
@@ -158,7 +192,6 @@ class WorldFrameRenderer:
             return None
         try:
             image = Image.open(path).convert("RGBA")
-            # Factorio icons contain the main mip at the left; height is the base size.
             base = min(image.height, image.width)
             image = image.crop((0, 0, base, base))
             image.thumbnail((size, size), Image.Resampling.LANCZOS)
@@ -167,30 +200,212 @@ class WorldFrameRenderer:
         self._icon_cache[cache_key] = image
         return image
 
-    def _terrain_patch(self, kind: str, size: int = 128) -> Image.Image:
-        key = f"{kind}:{size}"
-        if key in self._terrain_cache:
-            return self._terrain_cache[key]
+    def _terrain_samples(self, kind: str) -> list[Image.Image]:
+        if kind in self._terrain_tiles:
+            return self._terrain_tiles[kind]
 
         source = TERRAIN_GRASS if kind == "grass" else TERRAIN_DIRT
+        tiles: list[Image.Image] = []
         try:
-            sheet = Image.open(source).convert("RGB")
-            # These official sheets contain tile variations. A deterministic crop
-            # gives us real Factorio ground texture without shipping the source file.
-            x = 192 if sheet.width >= 320 else 0
-            y = 64 if sheet.height >= 192 else 0
-            patch = sheet.crop((x, y, min(x + 256, sheet.width), min(y + 256, sheet.height)))
-            patch = patch.resize((size, size), Image.Resampling.BILINEAR)
-            patch = ImageEnhance.Brightness(patch).enhance(0.62)
+            sheet = Image.open(source).convert("RGBA")
+            for y in range(0, sheet.height - 63, 64):
+                for x in range(0, sheet.width - 63, 64):
+                    tile = sheet.crop((x, y, x + 64, y + 64))
+                    if tile.getchannel("A").getextrema() != (255, 255):
+                        continue
+                    mean = tile.convert("RGB").resize(
+                        (1, 1),
+                        Image.Resampling.BILINEAR,
+                    ).getpixel((0, 0))
+                    brightness = sum(mean) / 3
+                    if 24 <= brightness <= 125:
+                        tile = ImageEnhance.Brightness(
+                            tile.convert("RGB")
+                        ).enhance(0.62)
+                        tile = ImageEnhance.Color(tile).enhance(0.78)
+                        tiles.append(tile.convert("RGBA"))
+                    if len(tiles) >= 72:
+                        break
+                if len(tiles) >= 72:
+                    break
         except OSError:
-            color = (62, 70, 46) if kind == "grass" else (82, 67, 48)
-            patch = Image.new("RGB", (size, size), color)
-        self._terrain_cache[key] = patch
-        return patch
+            pass
+
+        if not tiles:
+            color = (55, 62, 39, 255) if kind == "grass" else (79, 63, 43, 255)
+            tiles = [Image.new("RGBA", (64, 64), color)]
+
+        self._terrain_tiles[kind] = tiles
+        return tiles
+
+    def _background(self, width: int, height: int) -> Image.Image:
+        if self._background_cache is not None:
+            return self._background_cache.copy()
+
+        grass = self._terrain_samples("grass")
+        dirt = self._terrain_samples("dirt")
+        canvas = Image.new("RGBA", (width, height), (38, 43, 30, 255))
+
+        block = 64
+        for gy, y in enumerate(range(0, height, block)):
+            for gx, x in enumerate(range(0, width, block)):
+                seed = gx * 73856093 ^ gy * 19349663
+                use_dirt = seed % 17 in {0, 1}
+                source = dirt if use_dirt else grass
+                tile = source[seed % len(source)]
+                canvas.alpha_composite(tile, (x, y))
+
+        # Integrate the repeated tile samples so the terrain reads as one surface.
+        canvas = canvas.filter(ImageFilter.GaussianBlur(radius=0.35))
+        veil = Image.new("RGBA", canvas.size, (7, 10, 8, 32))
+        canvas = Image.alpha_composite(canvas, veil)
+        self._background_cache = canvas.copy()
+        return canvas
 
     @staticmethod
-    def _paste_center(canvas: Image.Image, icon: Image.Image, x: int, y: int) -> None:
-        canvas.alpha_composite(icon, (x - icon.width // 2, y - icon.height // 2))
+    def _paste_center(
+        canvas: Image.Image,
+        sprite: Image.Image,
+        x: int,
+        y: int,
+    ) -> None:
+        canvas.alpha_composite(
+            sprite,
+            (x - sprite.width // 2, y - sprite.height // 2),
+        )
+
+    @staticmethod
+    def _resize_factorio_sprite(
+        image: Image.Image,
+        tile_pixels: float,
+        *,
+        high_res_scale: float = 0.5,
+        logical_pixel_tile: float = 32.0,
+    ) -> Image.Image:
+        factor = high_res_scale * tile_pixels / logical_pixel_tile
+        width = max(2, round(image.width * factor))
+        height = max(2, round(image.height * factor))
+        return image.resize((width, height), Image.Resampling.LANCZOS)
+
+    def _burner_drill_sprite(
+        self,
+        direction: int,
+        tick: int,
+        tile_pixels: float,
+    ) -> Image.Image | None:
+        direction = _cardinal_direction(direction)
+        suffix, frame_width, frame_height = DRILL_SPECS[direction]
+        frame = (max(0, tick) // 8) % 32
+        cache_key = ("burner-drill", direction, frame, round(tile_pixels, 1))
+        if cache_key in self._sprite_cache:
+            return self._sprite_cache[cache_key]
+
+        path = (
+            ENTITY_DIR / "burner-mining-drill"
+            / f"burner-mining-drill-{suffix}.png"
+        )
+        try:
+            sheet = Image.open(path).convert("RGBA")
+            col = frame % 4
+            row = frame // 4
+            crop = sheet.crop((
+                col * frame_width,
+                row * frame_height,
+                (col + 1) * frame_width,
+                (row + 1) * frame_height,
+            ))
+            crop = self._resize_factorio_sprite(crop, tile_pixels)
+        except OSError:
+            return None
+        self._sprite_cache[cache_key] = crop
+        return crop
+
+    def _belt_sprite(
+        self,
+        direction: int,
+        tick: int,
+        tile_pixels: float,
+    ) -> Image.Image | None:
+        direction = _cardinal_direction(direction)
+        row = BELT_ROW_BY_DIRECTION.get(direction, 2)
+        frame = (max(0, tick) // 2) % 16
+        cache_key = ("belt", direction, frame, round(tile_pixels, 1))
+        if cache_key in self._sprite_cache:
+            return self._sprite_cache[cache_key]
+        path = ENTITY_DIR / "transport-belt" / "transport-belt.png"
+        try:
+            sheet = Image.open(path).convert("RGBA")
+            crop = sheet.crop((
+                frame * 128,
+                row * 128,
+                (frame + 1) * 128,
+                (row + 1) * 128,
+            ))
+            target = max(12, round(tile_pixels * 1.18))
+            crop = crop.resize((target, target), Image.Resampling.LANCZOS)
+        except OSError:
+            return None
+        self._sprite_cache[cache_key] = crop
+        return crop
+
+    def _static_world_sprite(
+        self,
+        name: str,
+        tile_pixels: float,
+    ) -> Image.Image | None:
+        cache_key = ("static", name, round(tile_pixels, 1))
+        if cache_key in self._sprite_cache:
+            return self._sprite_cache[cache_key]
+
+        candidates = {
+            "wooden-chest": ENTITY_DIR / "wooden-chest" / "wooden-chest.png",
+            "stone-furnace": ENTITY_DIR / "stone-furnace" / "stone-furnace.png",
+        }
+        path = candidates.get(name)
+        if path is None:
+            return None
+        try:
+            sprite = Image.open(path).convert("RGBA")
+            sprite = self._resize_factorio_sprite(sprite, tile_pixels)
+        except OSError:
+            return None
+        self._sprite_cache[cache_key] = sprite
+        return sprite
+
+    @staticmethod
+    def _factory_view(
+        entities: list[dict[str, Any]],
+        map_context: dict[str, Any],
+        max_radius: float,
+    ) -> tuple[tuple[float, float], float]:
+        built_positions = [
+            pos
+            for item in entities
+            if item.get("name") != "character"
+            if (pos := _position(item)) is not None
+        ]
+        if built_positions:
+            center = (
+                sum(pos[0] for pos in built_positions) / len(built_positions),
+                sum(pos[1] for pos in built_positions) / len(built_positions),
+            )
+            extent = max(
+                max(abs(pos[0] - center[0]), abs(pos[1] - center[1]))
+                for pos in built_positions
+            )
+            radius = min(max_radius, max(12.0, extent + 7.5))
+            return center, radius
+
+        center_raw = map_context.get("center")
+        if isinstance(center_raw, dict):
+            try:
+                return (
+                    float(center_raw.get("x", 0.0)),
+                    float(center_raw.get("y", 0.0)),
+                ), min(max_radius, 18.0)
+            except (TypeError, ValueError):
+                pass
+        return (0.0, 0.0), min(max_radius, 18.0)
 
     def render(
         self,
@@ -221,175 +436,226 @@ class WorldFrameRenderer:
     ) -> bytes:
         width = 1024
         height = 1024
-        radius = float(self.viewport_radius)
+        tick = int(world.get("tick") or 0)
 
         entities = [
-            item for item in world.get("entities", [])
+            item
+            for item in world.get("entities", [])
             if isinstance(item, dict) and _position(item) is not None
         ]
-        center_raw = map_context.get("center")
-        if isinstance(center_raw, dict):
-            center = (
-                float(center_raw.get("x", 0.0)),
-                float(center_raw.get("y", 0.0)),
-            )
-        else:
-            character = next(
-                (item for item in entities if item.get("name") == "character"),
-                None,
-            )
-            center = _position(character) if character else (0.0, 0.0)
-        if center is None:
-            center = (0.0, 0.0)
+        center, radius = self._factory_view(
+            entities,
+            map_context,
+            self.viewport_radius,
+        )
+        self._last_radius = radius
 
-        canvas = Image.new("RGBA", (width, height), (30, 33, 24, 255))
-        grass = self._terrain_patch("grass")
-        dirt = self._terrain_patch("dirt")
-        tile_px = grass.width
-        for y in range(0, height, tile_px):
-            for x in range(0, width, tile_px):
-                # Deterministic variation based on tile coordinate.
-                use_dirt = ((x // tile_px) * 17 + (y // tile_px) * 31) % 11 == 0
-                patch = dirt if use_dirt else grass
-                canvas.alpha_composite(patch.convert("RGBA"), (x, y))
-
-        draw = ImageDraw.Draw(canvas, "RGBA")
+        canvas = self._background(width, height)
         scale_x = width / (radius * 2)
         scale_y = height / (radius * 2)
+        tile_pixels = min(scale_x, scale_y)
 
         def project(x: float, y: float) -> tuple[int, int]:
             return (
-                int((x - center[0] + radius) * scale_x),
-                int((y - center[1] + radius) * scale_y),
+                round((x - center[0] + radius) * scale_x),
+                round((y - center[1] + radius) * scale_y),
             )
 
-        # Water is background terrain, so draw it before resources/entities.
+        # Water is a continuous layer, not one rectangle per tile.
+        water_mask = Image.new("L", (width, height), 0)
+        water_draw = ImageDraw.Draw(water_mask)
+        water_radius = max(2, round(tile_pixels * 0.62))
         for tile in map_context.get("water_tiles", []):
             if not isinstance(tile, dict):
                 continue
             try:
-                tx, ty = float(tile["x"]), float(tile["y"])
+                px, py = project(float(tile["x"]), float(tile["y"]))
             except (KeyError, TypeError, ValueError):
                 continue
-            px, py = project(tx, ty)
-            half_x = max(2, int(scale_x * 0.52))
-            half_y = max(2, int(scale_y * 0.52))
-            draw.rectangle(
-                (px - half_x, py - half_y, px + half_x, py + half_y),
-                fill=(38, 91, 127, 230),
+            water_draw.ellipse((
+                px - water_radius,
+                py - water_radius,
+                px + water_radius,
+                py + water_radius,
+            ), fill=235)
+        if water_mask.getbbox():
+            water_mask = water_mask.filter(
+                ImageFilter.GaussianBlur(radius=max(1.0, tile_pixels * 0.34))
             )
+            water_layer = Image.new("RGBA", (width, height), (38, 92, 127, 0))
+            water_layer.putalpha(water_mask.point(lambda value: int(value * 0.88)))
+            canvas = Image.alpha_composite(canvas, water_layer)
 
-        # Resource patches: colored tile + real Factorio item icon at sparse intervals.
+        # Resource fields read as organic patches rather than a spreadsheet.
         resources = [
-            item for item in map_context.get("resources", [])
+            item
+            for item in map_context.get("resources", [])
             if isinstance(item, dict) and _position(item) is not None
         ]
-        resource_icons: dict[str, Image.Image | None] = {}
+        by_resource: dict[str, list[tuple[float, float]]] = {}
+        for resource in resources:
+            name = str(resource.get("name", "resource"))
+            pos = _position(resource)
+            if pos is not None:
+                by_resource.setdefault(name, []).append(pos)
+
+        for name, positions in by_resource.items():
+            mask = Image.new("L", (width, height), 0)
+            mask_draw = ImageDraw.Draw(mask)
+            r = max(2, round(tile_pixels * 0.54))
+            for pos in positions:
+                px, py = project(*pos)
+                mask_draw.ellipse((px - r, py - r, px + r, py + r), fill=220)
+            mask = mask.filter(
+                ImageFilter.GaussianBlur(radius=max(1.5, tile_pixels * 0.55))
+            )
+            rgb = RESOURCE_COLORS.get(name, (137, 122, 80))
+            layer = Image.new("RGBA", (width, height), (*rgb, 0))
+            layer.putalpha(mask.point(lambda value: int(value * 0.70)))
+            canvas = Image.alpha_composite(canvas, layer)
+
+        draw = ImageDraw.Draw(canvas, "RGBA")
+
+        # Add small ore flecks to give the patch texture without drawing a square grid.
         for index, resource in enumerate(resources):
+            if index % 2:
+                continue
             pos = _position(resource)
             if pos is None:
                 continue
-            name = str(resource.get("name", "resource"))
             px, py = project(*pos)
-            color = RESOURCE_COLORS.get(name, (145, 128, 82, 190))
-            half = max(2, int(min(scale_x, scale_y) * 0.42))
-            draw.rectangle((px - half, py - half, px + half, py + half), fill=color)
-            # Keep dense fields legible while visibly using actual game art.
-            if index % 9 == 0:
-                icon = resource_icons.get(name)
-                if name not in resource_icons:
-                    icon = self._load_icon(name, max(12, int(min(scale_x, scale_y) * 1.7)))
-                    resource_icons[name] = icon
-                if icon is not None:
-                    self._paste_center(canvas, icon, px, py)
+            name = str(resource.get("name", "resource"))
+            base = RESOURCE_COLORS.get(name, (150, 135, 90))
+            seed = int(
+                hashlib.sha1(f"{name}:{pos[0]}:{pos[1]}".encode()).hexdigest()[:4],
+                16,
+            )
+            dx = (seed % 7) - 3
+            dy = ((seed // 7) % 7) - 3
+            size = max(1, round(tile_pixels * 0.10))
+            color = tuple(min(255, channel + 48) for channel in base)
+            draw.ellipse(
+                (px + dx - size, py + dy - size, px + dx + size, py + dy + size),
+                fill=(*color, 175),
+            )
 
-        # Natural objects (trees/rocks) from the live map.
-        natural = [
-            item for item in map_context.get("natural", [])
-            if isinstance(item, dict) and _position(item) is not None
+        # Belts are infrastructure first: draw a connected animated lane under the sprites.
+        belts = [
+            item for item in entities
+            if "transport-belt" in str(item.get("name", ""))
+            and "underground" not in str(item.get("name", ""))
         ]
-        for item in natural[:900]:
-            pos = _position(item)
+        phase = (tick // 2) % 12
+        for belt in belts:
+            pos = _position(belt)
             if pos is None:
                 continue
+            direction = _cardinal_direction(belt.get("direction"))
+            vx, vy = DIRECTION_VECTORS[direction]
             px, py = project(*pos)
-            name = str(item.get("name", "tree"))
-            icon = self._load_icon(name, 18)
-            if icon is not None:
-                self._paste_center(canvas, icon, px, py)
-            elif "tree" in name:
-                draw.ellipse((px - 4, py - 4, px + 4, py + 4), fill=(38, 77, 34, 220))
-            else:
-                draw.ellipse((px - 3, py - 3, px + 3, py + 3), fill=(92, 83, 67, 210))
+            dx = vx * tile_pixels * 0.54
+            dy = vy * tile_pixels * 0.54
+            draw.line(
+                (px - dx, py - dy, px + dx, py + dy),
+                fill=(33, 28, 20, 245),
+                width=max(5, round(tile_pixels * 0.80)),
+            )
+            draw.line(
+                (px - dx, py - dy, px + dx, py + dy),
+                fill=(169, 112, 42, 215),
+                width=max(2, round(tile_pixels * 0.58)),
+            )
+            offset = ((phase / 12.0) - 0.5) * tile_pixels
+            cx = px + vx * offset
+            cy = py + vy * offset
+            nx, ny = -vy, vx
+            arrow = max(2.0, tile_pixels * 0.12)
+            draw.polygon(
+                [
+                    (cx + vx * arrow * 1.8, cy + vy * arrow * 1.8),
+                    (cx - vx * arrow + nx * arrow, cy - vy * arrow + ny * arrow),
+                    (cx - vx * arrow - nx * arrow, cy - vy * arrow - ny * arrow),
+                ],
+                fill=(246, 195, 86, 220),
+            )
 
-        # World grid at 4-tile intervals.
-        grid_step = 4
-        start_x = math.floor((center[0] - radius) / grid_step) * grid_step
-        end_x = center[0] + radius
-        x = start_x
-        while x <= end_x:
-            px, _ = project(x, center[1])
-            draw.line((px, 0, px, height), fill=(255, 255, 255, 18), width=1)
-            x += grid_step
-        start_y = math.floor((center[1] - radius) / grid_step) * grid_step
-        end_y = center[1] + radius
-        y = start_y
-        while y <= end_y:
-            _, py = project(center[0], y)
-            draw.line((0, py, width, py), fill=(255, 255, 255, 18), width=1)
-            y += grid_step
-
-        # Player-built entities use the real high-resolution Factorio icons.
+        # World entities. Real entity frames are preferred over inventory icons.
         for entity in entities:
             pos = _position(entity)
             if pos is None:
                 continue
             px, py = project(*pos)
             name = str(entity.get("name", "entity"))
+            direction = _cardinal_direction(entity.get("direction"))
+
             if name == "character":
+                radius_px = max(8, round(tile_pixels * 0.38))
                 draw.ellipse(
-                    (px - 13, py - 13, px + 13, py + 13),
-                    fill=(238, 159, 52, 75),
-                    outline=(255, 195, 84, 255),
-                    width=3,
+                    (
+                        px - radius_px,
+                        py - radius_px,
+                        px + radius_px,
+                        py + radius_px,
+                    ),
+                    fill=(240, 163, 58, 32),
+                    outline=(255, 197, 90, 205),
+                    width=max(2, round(tile_pixels * 0.06)),
+                )
+                inner = max(3, round(radius_px * 0.25))
+                draw.ellipse(
+                    (px - inner, py - inner, px + inner, py + inner),
+                    fill=(255, 205, 105, 230),
                 )
                 continue
-            icon_size = 44 if "drill" in name or "furnace" in name else 34
-            icon = self._load_icon(name, icon_size)
-            if icon is not None:
-                self._paste_center(canvas, icon, px, py)
+
+            sprite: Image.Image | None = None
+            if name == "burner-mining-drill":
+                sprite = self._burner_drill_sprite(direction, tick, tile_pixels)
+            elif name == "transport-belt":
+                sprite = self._belt_sprite(direction, tick, tile_pixels)
             else:
-                draw.rounded_rectangle(
-                    (px - 12, py - 12, px + 12, py + 12),
-                    radius=4,
-                    fill=(61, 107, 139, 230),
-                    outline=(199, 219, 232, 200),
+                sprite = self._static_world_sprite(name, tile_pixels)
+
+            if sprite is None:
+                size = max(22, round(tile_pixels * 1.15))
+                sprite = self._load_icon(name, size)
+
+            if sprite is not None:
+                # Local contact shadow makes the entity visually sit on the surface.
+                shadow_w = max(8, round(sprite.width * 0.58))
+                shadow_h = max(4, round(sprite.height * 0.16))
+                draw.ellipse(
+                    (
+                        px - shadow_w // 2,
+                        py + round(tile_pixels * 0.22) - shadow_h // 2,
+                        px + shadow_w // 2,
+                        py + round(tile_pixels * 0.22) + shadow_h // 2,
+                    ),
+                    fill=(0, 0, 0, 78),
                 )
-            direction = int(entity.get("direction", 0) or 0)
-            angle = math.radians((direction / 16.0) * 360.0 - 90.0)
-            ex = px + int(math.cos(angle) * 18)
-            ey = py + int(math.sin(angle) * 18)
-            draw.line((px, py, ex, ey), fill=(255, 190, 70, 235), width=2)
+                self._paste_center(canvas, sprite, px, py)
+            else:
+                half = max(8, round(tile_pixels * 0.44))
+                draw.rounded_rectangle(
+                    (px - half, py - half, px + half, py + half),
+                    radius=max(3, half // 4),
+                    fill=(57, 73, 83, 230),
+                    outline=(190, 205, 214, 150),
+                )
 
-        font = ImageFont.load_default()
-        draw.rounded_rectangle((12, 12, 340, 68), radius=7, fill=(8, 10, 12, 195))
-        draw.text((23, 22), "LIVE FACTORIO WORLD", fill=(236, 239, 241, 255), font=font)
-        draw.text(
-            (23, 40),
-            f"center ({center[0]:.1f}, {center[1]:.1f}) · tick {world.get('tick', '--')}",
-            fill=(177, 188, 196, 255),
-            font=font,
+        # Gentle vignette gives hierarchy without a debug grid.
+        vignette = Image.new("L", (width, height), 0)
+        vignette_draw = ImageDraw.Draw(vignette)
+        vignette_draw.ellipse(
+            (-width * 0.12, -height * 0.12, width * 1.12, height * 1.12),
+            fill=0,
+            outline=68,
+            width=150,
         )
-
-        output = world.get("production", {}).get("output", {})
-        if isinstance(output, dict) and output:
-            top = sorted(output.items(), key=lambda item: float(item[1]), reverse=True)[:3]
-            text = " · ".join(f"{value:g} {name}" for name, value in top)
-            draw.rounded_rectangle((12, height - 45, min(width - 12, 420), height - 12), radius=7, fill=(8, 10, 12, 195))
-            draw.text((23, height - 34), text, fill=(123, 222, 143, 255), font=font)
-
-        digest = hashlib.sha1(repr(self._key(world, run, map_context)).encode()).hexdigest()[:8]
-        draw.text((width - 120, height - 24), f"frame {digest}", fill=(190, 190, 190, 180), font=font)
+        vignette = vignette.filter(ImageFilter.GaussianBlur(radius=60))
+        shade = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        shade.putalpha(vignette)
+        canvas = Image.alpha_composite(canvas, shade)
 
         buffer = BytesIO()
         canvas.save(buffer, format="PNG", optimize=True)
