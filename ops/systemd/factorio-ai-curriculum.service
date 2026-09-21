@@ -10,8 +10,7 @@ Group=devs
 WorkingDirectory=/srv/factorio-ai-lab
 Environment=HOME=/home/ti
 ExecStart=/srv/factorio-ai-lab/scripts/run_curriculum.sh
-TimeoutStartSec=900
-RemainAfterExit=yes
+TimeoutStartSec=1800
 NoNewPrivileges=true
 PrivateTmp=true
 

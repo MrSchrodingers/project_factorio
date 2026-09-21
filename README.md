@@ -128,6 +128,13 @@ O Production Monitor também foi refinado: nomes completos de recursos, labels m
 média de janela rotulada corretamente e uma curva EMA legível sobre os 300 samples nativos,
 com o sinal bruto preservado em baixa opacidade.
 
+### Patch v0.6.1
+
+O patch 0.6.1 versiona o helper de métricas usado pelo currículo para comparar taxas medidas
+em janelas diferentes, adiciona testes de regressão para essa normalização e atualiza o
+oneshot systemd para o tempo de execução do currículo de seis estágios. O v0.6.0 já usava
+essa lógica no host, mas o helper ainda não havia sido incluído no commit público.
+
 ## Comandos principais
 
     cd /srv/factorio-ai-lab

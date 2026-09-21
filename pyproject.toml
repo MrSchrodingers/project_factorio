@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "factorio-ai-lab"
-version = "0.6.0"
+version = "0.6.1"
 description = "Laboratório híbrido de IA/ML para planejamento, aprendizado e otimização em Factorio."
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
