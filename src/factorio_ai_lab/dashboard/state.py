@@ -207,6 +207,13 @@ rcon.print(helpers.table_to_json({
         "coal",
         "stone",
         "uranium-ore",
+        "iron-plate",
+        "copper-plate",
+        "iron-gear-wheel",
+        "copper-cable",
+        "electronic-circuit",
+        "automation-science-pack",
+        "logistic-science-pack",
     )
 
     _PRODUCTION_PRECISIONS: ClassVar[dict[str, tuple[str, float]]] = {
