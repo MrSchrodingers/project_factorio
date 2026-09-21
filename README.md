@@ -61,7 +61,7 @@ Por isso o primeiro modelo sugerido é **Qwen3-4B GGUF Q4_K_M via llama.cpp**. N
 9B v2 pode entrar como benchmark secundário quantizado; modelos MoE de ~30B ficam fora do
 baseline de RAM.
 
-## Estado do marco v0.6.0
+## Estado do marco v0.6.1
 
 O laboratório executa Factorio 2.0.73 via FLE, mantém checkpoints transacionais e possui
 um control plane web com telemetria ao vivo. O LLM baseline é Qwen3-4B Q4_K_M local em
@@ -127,6 +127,11 @@ ops/systemd/factorio-ai-curriculum.service.
 O Production Monitor também foi refinado: nomes completos de recursos, labels maiores,
 média de janela rotulada corretamente e uma curva EMA legível sobre os 300 samples nativos,
 com o sinal bruto preservado em baixa opacidade.
+
+O patch v0.6.1 torna o release autocontido e protege a comparação de throughput com
+métricas normalizadas por duração. A validação de 74 plates/32 s contra 36 plates/24 s
+resulta em 1.5417x pela taxa, não 2.06x pelos raw counts. O cálculo é coberto por teste
+unitário e uma correction lesson foi adicionada à memória da run de referência.
 
 ### Patch v0.6.1
 
