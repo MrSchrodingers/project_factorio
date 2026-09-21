@@ -1,0 +1,19 @@
+[Unit]
+Description=Factorio AI Lab local Qwen llama.cpp server
+After=network.target
+
+[Service]
+Type=simple
+User=ti
+Group=devs
+WorkingDirectory=/srv/factorio-ai-lab
+Environment=HOME=/home/ti
+ExecStart=/srv/factorio-ai-lab/scripts/run_llm_server.sh
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+Nice=5
+
+[Install]
+WantedBy=multi-user.target

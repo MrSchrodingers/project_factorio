@@ -61,15 +61,51 @@ Por isso o primeiro modelo sugerido é **Qwen3-4B GGUF Q4_K_M via llama.cpp**. N
 9B v2 pode entrar como benchmark secundário quantizado; modelos MoE de ~30B ficam fora do
 baseline de RAM.
 
-## Primeiros comandos
+## Estado do marco v0.2.0
 
-```bash
-cd /srv/factorio-ai-lab
-PYTHONPATH=src python3 -m unittest discover -s tests -v
-PYTHONPATH=src python3 -m factorio_ai_lab.cli baseline
-```
+O laboratório já executa o Factorio 2.0.73 via FLE, mantém checkpoints transacionais e possui
+um control plane web com telemetria ao vivo. O LLM baseline é Qwen3-4B Q4_K_M local em
+llama.cpp; nenhum provider pago é necessário.
 
-A instalação do FLE, llama.cpp e modelos é deliberadamente uma etapa posterior. Primeiro o
-substrato determinístico e as métricas precisam ser verificáveis sem qualquer modelo externo.
+Componentes ativos:
 
-Consulte `docs/ARCHITECTURE.md`, `docs/RESEARCH_BASELINE.md` e `docs/ROADMAP.md`.
+- Factorio/FLE: 127.0.0.1:27000 RCON;
+- dashboard: 127.0.0.1:8765;
+- Qwen/llama.cpp: 127.0.0.1:18081;
+- acesso do dashboard pela tailnet: http://midasnet.tail106aa2.ts.net:8765/;
+- learner UCB1 para seleção quantitativa do turn penalty do A*;
+- router de modelos que permite apenas backends local ou free.
+
+## Comandos principais
+
+    cd /srv/factorio-ai-lab
+
+    # Testes
+    PYTHONPATH=src python3 -m unittest discover -s tests -v
+
+    # Baseline determinístico
+    PYTHONPATH=src python3 -m factorio_ai_lab.cli baseline
+
+    # Sweep A*
+    PYTHONPATH=src python3 -m factorio_ai_lab.experiments.routing_sweep       --seeds 100 --output runs/routing_sweep_100.csv
+
+    # Aprendizado do hiperparâmetro de curva
+    PYTHONPATH=src python3 -m factorio_ai_lab.experiments.learn_turn_penalty       --episodes 300
+
+    # Dashboard manual
+    ./scripts/run_dashboard.sh
+
+    # Publicar dashboard somente na tailnet
+    ./scripts/expose_dashboard_tailscale.sh
+
+## Próximos experimentos
+
+1. gerar datasets de demonstrações do planner;
+2. treinar política espacial supervisionada e comparar CNN, CNN+self-attention e GNN;
+3. adicionar grafo de receitas e otimização de capacidade/produção;
+4. fazer o LLM gerar planos tipados em vez de comandos livres;
+5. acoplar executor transacional ao ciclo de auto-healing;
+6. somente depois adicionar perturbações dinâmicas e insetos.
+
+Consulte docs/ARCHITECTURE.md, docs/DASHBOARD.md, docs/FLE_RUNTIME.md,
+docs/LLM_RUNTIME.md, docs/RESEARCH_BASELINE.md e docs/ROADMAP.md.

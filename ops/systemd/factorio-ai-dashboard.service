@@ -1,0 +1,19 @@
+[Unit]
+Description=Factorio AI Lab dashboard
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+User=ti
+Group=devs
+WorkingDirectory=/srv/factorio-ai-lab
+Environment=HOME=/home/ti
+ExecStart=/srv/factorio-ai-lab/scripts/run_dashboard.sh
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

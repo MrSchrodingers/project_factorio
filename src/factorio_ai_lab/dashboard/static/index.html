@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Factorio AI Lab</title>
+  <link rel="stylesheet" href="/static/styles.css?v=0.2.0">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <div class="eyebrow">RESEARCH CONTROL PLANE</div>
+      <h1>Factorio AI Lab</h1>
+    </div>
+    <div class="top-status">
+      <span id="socketBadge" class="badge neutral">connecting</span>
+      <span id="commitBadge" class="mono">git --</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="cards metrics">
+      <article class="card metric-card">
+        <span class="label">Factorio</span>
+        <strong id="factorioStatus">--</strong>
+        <small id="factorioDetail">RCON 127.0.0.1:27000</small>
+      </article>
+      <article class="card metric-card">
+        <span class="label">Local LLM</span>
+        <strong id="llmStatus">--</strong>
+        <small id="llmDetail">llama.cpp :18081</small>
+      </article>
+      <article class="card metric-card">
+        <span class="label">Entities</span>
+        <strong id="entityCount">0</strong>
+        <small id="worldTick">tick --</small>
+      </article>
+      <article class="card metric-card">
+        <span class="label">Probe latency</span>
+        <strong id="probeLatency">-- ms</strong>
+        <small>read-only world observer</small>
+      </article>
+      <article class="card metric-card">
+        <span class="label">Memory</span>
+        <strong id="memoryUsed">--</strong>
+        <small id="memoryDetail">--</small>
+      </article>
+      <article class="card metric-card">
+        <span class="label">Learner</span>
+        <strong id="learnerBest">--</strong>
+        <small id="learnerEpisodes">no experiment</small>
+      </article>
+    </section>
+
+    <section class="main-grid">
+      <article class="card world-card">
+        <div class="card-head">
+          <div>
+            <span class="label">LIVE WORLD</span>
+            <h2>Factory topology</h2>
+          </div>
+          <div class="legend">
+            <span><i class="dot belt"></i>logistics</span>
+            <span><i class="dot machine"></i>machine</span>
+            <span><i class="dot power"></i>power</span>
+            <span><i class="dot other"></i>other</span>
+          </div>
+        </div>
+        <div class="canvas-wrap">
+          <canvas id="worldCanvas"></canvas>
+          <div id="worldEmpty" class="empty-state">Waiting for entity snapshot…</div>
+        </div>
+        <div class="world-footer">
+          <div id="boundsText" class="mono">bounds --</div>
+          <div id="entityTypes" class="type-pills"></div>
+        </div>
+      </article>
+
+      <aside class="card side-card">
+        <div class="card-head">
+          <div>
+            <span class="label">ACTIVE CONFIG</span>
+            <h2>Runtime parameters</h2>
+          </div>
+          <span id="configSaved" class="save-state"></span>
+        </div>
+        <form id="configForm" class="config-form">
+          <label>Poll interval (s)<input name="poll_interval_s" type="number" min=".25" max="30" step=".25"></label>
+          <label>A* turn penalty<input name="astar_turn_penalty" type="number" min="0" max="20" step=".05"></label>
+          <label>UCB exploration<input name="ucb_exploration" type="number" min="0" max="20" step=".1"></label>
+          <label>LLM provider<input name="llm_provider" type="text"></label>
+          <label>Temperature<input name="llm_temperature" type="number" min="0" max="2" step=".05"></label>
+          <label>Max tokens<input name="llm_max_tokens" type="number" min="32" max="32768" step="32"></label>
+          <label>Learning algorithm<input name="learning_algorithm" type="text"></label>
+          <label>Neural policy<input name="neural_policy" type="text"></label>
+          <label>World model<input name="world_model" type="text"></label>
+          <button type="submit">Save runtime parameters</button>
+        </form>
+      </aside>
+    </section>
+
+    <section class="chart-grid">
+      <article class="card chart-card">
+        <div class="card-head">
+          <div>
+            <span class="label">ONLINE LEARNING</span>
+            <h2>UCB1 reward</h2>
+          </div>
+          <span class="mono" id="learningSource">turn penalty</span>
+        </div>
+        <canvas id="learningCanvas"></canvas>
+      </article>
+
+      <article class="card chart-card">
+        <div class="card-head">
+          <div>
+            <span class="label">PLANNER BENCHMARK</span>
+            <h2>Turns vs search cost</h2>
+          </div>
+          <span class="mono" id="sweepSource">no sweep</span>
+        </div>
+        <canvas id="sweepCanvas"></canvas>
+      </article>
+
+      <article class="card chart-card">
+        <div class="card-head">
+          <div>
+            <span class="label">LIVE TELEMETRY</span>
+            <h2>World / observer</h2>
+          </div>
+          <span class="mono">last 600 samples</span>
+        </div>
+        <canvas id="historyCanvas"></canvas>
+      </article>
+    </section>
+
+    <section class="bottom-grid">
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <span class="label">MODEL ROUTER</span>
+            <h2>Inference policy</h2>
+          </div>
+        </div>
+        <div class="router">
+          <div class="route-row"><span>1</span><div><strong>Qwen3-4B Q4_K_M</strong><small>local · llama.cpp · primary</small></div><b id="routeLocal">checking</b></div>
+          <div class="route-row"><span>2</span><div><strong>openrouter/free</strong><small>external free-only fallback · opt-in</small></div><b>disabled</b></div>
+          <div class="route-row"><span>3</span><div><strong>Deterministic engines</strong><small>A* / optimizer bypass LLM when applicable</small></div><b>active</b></div>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <span class="label">RUN STATE</span>
+            <h2>Learning summary</h2>
+          </div>
+        </div>
+        <pre id="learningSummary" class="summary">No learning artifact yet.</pre>
+      </article>
+    </section>
+  </main>
+
+  <script src="/static/app.js?v=0.2.0"></script>
+</body>
+</html>
