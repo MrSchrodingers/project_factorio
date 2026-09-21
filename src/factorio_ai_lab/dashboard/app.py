@@ -91,6 +91,16 @@ def api_research() -> dict[str, Any]:
     return state.research_data()
 
 
+@app.get("/api/progression")
+async def api_progression() -> dict[str, Any]:
+    world = await asyncio.to_thread(state.factorio.snapshot)
+    research = state.research_data()
+    return state.engineering_progression_data(
+        world=world,
+        research=research,
+    )
+
+
 @app.get("/api/knowledge")
 def api_knowledge() -> dict[str, Any]:
     return state.knowledge_data()

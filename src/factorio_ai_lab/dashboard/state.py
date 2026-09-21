@@ -14,6 +14,10 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from factorio_ai_lab.dashboard.rendering import WorldFrameRenderer
+from factorio_ai_lab.planning.progression import (
+    DEFAULT_ENGINEERING_PLANNER,
+    EngineeringState,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 RUNS_DIR = PROJECT_ROOT / "runs"
@@ -203,6 +207,13 @@ rcon.print(helpers.table_to_json({
         "coal",
         "stone",
         "uranium-ore",
+        "iron-plate",
+        "copper-plate",
+        "iron-gear-wheel",
+        "copper-cable",
+        "electronic-circuit",
+        "automation-science-pack",
+        "logistic-science-pack",
     )
 
     _PRODUCTION_PRECISIONS: ClassVar[dict[str, tuple[str, float]]] = {
@@ -575,6 +586,7 @@ class DashboardState:
 
     def sample(self) -> dict[str, Any]:
         world = self.factorio.snapshot()
+        research = self.research_data()
         point = {
             "timestamp": time.time(),
             "tick": world.get("tick"),
@@ -591,7 +603,11 @@ class DashboardState:
             "history": self.history_data(),
             "learning": self.learning_data(),
             "run": self.active_run_data(),
-            "research": self.research_data(),
+            "research": research,
+            "progression": self.engineering_progression_data(
+                world=world,
+                research=research,
+            ),
             "knowledge": self.knowledge_data(),
             "datasets": self.dataset_data(),
         }
@@ -666,6 +682,117 @@ class DashboardState:
         except (OSError, json.JSONDecodeError):
             return {"count": 0, "lessons": [], "error": "invalid knowledge log"}
         return {"count": len(lines), "lessons": lessons}
+
+    def engineering_progression_data(
+        self,
+        *,
+        world: dict[str, Any] | None = None,
+        research: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        world = world if world is not None else self.factorio.snapshot()
+        research = research if research is not None else self.research_data()
+
+        metrics = research.get("metrics", {})
+        if not isinstance(metrics, dict):
+            metrics = {}
+        engineering = research.get("engineering_progression", {})
+        if not isinstance(engineering, dict):
+            engineering = {}
+
+        achieved = {
+            str(goal)
+            for goal in engineering.get("achieved", [])
+            if isinstance(goal, str)
+        }
+        production = world.get("production", {})
+        outputs = production.get("output", {}) if isinstance(production, dict) else {}
+        if not isinstance(outputs, dict):
+            outputs = {}
+
+        if (
+            float(outputs.get("iron-plate", 0.0) or 0.0) > 0
+            or float(metrics.get("belt_smelting_plate_output", 0.0) or 0.0) > 0
+            or float(metrics.get("iron_plate_output", 0.0) or 0.0) > 0
+        ):
+            achieved.add("iron_backbone")
+        if (
+            float(outputs.get("copper-ore", 0.0) or 0.0) > 0
+            or float(metrics.get("copper_ore_output", 0.0) or 0.0) > 0
+        ):
+            achieved.add("copper_mining")
+        if (
+            float(outputs.get("copper-plate", 0.0) or 0.0) > 0
+            or float(metrics.get("copper_plate_output", 0.0) or 0.0) > 0
+        ):
+            achieved.add("copper_smelting")
+
+        entity_counts: dict[str, int] = {}
+        for entity in world.get("entities", []):
+            if not isinstance(entity, dict):
+                continue
+            name = entity.get("name")
+            if isinstance(name, str):
+                entity_counts[name] = entity_counts.get(name, 0) + 1
+
+        researched = frozenset(
+            str(name)
+            for name in engineering.get("researched", [])
+            if isinstance(name, str)
+        )
+        stalled_raw = engineering.get("stalled_attempts", {})
+        stalled_attempts = (
+            {
+                str(key): int(value)
+                for key, value in stalled_raw.items()
+                if isinstance(key, str)
+            }
+            if isinstance(stalled_raw, dict)
+            else {}
+        )
+        item_signals = {
+            str(item): float(value)
+            for item, value in outputs.items()
+            if isinstance(item, str)
+            and isinstance(value, (int, float))
+            and float(value) > 0
+        }
+
+        state = EngineeringState(
+            achieved=frozenset(achieved),
+            item_rates=item_signals,
+            entity_counts=entity_counts,
+            researched=researched,
+            stalled_attempts=stalled_attempts,
+        )
+        inferred = DEFAULT_ENGINEERING_PLANNER.inferred_achieved(state)
+        ranked = DEFAULT_ENGINEERING_PLANNER.ranked_frontier(
+            EngineeringState(
+                achieved=inferred,
+                item_rates=item_signals,
+                entity_counts=entity_counts,
+                researched=researched,
+                stalled_attempts=stalled_attempts,
+            )
+        )
+
+        frontier = [
+            {
+                "goal_id": candidate.goal.goal_id,
+                "label": candidate.goal.label,
+                "kind": candidate.goal.kind,
+                "score": round(candidate.score, 4),
+                "novelty": round(candidate.novelty, 4),
+                "retry_penalty": round(candidate.retry_penalty, 4),
+            }
+            for candidate in ranked
+        ]
+        return {
+            "achieved": sorted(inferred),
+            "next_goal": frontier[0] if frontier else None,
+            "frontier": frontier,
+            "stalled_attempts": stalled_attempts,
+            "terminal": not frontier,
+        }
 
     def render_world_frame(self, mode: str = "game") -> bytes:
         world = self.factorio.snapshot()

@@ -19,6 +19,10 @@ from factorio_ai_lab.integrations.fle import (
 from factorio_ai_lab.learning.bandit import UCB1Bandit
 from factorio_ai_lab.metrics.rates import normalized_rate_ratio, rate_per_second
 from factorio_ai_lab.planning.astar import RoutingWeights, weighted_astar
+from factorio_ai_lab.planning.progression import (
+    DEFAULT_ENGINEERING_PLANNER,
+    EngineeringState,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 RUNS_DIR = PROJECT_ROOT / "runs"
@@ -122,6 +126,20 @@ class ResearchJournal:
                         "compare plate throughput against direct feed."
                     ),
                 },
+                {
+                    "name": "Copper expansion",
+                    "status": "pending",
+                    "detail": (
+                        "Discover a copper patch and establish validated copper mining."
+                    ),
+                },
+                {
+                    "name": "Copper smelting",
+                    "status": "pending",
+                    "detail": (
+                        "Convert mined copper into validated copper-plate production."
+                    ),
+                },
             ],
             "online_learning": {
                 "algorithm": "ucb1_real_factorio_placement",
@@ -148,6 +166,13 @@ class ResearchJournal:
                     "planned": "residual recurrent model",
                     "reason": "learn residual only after measurable model mismatch exists",
                 },
+            },
+            "engineering_progression": {
+                "status": "bootstrapping",
+                "achieved": [],
+                "stalled_attempts": {},
+                "frontier": [],
+                "next_goal": None,
             },
             "metrics": {},
             "events": [],
@@ -1357,6 +1382,273 @@ print({{
     return True
 
 
+def update_engineering_frontier(
+    journal: ResearchJournal,
+    *,
+    achieved: set[str],
+    stalled_attempts: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    stalled = dict(stalled_attempts or {})
+    state = EngineeringState(
+        achieved=frozenset(achieved),
+        stalled_attempts=stalled,
+    )
+    inferred = DEFAULT_ENGINEERING_PLANNER.inferred_achieved(state)
+    ranked = DEFAULT_ENGINEERING_PLANNER.ranked_frontier(
+        EngineeringState(
+            achieved=inferred,
+            stalled_attempts=stalled,
+        )
+    )
+    frontier = [
+        {
+            "goal_id": candidate.goal.goal_id,
+            "label": candidate.goal.label,
+            "kind": candidate.goal.kind,
+            "score": candidate.score,
+            "novelty": candidate.novelty,
+            "retry_penalty": candidate.retry_penalty,
+        }
+        for candidate in ranked
+    ]
+    progression = journal.state["engineering_progression"]
+    progression["status"] = "active" if frontier else "frontier_complete"
+    progression["achieved"] = sorted(inferred)
+    progression["stalled_attempts"] = stalled
+    progression["frontier"] = frontier
+    progression["next_goal"] = frontier[0] if frontier else None
+    journal.flush()
+    return progression
+
+
+def stage_copper_mining(
+    executor: TransactionalFLEExecutor,
+    env: Any,
+    journal: ResearchJournal,
+    *,
+    settle_seconds: int,
+) -> tuple[bool, tuple[float, float] | None]:
+    namespace = env.unwrapped.instance.namespace
+    journal.set_stage(
+        6,
+        status="running",
+        detail="Expanding the factory to a measured copper resource patch.",
+        next_action="discover and validate copper extraction",
+    )
+
+    perception = executor.execute(
+        """
+copper = nearest(Resource.CopperOre)
+copper_patch = get_resource_patch(Resource.CopperOre, copper, radius=30)
+print({'copper': copper, 'patch': copper_patch})
+""",
+        accept=lambda result: (
+            not bool(result.info.get("error_occurred"))
+            and result.candidate_game_state is not None
+        ),
+    )
+    if not perception.accepted:
+        journal.fail_stage(6, "Copper patch perception failed and was rolled back.")
+        return False, None
+
+    patch = namespace.copper_patch
+    center = patch_center(patch)
+    journal.state.setdefault("world", {})["copper_patch"] = {
+        "size": patch.size,
+        "center": {"x": center[0], "y": center[1]},
+        "bounds": {
+            "left_top": {
+                "x": float(patch.bounding_box.left_top.x),
+                "y": float(patch.bounding_box.left_top.y),
+            },
+            "right_bottom": {
+                "x": float(patch.bounding_box.right_bottom.x),
+                "y": float(patch.bounding_box.right_bottom.y),
+            },
+        },
+    }
+    journal.event(
+        "world_model",
+        "Copper resource patch added to the explicit world model.",
+        center={"x": center[0], "y": center[1]},
+        patch_size=patch.size,
+    )
+
+    fast_reposition(env, x=center[0], y=center[1])
+    output_before = production_output(namespace, "copper-ore")
+    measured: dict[str, float] = {}
+
+    def validate_copper(result: Any) -> bool:
+        output_after = production_output(namespace, "copper-ore")
+        delta = max(0.0, output_after - output_before)
+        measured["copper_ore_output"] = delta
+        return (
+            not bool(result.info.get("error_occurred"))
+            and result.candidate_game_state is not None
+            and delta > 0
+        )
+
+    code = f"""
+copper_drill=place_entity(
+    Prototype.BurnerMiningDrill,
+    position=Position(x={center[0]},y={center[1]}),
+    direction=Direction.DOWN,
+)
+copper_drill=insert_item(Prototype.Coal,copper_drill,quantity=20)
+copper_chest=place_entity_next_to(
+    Prototype.WoodenChest,
+    copper_drill.position,
+    direction=Direction.DOWN,
+)
+sleep({settle_seconds})
+print({{'copper_inventory': inspect_inventory(copper_chest)}})
+"""
+    step = executor.execute(
+        code,
+        accept=validate_copper,
+        use_checkpoint_for_action=False,
+    )
+    if not step.accepted:
+        journal.fail_stage(
+            6,
+            "Copper mining produced no validated output; transaction rolled back.",
+        )
+        journal.event("reject", "Copper expansion rejected and rolled back.")
+        return False, center
+
+    output = measured["copper_ore_output"]
+    journal.state["metrics"]["copper_ore_output"] = output
+    journal.state["metrics"]["copper_mining_reward"] = step.reward
+    journal.complete_stage(
+        6,
+        f"Copper mining accepted with {output:.0f} copper ore produced.",
+    )
+    journal.event(
+        "accept",
+        "First persistent copper mining cell accepted.",
+        copper_ore_output=output,
+        center={"x": center[0], "y": center[1]},
+    )
+    lesson = synthesize_lesson(
+        stage="copper_mining",
+        facts={
+            "accepted": True,
+            "copper_ore_output": output,
+            "patch_size": patch.size,
+        },
+        fallback_lesson=(
+            "The factory diversified beyond iron by establishing validated "
+            "copper extraction on a measured live resource patch."
+        ),
+        fallback_hypothesis=(
+            "Smelt copper ore into copper plates, then open the electronics "
+            "and science dependency chain."
+        ),
+    )
+    journal.event("knowledge", lesson["lesson"])
+    return True, center
+
+
+def stage_copper_smelting(
+    executor: TransactionalFLEExecutor,
+    env: Any,
+    journal: ResearchJournal,
+    *,
+    center: tuple[float, float],
+    settle_seconds: int,
+) -> bool:
+    namespace = env.unwrapped.instance.namespace
+    target = (center[0] + 4.5, center[1])
+
+    journal.set_stage(
+        7,
+        status="validating",
+        detail="Testing a second copper cell that directly feeds a stone furnace.",
+        next_action="validate copper plate production",
+    )
+    fast_reposition(env, x=target[0], y=target[1])
+    plate_before = production_output(namespace, "copper-plate")
+    measured: dict[str, float] = {}
+
+    def validate_smelting(result: Any) -> bool:
+        plate_after = production_output(namespace, "copper-plate")
+        delta = max(0.0, plate_after - plate_before)
+        measured["copper_plate_output"] = delta
+        return (
+            not bool(result.info.get("error_occurred"))
+            and result.candidate_game_state is not None
+            and delta > 0
+        )
+
+    code = f"""
+copper_smelt_drill=place_entity(
+    Prototype.BurnerMiningDrill,
+    position=Position(x={target[0]},y={target[1]}),
+    direction=Direction.DOWN,
+)
+copper_smelt_drill=insert_item(
+    Prototype.Coal,
+    copper_smelt_drill,
+    quantity=20,
+)
+copper_furnace=place_entity_next_to(
+    Prototype.StoneFurnace,
+    copper_smelt_drill.position,
+    direction=Direction.DOWN,
+)
+copper_furnace=insert_item(
+    Prototype.Coal,
+    copper_furnace,
+    quantity=20,
+)
+sleep({settle_seconds})
+print({{'copper_furnace': inspect_inventory(copper_furnace)}})
+"""
+    step = executor.execute(
+        code,
+        accept=validate_smelting,
+        use_checkpoint_for_action=False,
+    )
+    if not step.accepted:
+        journal.fail_stage(
+            7,
+            "Copper smelting produced no validated copper plates; rolled back.",
+        )
+        journal.event("reject", "Copper smelting rejected and rolled back.")
+        return False
+
+    plates = measured["copper_plate_output"]
+    journal.state["metrics"]["copper_plate_output"] = plates
+    journal.state["metrics"]["copper_smelting_reward"] = step.reward
+    journal.complete_stage(
+        7,
+        f"Copper smelting accepted with {plates:.0f} copper plates produced.",
+    )
+    journal.event(
+        "accept",
+        "Persistent copper smelting cell accepted.",
+        copper_plate_output=plates,
+    )
+    lesson = synthesize_lesson(
+        stage="copper_smelting",
+        facts={
+            "accepted": True,
+            "copper_plate_output": plates,
+            "engine_reward": step.reward,
+        },
+        fallback_lesson=(
+            "The factory now has validated copper-plate production in addition "
+            "to its iron logistics and smelting backbone."
+        ),
+        fallback_hypothesis=(
+            "Produce automation science packs from copper plates and iron gears, "
+            "then establish a lab and research Automation."
+        ),
+    )
+    journal.event("knowledge", lesson["lesson"])
+    return True
+
+
 def run_curriculum(
     *,
     seed: int,
@@ -1367,6 +1659,8 @@ def run_curriculum(
     smelt_settle: int,
     logistics_settle: int,
     belt_smelt_settle: int,
+    copper_mine_settle: int,
+    copper_smelt_settle: int,
     exploration: float,
 ) -> dict[str, Any]:
     import gym
@@ -1434,16 +1728,49 @@ def run_curriculum(
                 settle_seconds=belt_smelt_settle,
             )
 
+        achieved: set[str] = set()
+        copper_ok = False
+        copper_smelt_ok = False
+        copper_center: tuple[float, float] | None = None
+
+        if belt_smelt_ok:
+            achieved.add("iron_backbone")
+            update_engineering_frontier(journal, achieved=achieved)
+            copper_ok, copper_center = stage_copper_mining(
+                executor,
+                env,
+                journal,
+                settle_seconds=copper_mine_settle,
+            )
+        if copper_ok and copper_center is not None:
+            achieved.add("copper_mining")
+            update_engineering_frontier(journal, achieved=achieved)
+            copper_smelt_ok = stage_copper_smelting(
+                executor,
+                env,
+                journal,
+                center=copper_center,
+                settle_seconds=copper_smelt_settle,
+            )
+        if copper_smelt_ok:
+            achieved.add("copper_smelting")
+        progression = update_engineering_frontier(
+            journal,
+            achieved=achieved,
+        )
+
         final_status = (
             "completed"
-            if smelting_ok and logistics is not None and belt_smelt_ok
+            if belt_smelt_ok and copper_ok and copper_smelt_ok
             else "partial_success"
         )
-        if belt_smelt_ok:
+        next_goal = progression.get("next_goal")
+        if isinstance(next_goal, dict):
             next_action = (
-                "run transactional A* route variants and optimize plate throughput "
-                "against belt count, turns and occupied tiles"
+                f"engineering frontier: {next_goal.get('label', next_goal.get('goal_id'))}"
             )
+        elif belt_smelt_ok:
+            next_action = "expand the production-engineering goal catalog"
         elif logistics is not None:
             next_action = "repair buffered belt-to-furnace integration"
         elif smelting_ok:
@@ -1479,6 +1806,8 @@ def main() -> None:
     parser.add_argument("--smelt-settle", type=int, default=24)
     parser.add_argument("--logistics-settle", type=int, default=30)
     parser.add_argument("--belt-smelt-settle", type=int, default=32)
+    parser.add_argument("--copper-mine-settle", type=int, default=16)
+    parser.add_argument("--copper-smelt-settle", type=int, default=24)
     parser.add_argument("--exploration", type=float, default=2.0)
     args = parser.parse_args()
 
@@ -1491,6 +1820,8 @@ def main() -> None:
         smelt_settle=args.smelt_settle,
         logistics_settle=args.logistics_settle,
         belt_smelt_settle=args.belt_smelt_settle,
+        copper_mine_settle=args.copper_mine_settle,
+        copper_smelt_settle=args.copper_smelt_settle,
         exploration=args.exploration,
     )
     print(json.dumps(result, indent=2, sort_keys=True, default=str))

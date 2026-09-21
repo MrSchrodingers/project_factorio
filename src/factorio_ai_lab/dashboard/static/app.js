@@ -8,6 +8,7 @@ const state = {
   run: {},
   datasets: {},
   research: {},
+  progression: { achieved: [], frontier: [], next_goal: null },
   knowledge: { count: 0, lessons: [] },
   socket: null,
   frameTick: null,
@@ -113,7 +114,7 @@ function updateEntityMix() {
   const pills = types
     .map(([name, count]) => "<span>" + escapeHtml(name) + " × " + count + "</span>");
   if (beltCount === 0) {
-    pills.push('<span class="next-stage-pill">0 belts · next: A* logistics</span>');
+    pills.push('<span class="next-stage-pill">0 belts</span>');
   }
   $("entityTypes").innerHTML = pills.join("");
 
@@ -308,7 +309,7 @@ function refreshWorldFrame(force = false) {
         : "structured map · local assets pending"
     );
     const rendererName = render.renderer || "";
-    if (rendererName.startsWith("official-asset-world-map")) {
+    if ((rendererName.startsWith("official-asset-world-map") || rendererName.startsWith("full-factorio-world-map"))) {
       renderWorldHotspots();
     } else {
       renderWorldHotspots();
@@ -1022,6 +1023,30 @@ function updateKpis() {
           : "no active agent process"
   );
 
+  const progression = state.progression || {};
+  const nextGoal = progression.next_goal || null;
+  const frontier = Array.isArray(progression.frontier) ? progression.frontier : [];
+  const achievedGoals = Array.isArray(progression.achieved) ? progression.achieved : [];
+  if (nextGoal) {
+    setText("engineeringGoal", nextGoal.label || nextGoal.goal_id || "next capability");
+    const alternatives = frontier
+      .slice(1, 3)
+      .map((candidate) => candidate.label || candidate.goal_id)
+      .filter(Boolean);
+    setText(
+      "engineeringGoalDetail",
+      String(nextGoal.kind || "engineering")
+        + " · " + achievedGoals.length + " capabilities achieved"
+        + (alternatives.length ? " · alternatives: " + alternatives.join(" / ") : "")
+    );
+  } else {
+    setText("engineeringGoal", "frontier complete");
+    setText(
+      "engineeringGoalDetail",
+      achievedGoals.length + " capabilities achieved · expand goal catalog"
+    );
+  }
+
   const onlineStatus = online.status || (onlineRows.length ? "learning" : "idle");
   setText("onlineLearner", online.algorithm ? online.algorithm + " · " + onlineStatus : onlineStatus);
   setText(
@@ -1085,6 +1110,7 @@ function applyPayload(payload) {
   if (payload.history) state.history = payload.history;
   if (payload.run) state.run = payload.run;
   if (payload.research) state.research = payload.research;
+  if (payload.progression) state.progression = payload.progression;
   if (payload.knowledge) state.knowledge = payload.knowledge;
   if (payload.datasets) state.datasets = payload.datasets;
 
@@ -1119,6 +1145,7 @@ async function loadInitialState() {
     "/api/learning",
     "/api/run",
     "/api/research",
+    "/api/progression",
     "/api/knowledge",
     "/api/datasets",
   ];
@@ -1131,8 +1158,9 @@ async function loadInitialState() {
     learning: payloads[3],
     run: payloads[4],
     research: payloads[5],
-    knowledge: payloads[6],
-    datasets: payloads[7],
+    progression: payloads[6],
+    knowledge: payloads[7],
+    datasets: payloads[8],
   });
 }
 

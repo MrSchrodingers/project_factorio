@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Factorio AI Lab</title>
-  <link rel="stylesheet" href="/static/styles.css?v=0.6.1">
+  <link rel="stylesheet" href="/static/styles.css?v=0.7.0">
 </head>
 <body>
   <header class="topbar">
@@ -61,6 +61,11 @@
         <span class="label">RESEARCH LOOP</span>
         <strong id="researchLoop">idle</strong>
         <small id="researchLoopDetail">no active agent process</small>
+      </article>
+      <article class="card kpi engineering-kpi">
+        <span class="label">NEXT FACTORY GOAL</span>
+        <strong id="engineeringGoal">discovering frontier</strong>
+        <small id="engineeringGoalDetail">waiting for production state</small>
       </article>
       <article class="card kpi">
         <span class="label">KNOWLEDGE MEMORY</span>
@@ -170,8 +175,8 @@
       <div class="card-head production-head">
         <div>
           <span class="label">FACTORIO PRODUCTION STATISTICS</span>
-          <h2>Ore production / consumption</h2>
-          <small id="productionSource">native LuaFlowStatistics · items/min</small>
+          <h2>Factory production / consumption</h2>
+          <small id="productionSource">native LuaFlowStatistics · resources, intermediates and science · items/min</small>
         </div>
         <div class="production-range" aria-label="Production statistics time range">
           <button type="button" data-production-precision="5s">5s</button>
@@ -335,6 +340,6 @@
     </details>
   </main>
 
-  <script src="/static/app.js?v=0.6.1"></script>
+  <script src="/static/app.js?v=0.7.0"></script>
 </body>
 </html>
