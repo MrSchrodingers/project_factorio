@@ -1,0 +1,29 @@
+name: progression-gate
+
+on:
+  push:
+    branches:
+      - feat/production-engineering-goals
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip ruff
+      - name: Lint progression changes
+        run: |
+          ruff check             src/factorio_ai_lab/planning/progression.py             src/factorio_ai_lab/dashboard/state.py             src/factorio_ai_lab/dashboard/app.py             src/factorio_ai_lab/experiments/curriculum_runner.py             tests/test_progression.py
+      - name: Compile Python
+        run: |
+          python -m py_compile             src/factorio_ai_lab/planning/progression.py             src/factorio_ai_lab/dashboard/state.py             src/factorio_ai_lab/dashboard/app.py             src/factorio_ai_lab/experiments/curriculum_runner.py
+      - name: Planner unit tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest tests.test_progression -v
