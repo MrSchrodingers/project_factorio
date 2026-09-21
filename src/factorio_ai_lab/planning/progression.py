@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Mapping
 
 
 @dataclass(frozen=True)
@@ -17,7 +17,7 @@ class EngineeringGoal:
     target_research: frozenset[str] = frozenset()
     introduces: frozenset[str] = frozenset()
 
-    def is_satisfied(self, state: "EngineeringState") -> bool:
+    def is_satisfied(self, state: EngineeringState) -> bool:
         if self.goal_id in state.achieved:
             return True
 
