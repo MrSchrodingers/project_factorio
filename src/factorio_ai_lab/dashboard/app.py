@@ -25,7 +25,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Factorio AI Lab Dashboard",
-    version="0.5.0",
+    version="0.6.0",
     lifespan=lifespan,
 )
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -96,6 +96,11 @@ def api_knowledge() -> dict[str, Any]:
     return state.knowledge_data()
 
 
+@app.get("/api/datasets")
+def api_datasets() -> dict[str, Any]:
+    return state.dataset_data()
+
+
 @app.get("/api/assets/icon/{entity_name}.png")
 def api_official_icon(entity_name: str) -> FileResponse:
     icon = resolve_official_icon(entity_name)
@@ -112,9 +117,11 @@ def api_official_icon(entity_name: str) -> FileResponse:
 
 
 @app.get("/api/world/frame.png")
-async def api_world_frame() -> Response:
+async def api_world_frame(mode: str = "game") -> Response:
+    if mode not in {"game", "tactical"}:
+        raise HTTPException(400, "mode must be game or tactical")
     try:
-        png = await asyncio.to_thread(state.render_world_frame)
+        png = await asyncio.to_thread(state.render_world_frame, mode)
     except Exception as exc:
         raise HTTPException(503, f"world renderer unavailable: {exc}") from exc
     return Response(

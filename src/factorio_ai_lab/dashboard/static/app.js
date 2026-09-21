@@ -6,17 +6,20 @@ const state = {
   learning: { history: [], summary: {} },
   history: [],
   run: {},
+  datasets: {},
   research: {},
   knowledge: { count: 0, lessons: [] },
   socket: null,
   frameTick: null,
   frameLoadedAt: null,
   frameLoading: false,
+  frameRequestId: 0,
   worldZoom: 1,
   worldPanX: 0,
   worldPanY: 0,
   worldDragging: false,
   worldDragStart: null,
+  worldViewMode: "game",
   production: { precision: "1m", series: {} },
   productionPrecision: "1m",
   productionLoading: false,
@@ -271,13 +274,19 @@ function refreshWorldFrame(force = false) {
   const render = (state.status && state.status.render) || {};
   const tick = state.world && state.world.tick;
   const key = String(tick ?? "none") + ":" + String((state.world && state.world.entity_count) || 0)
-    + ":" + String(render.sprite_count || 0);
+    + ":" + String(render.sprite_count || 0)
+    + ":" + state.worldViewMode;
   if (!force && state.frameTick === key) return;
-  if (state.frameLoading) return;
+  if (state.frameLoading && !force) return;
 
   state.frameLoading = true;
+  const requestId = ++state.frameRequestId;
+  const requestedMode = state.worldViewMode;
   const probe = new Image();
   probe.onload = () => {
+    if (requestId !== state.frameRequestId || requestedMode !== state.worldViewMode) {
+      return;
+    }
     const frame = $("worldFrame");
     frame.classList.add("frame-updating");
     frame.src = probe.src;
@@ -306,6 +315,9 @@ function refreshWorldFrame(force = false) {
     }
   };
   probe.onerror = () => {
+    if (requestId !== state.frameRequestId || requestedMode !== state.worldViewMode) {
+      return;
+    }
     $("worldFrame").style.display = "none";
     $("worldFallback").style.display = "block";
     drawStructuredFallback();
@@ -315,7 +327,7 @@ function refreshWorldFrame(force = false) {
     state.frameLoading = false;
     setClassText("renderBadge", render.ready ? "render degraded" : "sprites loading", "badge warn");
   };
-  probe.src = "/api/world/frame.png?t=" + encodeURIComponent(key) + "&ts=" + Date.now();
+  probe.src = "/api/world/frame.png?mode=" + encodeURIComponent(requestedMode) + "&t=" + encodeURIComponent(key) + "&ts=" + Date.now();
 }
 
 function applyWorldView() {
@@ -347,6 +359,23 @@ function resetWorldView() {
   state.worldPanX = 0;
   state.worldPanY = 0;
   applyWorldView();
+}
+
+function installWorldModeControls() {
+  for (const button of document.querySelectorAll("[data-world-mode]")) {
+    button.addEventListener("click", () => {
+      const mode = button.dataset.worldMode;
+      if (!mode || mode === state.worldViewMode) return;
+      state.worldViewMode = mode;
+      for (const option of document.querySelectorAll("[data-world-mode]")) {
+        option.classList.toggle("active", option.dataset.worldMode === mode);
+      }
+      $("worldStage").dataset.mode = mode;
+      state.frameTick = null;
+      refreshWorldFrame(true);
+    });
+  }
+  $("worldStage").dataset.mode = state.worldViewMode;
 }
 
 function installWorldControls() {
@@ -432,6 +461,14 @@ const oreSeriesColors = {
   "uranium-ore": "#72c957",
 };
 
+function humanizePrototype(value) {
+  return String(value || "")
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 function compactFactorioNumber(value) {
   const n = Number(value || 0);
   const abs = Math.abs(n);
@@ -447,6 +484,15 @@ function productionDurationLabel(seconds) {
   if (s < 60) return s + " seconds";
   if (s < 3600) return (s / 60) + " minute" + (s === 60 ? "" : "s");
   return (s / 3600) + " hour" + (s === 3600 ? "" : "s");
+}
+
+function smoothSeries(samples, alpha = 0.24) {
+  if (!samples.length) return [];
+  const output = [samples[0]];
+  for (let i = 1; i < samples.length; i += 1) {
+    output.push(alpha * samples[i] + (1 - alpha) * output[i - 1]);
+  }
+  return output;
 }
 
 function drawNativeProductionChart(canvasId, mode) {
@@ -469,7 +515,15 @@ function drawNativeProductionChart(canvasId, mode) {
   const padBottom = 25;
   const graphWidth = Math.max(1, width - padLeft - padRight);
   const graphHeight = Math.max(1, height - padTop - padBottom);
-  const maxY = Math.max(1, ...entries.flatMap(([, samples]) => samples));
+  const preparedEntries = entries.map(([name, samples]) => [
+    name,
+    samples,
+    smoothSeries(samples),
+  ]);
+  const maxY = Math.max(
+    1,
+    ...preparedEntries.flatMap(([, , smoothed]) => smoothed)
+  ) * 1.08;
 
   ctx.strokeStyle = "rgba(255,255,255,.07)";
   ctx.lineWidth = 1;
@@ -495,14 +549,31 @@ function drawNativeProductionChart(canvasId, mode) {
   ctx.fillText(compactFactorioNumber(maxY / 2), padLeft - 5, padTop + graphHeight / 2 + 3);
   ctx.fillText("0", padLeft - 5, height - padBottom + 3);
 
-  for (const [name, samples] of entries) {
+  for (const [name, samples, smoothed] of preparedEntries) {
     if (!samples.some((value) => value > 0)) continue;
-    ctx.strokeStyle = oreSeriesColors[name] || "#b993f6";
-    ctx.lineWidth = 1.6;
+    const color = oreSeriesColors[name] || "#b993f6";
+
+    ctx.save();
+    ctx.globalAlpha = 0.20;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
     ctx.beginPath();
     for (let i = 0; i < samples.length; i += 1) {
       const x = padLeft + (i / Math.max(samples.length - 1, 1)) * graphWidth;
-      const y = padTop + graphHeight - (Math.max(0, samples[i]) / maxY) * graphHeight;
+      const raw = Math.min(maxY, Math.max(0, samples[i]));
+      const y = padTop + graphHeight - (raw / maxY) * graphHeight;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2.25;
+    ctx.beginPath();
+    for (let i = 0; i < smoothed.length; i += 1) {
+      const x = padLeft + (i / Math.max(smoothed.length - 1, 1)) * graphWidth;
+      const y = padTop + graphHeight - (Math.max(0, smoothed[i]) / maxY) * graphHeight;
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     }
@@ -531,8 +602,10 @@ function renderNativeProductionBars(containerId, mode) {
     }))
     .sort((a, b) => b.rate - a.rate);
   const maxRate = Math.max(0, ...entries.map((item) => item.rate));
-  setText(mode === "produced" ? "producedPeak" : "consumedPeak",
-    "peak " + compactFactorioNumber(maxRate) + "/min");
+  setText(
+    mode === "produced" ? "producedPeak" : "consumedPeak",
+    "avg " + compactFactorioNumber(maxRate) + "/min"
+  );
 
   container.innerHTML = entries.map((item) => {
     const color = oreSeriesColors[item.name] || "#b993f6";
@@ -540,7 +613,7 @@ function renderNativeProductionBars(containerId, mode) {
     return '<div class="factorio-stat-row" title="' + escapeHtml(item.name) + '">'
       + '<div class="factorio-item">'
       + '<img src="/api/assets/icon/' + encodeURIComponent(item.name) + '.png" alt="">'
-      + '<div class="factorio-item-meta"><strong>' + escapeHtml(item.name)
+      + '<div class="factorio-item-meta"><strong>' + escapeHtml(humanizePrototype(item.name))
       + '</strong><small>' + compactFactorioNumber(item.count) + ' in window</small></div>'
       + '</div>'
       + '<div class="factorio-bar-track"><div class="factorio-bar-fill" style="width:'
@@ -805,6 +878,8 @@ function renderTruthTable() {
   const onlineHistory = (state.research && state.research.online_learning && state.research.online_learning.history) || [];
   const knowledgeCount = Number((state.knowledge && state.knowledge.count) || 0);
   const capabilities = (state.research && state.research.capabilities) || {};
+  const datasets = state.datasets || {};
+  const spatialDemos = Number(datasets.spatial_demonstrations || 0);
 
   setClassText(
     "truthOffline",
@@ -820,6 +895,13 @@ function renderTruthTable() {
     "truthKnowledge",
     knowledgeCount ? knowledgeCount + " lessons" : "not started",
     knowledgeCount ? "good" : "warn"
+  );
+
+  setClassText(
+    "truthDataset",
+    spatialDemos + " demo" + (spatialDemos === 1 ? "" : "s")
+      + (datasets.training_ready ? " · ready" : " · collecting"),
+    datasets.training_ready ? "good" : spatialDemos ? "warn" : "muted"
   );
 
   const neuralStatus = capabilities.neural_policy && capabilities.neural_policy.status;
@@ -860,7 +942,7 @@ function updateMission() {
   setText("stageProgressText", formatNumber(progress, 0) + "%");
 
   const status = String(research.status || "idle");
-  const badgeClass = status === "running" || status === "learning"
+  const badgeClass = ["running", "learning", "validating"].includes(status)
     ? "badge live"
     : status === "completed"
       ? "badge good"
@@ -905,6 +987,41 @@ function updateKpis() {
     setText("productionSecondary", "no measured flow");
   }
 
+  const runner = status.research_runner || {};
+  const research = state.research || {};
+  const updatedAt = Date.parse(research.updated_at || "");
+  const researchAgeS = Number.isFinite(updatedAt)
+    ? Math.max(0, (Date.now() - updatedAt) / 1000)
+    : null;
+  const researchStatus = String(research.status || "idle");
+  const runnerStalled = !!runner.active
+    && ["running", "learning", "validating"].includes(researchStatus)
+    && researchAgeS !== null
+    && researchAgeS > 45;
+  const loopLabel = runnerStalled
+    ? "stalled"
+    : runner.active
+      ? "active"
+      : researchStatus === "completed"
+        ? "completed · idle"
+        : "idle";
+  setClassText(
+    "researchLoop",
+    loopLabel,
+    runnerStalled ? "bad" : runner.active ? "good" : "muted"
+  );
+  setText(
+    "researchLoopDetail",
+    runnerStalled
+      ? "process active · no state update for " + formatNumber(researchAgeS, 0) + " s"
+      : runner.active
+        ? (research.stage || "working") + " · updated "
+          + (researchAgeS === null ? "--" : formatNumber(researchAgeS, 0) + " s") + " ago"
+        : researchStatus === "completed"
+          ? "last run completed · next: " + String(research.next_action || "--")
+          : "no active agent process"
+  );
+
   const onlineStatus = online.status || (onlineRows.length ? "learning" : "idle");
   setText("onlineLearner", online.algorithm ? online.algorithm + " · " + onlineStatus : onlineStatus);
   setText(
@@ -930,8 +1047,13 @@ function updateKpis() {
     factorioLabel,
     factorio.connected ? "hud-chip good" : "hud-chip bad"
   );
-  setClassText("llmStatus", llm.connected ? "Qwen ready" : "offline", llm.connected ? "good" : "bad");
-  setText("llmDetail", llm.connected && llm.models && llm.models.length ? llm.models.join(", ") : "llama.cpp :18081");
+  setClassText("llmStatus", llm.connected ? "Qwen inference" : "offline", llm.connected ? "good" : "bad");
+  setText(
+    "llmDetail",
+    llm.connected
+      ? ((llm.models && llm.models.length ? llm.models.join(", ") : "qwen") + " · weights static · knowledge memory learns")
+      : "llama.cpp :18081"
+  );
   setClassText("routeLocal", llm.connected ? "ready" : "offline", llm.connected ? "good" : "bad");
   setText("commitBadge", (status.branch || "--") + " · " + (status.git_sha || "--"));
 
@@ -945,8 +1067,8 @@ function updateKpis() {
   setClassText(
     "runStatus",
     runStatus,
-    runStatus === "success" ? "badge good"
-      : ["running", "starting"].includes(runStatus) ? "badge live"
+    ["success", "completed"].includes(runStatus) ? "badge good"
+      : ["running", "starting", "learning", "validating"].includes(runStatus) ? "badge live"
       : runStatus === "--" ? "badge neutral" : "badge warn"
   );
   setText("runId", (state.run && state.run.run_id) || "no run");
@@ -964,6 +1086,7 @@ function applyPayload(payload) {
   if (payload.run) state.run = payload.run;
   if (payload.research) state.research = payload.research;
   if (payload.knowledge) state.knowledge = payload.knowledge;
+  if (payload.datasets) state.datasets = payload.datasets;
 
   updateKpis();
   updateMission();
@@ -997,6 +1120,7 @@ async function loadInitialState() {
     "/api/run",
     "/api/research",
     "/api/knowledge",
+    "/api/datasets",
   ];
   const responses = await Promise.all(paths.map((path) => fetch(path)));
   const payloads = await Promise.all(responses.map((response) => response.json()));
@@ -1008,6 +1132,7 @@ async function loadInitialState() {
     run: payloads[4],
     research: payloads[5],
     knowledge: payloads[6],
+    datasets: payloads[7],
   });
 }
 
@@ -1070,6 +1195,7 @@ window.addEventListener("resize", () => {
 });
 
 installWorldControls();
+installWorldModeControls();
 installProductionControls();
 
 Promise.all([loadConfig(), loadInitialState(), loadProduction()])

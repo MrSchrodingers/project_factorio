@@ -1,0 +1,19 @@
+[Unit]
+Description=Factorio AI Lab autonomous curriculum runner
+After=docker.service factorio-ai-dashboard.service factorio-ai-llm.service
+Wants=docker.service factorio-ai-dashboard.service factorio-ai-llm.service
+
+[Service]
+Type=oneshot
+User=ti
+Group=devs
+WorkingDirectory=/srv/factorio-ai-lab
+Environment=HOME=/home/ti
+ExecStart=/srv/factorio-ai-lab/scripts/run_curriculum.sh
+TimeoutStartSec=900
+RemainAfterExit=yes
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

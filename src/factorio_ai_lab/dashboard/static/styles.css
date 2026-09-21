@@ -1281,3 +1281,89 @@ small { line-height: 1.35; }
   from { opacity: 0; transform: translateY(-4px) scale(.985); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
+
+.world-card-head { align-items: center; }
+.world-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.view-mode-toggle {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #0f1112;
+}
+.view-mode-toggle button {
+  min-width: 68px;
+  height: 27px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: #858e94;
+  font: 700 9px "SFMono-Regular", Consolas, monospace;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  cursor: pointer;
+  transition: background .16s ease, color .16s ease, box-shadow .16s ease;
+}
+.view-mode-toggle button.active {
+  background: #d89435;
+  color: #171109;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.25);
+}
+.world-stage[data-mode="game"] .entity-hotspot { opacity: .16; }
+.world-stage[data-mode="game"] .entity-hotspot:hover,
+.world-stage[data-mode="game"] .entity-hotspot:focus-visible { opacity: 1; }
+.world-stage[data-mode="tactical"] .entity-hotspot { opacity: .70; }
+
+.factorio-stat-row {
+  grid-template-columns: minmax(150px, 180px) minmax(90px, 1fr) 78px;
+  min-height: 48px;
+}
+.factorio-item {
+  grid-template-columns: 36px minmax(0,1fr);
+  gap: 8px;
+}
+.factorio-item img {
+  width: 34px;
+  height: 34px;
+}
+.factorio-item-meta strong {
+  overflow: visible;
+  font-size: 9px;
+  text-overflow: clip;
+  white-space: normal;
+  line-height: 1.2;
+}
+.factorio-item-meta small { font-size: 8px; }
+.production-side canvas { height: 250px; }
+.production-side-head strong { font-size: 12px; }
+.production-side-head .mono { font-size: 10px; }
+
+@media (max-width: 1180px) {
+  .factorio-stat-row {
+    grid-template-columns: minmax(135px, 170px) minmax(90px, 1fr) 74px;
+  }
+}
+@media (max-width: 720px) {
+  .world-card-head { align-items: flex-start; }
+  .world-head-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .view-mode-toggle button { min-width: 61px; }
+  .factorio-stat-row {
+    grid-template-columns: minmax(120px, 145px) minmax(60px,1fr) 65px;
+  }
+  .factorio-item {
+    grid-template-columns: 30px minmax(0,1fr);
+    gap: 6px;
+  }
+  .factorio-item img {
+    width: 30px;
+    height: 30px;
+  }
+}

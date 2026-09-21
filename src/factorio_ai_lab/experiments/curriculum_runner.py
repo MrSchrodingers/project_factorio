@@ -5,16 +5,20 @@ import json
 import math
 from dataclasses import asdict
 from datetime import UTC, datetime
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
 from factorio_ai_lab.agents.llm_router import default_free_router
+from factorio_ai_lab.domain.state import GridPoint
 from factorio_ai_lab.integrations.fle import (
     TransactionalFLEExecutor,
     fast_reposition,
     list_environments,
 )
 from factorio_ai_lab.learning.bandit import UCB1Bandit
+from factorio_ai_lab.metrics.rates import normalized_rate_ratio, rate_per_second
+from factorio_ai_lab.planning.astar import RoutingWeights, weighted_astar
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 RUNS_DIR = PROJECT_ROOT / "runs"
@@ -22,6 +26,7 @@ RESEARCH_STATE = RUNS_DIR / "research_state.json"
 KNOWLEDGE_LOG = RUNS_DIR / "knowledge.jsonl"
 ACTIVE_RUN = RUNS_DIR / "active_run.json"
 RESEARCH_HISTORY = RUNS_DIR / "research"
+SPATIAL_DEMOS = RUNS_DIR / "datasets" / "spatial_demonstrations.jsonl"
 
 THROUGHPUT_EQUIVALENCE_TOLERANCE = 1.0
 
@@ -101,6 +106,22 @@ class ResearchJournal:
                     "status": "pending",
                     "detail": "Attempt drill-to-furnace iron-plate automation transactionally.",
                 },
+                {
+                    "name": "A* belt logistics",
+                    "status": "pending",
+                    "detail": (
+                        "Route a real transport-belt line and validate ore delivery "
+                        "through a burner inserter into a chest."
+                    ),
+                },
+                {
+                    "name": "Belt-fed smelting",
+                    "status": "pending",
+                    "detail": (
+                        "Extend the promoted belt line into buffered smelting and "
+                        "compare plate throughput against direct feed."
+                    ),
+                },
             ],
             "online_learning": {
                 "algorithm": "ucb1_real_factorio_placement",
@@ -114,6 +135,8 @@ class ResearchJournal:
                     "status": "active",
                     "model": "qwen3-4b",
                     "role": "post-experiment lesson synthesis",
+                    "weights": "static",
+                    "learning_surface": "external typed knowledge memory",
                 },
                 "neural_policy": {
                     "status": "not_trained",
@@ -597,7 +620,16 @@ print({{'trial_inventory': inspect_inventory(trial_chest)}})
             "mean_output_by_arm": mean_output_by_arm,
             "throughput_equivalence_tolerance": THROUGHPUT_EQUIVALENCE_TOLERANCE,
             "arms": online["arms"],
-            "history": online["history"],
+            "trial_reward_range": {
+                "min": min(
+                    float(row.get("reward", 0.0))
+                    for row in online["history"]
+                ),
+                "max": max(
+                    float(row.get("reward", 0.0))
+                    for row in online["history"]
+                ),
+            },
         },
         fallback_lesson=(
             "Real Factorio trials found near-equivalent mining throughput "
@@ -743,7 +775,14 @@ print({{'furnace_inventory': inspect_inventory(smelt_furnace)}})
 
     if step.accepted:
         plates = measured["iron_plate_output"]
-        journal.state["metrics"]["iron_plate_output"] = plates
+        plate_rate = rate_per_second(plates, float(settle_seconds))
+        journal.state["metrics"].update(
+            {
+                "iron_plate_output": plates,
+                "direct_smelting_duration_s": float(settle_seconds),
+                "direct_smelting_plate_rate_per_s": plate_rate,
+            }
+        )
         journal.complete_stage(
             3,
             f"Smelting cell accepted with {plates:.0f} iron plates produced.",
@@ -752,12 +791,16 @@ print({{'furnace_inventory': inspect_inventory(smelt_furnace)}})
             "accept",
             "Direct drill-to-furnace smelting cell accepted.",
             iron_plate_output=plates,
+            duration_s=float(settle_seconds),
+            plate_rate_per_s=plate_rate,
         )
         lesson = synthesize_lesson(
             stage="smelting_probe",
             facts={
                 "accepted": True,
                 "iron_plate_output": plates,
+                "duration_s": float(settle_seconds),
+                "plate_rate_per_s": plate_rate,
                 "engine_reward": step.reward,
             },
             fallback_lesson=(
@@ -803,6 +846,517 @@ print({{'furnace_inventory': inspect_inventory(smelt_furnace)}})
     return False
 
 
+
+def _count_route_turns(path: tuple[GridPoint, ...]) -> int:
+    turns = 0
+    previous: tuple[int, int] | None = None
+    for current, nxt in pairwise(path):
+        direction = (nxt.x - current.x, nxt.y - current.y)
+        if previous is not None and direction != previous:
+            turns += 1
+        previous = direction
+    return turns
+
+
+def _direction_name(current: GridPoint, nxt: GridPoint) -> str:
+    delta = (nxt.x - current.x, nxt.y - current.y)
+    names = {
+        (1, 0): "RIGHT",
+        (-1, 0): "LEFT",
+        (0, 1): "DOWN",
+        (0, -1): "UP",
+    }
+    try:
+        return names[delta]
+    except KeyError as exc:
+        raise ValueError(f"non-cardinal belt segment: {delta}") from exc
+
+
+def _chest_item_count(
+    instance: Any,
+    *,
+    x: float,
+    y: float,
+    item: str,
+) -> int:
+    command = (
+        "/c "
+        "local p=storage.agent_characters and storage.agent_characters[1]; "
+        "if not p then rcon.print('0') return end; "
+        f"local e=p.surface.find_entity('wooden-chest',{{x={x},y={y}}}); "
+        "if not e then rcon.print('0') return end; "
+        "local inv=e.get_inventory(defines.inventory.chest); "
+        f"rcon.print(inv and inv.get_item_count('{item}') or 0)"
+    )
+    raw = instance.rcon_client.send_command(command)
+    try:
+        return int(float(str(raw).strip()))
+    except (TypeError, ValueError):
+        return 0
+
+
+def stage_astar_logistics(
+    executor: TransactionalFLEExecutor,
+    env: Any,
+    journal: ResearchJournal,
+    *,
+    center: tuple[float, float],
+    settle_seconds: int,
+) -> dict[str, Any] | None:
+    namespace = env.unwrapped.instance.namespace
+    instance = env.unwrapped.instance
+
+    drill_position = (center[0] - 8.0, center[1] - 0.5)
+    start_world = (drill_position[0] + 0.5, drill_position[1] + 1.5)
+    goal_world = (drill_position[0] + 5.5, drill_position[1] + 4.5)
+    start = GridPoint(round(start_world[0] - 0.5), round(start_world[1] - 0.5))
+    goal = GridPoint(round(goal_world[0] - 0.5), round(goal_world[1] - 0.5))
+
+    patch_bounds = journal.state.get("world", {}).get("patch_bounds", {})
+    left_top = patch_bounds.get("left_top", {})
+    right_bottom = patch_bounds.get("right_bottom", {})
+    min_x = math.floor(float(left_top.get("x", center[0] - 14)))
+    max_x = math.ceil(float(right_bottom.get("x", center[0] + 14)))
+    min_y = math.floor(float(left_top.get("y", center[1] - 14)))
+    max_y = math.ceil(float(right_bottom.get("y", center[1] + 14)))
+
+    blocked: set[GridPoint] = set()
+    entities = namespace._save_entity_state(
+        distance=500,
+        player_entities=True,
+        resource_entities=False,
+        items_on_ground=False,
+        encode=False,
+        compress=False,
+    )
+    large = {"burner-mining-drill", "stone-furnace"}
+    for entity in entities:
+        if entity.get("name") == "character":
+            continue
+        position = entity.get("position") or {}
+        try:
+            gx = round(float(position["x"]) - 0.5)
+            gy = round(float(position["y"]) - 0.5)
+        except (KeyError, TypeError, ValueError):
+            continue
+        radius = 1 if entity.get("name") in large else 0
+        for dx in range(-radius, radius + 1):
+            for dy in range(-radius, radius + 1):
+                blocked.add(GridPoint(gx + dx, gy + dy))
+
+    blocked.discard(start)
+    blocked.discard(goal)
+    route = weighted_astar(
+        start,
+        goal,
+        is_blocked=blocked.__contains__,
+        in_bounds=lambda point: (
+            min_x <= point.x <= max_x
+            and min_y <= point.y <= max_y
+        ),
+        weights=RoutingWeights(step=1.0, turn=0.25, occupied=8.0),
+    )
+    if route is None:
+        journal.fail_stage(4, "A* could not find a valid logistics route.")
+        return None
+
+    path = route.path
+    turns = _count_route_turns(path)
+    belt_lines: list[str] = []
+    for index, point in enumerate(path):
+        if index + 1 < len(path):
+            direction = _direction_name(point, path[index + 1])
+        else:
+            direction = "RIGHT"
+        belt_lines.append(
+            f"belt_{index}=place_entity("
+            "Prototype.TransportBelt,"
+            f"position=Position(x={point.x + 0.5},y={point.y + 0.5}),"
+            f"direction=Direction.{direction}"
+            ")"
+        )
+
+    last = path[-1]
+    inserter_position = (last.x + 1.5, last.y + 0.5)
+    chest_position = (last.x + 2.5, last.y + 0.5)
+
+    journal.set_stage(
+        4,
+        status="validating",
+        detail=(
+            f"A* planned {len(path)} belts, {turns} turn(s), "
+            f"cost {route.cost:.2f}; executing on the live world."
+        ),
+        next_action="validate ore reaches the logistics chest",
+    )
+    journal.event(
+        "plan",
+        "A* generated the first persistent belt route.",
+        belt_count=len(path),
+        turns=turns,
+        cost=route.cost,
+        expanded_nodes=route.expanded_nodes,
+        path=[
+            {"x": point.x + 0.5, "y": point.y + 0.5}
+            for point in path
+        ],
+    )
+
+    fast_reposition(
+        env,
+        x=drill_position[0],
+        y=drill_position[1],
+    )
+
+    measured: dict[str, float] = {"chest_iron": 0.0}
+
+    def validate_logistics(result: Any) -> bool:
+        chest_iron = _chest_item_count(
+            instance,
+            x=chest_position[0],
+            y=chest_position[1],
+            item="iron-ore",
+        )
+        measured["chest_iron"] = float(chest_iron)
+        return (
+            not bool(result.info.get("error_occurred"))
+            and result.candidate_game_state is not None
+            and chest_iron > 0
+        )
+
+    code = f"""
+logistics_drill=place_entity(
+    Prototype.BurnerMiningDrill,
+    position=Position(x={drill_position[0]},y={drill_position[1]}),
+    direction=Direction.DOWN,
+)
+logistics_drill=insert_item(
+    Prototype.Coal,
+    logistics_drill,
+    quantity=20,
+)
+{chr(10).join(belt_lines)}
+logistics_inserter=place_entity(
+    Prototype.BurnerInserter,
+    position=Position(x={inserter_position[0]},y={inserter_position[1]}),
+    direction=Direction.RIGHT,
+)
+logistics_inserter=insert_item(
+    Prototype.Coal,
+    logistics_inserter,
+    quantity=10,
+)
+logistics_chest=place_entity(
+    Prototype.WoodenChest,
+    position=Position(x={chest_position[0]},y={chest_position[1]}),
+    direction=Direction.UP,
+)
+sleep({settle_seconds})
+print({{'logistics_chest': inspect_inventory(logistics_chest)}})
+"""
+    step = executor.execute(
+        code,
+        accept=validate_logistics,
+        use_checkpoint_for_action=False,
+    )
+
+    if not step.accepted:
+        journal.fail_stage(
+            4,
+            "Belt route failed to deliver ore; transaction rolled back.",
+        )
+        journal.event(
+            "reject",
+            "A* logistics route rejected and rolled back.",
+            chest_iron=measured["chest_iron"],
+            belt_count=len(path),
+            turns=turns,
+        )
+        return None
+
+    journal.state["metrics"].update(
+        {
+            "logistics_belt_count": len(path),
+            "logistics_turns": turns,
+            "logistics_route_cost": route.cost,
+            "logistics_expanded_nodes": route.expanded_nodes,
+            "logistics_chest_iron": measured["chest_iron"],
+        }
+    )
+    journal.complete_stage(
+        4,
+        (
+            f"A* logistics accepted: {len(path)} belts, {turns} turn(s), "
+            f"{measured['chest_iron']:.0f} iron ore delivered to the final chest."
+        ),
+    )
+    journal.event(
+        "accept",
+        "First persistent A* belt line accepted.",
+        belt_count=len(path),
+        turns=turns,
+        cost=route.cost,
+        expanded_nodes=route.expanded_nodes,
+        chest_iron=measured["chest_iron"],
+    )
+    append_jsonl(
+        SPATIAL_DEMOS,
+        {
+            "at": utc_now(),
+            "run_id": journal.run_id,
+            "task": "belt_route",
+            "planner": "weighted_astar",
+            "weights": asdict(
+                RoutingWeights(step=1.0, turn=0.25, occupied=8.0)
+            ),
+            "start": {
+                "x": path[0].x + 0.5,
+                "y": path[0].y + 0.5,
+            },
+            "goal": {
+                "x": path[-1].x + 0.5,
+                "y": path[-1].y + 0.5,
+            },
+            "path": [
+                {"x": point.x + 0.5, "y": point.y + 0.5}
+                for point in path
+            ],
+            "metrics": {
+                "belt_count": len(path),
+                "turns": turns,
+                "route_cost": route.cost,
+                "expanded_nodes": route.expanded_nodes,
+                "delivered_iron": measured["chest_iron"],
+            },
+            "accepted": True,
+        },
+    )
+    lesson = synthesize_lesson(
+        stage="astar_belt_logistics",
+        facts={
+            "accepted": True,
+            "belt_count": len(path),
+            "turns": turns,
+            "route_cost": route.cost,
+            "expanded_nodes": route.expanded_nodes,
+            "chest_iron": measured["chest_iron"],
+            "route_start": {
+                "x": path[0].x + 0.5,
+                "y": path[0].y + 0.5,
+            },
+            "route_end": {
+                "x": path[-1].x + 0.5,
+                "y": path[-1].y + 0.5,
+            },
+        },
+        fallback_lesson=(
+            "The project A* planner generated a real belt route that moved "
+            "iron ore through a fueled burner inserter into a terminal chest."
+        ),
+        fallback_hypothesis=(
+            "Connect belt logistics to smelting output and compare throughput "
+            "against direct-feed layouts using area and belt-count penalties."
+        ),
+    )
+    journal.event("knowledge", lesson["lesson"])
+    return {
+        "belt_count": len(path),
+        "turns": turns,
+        "route_cost": route.cost,
+        "expanded_nodes": route.expanded_nodes,
+        "chest_iron": measured["chest_iron"],
+        "inserter_position": {
+            "x": inserter_position[0],
+            "y": inserter_position[1],
+        },
+        "chest_position": {
+            "x": chest_position[0],
+            "y": chest_position[1],
+        },
+        "path": [
+            {"x": point.x + 0.5, "y": point.y + 0.5}
+            for point in path
+        ],
+    }
+
+
+def stage_belt_smelting(
+    executor: TransactionalFLEExecutor,
+    env: Any,
+    journal: ResearchJournal,
+    *,
+    logistics: dict[str, Any],
+    settle_seconds: int,
+) -> bool:
+    namespace = env.unwrapped.instance.namespace
+    chest = logistics["chest_position"]
+    downstream_inserter = {
+        "x": float(chest["x"]) + 1.0,
+        "y": float(chest["y"]),
+    }
+
+    journal.set_stage(
+        5,
+        status="validating",
+        detail=(
+            "Extending the accepted A* route from its terminal buffer into "
+            "a fueled stone furnace."
+        ),
+        next_action="measure belt-buffered iron plate throughput",
+    )
+
+    plate_before = production_output(namespace, "iron-plate")
+    measured: dict[str, float] = {
+        "iron_plate_before": plate_before,
+        "iron_plate_output": 0.0,
+    }
+
+    def validate_belt_smelting(result: Any) -> bool:
+        plate_after = production_output(namespace, "iron-plate")
+        delta = max(0.0, plate_after - plate_before)
+        measured["iron_plate_after"] = plate_after
+        measured["iron_plate_output"] = delta
+        return (
+            not bool(result.info.get("error_occurred"))
+            and result.candidate_game_state is not None
+            and delta > 0
+        )
+
+    fast_reposition(
+        env,
+        x=downstream_inserter["x"],
+        y=downstream_inserter["y"],
+    )
+    code = f"""
+buffer_chest=get_entity(
+    Prototype.WoodenChest,
+    Position(x={chest["x"]},y={chest["y"]}),
+)
+smelt_out_inserter=place_entity(
+    Prototype.BurnerInserter,
+    position=Position(
+        x={downstream_inserter["x"]},
+        y={downstream_inserter["y"]}
+    ),
+    direction=Direction.RIGHT,
+)
+smelt_out_inserter=insert_item(
+    Prototype.Coal,
+    smelt_out_inserter,
+    quantity=10,
+)
+belt_furnace=place_entity_next_to(
+    Prototype.StoneFurnace,
+    smelt_out_inserter.position,
+    direction=Direction.RIGHT,
+)
+belt_furnace=insert_item(
+    Prototype.Coal,
+    belt_furnace,
+    quantity=20,
+)
+sleep({settle_seconds})
+print({{
+    'buffer': inspect_inventory(buffer_chest),
+    'furnace': inspect_inventory(belt_furnace),
+}})
+"""
+    step = executor.execute(
+        code,
+        accept=validate_belt_smelting,
+        use_checkpoint_for_action=False,
+    )
+
+    if not step.accepted:
+        journal.fail_stage(
+            5,
+            "Buffered belt-to-furnace integration produced no validated plates; rolled back.",
+        )
+        journal.event(
+            "reject",
+            "Belt-fed smelting integration rejected and rolled back.",
+            iron_plate_output=measured["iron_plate_output"],
+        )
+        return False
+
+    plates = measured["iron_plate_output"]
+    direct = float(journal.state["metrics"].get("iron_plate_output", 0.0))
+    direct_duration = float(
+        journal.state["metrics"].get("direct_smelting_duration_s", 0.0)
+    )
+    direct_rate = float(
+        journal.state["metrics"].get(
+            "direct_smelting_plate_rate_per_s",
+            direct / direct_duration if direct_duration > 0 else 0.0,
+        )
+    )
+    belt_count = max(1, int(logistics["belt_count"]))
+    belt_rate = rate_per_second(plates, float(settle_seconds))
+    ratio = normalized_rate_ratio(
+        candidate_count=plates,
+        candidate_duration_s=float(settle_seconds),
+        baseline_count=direct,
+        baseline_duration_s=direct_duration,
+    )
+    plate_rate_per_belt = belt_rate / belt_count
+
+    journal.state["metrics"].update(
+        {
+            "belt_smelting_plate_output": plates,
+            "belt_smelting_duration_s": float(settle_seconds),
+            "belt_smelting_plate_rate_per_s": belt_rate,
+            "belt_smelting_reward": step.reward,
+            "belt_smelting_vs_direct_rate_ratio": ratio,
+            "belt_smelting_plate_rate_per_belt_per_s": plate_rate_per_belt,
+        }
+    )
+    journal.complete_stage(
+        5,
+        (
+            f"Belt-fed smelting accepted with {plates:.0f} iron plates "
+            f"over {settle_seconds}s ({belt_rate:.3f} plates/s); "
+            f"{ratio:.3f}x the normalized direct-feed rate." if ratio is not None else "no valid direct-feed rate baseline."
+        ),
+    )
+    journal.event(
+        "accept",
+        "Buffered belt-fed smelting accepted.",
+        iron_plate_output=plates,
+        direct_feed_output=direct,
+        throughput_rate_ratio=ratio,
+        belt_plate_rate_per_s=belt_rate,
+        direct_plate_rate_per_s=direct_rate,
+        plate_rate_per_belt_per_s=plate_rate_per_belt,
+    )
+    lesson = synthesize_lesson(
+        stage="belt_fed_smelting",
+        facts={
+            "accepted": True,
+            "belt_count": belt_count,
+            "turns": logistics["turns"],
+            "route_cost": logistics["route_cost"],
+            "belt_smelting_plate_output": plates,
+            "belt_smelting_duration_s": float(settle_seconds),
+            "belt_smelting_plate_rate_per_s": belt_rate,
+            "direct_feed_plate_output": direct,
+            "direct_feed_duration_s": direct_duration,
+            "direct_feed_plate_rate_per_s": direct_rate,
+            "throughput_rate_ratio": ratio,
+            "plate_rate_per_belt_per_s": plate_rate_per_belt,
+        },
+        fallback_lesson=(
+            "The accepted A* belt corridor can feed a buffered furnace chain "
+            "and produce validated iron plates."
+        ),
+        fallback_hypothesis=(
+            "Run transactional route variants that jointly optimize plate "
+            "throughput, belt count, turns and occupied tiles."
+        ),
+    )
+    journal.event("knowledge", lesson["lesson"])
+    return True
+
+
 def run_curriculum(
     *,
     seed: int,
@@ -811,6 +1365,8 @@ def run_curriculum(
     trial_settle: int,
     scale_settle: int,
     smelt_settle: int,
+    logistics_settle: int,
+    belt_smelt_settle: int,
     exploration: float,
 ) -> dict[str, Any]:
     import gym
@@ -859,13 +1415,41 @@ def run_curriculum(
             center=center,
             settle_seconds=smelt_settle,
         )
+        logistics: dict[str, Any] | None = None
+        belt_smelt_ok = False
+        if smelting_ok:
+            logistics = stage_astar_logistics(
+                executor,
+                env,
+                journal,
+                center=center,
+                settle_seconds=logistics_settle,
+            )
+        if logistics is not None:
+            belt_smelt_ok = stage_belt_smelting(
+                executor,
+                env,
+                journal,
+                logistics=logistics,
+                settle_seconds=belt_smelt_settle,
+            )
 
-        final_status = "completed" if smelting_ok else "partial_success"
-        next_action = (
-            "design belt/output extraction stage with A*"
-            if smelting_ok
-            else "run alternate smelting-geometry repair experiment"
+        final_status = (
+            "completed"
+            if smelting_ok and logistics is not None and belt_smelt_ok
+            else "partial_success"
         )
+        if belt_smelt_ok:
+            next_action = (
+                "run transactional A* route variants and optimize plate throughput "
+                "against belt count, turns and occupied tiles"
+            )
+        elif logistics is not None:
+            next_action = "repair buffered belt-to-furnace integration"
+        elif smelting_ok:
+            next_action = "repair A* logistics geometry from the rejected route"
+        else:
+            next_action = "run alternate smelting-geometry repair experiment"
         journal.finish(final_status, next_action)
         return journal.state
     except Exception as exc:
@@ -893,6 +1477,8 @@ def main() -> None:
     parser.add_argument("--trial-settle", type=int, default=8)
     parser.add_argument("--scale-settle", type=int, default=14)
     parser.add_argument("--smelt-settle", type=int, default=24)
+    parser.add_argument("--logistics-settle", type=int, default=30)
+    parser.add_argument("--belt-smelt-settle", type=int, default=32)
     parser.add_argument("--exploration", type=float, default=2.0)
     args = parser.parse_args()
 
@@ -903,6 +1489,8 @@ def main() -> None:
         trial_settle=args.trial_settle,
         scale_settle=args.scale_settle,
         smelt_settle=args.smelt_settle,
+        logistics_settle=args.logistics_settle,
+        belt_smelt_settle=args.belt_smelt_settle,
         exploration=args.exploration,
     )
     print(json.dumps(result, indent=2, sort_keys=True, default=str))

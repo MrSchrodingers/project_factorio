@@ -61,7 +61,7 @@ Por isso o primeiro modelo sugerido é **Qwen3-4B GGUF Q4_K_M via llama.cpp**. N
 9B v2 pode entrar como benchmark secundário quantizado; modelos MoE de ~30B ficam fora do
 baseline de RAM.
 
-## Estado do marco v0.5.0
+## Estado do marco v0.6.0
 
 O laboratório executa Factorio 2.0.73 via FLE, mantém checkpoints transacionais e possui
 um control plane web com telemetria ao vivo. O LLM baseline é Qwen3-4B Q4_K_M local em
@@ -82,18 +82,51 @@ Componentes ativos:
 - memória de conhecimento estruturado sintetizada pelo Qwen local;
 - router que permite apenas backends local ou free.
 
-O primeiro currículo online validado executou 8 trials reais de placement, promoveu
-east_near, persistiu uma segunda célula de mineração e aceitou uma célula de fundição que
-produziu 36 iron plates. O próximo objetivo registrado pelo research loop é projetar a
-extração por belts usando A*.
+O currículo v0.6 executa seis estágios reais no mesmo mundo transacional:
 
-O marco v0.5.0 redesenha a experiência de observabilidade com foco em legibilidade do
-mundo. O renderer deixou de usar ícones de inventário e grids de debug como visualização
-principal: ele auto-enquadra a fábrica, usa sprites de mundo reais para as entidades
-suportadas, compõe patches orgânicos de recursos, remove ruído natural do modo padrão e
-mantém inspeção contextual por hotspot. A UI também diferencia explicitamente o que já
-existe no checkpoint aceito do que é o próximo estágio de pesquisa; no estado atual há
-zero belts persistidos e a logística por A* é a próxima etapa.
+1. baseline de mineração;
+2. 8 trials UCB1 de placement com rollback;
+3. promoção da melhor segunda célula;
+4. smelting direct-feed;
+5. logística física planejada por A*;
+6. smelting alimentado pela logística aceita.
+
+Na validação de referência, northwest_edge foi promovido. O A* construiu 8 transport belts,
+fez 1 curva, custo 7.25, expandiu 22 nós e entregou 37 iron ore no chest terminal. A cadeia
+belt-fed produziu 74 iron plates em 32 s (2.3125/s), contra 36 em 24 s no direct-feed
+(1.5/s): razão de taxa normalizada 1.5417x. Comparações de throughput usam duração explícita;
+raw counts de janelas diferentes são rejeitados como métrica comparativa.
+
+O marco v0.5.0 redesenhou a experiência de observabilidade com foco em legibilidade do
+mundo: auto-enquadramento da fábrica, sprites de mundo reais, patches orgânicos de recursos,
+grid removido do modo padrão e inspeção contextual.
+
+O v0.6.0 adiciona a primeira logística persistente gerada pelo planner do projeto. O A*
+planejou uma rota de 8 transport belts com 1 curva, custo 7.25 e 22 nós expandidos; a linha
+foi aceita apenas após 37 iron ore chegarem ao chest terminal por um burner inserter.
+O runner agora usa lock exclusivo para impedir duas pesquisas concorrentes no mesmo mundo.
+O dashboard expõe heartbeat do curriculum runner e diferencia active, stalled e
+completed/idle. O Qwen é identificado como inference com pesos estáticos: o aprendizado
+persistente atual ocorre no UCB1, na knowledge memory tipada, nos planners calibrados e no
+dataset de demonstrações espaciais. A política CNN/attention ainda não é treinada; o alvo
+inicial configurado é 250 demonstrações aceitas.
+
+O dashboard agora oferece Game View e Tactical View separados. Game View prioriza leitura
+visual da fábrica; Tactical View adiciona grid, footprints e a rota A* registrada no journal.
+
+O currículo também integrou essa logística a uma segunda célula de smelting: a validação
+belt-fed produziu 74 iron plates em 32 s. O direct-feed anterior produziu 36 em 24 s;
+a comparação normalizada é 2.3125 vs 1.5 plates/s, razão de throughput 1.54x.
+A taxa belt-fed correspondeu a 0.289 plates/s por belt segment nessa topologia. O mundo
+aceito permanece no Factorio após o runner encerrar e após restart do dashboard.
+
+O runner operacional usa flock em runs/curriculum.lock; portanto apenas um processo possui
+autoridade de escrita sobre o mundo por vez. O serviço systemd é versionado em
+ops/systemd/factorio-ai-curriculum.service.
+
+O Production Monitor também foi refinado: nomes completos de recursos, labels maiores,
+média de janela rotulada corretamente e uma curva EMA legível sobre os 300 samples nativos,
+com o sinal bruto preservado em baixa opacidade.
 
 ## Comandos principais
 
@@ -126,12 +159,15 @@ zero belts persistidos e a logística por A* é a próxima etapa.
 
 ## Próximos experimentos
 
-1. gerar datasets de demonstrações do planner;
-2. treinar política espacial supervisionada e comparar CNN, CNN+self-attention e GNN;
-3. adicionar grafo de receitas e otimização de capacidade/produção;
-4. fazer o LLM gerar planos tipados em vez de comandos livres;
-5. acoplar executor transacional ao ciclo de auto-healing;
-6. somente depois adicionar perturbações dinâmicas e insetos.
+1. continuar coletando demonstrações A* reais até o gate inicial de 250 exemplos;
+2. executar variantes transacionais de rota e otimizar throughput normalizado contra belts,
+   curvas e área ocupada;
+3. treinar política espacial supervisionada e comparar CNN, CNN+self-attention e GNN;
+4. adicionar grafo de receitas e otimização de capacidade/produção;
+5. fazer o LLM gerar planos tipados em vez de comandos livres;
+6. acoplar um orquestrador persistente que consuma next_action sem resetar o checkpoint aceito;
+7. ampliar o ciclo de auto-healing;
+8. somente depois adicionar perturbações dinâmicas e insetos.
 
 Consulte docs/ARCHITECTURE.md, docs/DASHBOARD.md, docs/FLE_RUNTIME.md,
 docs/LLM_RUNTIME.md, docs/RESEARCH_BASELINE.md e docs/ROADMAP.md.

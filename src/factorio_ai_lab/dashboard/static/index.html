@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Factorio AI Lab</title>
-  <link rel="stylesheet" href="/static/styles.css?v=0.5.0">
+  <link rel="stylesheet" href="/static/styles.css?v=0.6.0">
 </head>
 <body>
   <header class="topbar">
@@ -58,6 +58,11 @@
         <small id="onlineLearnerDetail">no real-world trials yet</small>
       </article>
       <article class="card kpi">
+        <span class="label">RESEARCH LOOP</span>
+        <strong id="researchLoop">idle</strong>
+        <small id="researchLoopDetail">no active agent process</small>
+      </article>
+      <article class="card kpi">
         <span class="label">KNOWLEDGE MEMORY</span>
         <strong id="knowledgeCount">0 lessons</strong>
         <small id="knowledgeLatest">no learned lesson yet</small>
@@ -71,14 +76,20 @@
 
     <section class="workspace-grid">
       <article class="card factory-card">
-        <div class="card-head">
+        <div class="card-head world-card-head">
           <div>
             <span class="label">LIVE FACTORY</span>
             <h2>Live factory map</h2>
           </div>
-          <div class="world-health">
-            <span id="renderBadge" class="badge neutral">renderer checking</span>
-            <span id="frameAge" class="mono">frame --</span>
+          <div class="world-head-actions">
+            <div class="view-mode-toggle" role="group" aria-label="World view mode">
+              <button type="button" data-world-mode="game" class="active">Game</button>
+              <button type="button" data-world-mode="tactical">Tactical</button>
+            </div>
+            <div class="world-health">
+              <span id="renderBadge" class="badge neutral">renderer checking</span>
+              <span id="frameAge" class="mono">frame --</span>
+            </div>
           </div>
         </div>
 
@@ -266,6 +277,10 @@
             <b id="truthKnowledge" class="warn">starting</b>
           </div>
           <div class="truth-row">
+            <span>Spatial demonstration dataset</span>
+            <b id="truthDataset" class="muted">0 demos</b>
+          </div>
+          <div class="truth-row">
             <span>Neural CNN/RNN policy weights</span>
             <b id="truthNeural" class="muted">not trained</b>
           </div>
@@ -320,6 +335,6 @@
     </details>
   </main>
 
-  <script src="/static/app.js?v=0.5.0"></script>
+  <script src="/static/app.js?v=0.6.0"></script>
 </body>
 </html>

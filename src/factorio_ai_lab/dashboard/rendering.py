@@ -18,6 +18,7 @@ ENTITY_DIR = ASSET_ROOT / "entity"
 TERRAIN_GRASS = ASSET_ROOT / "terrain/grass-2.png"
 TERRAIN_DIRT = ASSET_ROOT / "terrain/dirt-1.png"
 FLE_ICON_DIR = Path("/home/ti/.fle/spritemaps/__base__/graphics/icons")
+FLE_RESOURCE_DIR = Path("/home/ti/.fle/spritemaps/__base__/graphics/resources")
 
 ICON_ALIASES = {
     "character": "light-armor",
@@ -164,6 +165,7 @@ class WorldFrameRenderer:
         world: dict[str, Any],
         run: dict[str, Any],
         map_context: dict[str, Any],
+        mode: str,
     ) -> tuple[Any, ...]:
         entities = tuple(
             (
@@ -176,6 +178,7 @@ class WorldFrameRenderer:
             if isinstance(item, dict)
         )
         return (
+            mode,
             world.get("tick"),
             entities,
             len(map_context.get("resources", [])),
@@ -199,6 +202,62 @@ class WorldFrameRenderer:
             return None
         self._icon_cache[cache_key] = image
         return image
+
+    def _resource_sprite(
+        self,
+        name: str,
+        amount: float,
+        x: float,
+        y: float,
+        tile_pixels: float,
+    ) -> Image.Image | None:
+        path = FLE_RESOURCE_DIR / name / f"{name}.png"
+        if not path.is_file():
+            return None
+
+        thresholds = (15000, 9500, 5500, 2900, 1300, 400, 150, 80)
+        stage = 7
+        for index, threshold in enumerate(thresholds):
+            if amount >= threshold:
+                stage = index
+                break
+
+        digest = hashlib.sha1(
+            f"{name}:{x:.1f}:{y:.1f}".encode()
+        ).digest()
+        variation = digest[0] % 8
+        cache_key = (
+            "resource",
+            name,
+            stage,
+            variation,
+            round(tile_pixels, 1),
+        )
+        if cache_key in self._sprite_cache:
+            return self._sprite_cache[cache_key]
+
+        try:
+            sheet = Image.open(path).convert("RGBA")
+            frame_w = sheet.width // 8
+            frame_h = sheet.height // 8
+            sprite = sheet.crop(
+                (
+                    stage * frame_w,
+                    variation * frame_h,
+                    (stage + 1) * frame_w,
+                    (variation + 1) * frame_h,
+                )
+            )
+            target = max(6, round(tile_pixels * 1.04))
+            sprite = sprite.resize(
+                (target, target),
+                Image.Resampling.LANCZOS,
+            )
+        except (OSError, ValueError):
+            return None
+
+        self._sprite_cache[cache_key] = sprite
+        return sprite
 
     def _terrain_samples(self, kind: str) -> list[Image.Image]:
         if kind in self._terrain_tiles:
@@ -412,14 +471,18 @@ class WorldFrameRenderer:
         world: dict[str, Any],
         run: dict[str, Any],
         map_context: dict[str, Any] | None = None,
+        *,
+        mode: str = "game",
     ) -> bytes:
+        if mode not in {"game", "tactical"}:
+            raise ValueError(f"unsupported renderer mode: {mode}")
         map_context = map_context or {}
-        key = self._key(world, run, map_context)
+        key = self._key(world, run, map_context, mode)
         with self._lock:
             if key == self._cache_key and self._cache_png is not None:
                 return self._cache_png
             try:
-                png = self._render_uncached(world, run, map_context)
+                png = self._render_uncached(world, run, map_context, mode=mode)
                 self._cache_key = key
                 self._cache_png = png
                 self._last_error = None
@@ -433,6 +496,8 @@ class WorldFrameRenderer:
         world: dict[str, Any],
         run: dict[str, Any],
         map_context: dict[str, Any],
+        *,
+        mode: str,
     ) -> bytes:
         width = 1024
         height = 1024
@@ -486,58 +551,88 @@ class WorldFrameRenderer:
             water_layer.putalpha(water_mask.point(lambda value: int(value * 0.88)))
             canvas = Image.alpha_composite(canvas, water_layer)
 
-        # Resource fields read as organic patches rather than a spreadsheet.
+        # Game View uses the actual resource sheets from the local FLE
+        # sprite cache. Tactical View adds a subtle map-color field below them.
         resources = [
             item
             for item in map_context.get("resources", [])
             if isinstance(item, dict) and _position(item) is not None
         ]
-        by_resource: dict[str, list[tuple[float, float]]] = {}
+        by_resource: dict[str, list[dict[str, Any]]] = {}
         for resource in resources:
             name = str(resource.get("name", "resource"))
-            pos = _position(resource)
-            if pos is not None:
-                by_resource.setdefault(name, []).append(pos)
+            by_resource.setdefault(name, []).append(resource)
 
-        for name, positions in by_resource.items():
-            mask = Image.new("L", (width, height), 0)
-            mask_draw = ImageDraw.Draw(mask)
-            r = max(2, round(tile_pixels * 0.54))
-            for pos in positions:
-                px, py = project(*pos)
-                mask_draw.ellipse((px - r, py - r, px + r, py + r), fill=220)
-            mask = mask.filter(
-                ImageFilter.GaussianBlur(radius=max(1.5, tile_pixels * 0.55))
-            )
-            rgb = RESOURCE_COLORS.get(name, (137, 122, 80))
-            layer = Image.new("RGBA", (width, height), (*rgb, 0))
-            layer.putalpha(mask.point(lambda value: int(value * 0.70)))
-            canvas = Image.alpha_composite(canvas, layer)
+        if mode == "tactical":
+            for name, items in by_resource.items():
+                mask = Image.new("L", (width, height), 0)
+                mask_draw = ImageDraw.Draw(mask)
+                patch_radius = max(2, round(tile_pixels * 0.56))
+                for item in items:
+                    pos = _position(item)
+                    if pos is None:
+                        continue
+                    px, py = project(*pos)
+                    mask_draw.ellipse(
+                        (
+                            px - patch_radius,
+                            py - patch_radius,
+                            px + patch_radius,
+                            py + patch_radius,
+                        ),
+                        fill=170,
+                    )
+                mask = mask.filter(
+                    ImageFilter.GaussianBlur(
+                        radius=max(1.0, tile_pixels * 0.35)
+                    )
+                )
+                rgb = RESOURCE_COLORS.get(name, (137, 122, 80))
+                layer = Image.new("RGBA", (width, height), (*rgb, 0))
+                layer.putalpha(mask.point(lambda value: int(value * 0.42)))
+                canvas = Image.alpha_composite(canvas, layer)
 
-        draw = ImageDraw.Draw(canvas, "RGBA")
-
-        # Add small ore flecks to give the patch texture without drawing a square grid.
-        for index, resource in enumerate(resources):
-            if index % 2:
-                continue
+        for resource in resources:
             pos = _position(resource)
             if pos is None:
                 continue
-            px, py = project(*pos)
             name = str(resource.get("name", "resource"))
-            base = RESOURCE_COLORS.get(name, (150, 135, 90))
-            seed = int(
-                hashlib.sha1(f"{name}:{pos[0]}:{pos[1]}".encode()).hexdigest()[:4],
-                16,
+            try:
+                amount = float(resource.get("amount", 1.0))
+            except (TypeError, ValueError):
+                amount = 1.0
+            sprite = self._resource_sprite(
+                name,
+                amount,
+                pos[0],
+                pos[1],
+                tile_pixels,
             )
-            dx = (seed % 7) - 3
-            dy = ((seed // 7) % 7) - 3
-            size = max(1, round(tile_pixels * 0.10))
-            color = tuple(min(255, channel + 48) for channel in base)
-            draw.ellipse(
-                (px + dx - size, py + dy - size, px + dx + size, py + dy + size),
-                fill=(*color, 175),
-            )
+            if sprite is None:
+                continue
+            px, py = project(*pos)
+            self._paste_center(canvas, sprite, px, py)
+
+        draw = ImageDraw.Draw(canvas, "RGBA")
+
+        if mode == "tactical":
+            grid_step = max(1.0, tile_pixels)
+            x = 0.0
+            while x <= width:
+                draw.line(
+                    (round(x), 0, round(x), height),
+                    fill=(221, 229, 233, 22),
+                    width=1,
+                )
+                x += grid_step
+            y = 0.0
+            while y <= height:
+                draw.line(
+                    (0, round(y), width, round(y)),
+                    fill=(221, 229, 233, 22),
+                    width=1,
+                )
+                y += grid_step
 
         # Belts are infrastructure first: draw a connected animated lane under the sprites.
         belts = [
@@ -578,6 +673,57 @@ class WorldFrameRenderer:
                 ],
                 fill=(246, 195, 86, 220),
             )
+
+        if mode == "tactical":
+            latest_path: list[dict[str, Any]] = []
+            for event in reversed(run.get("events", [])):
+                if (
+                    isinstance(event, dict)
+                    and event.get("type") == "plan"
+                    and isinstance(event.get("path"), list)
+                ):
+                    latest_path = event["path"]
+                    break
+            route_points: list[tuple[int, int]] = []
+            for raw in latest_path:
+                try:
+                    route_points.append(
+                        project(float(raw["x"]), float(raw["y"]))
+                    )
+                except (KeyError, TypeError, ValueError):
+                    continue
+            if len(route_points) >= 2:
+                draw.line(
+                    route_points,
+                    fill=(246, 184, 69, 210),
+                    width=max(3, round(tile_pixels * 0.12)),
+                    joint="curve",
+                )
+                for px, py in route_points:
+                    rr = max(2, round(tile_pixels * 0.08))
+                    draw.ellipse(
+                        (px - rr, py - rr, px + rr, py + rr),
+                        fill=(255, 219, 132, 225),
+                    )
+
+            for entity in entities:
+                if entity.get("name") == "character":
+                    continue
+                pos = _position(entity)
+                if pos is None:
+                    continue
+                px, py = project(*pos)
+                name = str(entity.get("name", "entity"))
+                footprint = 2.0 if name in {
+                    "burner-mining-drill",
+                    "stone-furnace",
+                } else 1.0
+                half = max(5, round(tile_pixels * footprint * 0.48))
+                draw.rectangle(
+                    (px - half, py - half, px + half, py + half),
+                    outline=(103, 199, 255, 96),
+                    width=max(1, round(tile_pixels * 0.035)),
+                )
 
         # World entities. Real entity frames are preferred over inventory icons.
         for entity in entities:

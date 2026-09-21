@@ -17,6 +17,7 @@ experimentos/currículo, separado do servidor web.
 - /api/run — execução/currículo ativo.
 - /api/research — estágios, trials online, métricas e próxima ação.
 - /api/knowledge — lições estruturadas retidas pelo laboratório.
+- /api/datasets — contagem e gate de treinamento das demonstrações espaciais.
 - /api/experiments/routing — agregação do sweep A*.
 - /api/config — parâmetros runtime editáveis.
 - /ws/live — mundo, research state, run, conhecimento e telemetria ao vivo.
@@ -34,9 +35,11 @@ raster do mundo observado com:
 - zoom, pan e reset de viewport no navegador;
 - atualização de frame desacoplada da telemetria estruturada.
 
-Os assets são obtidos da distribuição oficial Linux demo do Factorio 2.0.73 e usados somente
-na máquina de runtime. Eles não são versionados nem redistribuídos pelo repositório. O Git
-contém apenas o código que resolve e renderiza esses arquivos locais.
+O terreno e os sprites de máquinas suportados são lidos da distribuição Linux demo do
+Factorio 2.0.73 instalada localmente. Os sheets de recursos como iron ore, copper ore, coal
+e stone são lidos do cache local de sprites do FLE. Nenhum desses binários é versionado ou
+redistribuído pelo repositório; o Git contém apenas o código que resolve e renderiza os
+arquivos locais.
 
 ## Princípios visuais do v0.5
 
@@ -50,8 +53,8 @@ runtime para construir uma câmera tática legível para observabilidade:
 5. sprites de mundo reais têm prioridade sobre ícones de inventário;
 6. labels aparecem sob demanda por hover/click, não permanentemente;
 7. estados físicos não são animados quando o Factorio está pausado entre ações FLE;
-8. o dashboard explica ausência de infraestrutura em vez de esconder o fato. No checkpoint
-   atual existem zero belts e o estágio seguinte é A* logistics;
+8. o dashboard diferencia infraestrutura inexistente de falha de renderização. No
+   checkpoint v0.6 existem 8 transport belts persistidos e a topologia aparece no mapa;
 9. controles avançados continuam recolhidos para preservar hierarchy visual;
 10. motion é usado para feedback de UI (timeline, progresso, live state, frame transition),
     com respeito a prefers-reduced-motion.
@@ -82,6 +85,40 @@ As barras horizontais também seguem a semântica do jogo: o item com maior taxa
 ocupa 100% da barra e os demais são proporcionais a ele. O dashboard começa com
 iron ore, copper ore, coal, stone e uranium ore.
 
+## Game View e Tactical View
+
+O mapa possui dois modos explícitos:
+
+- Game View: terreno, recursos e sprites do mundo sem grid analítico; hotspots ficam quase
+  invisíveis até hover/focus.
+- Tactical View: adiciona grid por tile, footprints das entidades e a última rota A*
+  persistida no journal.
+
+Os dois modos usam o mesmo snapshot real do Factorio; o toggle apenas muda a camada de
+visualização. A imagem continua read-only e não executa ações no jogo.
+
+No currículo v0.6 a primeira rota persistente contém 8 transport belts e 1 burner inserter.
+A aceitação exigiu minério no chest terminal, não apenas placement bem-sucedido.
+
+A etapa seguinte usa o corredor A* como buffer para smelting. No currículo validado, a
+célula belt-fed produziu 74 iron plates em 32 s; o direct-feed anterior produziu 36 em
+24 s. As taxas são 2.3125 e 1.5 plates/s, respectivamente, razão normalizada 1.54x.
+A janela belt-fed correspondeu a 9.25 plates por belt segment. Esses números são evidência daquela execução,
+não uma alegação de throughput assintótico.
+
+O runner usa um lock de processo em runs/curriculum.lock. Execuções manuais e o serviço
+systemd compartilham o mesmo script, evitando dois writers simultâneos no Factorio.
+
+## Production Monitor v0.6
+
+O gráfico preserva as 300 amostras nativas de LuaFlowStatistics. Para melhorar a leitura de
+ciclos discretos, o sinal bruto é desenhado em baixa opacidade e uma EMA visual é sobreposta.
+O eixo Y é escalado pela série suavizada; impulsos brutos continuam visíveis, mas não achatam
+a curva útil.
+
+O número no cabeçalho é rotulado como avg, porque get_flow_count sem sample_index retorna
+a taxa média da janela selecionada. Os nomes dos recursos são exibidos por extenso.
+
 ## Research loop
 
 O curriculum_runner usa o mesmo Factorio real, mas é um processo separado do observer:
@@ -90,11 +127,41 @@ O curriculum_runner usa o mesmo Factorio real, mas é um processo separado do ob
 
 Fluxo atual:
 
-    baseline -> trials UCB1 -> rollback -> promoção -> scale mining -> smelting probe
+    baseline
+      -> UCB1 placement trials + rollback
+      -> promote placement
+      -> scale mining
+      -> direct-feed smelting
+      -> A* belt logistics
+      -> belt-fed smelting
 
-Em cada trial o mundo é alterado, medido e depois restaurado caso a hipótese não seja
-promovida. O dashboard mostra o estágio, timeline, reward, braço selecionado, métricas e
-conhecimento sintetizado.
+Em cada trial o mundo é alterado, medido e restaurado caso a hipótese não seja promovida.
+O A* só é aceito se minério físico chegar ao chest terminal. O estágio belt-fed só é aceito
+se houver produção real de iron plates.
+
+O dashboard mostra separadamente o estado do processo de pesquisa. Se o processo estiver
+ativo e o journal não for atualizado por mais de 45 s durante um estágio ativo, o KPI muda
+para stalled. Quando o currículo termina, mostra completed · idle e a próxima hipótese,
+em vez de deixar o último estágio parecendo ainda estar executando.
+
+O script usa flock sobre runs/curriculum.lock; uma segunda execução simultânea é recusada.
+
+## O que realmente aprende
+
+O painel Capability truth table diferencia deliberadamente componentes com semânticas
+diferentes:
+
+- Qwen3-4B: inferência local com pesos estáticos; sintetiza lessons tipadas;
+- UCB1 online: atualiza estatísticas a partir de trials físicos reais;
+- UCB1/A* offline: mantém calibração quantitativa dos hiperparâmetros;
+- knowledge memory: cresce com resultados aceitos, rejeições e correções determinísticas;
+- spatial demonstrations: rotas A* aceitas são persistidas como exemplos supervisionados;
+- CNN/attention: ainda não treinada; gate inicial de 250 demonstrações;
+- residual neural world model: ainda não treinado; o world model atual é explícito.
+
+No v0.6 foi detectada e corrigida uma lesson que comparava raw counts de janelas de 24 s e
+32 s. A comparação válida normaliza por duração: direct-feed 1.5 plates/s, belt-fed
+2.3125 plates/s, razão 1.5417x. A correction lesson supersede a conclusão anterior de 2.06x.
 
 ## Serviço local
 

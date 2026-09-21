@@ -64,6 +64,20 @@ def _port_open(host: str, port: int, timeout: float = 0.25) -> bool:
         return False
 
 
+def _process_running(pattern: str) -> bool:
+    try:
+        completed = subprocess.run(
+            ["pgrep", "-f", pattern],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=1,
+            check=False,
+        )
+        return completed.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def _git_value(*args: str) -> str:
     try:
         return subprocess.check_output(
@@ -551,6 +565,12 @@ class DashboardState:
             "memory": _memory_status(),
             "runtime": self.config.read(),
             "render": self.renderer.status(),
+            "research_runner": {
+                "active": _process_running(
+                    "factorio_ai_lab.experiments.curriculum_runner"
+                ),
+                "process": "curriculum_runner",
+            },
         }
 
     def sample(self) -> dict[str, Any]:
@@ -573,6 +593,7 @@ class DashboardState:
             "run": self.active_run_data(),
             "research": self.research_data(),
             "knowledge": self.knowledge_data(),
+            "datasets": self.dataset_data(),
         }
 
     def history_data(self) -> list[dict[str, Any]]:
@@ -604,6 +625,37 @@ class DashboardState:
             return {"status": "degraded", "error": "invalid research_state.json"}
         return loaded if isinstance(loaded, dict) else {}
 
+    def dataset_data(self) -> dict[str, Any]:
+        path = RUNS_DIR / "datasets" / "spatial_demonstrations.jsonl"
+        if not path.exists():
+            return {
+                "spatial_demonstrations": 0,
+                "training_ready": False,
+            }
+        try:
+            rows = [
+                json.loads(line)
+                for line in path.read_text().splitlines()
+                if line.strip()
+            ]
+        except (OSError, json.JSONDecodeError):
+            return {
+                "spatial_demonstrations": 0,
+                "training_ready": False,
+                "error": "invalid spatial demonstration dataset",
+            }
+        accepted = sum(
+            1
+            for row in rows
+            if isinstance(row, dict) and bool(row.get("accepted"))
+        )
+        return {
+            "spatial_demonstrations": len(rows),
+            "accepted_demonstrations": accepted,
+            "training_ready": len(rows) >= 250,
+            "minimum_training_target": 250,
+        }
+
     def knowledge_data(self, limit: int = 12) -> dict[str, Any]:
         path = RUNS_DIR / "knowledge.jsonl"
         if not path.exists():
@@ -615,11 +667,11 @@ class DashboardState:
             return {"count": 0, "lessons": [], "error": "invalid knowledge log"}
         return {"count": len(lines), "lessons": lessons}
 
-    def render_world_frame(self) -> bytes:
+    def render_world_frame(self, mode: str = "game") -> bytes:
         world = self.factorio.snapshot()
         map_context = self.factorio.map_snapshot()
         run = self.active_run_data()
-        return self.renderer.render(world, run, map_context)
+        return self.renderer.render(world, run, map_context, mode=mode)
 
     def learning_data(self) -> dict[str, Any]:
         history_path = RUNS_DIR / "turn_penalty_learning.jsonl"
