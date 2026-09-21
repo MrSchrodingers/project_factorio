@@ -5,6 +5,7 @@ const state = {
   learning: { history: [], summary: {} },
   routing: { rows: [] },
   history: [],
+  run: {},
   socket: null,
 };
 
@@ -292,6 +293,7 @@ function applyPayload(payload) {
   state.world = payload.world || state.world;
   state.learning = payload.learning || state.learning;
   state.history = payload.history || state.history;
+  state.run = payload.run || state.run;
 
   const status = payload.status || {};
   const factorio = status.factorio || {};
@@ -334,7 +336,18 @@ function applyPayload(payload) {
   if (summary.best_observed !== undefined) {
     setText("learnerBest", "β " + summary.best_observed);
     setText("learnerEpisodes", (summary.episodes || 0) + " learning episodes");
-    setText("learningSummary", JSON.stringify(summary, null, 2));
+  }
+
+  const run = state.run || {};
+  if (run.status) {
+    setText("runStatus", run.status);
+    setText("runId", run.run_id || "unnamed run");
+    const runStatus = $("runStatus");
+    runStatus.className =
+      run.status === "success" ? "good"
+      : run.status === "running" || run.status === "starting" ? "warn"
+      : "bad";
+    setText("runSummary", JSON.stringify(run, null, 2));
   }
 
   drawWorld();
@@ -361,19 +374,26 @@ async function loadConfig() {
 }
 
 async function loadInitialState() {
-  const [statusResponse, worldResponse, historyResponse, learningResponse] =
-    await Promise.all([
-      fetch("/api/status"),
-      fetch("/api/world"),
-      fetch("/api/history"),
-      fetch("/api/learning"),
-    ]);
+  const [
+    statusResponse,
+    worldResponse,
+    historyResponse,
+    learningResponse,
+    runResponse,
+  ] = await Promise.all([
+    fetch("/api/status"),
+    fetch("/api/world"),
+    fetch("/api/history"),
+    fetch("/api/learning"),
+    fetch("/api/run"),
+  ]);
 
-  const [status, world, history, learning] = await Promise.all([
+  const [status, world, history, learning, run] = await Promise.all([
     statusResponse.json(),
     worldResponse.json(),
     historyResponse.json(),
     learningResponse.json(),
+    runResponse.json(),
   ]);
 
   applyPayload({
@@ -381,6 +401,7 @@ async function loadInitialState() {
     world,
     history,
     learning,
+    run,
   });
 }
 

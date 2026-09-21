@@ -61,7 +61,7 @@ Por isso o primeiro modelo sugerido é **Qwen3-4B GGUF Q4_K_M via llama.cpp**. N
 9B v2 pode entrar como benchmark secundário quantizado; modelos MoE de ~30B ficam fora do
 baseline de RAM.
 
-## Estado do marco v0.2.0
+## Estado do marco v0.3.0
 
 O laboratório já executa o Factorio 2.0.73 via FLE, mantém checkpoints transacionais e possui
 um control plane web com telemetria ao vivo. O LLM baseline é Qwen3-4B Q4_K_M local em
@@ -74,7 +74,9 @@ Componentes ativos:
 - Qwen/llama.cpp: 127.0.0.1:18081;
 - acesso do dashboard pela tailnet: http://midasnet.tail106aa2.ts.net:8765/;
 - learner UCB1 para seleção quantitativa do turn penalty do A*;
-- router de modelos que permite apenas backends local ou free.
+- router de modelos que permite apenas backends local ou free;
+- Run 001 construtiva: burner mining drill -> wooden chest com validação transacional;
+- endpoint /api/run e estado da execução atual no control plane.
 
 ## Comandos principais
 
@@ -91,6 +93,9 @@ Componentes ativos:
 
     # Aprendizado do hiperparâmetro de curva
     PYTHONPATH=src python3 -m factorio_ai_lab.experiments.learn_turn_penalty       --episodes 300
+
+    # Primeira run construtiva no Factorio real
+    PYTHONPATH=src .venv-fle/bin/python -m factorio_ai_lab.experiments.run_iron_miner       --seed 20260921 --settle-seconds 20
 
     # Dashboard manual
     ./scripts/run_dashboard.sh

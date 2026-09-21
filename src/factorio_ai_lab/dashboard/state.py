@@ -137,47 +137,77 @@ class RuntimeConfigStore:
 
 
 class FactorioObserver:
-    """Read-only FLE observer. It never resets the world or submits player actions."""
+    """Strictly read-only RCON observer; never constructs FactorioInstance."""
+
+    _SNAPSHOT_COMMAND = r"""
+/c local p=storage.agent_characters and storage.agent_characters[1]
+if not p then
+  rcon.print(helpers.table_to_json({connected=false,error="agent character unavailable"}))
+  return
+end
+local entities={}
+for _,e in pairs(p.surface.find_entities_filtered{force=p.force}) do
+  if e.valid then
+    table.insert(entities,{
+      name=e.name,
+      type=e.type,
+      direction=e.direction,
+      position={x=e.position.x,y=e.position.y}
+    })
+  end
+end
+local production={input={},output={}}
+local surface=p.surface
+local item_stats=p.force.get_item_production_statistics(surface)
+local fluid_stats=p.force.get_fluid_production_statistics(surface)
+for name,count in pairs(item_stats.input_counts) do
+  if count ~= 0 then production.output[name]=count end
+end
+for name,count in pairs(item_stats.output_counts) do
+  if count ~= 0 then production.input[name]=count end
+end
+for name,count in pairs(fluid_stats.input_counts) do
+  if count ~= 0 then production.output[name]=count end
+end
+for name,count in pairs(fluid_stats.output_counts) do
+  if count ~= 0 then production.input[name]=count end
+end
+rcon.print(helpers.table_to_json({
+  connected=true,
+  tick=storage.elapsed_ticks or game.tick,
+  entities=entities,
+  production=production
+}))
+"""
 
     def __init__(self, host: str = "127.0.0.1", port: int = 27000) -> None:
         self.host = host
         self.port = port
-        self._instance: Any | None = None
+        self._client: Any | None = None
         self._lock = threading.Lock()
         self._last_error: str | None = None
 
     def connected(self) -> bool:
         return _port_open(self.host, self.port)
 
-    def _discard_instance_unlocked(self) -> None:
-        if self._instance is None:
-            return
-        try:
-            self._instance.cleanup()
-        except Exception as exc:  # noqa: BLE001
-            self._last_error = f"cleanup {type(exc).__name__}: {exc}"
-        finally:
-            self._instance = None
-
     def close(self) -> None:
         with self._lock:
-            self._discard_instance_unlocked()
+            if self._client is not None:
+                close = getattr(self._client, "close", None)
+                if callable(close):
+                    try:
+                        close()
+                    except OSError:
+                        pass
+                self._client = None
 
-    def _ensure_instance(self) -> Any:
-        if self._instance is not None:
-            return self._instance
-        from fle.env import FactorioInstance
+    def _ensure_client(self) -> Any:
+        if self._client is not None:
+            return self._client
+        from factorio_rcon import RCONClient
 
-        self._instance = FactorioInstance(
-            address=self.host,
-            tcp_port=self.port,
-            num_agents=1,
-            fast=True,
-            cache_scripts=True,
-            inventory={},
-            all_technologies_researched=False,
-        )
-        return self._instance
+        self._client = RCONClient(self.host, self.port, "factorio")
+        return self._client
 
     def snapshot(self) -> dict[str, Any]:
         started = time.perf_counter()
@@ -193,42 +223,45 @@ class FactorioObserver:
 
         with self._lock:
             try:
-                instance = self._ensure_instance()
-                namespace = instance.namespace
-                entities = namespace._save_entity_state(
-                    distance=500,
-                    player_entities=True,
-                    resource_entities=False,
-                    items_on_ground=False,
-                    encode=False,
-                    compress=False,
-                )
-                production = namespace._get_production_stats()
-                ticks = instance.get_elapsed_ticks()
-                safe_entities = _json_safe(entities)
-                if not isinstance(safe_entities, list):
-                    safe_entities = []
+                client = self._ensure_client()
+                raw = client.send_command(self._SNAPSHOT_COMMAND)
+                if not raw:
+                    raise RuntimeError("RCON snapshot returned no payload")
+                payload = json.loads(raw)
+                entities = payload.get("entities", [])
+                if not isinstance(entities, list):
+                    entities = []
                 self._last_error = None
                 return {
-                    "connected": True,
-                    "tick": _json_safe(ticks),
-                    "entities": safe_entities,
-                    "entity_count": len(safe_entities),
-                    "production": _json_safe(production),
-                    "latency_ms": round(
-                        (time.perf_counter() - started) * 1000.0, 2
+                    "connected": bool(payload.get("connected", True)),
+                    "tick": payload.get("tick"),
+                    "entities": entities,
+                    "entity_count": len(entities),
+                    "production": payload.get(
+                        "production",
+                        {"input": {}, "output": {}},
                     ),
-                    "error": None,
+                    "latency_ms": round(
+                        (time.perf_counter() - started) * 1000.0,
+                        2,
+                    ),
+                    "error": payload.get("error"),
                 }
-            except Exception as exc:  # noqa: BLE001
+            except (
+                OSError,
+                RuntimeError,
+                ValueError,
+                json.JSONDecodeError,
+            ) as exc:
                 self._last_error = f"{type(exc).__name__}: {exc}"
-                self._discard_instance_unlocked()
+                self._client = None
                 return {
                     "connected": False,
                     "entities": [],
                     "entity_count": 0,
                     "latency_ms": round(
-                        (time.perf_counter() - started) * 1000.0, 2
+                        (time.perf_counter() - started) * 1000.0,
+                        2,
                     ),
                     "error": self._last_error,
                 }
@@ -303,11 +336,22 @@ class DashboardState:
             "world": world,
             "history": self.history_data(),
             "learning": self.learning_data(),
+            "run": self.active_run_data(),
         }
 
     def history_data(self) -> list[dict[str, Any]]:
         with self.history_lock:
             return list(self.history)
+
+    def active_run_data(self) -> dict[str, Any]:
+        path = RUNS_DIR / "active_run.json"
+        if not path.exists():
+            return {}
+        try:
+            loaded = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return loaded if isinstance(loaded, dict) else {}
 
     def learning_data(self) -> dict[str, Any]:
         history_path = RUNS_DIR / "turn_penalty_learning.jsonl"

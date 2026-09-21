@@ -24,6 +24,7 @@ class FakeEnvironment:
 
     def step(self, action):
         assert isinstance(action, FakeAction)
+        self.last_action = action
         self.state = f'{self.state}|{action.code}'
         return (
             {'raw_text': action.code},
@@ -52,6 +53,24 @@ class TransactionalFLEExecutorTests(unittest.TestCase):
         self.assertTrue(result.accepted)
         self.assertEqual(executor.game_state, 'initial|build')
         self.assertEqual(env.state, 'initial|build')
+
+
+    def test_live_action_keeps_checkpoint_only_for_rollback(self) -> None:
+        env = FakeEnvironment()
+        executor = TransactionalFLEExecutor(env, action_factory=fake_action_factory)
+        executor.game_state = "checkpoint"
+        env.state = "checkpoint"
+
+        result = executor.execute(
+            "build()",
+            accept=lambda _: True,
+            use_checkpoint_for_action=False,
+        )
+
+        self.assertTrue(result.accepted)
+        self.assertIsNone(env.last_action.game_state)
+        self.assertEqual(result.checkpoint_before, "checkpoint")
+        self.assertEqual(executor.game_state, "checkpoint|build()")
 
     def test_rolls_back_rejected_state(self) -> None:
         env = FakeEnvironment()

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Factorio AI Lab</title>
-  <link rel="stylesheet" href="/static/styles.css?v=0.2.0">
+  <link rel="stylesheet" href="/static/styles.css?v=0.3.0">
 </head>
 <body>
   <header class="topbar">
@@ -49,6 +49,11 @@
         <span class="label">Learner</span>
         <strong id="learnerBest">--</strong>
         <small id="learnerEpisodes">no experiment</small>
+      </article>
+      <article class="card metric-card">
+        <span class="label">Active run</span>
+        <strong id="runStatus">--</strong>
+        <small id="runId">no run</small>
       </article>
     </section>
 
@@ -153,14 +158,14 @@
         <div class="card-head">
           <div>
             <span class="label">RUN STATE</span>
-            <h2>Learning summary</h2>
+            <h2>Active experiment</h2>
           </div>
         </div>
-        <pre id="learningSummary" class="summary">No learning artifact yet.</pre>
+        <pre id="runSummary" class="summary">No active run yet.</pre>
       </article>
     </section>
   </main>
 
-  <script src="/static/app.js?v=0.2.0"></script>
+  <script src="/static/app.js?v=0.3.0"></script>
 </body>
 </html>

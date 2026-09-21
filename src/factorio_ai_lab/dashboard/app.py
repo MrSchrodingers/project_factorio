@@ -24,7 +24,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Factorio AI Lab Dashboard",
-    version="0.2.0",
+    version="0.3.0",
     lifespan=lifespan,
 )
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -67,6 +67,11 @@ def api_history() -> list[dict[str, Any]]:
 @app.get("/api/learning")
 def api_learning() -> dict[str, Any]:
     return state.learning_data()
+
+
+@app.get("/api/run")
+def api_run() -> dict[str, Any]:
+    return state.active_run_data()
 
 
 @app.get("/api/experiments/routing")
