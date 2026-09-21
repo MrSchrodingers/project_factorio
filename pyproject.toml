@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "factorio-ai-lab"
+version = "0.1.0"
+description = "Laboratório híbrido de IA/ML para planejamento, aprendizado e otimização em Factorio."
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+license = { text = "MIT" }
+authors = [{ name = "Factorio AI Lab" }]
+dependencies = []
+
+[project.optional-dependencies]
+fle = ["factorio-learning-environment>=0.3.0"]
+ml = ["numpy>=2.0", "torch>=2.5", "gymnasium>=1.0"]
+optim = ["networkx>=3.3", "highspy>=1.9"]
+observability = ["mlflow>=3.0", "prometheus-client>=0.21"]
+dev = ["pytest>=8.3", "ruff>=0.11", "mypy>=1.15"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/factorio_ai_lab"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

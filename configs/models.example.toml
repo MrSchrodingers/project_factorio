@@ -1,0 +1,18 @@
+[endpoint]
+kind = "openai_compatible"
+base_url = "http://127.0.0.1:8080/v1"
+api_key = "local-no-key"
+
+[models.planner]
+name = "qwen3-4b-q4_k_m"
+role = "goal decomposition, Python synthesis, critique"
+
+[models.experimental_nemotron]
+name = "nemotron-nano-9b-v2-gguf"
+role = "secondary reasoning benchmark"
+enabled = false
+
+[routing]
+strategy = "deterministic-first"
+llm_for_spatial_routing = false
+llm_for_production_lp = false
