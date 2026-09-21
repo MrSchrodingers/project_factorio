@@ -61,9 +61,9 @@ Por isso o primeiro modelo sugerido é **Qwen3-4B GGUF Q4_K_M via llama.cpp**. N
 9B v2 pode entrar como benchmark secundário quantizado; modelos MoE de ~30B ficam fora do
 baseline de RAM.
 
-## Estado do marco v0.3.0
+## Estado do marco v0.4.0
 
-O laboratório já executa o Factorio 2.0.73 via FLE, mantém checkpoints transacionais e possui
+O laboratório executa Factorio 2.0.73 via FLE, mantém checkpoints transacionais e possui
 um control plane web com telemetria ao vivo. O LLM baseline é Qwen3-4B Q4_K_M local em
 llama.cpp; nenhum provider pago é necessário.
 
@@ -73,10 +73,19 @@ Componentes ativos:
 - dashboard: 127.0.0.1:8765;
 - Qwen/llama.cpp: 127.0.0.1:18081;
 - acesso do dashboard pela tailnet: http://midasnet.tail106aa2.ts.net:8765/;
-- learner UCB1 para seleção quantitativa do turn penalty do A*;
-- router de modelos que permite apenas backends local ou free;
-- Run 001 construtiva: burner mining drill -> wooden chest com validação transacional;
-- endpoint /api/run e estado da execução atual no control plane.
+- mapa raster ao vivo com terreno e ícones oficiais do Factorio carregados apenas no runtime
+  local, com zoom/pan e sem redistribuir os assets no Git;
+- monitor de Production/Consumption baseado diretamente em LuaFlowStatistics, com as 300
+  amostras nativas do jogo e janelas 5s/1m/10m/1h/10h/50h/250h;
+- learner UCB1 offline para o turn penalty do A*;
+- learner UCB1 online que executa placements reais no Factorio com rollback transacional;
+- memória de conhecimento estruturado sintetizada pelo Qwen local;
+- router que permite apenas backends local ou free.
+
+O primeiro currículo online validado executou 8 trials reais de placement, promoveu
+east_near, persistiu uma segunda célula de mineração e aceitou uma célula de fundição que
+produziu 36 iron plates. O próximo objetivo registrado pelo research loop é projetar a
+extração por belts usando A*.
 
 ## Comandos principais
 
@@ -95,7 +104,11 @@ Componentes ativos:
     PYTHONPATH=src python3 -m factorio_ai_lab.experiments.learn_turn_penalty       --episodes 300
 
     # Primeira run construtiva no Factorio real
-    PYTHONPATH=src .venv-fle/bin/python -m factorio_ai_lab.experiments.run_iron_miner       --seed 20260921 --settle-seconds 20
+    PYTHONPATH=src .venv-fle/bin/python -m factorio_ai_lab.experiments.run_iron_miner \
+      --seed 20260921 --settle-seconds 20
+
+    # Currículo autônomo com aprendizado online + rollback
+    ./scripts/run_curriculum.sh
 
     # Dashboard manual
     ./scripts/run_dashboard.sh

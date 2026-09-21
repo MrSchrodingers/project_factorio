@@ -4,134 +4,215 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Factorio AI Lab</title>
-  <link rel="stylesheet" href="/static/styles.css?v=0.3.0">
+  <link rel="stylesheet" href="/static/styles.css?v=0.4.0">
 </head>
 <body>
   <header class="topbar">
-    <div>
+    <div class="brand">
       <div class="eyebrow">RESEARCH CONTROL PLANE</div>
-      <h1>Factorio AI Lab</h1>
+      <div class="brand-row">
+        <h1>Factorio AI Lab</h1>
+        <span id="socketBadge" class="badge neutral">connecting</span>
+      </div>
     </div>
-    <div class="top-status">
-      <span id="socketBadge" class="badge neutral">connecting</span>
+    <div class="top-meta">
+      <span id="researchBadge" class="badge neutral">research idle</span>
       <span id="commitBadge" class="mono">git --</span>
     </div>
   </header>
 
-  <main class="layout">
-    <section class="cards metrics">
-      <article class="card metric-card">
-        <span class="label">Factorio</span>
-        <strong id="factorioStatus">--</strong>
-        <small id="factorioDetail">RCON 127.0.0.1:27000</small>
+  <main class="shell">
+    <section class="mission-strip card">
+      <div class="mission-copy">
+        <span class="label">CURRENT OBJECTIVE</span>
+        <strong id="missionTitle">Waiting for research loop…</strong>
+        <small id="missionDetail">No active curriculum stage.</small>
+      </div>
+      <div class="mission-progress">
+        <div class="progress-head">
+          <span id="stageName">stage --</span>
+          <span id="stageProgressText">0%</span>
+        </div>
+        <div class="progress-track"><div id="stageProgressBar" class="progress-fill"></div></div>
+      </div>
+      <div class="mission-next">
+        <span class="label">NEXT ACTION</span>
+        <strong id="nextAction">--</strong>
+      </div>
+    </section>
+
+    <section class="kpi-grid">
+      <article class="card kpi">
+        <span class="label">WORLD</span>
+        <strong><span id="entityCount">0</span> entities</strong>
+        <small><span id="worldTick">tick --</span> · <span id="probeLatency">-- ms</span></small>
       </article>
-      <article class="card metric-card">
-        <span class="label">Local LLM</span>
+      <article class="card kpi">
+        <span class="label">PRODUCTION</span>
+        <strong id="productionPrimary">--</strong>
+        <small id="productionSecondary">no measured flow</small>
+      </article>
+      <article class="card kpi">
+        <span class="label">ONLINE LEARNING</span>
+        <strong id="onlineLearner">idle</strong>
+        <small id="onlineLearnerDetail">no real-world trials yet</small>
+      </article>
+      <article class="card kpi">
+        <span class="label">KNOWLEDGE MEMORY</span>
+        <strong id="knowledgeCount">0 lessons</strong>
+        <small id="knowledgeLatest">no learned lesson yet</small>
+      </article>
+      <article class="card kpi">
+        <span class="label">LOCAL MODEL</span>
         <strong id="llmStatus">--</strong>
         <small id="llmDetail">llama.cpp :18081</small>
       </article>
-      <article class="card metric-card">
-        <span class="label">Entities</span>
-        <strong id="entityCount">0</strong>
-        <small id="worldTick">tick --</small>
-      </article>
-      <article class="card metric-card">
-        <span class="label">Probe latency</span>
-        <strong id="probeLatency">-- ms</strong>
-        <small>read-only world observer</small>
-      </article>
-      <article class="card metric-card">
-        <span class="label">Memory</span>
-        <strong id="memoryUsed">--</strong>
-        <small id="memoryDetail">--</small>
-      </article>
-      <article class="card metric-card">
-        <span class="label">Learner</span>
-        <strong id="learnerBest">--</strong>
-        <small id="learnerEpisodes">no experiment</small>
-      </article>
-      <article class="card metric-card">
-        <span class="label">Active run</span>
-        <strong id="runStatus">--</strong>
-        <small id="runId">no run</small>
-      </article>
     </section>
 
-    <section class="main-grid">
-      <article class="card world-card">
+    <section class="workspace-grid">
+      <article class="card factory-card">
         <div class="card-head">
           <div>
-            <span class="label">LIVE WORLD</span>
-            <h2>Factory topology</h2>
+            <span class="label">LIVE FACTORY</span>
+            <h2>Rendered Factorio world</h2>
           </div>
-          <div class="legend">
-            <span><i class="dot belt"></i>logistics</span>
-            <span><i class="dot machine"></i>machine</span>
-            <span><i class="dot power"></i>power</span>
-            <span><i class="dot other"></i>other</span>
+          <div class="world-health">
+            <span id="renderBadge" class="badge neutral">renderer checking</span>
+            <span id="frameAge" class="mono">frame --</span>
           </div>
         </div>
-        <div class="canvas-wrap">
-          <canvas id="worldCanvas"></canvas>
-          <div id="worldEmpty" class="empty-state">Waiting for entity snapshot…</div>
+
+        <div class="world-stage" id="worldStage">
+          <div id="worldViewport" class="world-viewport">
+            <img id="worldFrame" alt="Live rendered Factorio world">
+            <canvas id="worldFallback" aria-label="Structured world fallback"></canvas>
+            <div id="worldAssetOverlay" class="world-asset-overlay" aria-hidden="true"></div>
+          </div>
+          <div id="worldEmpty" class="world-empty">
+            <strong>Waiting for live world frame</strong>
+            <span>The renderer will appear here when the FLE sprite set is ready.</span>
+          </div>
+          <div class="world-hud">
+            <span id="factorioStatus" class="hud-chip">Factorio --</span>
+            <span id="frameSource" class="hud-chip">FLE renderer</span>
+          </div>
+          <div class="world-controls" aria-label="World map controls">
+            <button id="zoomOut" type="button" title="Zoom out">−</button>
+            <button id="zoomReset" type="button" title="Reset view">1×</button>
+            <button id="zoomIn" type="button" title="Zoom in">+</button>
+          </div>
         </div>
-        <div class="world-footer">
-          <div id="boundsText" class="mono">bounds --</div>
-          <div id="entityTypes" class="type-pills"></div>
+
+        <div class="factory-footer">
+          <div>
+            <span class="label">ENTITY MIX</span>
+            <div id="entityTypes" class="type-pills"></div>
+          </div>
+          <div class="factory-bounds">
+            <span class="label">LIVE STATE</span>
+            <span id="boundsText" class="mono">bounds --</span>
+          </div>
         </div>
       </article>
 
-      <aside class="card side-card">
-        <div class="card-head">
-          <div>
-            <span class="label">ACTIVE CONFIG</span>
-            <h2>Runtime parameters</h2>
+      <aside class="right-stack">
+        <article class="card execution-card">
+          <div class="card-head compact">
+            <div>
+              <span class="label">AUTONOMOUS EXECUTION</span>
+              <h2>Curriculum</h2>
+            </div>
+            <span id="runStatus" class="badge neutral">--</span>
           </div>
-          <span id="configSaved" class="save-state"></span>
-        </div>
-        <form id="configForm" class="config-form">
-          <label>Poll interval (s)<input name="poll_interval_s" type="number" min=".25" max="30" step=".25"></label>
-          <label>A* turn penalty<input name="astar_turn_penalty" type="number" min="0" max="20" step=".05"></label>
-          <label>UCB exploration<input name="ucb_exploration" type="number" min="0" max="20" step=".1"></label>
-          <label>LLM provider<input name="llm_provider" type="text"></label>
-          <label>Temperature<input name="llm_temperature" type="number" min="0" max="2" step=".05"></label>
-          <label>Max tokens<input name="llm_max_tokens" type="number" min="32" max="32768" step="32"></label>
-          <label>Learning algorithm<input name="learning_algorithm" type="text"></label>
-          <label>Neural policy<input name="neural_policy" type="text"></label>
-          <label>World model<input name="world_model" type="text"></label>
-          <button type="submit">Save runtime parameters</button>
-        </form>
+          <div id="curriculumList" class="curriculum-list">
+            <div class="placeholder-row">No curriculum state yet.</div>
+          </div>
+        </article>
+
+        <article class="card execution-card">
+          <div class="card-head compact">
+            <div>
+              <span class="label">DECISION TRACE</span>
+              <h2>Live timeline</h2>
+            </div>
+            <span id="runId" class="mono">no run</span>
+          </div>
+          <div id="timeline" class="timeline">
+            <div class="placeholder-row">No execution events yet.</div>
+          </div>
+        </article>
       </aside>
     </section>
 
-    <section class="chart-grid">
-      <article class="card chart-card">
-        <div class="card-head">
-          <div>
-            <span class="label">ONLINE LEARNING</span>
-            <h2>UCB1 reward</h2>
+    <section class="card production-monitor">
+      <div class="card-head production-head">
+        <div>
+          <span class="label">FACTORIO PRODUCTION STATISTICS</span>
+          <h2>Ore production / consumption</h2>
+          <small id="productionSource">native LuaFlowStatistics · items/min</small>
+        </div>
+        <div class="production-range" aria-label="Production statistics time range">
+          <button type="button" data-production-precision="5s">5s</button>
+          <button type="button" data-production-precision="1m" class="active">1m</button>
+          <button type="button" data-production-precision="10m">10m</button>
+          <button type="button" data-production-precision="1h">1h</button>
+          <button type="button" data-production-precision="10h">10h</button>
+          <button type="button" data-production-precision="50h">50h</button>
+          <button type="button" data-production-precision="250h">250h</button>
+        </div>
+      </div>
+      <div class="production-meta">
+        <span id="productionWindow" class="mono">1 minute · 300 native samples</span>
+        <span class="mono">bars are relative to the highest rate on each side</span>
+      </div>
+      <div class="production-panels">
+        <section class="production-side">
+          <div class="production-side-head">
+            <strong>Production</strong>
+            <span id="producedPeak" class="mono">peak --/min</span>
           </div>
-          <span class="mono" id="learningSource">turn penalty</span>
+          <canvas id="producedCanvas" aria-label="Ore production over time"></canvas>
+          <div id="producedBars" class="factorio-bars"></div>
+        </section>
+        <section class="production-side">
+          <div class="production-side-head">
+            <strong>Consumption</strong>
+            <span id="consumedPeak" class="mono">peak --/min</span>
+          </div>
+          <canvas id="consumedCanvas" aria-label="Ore consumption over time"></canvas>
+          <div id="consumedBars" class="factorio-bars"></div>
+        </section>
+      </div>
+    </section>
+
+    <section class="evidence-grid">
+      <article class="card chart-card">
+        <div class="card-head compact">
+          <div>
+            <span class="label">REAL-WORLD LEARNING</span>
+            <h2>Online reward / trials</h2>
+          </div>
+          <span id="onlineLearningSource" class="mono">waiting</span>
+        </div>
+        <canvas id="onlineLearningCanvas"></canvas>
+      </article>
+
+      <article class="card chart-card">
+        <div class="card-head compact">
+          <div>
+            <span class="label">OFFLINE LEARNING</span>
+            <h2>A* UCB1 reward</h2>
+          </div>
+          <span id="offlineLearningSource" class="mono">turn penalty</span>
         </div>
         <canvas id="learningCanvas"></canvas>
       </article>
 
       <article class="card chart-card">
-        <div class="card-head">
-          <div>
-            <span class="label">PLANNER BENCHMARK</span>
-            <h2>Turns vs search cost</h2>
-          </div>
-          <span class="mono" id="sweepSource">no sweep</span>
-        </div>
-        <canvas id="sweepCanvas"></canvas>
-      </article>
-
-      <article class="card chart-card">
-        <div class="card-head">
+        <div class="card-head compact">
           <div>
             <span class="label">LIVE TELEMETRY</span>
-            <h2>World / observer</h2>
+            <h2>Entities / probe latency</h2>
           </div>
           <span class="mono">last 600 samples</span>
         </div>
@@ -139,33 +220,95 @@
       </article>
     </section>
 
-    <section class="bottom-grid">
-      <article class="card">
+    <section class="insight-grid">
+      <article class="card knowledge-card">
         <div class="card-head">
           <div>
-            <span class="label">MODEL ROUTER</span>
-            <h2>Inference policy</h2>
+            <span class="label">GENERATED KNOWLEDGE</span>
+            <h2>Lessons retained by the lab</h2>
           </div>
+          <span id="knowledgeMode" class="badge neutral">structured memory</span>
         </div>
-        <div class="router">
-          <div class="route-row"><span>1</span><div><strong>Qwen3-4B Q4_K_M</strong><small>local · llama.cpp · primary</small></div><b id="routeLocal">checking</b></div>
-          <div class="route-row"><span>2</span><div><strong>openrouter/free</strong><small>external free-only fallback · opt-in</small></div><b>disabled</b></div>
-          <div class="route-row"><span>3</span><div><strong>Deterministic engines</strong><small>A* / optimizer bypass LLM when applicable</small></div><b>active</b></div>
+        <div id="knowledgeList" class="knowledge-list">
+          <div class="placeholder-row">No knowledge artifacts yet.</div>
         </div>
       </article>
 
-      <article class="card">
+      <article class="card truth-card">
         <div class="card-head">
           <div>
-            <span class="label">RUN STATE</span>
-            <h2>Active experiment</h2>
+            <span class="label">WHAT IS ACTUALLY LEARNING?</span>
+            <h2>Capability truth table</h2>
           </div>
         </div>
-        <pre id="runSummary" class="summary">No active run yet.</pre>
+        <div class="truth-list">
+          <div class="truth-row">
+            <span>Offline A* hyperparameter learner</span>
+            <b id="truthOffline" class="good">trained</b>
+          </div>
+          <div class="truth-row">
+            <span>Online Factorio placement learner</span>
+            <b id="truthOnline" class="warn">starting</b>
+          </div>
+          <div class="truth-row">
+            <span>LLM knowledge synthesis</span>
+            <b id="truthKnowledge" class="warn">starting</b>
+          </div>
+          <div class="truth-row">
+            <span>Neural CNN/RNN policy weights</span>
+            <b id="truthNeural" class="muted">not trained</b>
+          </div>
+          <div class="truth-row">
+            <span>Residual neural world model</span>
+            <b id="truthWorldModel" class="muted">not trained</b>
+          </div>
+        </div>
       </article>
     </section>
+
+    <details class="card advanced-panel">
+      <summary>
+        <span>
+          <span class="label">ADVANCED CONTROLS</span>
+          Runtime parameters, router and raw run state
+        </span>
+        <span class="mono">expand</span>
+      </summary>
+      <div class="advanced-grid">
+        <section>
+          <h3>Runtime parameters</h3>
+          <form id="configForm" class="config-form">
+            <label>Poll interval (s)<input name="poll_interval_s" type="number" min=".25" max="30" step=".25"></label>
+            <label>A* turn penalty<input name="astar_turn_penalty" type="number" min="0" max="20" step=".05"></label>
+            <label>UCB exploration<input name="ucb_exploration" type="number" min="0" max="20" step=".1"></label>
+            <label>LLM provider<input name="llm_provider" type="text"></label>
+            <label>Temperature<input name="llm_temperature" type="number" min="0" max="2" step=".05"></label>
+            <label>Max tokens<input name="llm_max_tokens" type="number" min="32" max="32768" step="32"></label>
+            <label>Learning algorithm<input name="learning_algorithm" type="text"></label>
+            <label>Neural policy<input name="neural_policy" type="text"></label>
+            <label>World model<input name="world_model" type="text"></label>
+            <button type="submit">Save runtime parameters</button>
+            <span id="configSaved" class="save-state"></span>
+          </form>
+        </section>
+
+        <section>
+          <h3>Inference policy</h3>
+          <div class="router">
+            <div class="route-row"><span>1</span><div><strong>Qwen3-4B Q4_K_M</strong><small>local · llama.cpp · primary</small></div><b id="routeLocal">checking</b></div>
+            <div class="route-row"><span>2</span><div><strong>openrouter/free</strong><small>external free-only fallback · opt-in</small></div><b>disabled</b></div>
+            <div class="route-row"><span>3</span><div><strong>Deterministic engines</strong><small>A* / optimizer bypass LLM when applicable</small></div><b class="good">active</b></div>
+          </div>
+        </section>
+
+        <section>
+          <h3>Raw active run</h3>
+          <pre id="runSummary" class="summary">No active run yet.</pre>
+        </section>
+      </div>
+    </details>
   </main>
 
-  <script src="/static/app.js?v=0.3.0"></script>
+  <script src="/static/app.js?v=0.4.0"></script>
 </body>
 </html>

@@ -1,12 +1,25 @@
 const $ = (id) => document.getElementById(id);
 
 const state = {
-  world: null,
+  status: {},
+  world: {},
   learning: { history: [], summary: {} },
-  routing: { rows: [] },
   history: [],
   run: {},
+  research: {},
+  knowledge: { count: 0, lessons: [] },
   socket: null,
+  frameTick: null,
+  frameLoadedAt: null,
+  frameLoading: false,
+  worldZoom: 1,
+  worldPanX: 0,
+  worldPanY: 0,
+  worldDragging: false,
+  worldDragStart: null,
+  production: { precision: "1m", series: {} },
+  productionPrecision: "1m",
+  productionLoading: false,
 };
 
 function setText(id, value) {
@@ -14,12 +27,11 @@ function setText(id, value) {
   if (el) el.textContent = value;
 }
 
-function setHealth(id, ok, up = "online", down = "offline") {
+function setClassText(id, value, className) {
   const el = $(id);
   if (!el) return;
-  el.textContent = ok ? up : down;
-  el.classList.toggle("good", !!ok);
-  el.classList.toggle("bad", !ok);
+  el.textContent = value;
+  el.className = className;
 }
 
 function formatNumber(value, digits = 1) {
@@ -27,38 +39,38 @@ function formatNumber(value, digits = 1) {
   return Number(value).toLocaleString(undefined, { maximumFractionDigits: digits });
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
 function getPosition(entity) {
-  if (!entity || typeof entity !== "object") return null;
-  const p = entity.position || entity.pos || entity.location;
-  if (p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y))) {
-    return { x: Number(p.x), y: Number(p.y) };
-  }
-  if (Number.isFinite(Number(entity.x)) && Number.isFinite(Number(entity.y))) {
-    return { x: Number(entity.x), y: Number(entity.y) };
-  }
-  return null;
+  const p = entity && entity.position;
+  if (!p) return null;
+  const x = Number(p.x);
+  const y = Number(p.y);
+  return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
 }
 
 function getName(entity) {
-  if (!entity || typeof entity !== "object") return "entity";
-  if (typeof entity.name === "string") return entity.name;
-  if (typeof entity.prototype === "string") return entity.prototype;
-  if (entity.prototype && typeof entity.prototype.name === "string") return entity.prototype.name;
-  if (typeof entity.type === "string") return entity.type;
-  return "entity";
+  return entity && typeof entity.name === "string" ? entity.name : "entity";
 }
 
 function categoryFor(name) {
-  const n = name.toLowerCase();
-  if (n.includes("belt") || n.includes("splitter") || n.includes("inserter") || n.includes("pipe")) return "belt";
+  const n = String(name).toLowerCase();
+  if (n.includes("belt") || n.includes("splitter") || n.includes("inserter") || n.includes("pipe")) return "logistics";
   if (n.includes("pole") || n.includes("solar") || n.includes("accumulator") || n.includes("boiler") || n.includes("steam")) return "power";
   if (n.includes("furnace") || n.includes("assembling") || n.includes("drill") || n.includes("lab") || n.includes("refinery") || n.includes("plant")) return "machine";
   return "other";
 }
 
-function colorFor(category) {
+function categoryColor(category) {
   return {
-    belt: "#f0a33a",
+    logistics: "#f0a33a",
     machine: "#6ab5f7",
     power: "#64d98b",
     other: "#b993f6",
@@ -79,336 +91,858 @@ function prepareCanvas(canvas) {
   return { ctx, width: rect.width, height: rect.height };
 }
 
-function drawWorld() {
-  const canvas = $("worldCanvas");
-  const { ctx, width, height } = prepareCanvas(canvas);
-  ctx.clearRect(0, 0, width, height);
+function updateEntityMix() {
+  const entities = Array.isArray(state.world && state.world.entities) ? state.world.entities : [];
+  const counts = {};
+  const positions = [];
 
-  const entities = Array.isArray(state.world?.entities) ? state.world.entities : [];
-  const positioned = entities
-    .map((entity) => ({ entity, position: getPosition(entity), name: getName(entity) }))
-    .filter((item) => item.position);
+  for (const entity of entities) {
+    const name = getName(entity);
+    counts[name] = (counts[name] || 0) + 1;
+    const p = getPosition(entity);
+    if (p) positions.push(p);
+  }
 
-  $("worldEmpty").style.display = positioned.length ? "none" : "grid";
+  const types = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  $("entityTypes").innerHTML = types
+    .map(([name, count]) => "<span>" + escapeHtml(name) + " × " + count + "</span>")
+    .join("");
 
-  if (!positioned.length) {
+  if (!positions.length) {
     setText("boundsText", "bounds --");
-    $("entityTypes").innerHTML = "";
     return;
   }
-
-  const xs = positioned.map((item) => item.position.x);
-  const ys = positioned.map((item) => item.position.y);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
-  const spanX = Math.max(maxX - minX, 8);
-  const spanY = Math.max(maxY - minY, 8);
-  const padding = 34;
-  const scale = Math.min((width - padding * 2) / spanX, (height - padding * 2) / spanY);
-
-  const project = (p) => ({
-    x: padding + (p.x - minX) * scale + (width - padding * 2 - spanX * scale) / 2,
-    y: height - padding - (p.y - minY) * scale - (height - padding * 2 - spanY * scale) / 2,
-  });
-
-  ctx.lineWidth = 1;
-  ctx.strokeStyle = "rgba(255,255,255,.04)";
-  const gridStep = Math.max(1, Math.ceil(24 / Math.max(scale, 1)));
-  for (let gx = Math.floor(minX / gridStep) * gridStep; gx <= maxX; gx += gridStep) {
-    const a = project({ x: gx, y: minY });
-    const b = project({ x: gx, y: maxY });
-    ctx.beginPath();
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(b.x, b.y);
-    ctx.stroke();
-  }
-  for (let gy = Math.floor(minY / gridStep) * gridStep; gy <= maxY; gy += gridStep) {
-    const a = project({ x: minX, y: gy });
-    const b = project({ x: maxX, y: gy });
-    ctx.beginPath();
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(b.x, b.y);
-    ctx.stroke();
-  }
-
-  const counts = {};
-  positioned.forEach(({ position, name }) => {
-    const category = categoryFor(name);
-    counts[name] = (counts[name] || 0) + 1;
-    const p = project(position);
-    const size = category === "machine"
-      ? Math.max(5, Math.min(11, scale * 1.5))
-      : Math.max(3, Math.min(7, scale * .75));
-    ctx.fillStyle = colorFor(category);
-    ctx.globalAlpha = category === "belt" ? .82 : .94;
-    if (category === "power") {
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, size * .55, 0, Math.PI * 2);
-      ctx.fill();
-    } else {
-      ctx.fillRect(p.x - size / 2, p.y - size / 2, size, size);
-    }
-  });
-  ctx.globalAlpha = 1;
-
+  const xs = positions.map((p) => p.x);
+  const ys = positions.map((p) => p.y);
   setText(
     "boundsText",
-    "x " + formatNumber(minX) + "…" + formatNumber(maxX)
-      + " · y " + formatNumber(minY) + "…" + formatNumber(maxY)
+    "x " + formatNumber(Math.min(...xs)) + "…" + formatNumber(Math.max(...xs))
+      + " · y " + formatNumber(Math.min(...ys)) + "…" + formatNumber(Math.max(...ys))
   );
-  const topTypes = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 6);
-  $("entityTypes").innerHTML = topTypes
-    .map(([name, count]) => "<span>" + name + " × " + count + "</span>")
-    .join("");
 }
 
-function drawAxes(ctx, width, height, padding) {
-  ctx.strokeStyle = "rgba(255,255,255,.10)";
+function renderOfficialAssets() {
+  const overlay = $("worldAssetOverlay");
+  if (!overlay) return;
+  overlay.innerHTML = "";
+
+  const official = state.status && state.status.render
+    && state.status.render.official_assets;
+  if (!official || !official.ready) return;
+
+  const entities = Array.isArray(state.world && state.world.entities)
+    ? state.world.entities
+    : [];
+  if (!entities.length) return;
+
+  const character = entities.find((entity) => getName(entity) === "character");
+  const characterPosition = getPosition(character);
+  const allPositions = entities.map(getPosition).filter(Boolean);
+  if (!allPositions.length) return;
+
+  const center = characterPosition || {
+    x: allPositions.reduce((sum, p) => sum + p.x, 0) / allPositions.length,
+    y: allPositions.reduce((sum, p) => sum + p.y, 0) / allPositions.length,
+  };
+
+  const stage = $("worldStage");
+  const rect = stage.getBoundingClientRect();
+  const square = Math.min(rect.width, rect.height);
+  const offsetX = (rect.width - square) / 2;
+  const offsetY = (rect.height - square) / 2;
+  const radius = 22;
+  const span = radius * 2;
+
+  for (const entity of entities) {
+    const position = getPosition(entity);
+    const name = getName(entity);
+    if (!position || name === "character") continue;
+
+    const dx = position.x - center.x;
+    const dy = position.y - center.y;
+    if (Math.abs(dx) > radius || Math.abs(dy) > radius) continue;
+
+    const img = document.createElement("img");
+    img.className = "world-asset";
+    img.alt = "";
+    img.title = name;
+    img.src = "/api/assets/icon/" + encodeURIComponent(name) + ".png";
+    img.style.left = (offsetX + ((dx + radius) / span) * square) + "px";
+    img.style.top = (offsetY + ((dy + radius) / span) * square) + "px";
+    img.onerror = () => img.remove();
+    overlay.appendChild(img);
+  }
+}
+
+function drawStructuredFallback() {
+  const canvas = $("worldFallback");
+  const prepared = prepareCanvas(canvas);
+  const ctx = prepared.ctx;
+  const width = prepared.width;
+  const height = prepared.height;
+  ctx.clearRect(0, 0, width, height);
+
+  const raw = (state.world && state.world.entities) || [];
+  const entities = raw
+    .map((entity) => ({ entity, p: getPosition(entity), name: getName(entity) }))
+    .filter((item) => item.p);
+
+  if (!entities.length) return;
+
+  const xs = entities.map((e) => e.p.x);
+  const ys = entities.map((e) => e.p.y);
+  const minX = Math.min(...xs) - 5;
+  const maxX = Math.max(...xs) + 5;
+  const minY = Math.min(...ys) - 5;
+  const maxY = Math.max(...ys) + 5;
+  const spanX = Math.max(maxX - minX, 12);
+  const spanY = Math.max(maxY - minY, 12);
+  const pad = 34;
+  const scale = Math.min((width - pad * 2) / spanX, (height - pad * 2) / spanY);
+  const project = (p) => ({
+    x: pad + (p.x - minX) * scale + (width - pad * 2 - spanX * scale) / 2,
+    y: pad + (p.y - minY) * scale + (height - pad * 2 - spanY * scale) / 2,
+  });
+
+  ctx.strokeStyle = "rgba(255,255,255,.045)";
+  ctx.lineWidth = 1;
+  for (let x = Math.ceil(minX); x <= Math.floor(maxX); x += 1) {
+    const a = project({ x, y: minY });
+    const b = project({ x, y: maxY });
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+  }
+  for (let y = Math.ceil(minY); y <= Math.floor(maxY); y += 1) {
+    const a = project({ x: minX, y });
+    const b = project({ x: maxX, y });
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+  }
+
+  for (const item of entities) {
+    const p = project(item.p);
+    const category = categoryFor(item.name);
+    const size = category === "machine" ? Math.max(8, Math.min(18, scale * 1.5)) : Math.max(5, Math.min(11, scale));
+    ctx.fillStyle = categoryColor(category);
+    ctx.globalAlpha = .9;
+    ctx.fillRect(p.x - size / 2, p.y - size / 2, size, size);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "#d3d8dc";
+    ctx.font = "9px ui-monospace, monospace";
+    ctx.fillText(item.name, p.x + size / 2 + 4, p.y + 3);
+  }
+}
+
+function refreshWorldFrame(force = false) {
+  const render = (state.status && state.status.render) || {};
+  const tick = state.world && state.world.tick;
+  const key = String(tick ?? "none") + ":" + String((state.world && state.world.entity_count) || 0)
+    + ":" + String(render.sprite_count || 0);
+  if (!force && state.frameTick === key) return;
+  if (state.frameLoading) return;
+
+  state.frameLoading = true;
+  const probe = new Image();
+  probe.onload = () => {
+    $("worldFrame").src = probe.src;
+    $("worldFrame").style.display = "block";
+    $("worldFallback").style.display = "none";
+    $("worldEmpty").style.display = "none";
+    state.frameTick = key;
+    state.frameLoadedAt = Date.now();
+    state.frameLoading = false;
+    setClassText("renderBadge", "official asset map", "badge live");
+    const official = render.official_assets || {};
+    setText(
+      "frameSource",
+      official.ready
+        ? "Factorio 2.0.73 assets · terrain + " + formatNumber(official.icon_count || 0, 0) + " icons"
+        : "structured map · local assets pending"
+    );
+    const rendererName = render.renderer || "";
+    if (rendererName === "official-asset-world-map") {
+      $("worldAssetOverlay").innerHTML = "";
+    } else {
+      renderOfficialAssets();
+    }
+  };
+  probe.onerror = () => {
+    $("worldFrame").style.display = "none";
+    $("worldFallback").style.display = "block";
+    drawStructuredFallback();
+    renderOfficialAssets();
+    $("worldEmpty").style.display = ((state.world && state.world.entity_count) || 0) ? "none" : "grid";
+    state.frameTick = key;
+    state.frameLoading = false;
+    setClassText("renderBadge", render.ready ? "render degraded" : "sprites loading", "badge warn");
+  };
+  probe.src = "/api/world/frame.png?t=" + encodeURIComponent(key) + "&ts=" + Date.now();
+}
+
+function applyWorldView() {
+  const viewport = $("worldViewport");
+  if (!viewport) return;
+  viewport.style.transform =
+    "translate(" + state.worldPanX + "px, " + state.worldPanY + "px) scale(" + state.worldZoom + ")";
+  setText("zoomReset", state.worldZoom.toFixed(state.worldZoom < 2 ? 1 : 0) + "×");
+}
+
+function setWorldZoom(nextZoom, anchorX = null, anchorY = null) {
+  const stage = $("worldStage");
+  const rect = stage.getBoundingClientRect();
+  const oldZoom = state.worldZoom;
+  const next = Math.max(0.75, Math.min(5, nextZoom));
+  if (anchorX !== null && anchorY !== null && oldZoom > 0) {
+    const localX = anchorX - rect.left - rect.width / 2;
+    const localY = anchorY - rect.top - rect.height / 2;
+    const factor = next / oldZoom;
+    state.worldPanX = localX - (localX - state.worldPanX) * factor;
+    state.worldPanY = localY - (localY - state.worldPanY) * factor;
+  }
+  state.worldZoom = next;
+  applyWorldView();
+}
+
+function resetWorldView() {
+  state.worldZoom = 1;
+  state.worldPanX = 0;
+  state.worldPanY = 0;
+  applyWorldView();
+}
+
+function installWorldControls() {
+  const stage = $("worldStage");
+  const viewport = $("worldViewport");
+  if (!stage || !viewport) return;
+
+  $("zoomIn").addEventListener("click", () => setWorldZoom(state.worldZoom * 1.25));
+  $("zoomOut").addEventListener("click", () => setWorldZoom(state.worldZoom / 1.25));
+  $("zoomReset").addEventListener("click", resetWorldView);
+
+  stage.addEventListener("wheel", (event) => {
+    event.preventDefault();
+    const factor = event.deltaY < 0 ? 1.14 : 1 / 1.14;
+    setWorldZoom(state.worldZoom * factor, event.clientX, event.clientY);
+  }, { passive: false });
+
+  viewport.addEventListener("pointerdown", (event) => {
+    state.worldDragging = true;
+    state.worldDragStart = {
+      x: event.clientX,
+      y: event.clientY,
+      panX: state.worldPanX,
+      panY: state.worldPanY,
+    };
+    viewport.classList.add("dragging");
+    viewport.setPointerCapture(event.pointerId);
+  });
+
+  viewport.addEventListener("pointermove", (event) => {
+    if (!state.worldDragging || !state.worldDragStart) return;
+    state.worldPanX = state.worldDragStart.panX + event.clientX - state.worldDragStart.x;
+    state.worldPanY = state.worldDragStart.panY + event.clientY - state.worldDragStart.y;
+    applyWorldView();
+  });
+
+  const stopDrag = () => {
+    state.worldDragging = false;
+    state.worldDragStart = null;
+    viewport.classList.remove("dragging");
+  };
+  viewport.addEventListener("pointerup", stopDrag);
+  viewport.addEventListener("pointercancel", stopDrag);
+  viewport.addEventListener("dblclick", resetWorldView);
+  applyWorldView();
+}
+
+function updateFrameAge() {
+  if (!state.frameLoadedAt) {
+    setText("frameAge", "frame --");
+    return;
+  }
+  const age = Math.max(0, (Date.now() - state.frameLoadedAt) / 1000);
+  setText("frameAge", "frame " + age.toFixed(age < 10 ? 1 : 0) + "s ago");
+}
+
+const oreSeriesColors = {
+  "iron-ore": "#6ab5f7",
+  "copper-ore": "#d67a4e",
+  coal: "#8c949b",
+  stone: "#c6b28a",
+  "uranium-ore": "#72c957",
+};
+
+function compactFactorioNumber(value) {
+  const n = Number(value || 0);
+  const abs = Math.abs(n);
+  if (abs >= 1000000) return (n / 1000000).toFixed(abs >= 10000000 ? 0 : 1) + "M";
+  if (abs >= 1000) return (n / 1000).toFixed(abs >= 10000 ? 0 : 1) + "k";
+  if (abs >= 100) return n.toFixed(0);
+  if (abs >= 10) return n.toFixed(1).replace(/\.0$/, "");
+  return n.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function productionDurationLabel(seconds) {
+  const s = Number(seconds || 0);
+  if (s < 60) return s + " seconds";
+  if (s < 3600) return (s / 60) + " minute" + (s === 60 ? "" : "s");
+  return (s / 3600) + " hour" + (s === 3600 ? "" : "s");
+}
+
+function drawNativeProductionChart(canvasId, mode) {
+  const canvas = $(canvasId);
+  const prepared = prepareCanvas(canvas);
+  const ctx = prepared.ctx;
+  const width = prepared.width;
+  const height = prepared.height;
+  ctx.clearRect(0, 0, width, height);
+
+  const series = (state.production && state.production.series) || {};
+  const field = mode === "produced" ? "produced" : "consumed";
+  const entries = Object.entries(series)
+    .map(([name, value]) => [name, Array.isArray(value[field]) ? value[field].map(Number) : []])
+    .filter(([, samples]) => samples.length);
+
+  const padLeft = 44;
+  const padRight = 12;
+  const padTop = 12;
+  const padBottom = 25;
+  const graphWidth = Math.max(1, width - padLeft - padRight);
+  const graphHeight = Math.max(1, height - padTop - padBottom);
+  const maxY = Math.max(1, ...entries.flatMap(([, samples]) => samples));
+
+  ctx.strokeStyle = "rgba(255,255,255,.07)";
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i += 1) {
+    const y = padTop + (graphHeight * i) / 4;
+    ctx.beginPath();
+    ctx.moveTo(padLeft, y);
+    ctx.lineTo(width - padRight, y);
+    ctx.stroke();
+  }
+  for (let i = 0; i <= 6; i += 1) {
+    const x = padLeft + (graphWidth * i) / 6;
+    ctx.beginPath();
+    ctx.moveTo(x, padTop);
+    ctx.lineTo(x, height - padBottom);
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = "#707a82";
+  ctx.font = "9px ui-monospace, monospace";
+  ctx.textAlign = "right";
+  ctx.fillText(compactFactorioNumber(maxY), padLeft - 5, padTop + 4);
+  ctx.fillText(compactFactorioNumber(maxY / 2), padLeft - 5, padTop + graphHeight / 2 + 3);
+  ctx.fillText("0", padLeft - 5, height - padBottom + 3);
+
+  for (const [name, samples] of entries) {
+    if (!samples.some((value) => value > 0)) continue;
+    ctx.strokeStyle = oreSeriesColors[name] || "#b993f6";
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    for (let i = 0; i < samples.length; i += 1) {
+      const x = padLeft + (i / Math.max(samples.length - 1, 1)) * graphWidth;
+      const y = padTop + graphHeight - (Math.max(0, samples[i]) / maxY) * graphHeight;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  const duration = Number((state.production && state.production.duration_seconds) || 0);
+  ctx.fillStyle = "#707a82";
+  ctx.font = "9px ui-monospace, monospace";
+  ctx.textAlign = "left";
+  ctx.fillText("-" + productionDurationLabel(duration), padLeft, height - 8);
+  ctx.textAlign = "right";
+  ctx.fillText("now", width - padRight, height - 8);
+}
+
+function renderNativeProductionBars(containerId, mode) {
+  const container = $(containerId);
+  const series = (state.production && state.production.series) || {};
+  const rateField = mode === "produced" ? "produced_rate" : "consumed_rate";
+  const countField = mode === "produced" ? "produced_count" : "consumed_count";
+  const entries = Object.entries(series)
+    .map(([name, value]) => ({
+      name,
+      rate: Math.max(0, Number(value[rateField] || 0)),
+      count: Math.max(0, Number(value[countField] || 0)),
+    }))
+    .sort((a, b) => b.rate - a.rate);
+  const maxRate = Math.max(0, ...entries.map((item) => item.rate));
+  setText(mode === "produced" ? "producedPeak" : "consumedPeak",
+    "peak " + compactFactorioNumber(maxRate) + "/min");
+
+  container.innerHTML = entries.map((item) => {
+    const color = oreSeriesColors[item.name] || "#b993f6";
+    const width = maxRate > 0 ? Math.max(0, Math.min(100, (item.rate / maxRate) * 100)) : 0;
+    return '<div class="factorio-stat-row" title="' + escapeHtml(item.name) + '">'
+      + '<div class="factorio-item">'
+      + '<img src="/api/assets/icon/' + encodeURIComponent(item.name) + '.png" alt="">'
+      + '<div class="factorio-item-meta"><strong>' + escapeHtml(item.name)
+      + '</strong><small>' + compactFactorioNumber(item.count) + ' in window</small></div>'
+      + '</div>'
+      + '<div class="factorio-bar-track"><div class="factorio-bar-fill" style="width:'
+      + width.toFixed(2) + '%;background:' + color + ';color:' + color + '"></div></div>'
+      + '<div class="factorio-rate">' + compactFactorioNumber(item.rate) + '/min</div>'
+      + '</div>';
+  }).join("");
+}
+
+function renderProductionStatistics() {
+  drawNativeProductionChart("producedCanvas", "produced");
+  drawNativeProductionChart("consumedCanvas", "consumed");
+  renderNativeProductionBars("producedBars", "produced");
+  renderNativeProductionBars("consumedBars", "consumed");
+
+  const duration = Number((state.production && state.production.duration_seconds) || 0);
+  const samples = Number((state.production && state.production.sample_count) || 0);
+  const period = Number((state.production && state.production.sample_period_seconds) || 0);
+  setText(
+    "productionWindow",
+    productionDurationLabel(duration) + " · " + samples + " native samples · "
+      + compactFactorioNumber(period) + " s/sample"
+  );
+
+  for (const button of document.querySelectorAll("[data-production-precision]")) {
+    button.classList.toggle(
+      "active",
+      button.dataset.productionPrecision === state.productionPrecision
+    );
+  }
+}
+
+async function loadProduction(precision = state.productionPrecision) {
+  if (state.productionLoading) return;
+  state.productionLoading = true;
+  try {
+    const response = await fetch(
+      "/api/production?precision=" + encodeURIComponent(precision),
+      { cache: "no-store" }
+    );
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.detail || ("HTTP " + response.status));
+    state.production = payload;
+    state.productionPrecision = precision;
+    renderProductionStatistics();
+    setText(
+      "productionSource",
+      payload.connected
+        ? "native LuaFlowStatistics · items/min · live Factorio data"
+        : "production statistics unavailable"
+    );
+  } catch (error) {
+    console.error("production statistics failed", error);
+    setText("productionSource", "production statistics unavailable");
+  } finally {
+    state.productionLoading = false;
+  }
+}
+
+function installProductionControls() {
+  for (const button of document.querySelectorAll("[data-production-precision]")) {
+    button.addEventListener("click", () => {
+      const precision = button.dataset.productionPrecision;
+      if (!precision || precision === state.productionPrecision) return;
+      state.productionPrecision = precision;
+      loadProduction(precision);
+    });
+  }
+}
+
+function drawAxes(ctx, width, height, pad) {
+  ctx.strokeStyle = "rgba(255,255,255,.09)";
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(padding, padding / 2);
-  ctx.lineTo(padding, height - padding);
-  ctx.lineTo(width - padding / 2, height - padding);
+  ctx.moveTo(pad, 14);
+  ctx.lineTo(pad, height - pad);
+  ctx.lineTo(width - 12, height - pad);
   ctx.stroke();
 }
 
-function drawLineChart(canvasId, rows, xAccessor, series) {
+function drawLineChart(canvasId, rows, xAccessor, series, emptyMessage) {
   const canvas = $(canvasId);
-  const { ctx, width, height } = prepareCanvas(canvas);
+  const prepared = prepareCanvas(canvas);
+  const ctx = prepared.ctx;
+  const width = prepared.width;
+  const height = prepared.height;
   ctx.clearRect(0, 0, width, height);
-  const padding = 34;
-  drawAxes(ctx, width, height, padding);
-  if (!rows.length) return;
+  const pad = 34;
+  drawAxes(ctx, width, height, pad);
 
-  const xs = rows.map(xAccessor).filter(Number.isFinite);
+  if (!Array.isArray(rows) || !rows.length) {
+    ctx.fillStyle = "#737d85";
+    ctx.font = "10px ui-monospace, monospace";
+    ctx.fillText(emptyMessage || "waiting for samples", pad + 10, height / 2);
+    return;
+  }
+
+  const xs = rows.map(xAccessor).map(Number).filter(Number.isFinite);
   if (!xs.length) return;
   const minX = Math.min(...xs);
   const maxX = Math.max(...xs);
   const spanX = Math.max(maxX - minX, 1);
 
   series.forEach((item) => {
-    const values = rows.map(item.value).filter(Number.isFinite);
-    if (!values.length) return;
-    const minY = item.zero ? 0 : Math.min(...values);
-    const maxY = Math.max(...values);
+    const pairs = rows
+      .map((row) => [Number(xAccessor(row)), Number(item.value(row))])
+      .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
+    if (!pairs.length) return;
+    const ys = pairs.map((pair) => pair[1]);
+    const minY = item.zero ? 0 : Math.min(...ys);
+    const maxY = Math.max(...ys);
     const spanY = Math.max(maxY - minY, 1e-9);
 
     ctx.strokeStyle = item.color;
     ctx.lineWidth = item.width || 1.6;
     ctx.beginPath();
     let started = false;
-    rows.forEach((row) => {
-      const xValue = xAccessor(row);
-      const yValue = item.value(row);
-      if (!Number.isFinite(xValue) || !Number.isFinite(yValue)) return;
-      const x = padding + ((xValue - minX) / spanX) * (width - padding * 1.5);
-      const y = height - padding
-        - ((yValue - minY) / spanY) * (height - padding * 1.6);
+    for (const pair of pairs) {
+      const xv = pair[0];
+      const yv = pair[1];
+      const x = pad + ((xv - minX) / spanX) * (width - pad - 16);
+      const y = height - pad - ((yv - minY) / spanY) * (height - pad - 24);
       if (!started) {
         ctx.moveTo(x, y);
         started = true;
       } else {
         ctx.lineTo(x, y);
       }
-    });
+    }
     ctx.stroke();
   });
 
-  ctx.fillStyle = "#7f8a93";
-  ctx.font = "10px ui-monospace, monospace";
-  ctx.fillText(formatNumber(minX, 0), padding, height - 10);
-  ctx.fillText(formatNumber(maxX, 0), width - 52, height - 10);
+  ctx.fillStyle = "#737d85";
+  ctx.font = "9px ui-monospace, monospace";
+  ctx.fillText(formatNumber(minX, 0), pad, height - 10);
+  ctx.fillText(formatNumber(maxX, 0), width - 48, height - 10);
 }
 
-function drawLearning() {
-  const rows = state.learning?.history || [];
-  const enriched = rows.map((row, index) => {
-    const from = Math.max(0, index - 19);
-    const windowRows = rows.slice(from, index + 1);
-    const rolling = windowRows.reduce(
-      (sum, r) => sum + Number(r.reward || 0),
-      0
-    ) / windowRows.length;
-    return { ...row, rolling };
+function drawOfflineLearning() {
+  const rows = (state.learning && state.learning.history) || [];
+  const enriched = rows.map((row, i) => {
+    const start = Math.max(0, i - 19);
+    const windowRows = rows.slice(start, i + 1);
+    const rolling = windowRows.reduce((sum, r) => sum + Number(r.reward || 0), 0) / windowRows.length;
+    return Object.assign({}, row, { rolling });
   });
-  drawLineChart("learningCanvas", enriched, (r) => Number(r.episode), [
-    { value: (r) => Number(r.reward), color: "rgba(106,181,247,.35)", width: 1 },
-    { value: (r) => Number(r.rolling), color: "#f0a33a", width: 2.2 },
-  ]);
+  drawLineChart("learningCanvas", enriched, (r) => r.episode, [
+    { value: (r) => r.reward, color: "rgba(106,181,247,.34)", width: 1 },
+    { value: (r) => r.rolling, color: "#f0a33a", width: 2.1 },
+  ], "offline UCB1 artifact not found");
 }
 
-function drawSweep() {
-  const canvas = $("sweepCanvas");
-  const { ctx, width, height } = prepareCanvas(canvas);
-  ctx.clearRect(0, 0, width, height);
-  const rows = state.routing?.rows || [];
-  const padding = 38;
-  drawAxes(ctx, width, height, padding);
-  if (!rows.length) return;
-
-  const xs = rows.map((r) => Number(r.turn_penalty));
-  const ys = rows.map((r) => Number(r.mean_expanded_nodes));
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
-  const spanX = Math.max(maxX - minX, 1);
-  const spanY = Math.max(maxY - minY, 1);
-
-  rows.forEach((row) => {
-    const x = padding
-      + ((Number(row.turn_penalty) - minX) / spanX) * (width - padding * 1.6);
-    const y = height - padding
-      - ((Number(row.mean_expanded_nodes) - minY) / spanY)
-        * (height - padding * 1.7);
-    const turns = Number(row.mean_turns);
-    const radius = 4 + Math.max(0, Math.min(5, turns - 4));
-    ctx.fillStyle = "#6ab5f7";
-    ctx.beginPath();
-    ctx.arc(x, y, radius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#9aa4ac";
-    ctx.font = "9px ui-monospace, monospace";
-    ctx.fillText("β=" + row.turn_penalty, x + 7, y - 7);
-    ctx.fillText(formatNumber(turns, 2) + " turns", x + 7, y + 5);
-  });
+function drawOnlineLearning() {
+  const online = (state.research && state.research.online_learning) || {};
+  const rows = online.history || [];
+  drawLineChart("onlineLearningCanvas", rows, (r) => r.episode ?? r.trial ?? r.index, [
+    { value: (r) => r.reward, color: "#64d98b", width: 2.1 },
+    { value: (r) => r.output ?? r.iron_output, color: "rgba(106,181,247,.6)", width: 1.35 },
+  ], "waiting for real Factorio trials");
+  setText(
+    "onlineLearningSource",
+    online.algorithm ? online.algorithm + " · " + rows.length + " trials" : "no online learner"
+  );
 }
 
 function drawHistory() {
-  const rows = state.history || [];
-  drawLineChart("historyCanvas", rows, (r) => Number(r.timestamp), [
-    { value: (r) => Number(r.entity_count), color: "#64d98b", width: 2, zero: true },
-    {
-      value: (r) => Number(r.probe_latency_ms),
-      color: "rgba(240,163,58,.72)",
-      width: 1.4,
-      zero: true,
-    },
-  ]);
+  drawLineChart("historyCanvas", state.history || [], (r) => r.timestamp, [
+    { value: (r) => r.entity_count, color: "#64d98b", width: 2, zero: true },
+    { value: (r) => r.probe_latency_ms, color: "rgba(240,163,58,.72)", width: 1.25, zero: true },
+  ], "waiting for live telemetry");
+}
+
+function renderCurriculum() {
+  const list = $("curriculumList");
+  const curriculum = Array.isArray(state.research && state.research.curriculum)
+    ? state.research.curriculum
+    : [];
+  if (!curriculum.length) {
+    list.innerHTML = '<div class="placeholder-row">No curriculum state yet.</div>';
+    return;
+  }
+
+  list.innerHTML = curriculum.map((stage, index) => {
+    const status = String(stage.status || "pending");
+    const cls = status === "completed" || status === "success"
+      ? "done"
+      : status === "running" || status === "learning" || status === "validating"
+        ? "active"
+        : "";
+    const detail = stage.detail || stage.objective || "";
+    return '<div class="stage-row ' + cls + '">'
+      + '<span class="stage-index">' + (index + 1) + '</span>'
+      + '<div class="stage-copy"><strong>' + escapeHtml(stage.name || ("stage " + (index + 1)))
+      + '</strong><small>' + escapeHtml(detail) + '</small></div>'
+      + '<span class="stage-status">' + escapeHtml(status) + '</span>'
+      + '</div>';
+  }).join("");
+}
+
+function eventTime(event) {
+  return event.at || event.timestamp || event.time || "";
+}
+
+function renderTimeline() {
+  const events = [];
+  for (const event of ((state.research && state.research.events) || [])) {
+    events.push(Object.assign({}, event, { source: "research" }));
+  }
+  for (const event of ((state.run && state.run.events) || [])) {
+    events.push(Object.assign({}, event, { source: "run" }));
+  }
+  events.sort((a, b) => String(eventTime(a)).localeCompare(String(eventTime(b))));
+  const recent = events.slice(-40).reverse();
+  const timeline = $("timeline");
+
+  if (!recent.length) {
+    timeline.innerHTML = '<div class="placeholder-row">No execution events yet.</div>';
+    return;
+  }
+
+  timeline.innerHTML = recent.map((event) => {
+    const type = String(event.type || "event").toLowerCase();
+    const message = event.message || event.observation || event.lesson || type;
+    const when = eventTime(event);
+    return '<div class="timeline-row ' + escapeHtml(type) + '">'
+      + '<strong>' + escapeHtml(message) + '</strong>'
+      + '<small>' + escapeHtml(type) + (when ? " · " + escapeHtml(when) : "") + '</small>'
+      + '</div>';
+  }).join("");
+}
+
+function renderKnowledge() {
+  const lessons = Array.isArray(state.knowledge && state.knowledge.lessons)
+    ? state.knowledge.lessons
+    : [];
+  const count = Number((state.knowledge && state.knowledge.count) || lessons.length || 0);
+  setText("knowledgeCount", count + " lesson" + (count === 1 ? "" : "s"));
+
+  if (!lessons.length) {
+    setText("knowledgeLatest", "no learned lesson yet");
+    $("knowledgeList").innerHTML = '<div class="placeholder-row">No knowledge artifacts yet.</div>';
+    return;
+  }
+
+  const latest = lessons[lessons.length - 1];
+  setText("knowledgeLatest", latest.lesson || latest.observation || latest.stage || "latest lesson available");
+
+  $("knowledgeList").innerHTML = lessons.slice().reverse().map((lesson) => {
+    return '<article class="knowledge-item">'
+      + '<header><span>' + escapeHtml(lesson.stage || lesson.type || "lesson") + '</span>'
+      + '<span>' + escapeHtml(lesson.at || lesson.timestamp || "") + '</span></header>'
+      + '<strong>' + escapeHtml(lesson.lesson || lesson.observation || "Structured experiment result") + '</strong>'
+      + (lesson.next_hypothesis
+        ? '<p>Next hypothesis: ' + escapeHtml(lesson.next_hypothesis) + '</p>'
+        : "")
+      + '</article>';
+  }).join("");
+}
+
+function renderTruthTable() {
+  const offlineEpisodes = Number((state.learning && state.learning.summary && state.learning.summary.episodes) || 0);
+  const onlineHistory = (state.research && state.research.online_learning && state.research.online_learning.history) || [];
+  const knowledgeCount = Number((state.knowledge && state.knowledge.count) || 0);
+  const capabilities = (state.research && state.research.capabilities) || {};
+
+  setClassText(
+    "truthOffline",
+    offlineEpisodes > 0 ? offlineEpisodes + " episodes" : "not trained",
+    offlineEpisodes > 0 ? "good" : "muted"
+  );
+  setClassText(
+    "truthOnline",
+    onlineHistory.length ? onlineHistory.length + " trials" : "not started",
+    onlineHistory.length ? "good" : "warn"
+  );
+  setClassText(
+    "truthKnowledge",
+    knowledgeCount ? knowledgeCount + " lessons" : "not started",
+    knowledgeCount ? "good" : "warn"
+  );
+
+  const neuralStatus = capabilities.neural_policy && capabilities.neural_policy.status;
+  const worldModelStatus = capabilities.world_model && capabilities.world_model.status;
+  setClassText(
+    "truthNeural",
+    neuralStatus || "not trained",
+    neuralStatus === "trained" ? "good" : "muted"
+  );
+  setClassText(
+    "truthWorldModel",
+    worldModelStatus || "explicit only",
+    worldModelStatus === "trained" ? "good" : "muted"
+  );
+}
+
+function updateMission() {
+  const research = state.research || {};
+  const curriculum = Array.isArray(research.curriculum) ? research.curriculum : [];
+  const current = research.current_stage
+    || curriculum.find((stage) => ["running", "learning", "validating"].includes(stage.status))
+    || null;
+
+  setText("missionTitle", research.objective || (state.run && state.run.objective) || "Waiting for research loop…");
+  setText(
+    "missionDetail",
+    research.detail
+      || ((state.run && state.run.status) ? "Last validated run: " + state.run.status : "No active curriculum stage.")
+  );
+  setText("stageName", (current && current.name) || research.stage || "stage --");
+  setText("nextAction", research.next_action || "await curriculum runner");
+
+  let progress = Number(research.progress ?? 0);
+  if (!Number.isFinite(progress)) progress = 0;
+  if (progress <= 1) progress *= 100;
+  progress = Math.max(0, Math.min(100, progress));
+  $("stageProgressBar").style.width = progress + "%";
+  setText("stageProgressText", formatNumber(progress, 0) + "%");
+
+  const status = String(research.status || "idle");
+  const badgeClass = status === "running" || status === "learning"
+    ? "badge live"
+    : status === "completed"
+      ? "badge good"
+      : status === "error" || status === "failed"
+        ? "badge dead"
+        : "badge neutral";
+  setClassText("researchBadge", "research " + status, badgeClass);
+}
+
+function updateKpis() {
+  const world = state.world || {};
+  const status = state.status || {};
+  const factorio = status.factorio || {};
+  const llm = status.llm || {};
+  const render = status.render || {};
+  const production = world.production || {};
+  const outputs = production.output || {};
+  const inputs = production.input || {};
+  const online = (state.research && state.research.online_learning) || {};
+  const onlineRows = online.history || [];
+
+  setText("entityCount", formatNumber(world.entity_count || 0, 0));
+  setText("worldTick", "tick " + formatNumber(world.tick, 0));
+  setText("probeLatency", formatNumber(world.latency_ms, 1) + " ms");
+
+  const primaryOutput = Object.entries(outputs).sort((a, b) => Number(b[1]) - Number(a[1]))[0];
+  if (primaryOutput) {
+    setText("productionPrimary", formatNumber(primaryOutput[1], 0) + " " + primaryOutput[0]);
+    const primaryInput = Object.entries(inputs).sort((a, b) => Number(b[1]) - Number(a[1]))[0];
+    setText(
+      "productionSecondary",
+      primaryInput
+        ? formatNumber(primaryInput[1], 0) + " " + primaryInput[0] + " consumed"
+        : "measured game production"
+    );
+  } else {
+    setText("productionPrimary", "--");
+    setText("productionSecondary", "no measured flow");
+  }
+
+  const onlineStatus = online.status || (onlineRows.length ? "learning" : "idle");
+  setText("onlineLearner", online.algorithm ? online.algorithm + " · " + onlineStatus : onlineStatus);
+  setText(
+    "onlineLearnerDetail",
+    onlineRows.length
+      ? onlineRows.length + " real-world trials · best " + String(online.best_arm ?? "--")
+      : "no real-world trials yet"
+  );
+
+  setClassText(
+    "factorioStatus",
+    factorio.connected ? "Factorio online" : "Factorio offline",
+    factorio.connected ? "hud-chip good" : "hud-chip bad"
+  );
+  setClassText("llmStatus", llm.connected ? "Qwen ready" : "offline", llm.connected ? "good" : "bad");
+  setText("llmDetail", llm.connected && llm.models && llm.models.length ? llm.models.join(", ") : "llama.cpp :18081");
+  setClassText("routeLocal", llm.connected ? "ready" : "offline", llm.connected ? "good" : "bad");
+  setText("commitBadge", (status.branch || "--") + " · " + (status.git_sha || "--"));
+
+  if (render.ready) {
+    setClassText("renderBadge", formatNumber(render.sprite_count, 0) + " sprites", "badge live");
+  } else {
+    setClassText("renderBadge", "sprites loading", "badge warn");
+  }
+
+  const runStatus = String((state.run && state.run.status) || "--");
+  setClassText(
+    "runStatus",
+    runStatus,
+    runStatus === "success" ? "badge good"
+      : ["running", "starting"].includes(runStatus) ? "badge live"
+      : runStatus === "--" ? "badge neutral" : "badge warn"
+  );
+  setText("runId", (state.run && state.run.run_id) || "no run");
+  setText(
+    "runSummary",
+    state.run && Object.keys(state.run).length ? JSON.stringify(state.run, null, 2) : "No active run yet."
+  );
 }
 
 function applyPayload(payload) {
-  state.world = payload.world || state.world;
-  state.learning = payload.learning || state.learning;
-  state.history = payload.history || state.history;
-  state.run = payload.run || state.run;
+  if (payload.status) state.status = payload.status;
+  if (payload.world) state.world = payload.world;
+  if (payload.learning) state.learning = payload.learning;
+  if (payload.history) state.history = payload.history;
+  if (payload.run) state.run = payload.run;
+  if (payload.research) state.research = payload.research;
+  if (payload.knowledge) state.knowledge = payload.knowledge;
 
-  const status = payload.status || {};
-  const factorio = status.factorio || {};
-  const llm = status.llm || {};
-  const memory = status.memory || {};
-
-  setHealth("factorioStatus", factorio.connected, "online", "offline");
-  setText(
-    "factorioDetail",
-    factorio.connected
-      ? "RCON " + factorio.host + ":" + factorio.rcon_port
-      : "RCON unavailable"
-  );
-  setHealth("llmStatus", llm.connected, "ready", "offline");
-  setText(
-    "llmDetail",
-    llm.connected && llm.models?.length
-      ? llm.models.join(", ")
-      : "llama.cpp :18081"
-  );
-  setText("routeLocal", llm.connected ? "ready" : "offline");
-  $("routeLocal").className = llm.connected ? "good" : "bad";
-
-  setText("commitBadge", (status.branch || "--") + " · " + (status.git_sha || "--"));
-  setText("entityCount", formatNumber(state.world?.entity_count || 0, 0));
-  setText("worldTick", "tick " + formatNumber(state.world?.tick, 0));
-  setText("probeLatency", formatNumber(state.world?.latency_ms, 1) + " ms");
-  setText(
-    "memoryUsed",
-    memory.used_mib ? formatNumber(memory.used_mib / 1024, 1) + " GiB" : "--"
-  );
-  setText(
-    "memoryDetail",
-    memory.total_mib
-      ? formatNumber(memory.available_mib / 1024, 1) + " GiB available"
-      : "--"
-  );
-
-  const summary = state.learning?.summary || {};
-  if (summary.best_observed !== undefined) {
-    setText("learnerBest", "β " + summary.best_observed);
-    setText("learnerEpisodes", (summary.episodes || 0) + " learning episodes");
-  }
-
-  const run = state.run || {};
-  if (run.status) {
-    setText("runStatus", run.status);
-    setText("runId", run.run_id || "unnamed run");
-    const runStatus = $("runStatus");
-    runStatus.className =
-      run.status === "success" ? "good"
-      : run.status === "running" || run.status === "starting" ? "warn"
-      : "bad";
-    setText("runSummary", JSON.stringify(run, null, 2));
-  }
-
-  drawWorld();
-  drawLearning();
+  updateKpis();
+  updateMission();
+  updateEntityMix();
+  renderOfficialAssets();
+  renderCurriculum();
+  renderTimeline();
+  renderKnowledge();
+  renderTruthTable();
+  drawOfflineLearning();
+  drawOnlineLearning();
   drawHistory();
-}
-
-async function loadRouting() {
-  try {
-    const response = await fetch("/api/experiments/routing");
-    state.routing = await response.json();
-    setText("sweepSource", state.routing.source || "no sweep");
-    drawSweep();
-  } catch (_) {}
+  refreshWorldFrame();
 }
 
 async function loadConfig() {
   const response = await fetch("/api/config");
   const config = await response.json();
   const form = $("configForm");
-  Object.entries(config).forEach(([key, value]) => {
+  for (const [key, value] of Object.entries(config)) {
     if (form.elements[key]) form.elements[key].value = value;
-  });
+  }
 }
 
 async function loadInitialState() {
-  const [
-    statusResponse,
-    worldResponse,
-    historyResponse,
-    learningResponse,
-    runResponse,
-  ] = await Promise.all([
-    fetch("/api/status"),
-    fetch("/api/world"),
-    fetch("/api/history"),
-    fetch("/api/learning"),
-    fetch("/api/run"),
-  ]);
-
-  const [status, world, history, learning, run] = await Promise.all([
-    statusResponse.json(),
-    worldResponse.json(),
-    historyResponse.json(),
-    learningResponse.json(),
-    runResponse.json(),
-  ]);
-
+  const paths = [
+    "/api/status",
+    "/api/world",
+    "/api/history",
+    "/api/learning",
+    "/api/run",
+    "/api/research",
+    "/api/knowledge",
+  ];
+  const responses = await Promise.all(paths.map((path) => fetch(path)));
+  const payloads = await Promise.all(responses.map((response) => response.json()));
   applyPayload({
-    status,
-    world,
-    history,
-    learning,
-    run,
+    status: payloads[0],
+    world: payloads[1],
+    history: payloads[2],
+    learning: payloads[3],
+    run: payloads[4],
+    research: payloads[5],
+    knowledge: payloads[6],
   });
 }
 
 $("configForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
-  const patch = {};
   const numeric = new Set([
     "poll_interval_s",
     "astar_turn_penalty",
@@ -416,23 +950,19 @@ $("configForm").addEventListener("submit", async (event) => {
     "llm_temperature",
     "llm_max_tokens",
   ]);
+  const patch = {};
   for (const element of form.elements) {
     if (!element.name) continue;
-    patch[element.name] = numeric.has(element.name)
-      ? Number(element.value)
-      : element.value;
+    patch[element.name] = numeric.has(element.name) ? Number(element.value) : element.value;
   }
+
   const response = await fetch("/api/config", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
   });
-  if (!response.ok) {
-    setText("configSaved", "error " + response.status);
-    return;
-  }
-  setText("configSaved", "saved");
-  setTimeout(() => setText("configSaved", ""), 1800);
+  setText("configSaved", response.ok ? "saved" : "error " + response.status);
+  if (response.ok) setTimeout(() => setText("configSaved", ""), 1600);
 });
 
 function connectSocket() {
@@ -441,40 +971,43 @@ function connectSocket() {
   state.socket = socket;
 
   socket.addEventListener("open", () => {
-    $("socketBadge").textContent = "live";
-    $("socketBadge").className = "badge live";
+    setClassText("socketBadge", "live", "badge live");
   });
 
   socket.addEventListener("message", (event) => {
     try {
       applyPayload(JSON.parse(event.data));
     } catch (error) {
-      console.error(error);
+      console.error("live payload error", error);
     }
   });
 
   socket.addEventListener("close", () => {
-    $("socketBadge").textContent = "reconnecting";
-    $("socketBadge").className = "badge dead";
+    setClassText("socketBadge", "reconnecting", "badge dead");
     setTimeout(connectSocket, 1500);
   });
-
   socket.addEventListener("error", () => socket.close());
 }
 
 window.addEventListener("resize", () => {
-  drawWorld();
-  drawLearning();
-  drawSweep();
+  drawStructuredFallback();
+  renderOfficialAssets();
+  drawOfflineLearning();
+  drawOnlineLearning();
   drawHistory();
+  renderProductionStatistics();
 });
 
-Promise.all([loadRouting(), loadConfig(), loadInitialState()])
+installWorldControls();
+installProductionControls();
+
+Promise.all([loadConfig(), loadInitialState(), loadProduction()])
   .catch((error) => {
     console.error("dashboard bootstrap failed", error);
-    $("socketBadge").textContent = "degraded";
-    $("socketBadge").className = "badge dead";
+    setClassText("socketBadge", "degraded", "badge dead");
   })
   .finally(connectSocket);
 
-setInterval(loadRouting, 30000);
+setInterval(updateFrameAge, 1000);
+setInterval(() => refreshWorldFrame(true), 5000);
+setInterval(() => loadProduction(state.productionPrecision), 4000);

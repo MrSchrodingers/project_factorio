@@ -11,7 +11,9 @@ from collections import defaultdict, deque
 from dataclasses import asdict, is_dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
+
+from factorio_ai_lab.dashboard.rendering import WorldFrameRenderer
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 RUNS_DIR = PROJECT_ROOT / "runs"
@@ -180,12 +182,87 @@ rcon.print(helpers.table_to_json({
 }))
 """
 
+    _PRODUCTION_ITEMS = (
+        "iron-ore",
+        "copper-ore",
+        "coal",
+        "stone",
+        "uranium-ore",
+    )
+
+    _PRODUCTION_PRECISIONS: ClassVar[dict[str, tuple[str, float]]] = {
+        "5s": ("five_seconds", 5.0),
+        "1m": ("one_minute", 60.0),
+        "10m": ("ten_minutes", 600.0),
+        "1h": ("one_hour", 3600.0),
+        "10h": ("ten_hours", 36000.0),
+        "50h": ("fifty_hours", 180000.0),
+        "250h": ("two_hundred_fifty_hours", 900000.0),
+    }
+
+    _MAP_COMMAND = r"""
+/c local p=storage.agent_characters and storage.agent_characters[1]
+if not p then
+  rcon.print(helpers.table_to_json({connected=false,error="agent character unavailable"}))
+  return
+end
+local s=p.surface
+local radius=42
+local area={
+  left_top={x=p.position.x-radius,y=p.position.y-radius},
+  right_bottom={x=p.position.x+radius,y=p.position.y+radius}
+}
+local resources={}
+for _,e in pairs(s.find_entities_filtered{area=area,type="resource"}) do
+  if e.valid then
+    table.insert(resources,{
+      name=e.name,
+      amount=e.amount or 1,
+      position={x=e.position.x,y=e.position.y}
+    })
+  end
+end
+local natural={}
+local natural_types={"tree","simple-entity"}
+for _,kind in pairs(natural_types) do
+  for _,e in pairs(s.find_entities_filtered{area=area,type=kind}) do
+    if e.valid and #natural < 900 then
+      table.insert(natural,{
+        name=e.name,
+        direction=e.direction or 0,
+        position={x=e.position.x,y=e.position.y}
+      })
+    end
+  end
+end
+local water={}
+local water_names={
+  "water","deepwater","water-green","deepwater-green",
+  "water-shallow","water-mud"
+}
+for _,tile in pairs(s.find_tiles_filtered{area=area,name=water_names}) do
+  table.insert(water,{x=tile.position.x,y=tile.position.y})
+end
+rcon.print(helpers.table_to_json({
+  connected=true,
+  center={x=p.position.x,y=p.position.y},
+  radius=radius,
+  resources=resources,
+  natural=natural,
+  water_tiles=water
+}))
+"""
+
     def __init__(self, host: str = "127.0.0.1", port: int = 27000) -> None:
         self.host = host
         self.port = port
         self._client: Any | None = None
         self._lock = threading.Lock()
         self._last_error: str | None = None
+        self._map_cache: dict[str, Any] | None = None
+        self._map_cache_at = 0.0
+        self._map_cache_center: tuple[float, float] | None = None
+        self._production_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
     def connected(self) -> bool:
         return _port_open(self.host, self.port)
@@ -208,6 +285,160 @@ rcon.print(helpers.table_to_json({
 
         self._client = RCONClient(self.host, self.port, "factorio")
         return self._client
+
+    def map_snapshot(
+        self,
+        *,
+        max_age_s: float = 5.0,
+    ) -> dict[str, Any]:
+        now = time.monotonic()
+        with self._lock:
+            if (
+                self._map_cache is not None
+                and now - self._map_cache_at <= max_age_s
+            ):
+                return self._map_cache
+
+            try:
+                client = self._ensure_client()
+                raw = client.send_command(self._MAP_COMMAND)
+                if not raw:
+                    raise RuntimeError("RCON map snapshot returned no payload")
+                payload = json.loads(raw)
+                if not isinstance(payload, dict):
+                    raise TypeError("RCON map snapshot was not an object")
+                center = payload.get("center")
+                if isinstance(center, dict):
+                    try:
+                        self._map_cache_center = (
+                            float(center["x"]),
+                            float(center["y"]),
+                        )
+                    except (KeyError, TypeError, ValueError):
+                        self._map_cache_center = None
+                self._map_cache = payload
+                self._map_cache_at = now
+                return payload
+            except (
+                OSError,
+                RuntimeError,
+                ValueError,
+                json.JSONDecodeError,
+            ) as exc:
+                return {
+                    "connected": False,
+                    "resources": [],
+                    "natural": [],
+                    "water_tiles": [],
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+
+    def production_statistics(
+        self,
+        precision_key: str = "1m",
+        *,
+        max_age_s: float = 2.5,
+    ) -> dict[str, Any]:
+        if precision_key not in self._PRODUCTION_PRECISIONS:
+            raise ValueError(
+                f"unsupported production precision: {precision_key}"
+            )
+
+        now = time.monotonic()
+        cached = self._production_cache.get(precision_key)
+        if cached is not None and now - cached[0] <= max_age_s:
+            return cached[1]
+
+        precision_name, duration_seconds = self._PRODUCTION_PRECISIONS[
+            precision_key
+        ]
+        names = ",".join(f'"{name}"' for name in self._PRODUCTION_ITEMS)
+        command = f"""
+/c local p=storage.agent_characters and storage.agent_characters[1]
+if not p then
+  rcon.print(helpers.table_to_json({{connected=false,error="agent character unavailable"}}))
+  return
+end
+local stats=p.force.get_item_production_statistics(p.surface)
+local precision=defines.flow_precision_index.{precision_name}
+local names={{{names}}}
+local series={{}}
+for _,name in ipairs(names) do
+  local produced={{}}
+  local consumed={{}}
+  for i=300,1,-1 do
+    produced[#produced+1]=stats.get_flow_count{{
+      name=name,category="input",precision_index=precision,sample_index=i
+    }}
+    consumed[#consumed+1]=stats.get_flow_count{{
+      name=name,category="output",precision_index=precision,sample_index=i
+    }}
+  end
+  series[name]={{
+    produced_rate=stats.get_flow_count{{
+      name=name,category="input",precision_index=precision
+    }},
+    produced_count=stats.get_flow_count{{
+      name=name,category="input",precision_index=precision,count=true
+    }},
+    consumed_rate=stats.get_flow_count{{
+      name=name,category="output",precision_index=precision
+    }},
+    consumed_count=stats.get_flow_count{{
+      name=name,category="output",precision_index=precision,count=true
+    }},
+    produced=produced,
+    consumed=consumed
+  }}
+end
+rcon.print(helpers.table_to_json({{
+  connected=true,
+  precision="{precision_key}",
+  duration_seconds={duration_seconds},
+  sample_count=300,
+  series=series
+}}))
+"""
+
+        with self._lock:
+            try:
+                client = self._ensure_client()
+                raw = client.send_command(command)
+                if not raw:
+                    raise RuntimeError(
+                        "RCON production statistics returned no payload"
+                    )
+                payload = json.loads(raw)
+                if not isinstance(payload, dict):
+                    raise TypeError(
+                        "RCON production statistics were not an object"
+                    )
+                payload["sample_period_seconds"] = round(
+                    duration_seconds / 300.0,
+                    6,
+                )
+                self._production_cache[precision_key] = (now, payload)
+                return payload
+            except (
+                OSError,
+                RuntimeError,
+                TypeError,
+                ValueError,
+                json.JSONDecodeError,
+            ) as exc:
+                self._client = None
+                return {
+                    "connected": False,
+                    "precision": precision_key,
+                    "duration_seconds": duration_seconds,
+                    "sample_count": 300,
+                    "sample_period_seconds": round(
+                        duration_seconds / 300.0,
+                        6,
+                    ),
+                    "series": {},
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
 
     def snapshot(self) -> dict[str, Any]:
         started = time.perf_counter()
@@ -272,6 +503,7 @@ class DashboardState:
         self.started_at = time.time()
         self.config = RuntimeConfigStore()
         self.factorio = FactorioObserver()
+        self.renderer = WorldFrameRenderer()
         self.history: deque[dict[str, Any]] = deque(maxlen=600)
         self.history_lock = threading.Lock()
 
@@ -317,6 +549,7 @@ class DashboardState:
             "llm": self.llm_status(),
             "memory": _memory_status(),
             "runtime": self.config.read(),
+            "render": self.renderer.status(),
         }
 
     def sample(self) -> dict[str, Any]:
@@ -337,6 +570,8 @@ class DashboardState:
             "history": self.history_data(),
             "learning": self.learning_data(),
             "run": self.active_run_data(),
+            "research": self.research_data(),
+            "knowledge": self.knowledge_data(),
         }
 
     def history_data(self) -> list[dict[str, Any]]:
@@ -352,6 +587,38 @@ class DashboardState:
         except (OSError, json.JSONDecodeError):
             return {}
         return loaded if isinstance(loaded, dict) else {}
+
+    def research_data(self) -> dict[str, Any]:
+        path = RUNS_DIR / "research_state.json"
+        if not path.exists():
+            return {
+                "status": "idle",
+                "stage": None,
+                "curriculum": [],
+                "online_learning": {},
+            }
+        try:
+            loaded = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            return {"status": "degraded", "error": "invalid research_state.json"}
+        return loaded if isinstance(loaded, dict) else {}
+
+    def knowledge_data(self, limit: int = 12) -> dict[str, Any]:
+        path = RUNS_DIR / "knowledge.jsonl"
+        if not path.exists():
+            return {"count": 0, "lessons": []}
+        try:
+            lines = [line for line in path.read_text().splitlines() if line.strip()]
+            lessons = [json.loads(line) for line in lines[-limit:]]
+        except (OSError, json.JSONDecodeError):
+            return {"count": 0, "lessons": [], "error": "invalid knowledge log"}
+        return {"count": len(lines), "lessons": lessons}
+
+    def render_world_frame(self) -> bytes:
+        world = self.factorio.snapshot()
+        map_context = self.factorio.map_snapshot()
+        run = self.active_run_data()
+        return self.renderer.render(world, run, map_context)
 
     def learning_data(self) -> dict[str, Any]:
         history_path = RUNS_DIR / "turn_penalty_learning.jsonl"

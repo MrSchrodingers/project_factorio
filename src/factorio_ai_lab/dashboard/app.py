@@ -6,10 +6,11 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 
+from factorio_ai_lab.dashboard.rendering import resolve_official_icon
 from factorio_ai_lab.dashboard.state import DashboardState
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -24,7 +25,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Factorio AI Lab Dashboard",
-    version="0.3.0",
+    version="0.4.0",
     lifespan=lifespan,
 )
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -64,6 +65,17 @@ def api_history() -> list[dict[str, Any]]:
     return state.history_data()
 
 
+@app.get("/api/production")
+async def api_production(precision: str = "1m") -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(
+            state.factorio.production_statistics,
+            precision,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @app.get("/api/learning")
 def api_learning() -> dict[str, Any]:
     return state.learning_data()
@@ -72,6 +84,47 @@ def api_learning() -> dict[str, Any]:
 @app.get("/api/run")
 def api_run() -> dict[str, Any]:
     return state.active_run_data()
+
+
+@app.get("/api/research")
+def api_research() -> dict[str, Any]:
+    return state.research_data()
+
+
+@app.get("/api/knowledge")
+def api_knowledge() -> dict[str, Any]:
+    return state.knowledge_data()
+
+
+@app.get("/api/assets/icon/{entity_name}.png")
+def api_official_icon(entity_name: str) -> FileResponse:
+    icon = resolve_official_icon(entity_name)
+    if icon is None:
+        raise HTTPException(404, "official Factorio icon unavailable")
+    return FileResponse(
+        icon,
+        media_type="image/png",
+        headers={
+            "Cache-Control": "public, max-age=3600",
+            "X-Asset-Source": "Factorio official demo 2.0.73",
+        },
+    )
+
+
+@app.get("/api/world/frame.png")
+async def api_world_frame() -> Response:
+    try:
+        png = await asyncio.to_thread(state.render_world_frame)
+    except Exception as exc:
+        raise HTTPException(503, f"world renderer unavailable: {exc}") from exc
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={
+            "Cache-Control": "no-store, max-age=0",
+            "X-Frame-Source": "official-asset-world-map",
+        },
+    )
 
 
 @app.get("/api/experiments/routing")
