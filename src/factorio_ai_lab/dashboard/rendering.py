@@ -9,10 +9,14 @@ from typing import Any
 
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
 
-ASSET_ROOT = Path(
+FULL_ASSET_ROOT = Path(
+    "/home/ti/.local/share/factorio-ai/assets/full-graphics/graphics"
+)
+DEMO_ASSET_ROOT = Path(
     "/home/ti/.local/share/factorio-ai/assets/demo-2.0.73/"
     "factorio/data/base/graphics"
 )
+ASSET_ROOT = FULL_ASSET_ROOT if FULL_ASSET_ROOT.is_dir() else DEMO_ASSET_ROOT
 ICON_DIR = ASSET_ROOT / "icons"
 ENTITY_DIR = ASSET_ROOT / "entity"
 TERRAIN_GRASS = ASSET_ROOT / "terrain/grass-2.png"
@@ -106,7 +110,11 @@ def official_asset_status() -> dict[str, Any]:
         "icon_count": icon_count,
         "runtime_icon_count": runtime_png_count,
         "icon_dir": str(ICON_DIR),
-        "source": "Factorio 2.0.73 official Linux demo (runtime only)",
+        "source": (
+            "user-provided full Factorio graphics archive (runtime only)"
+            if ASSET_ROOT == FULL_ASSET_ROOT
+            else "Factorio 2.0.73 official Linux demo (runtime only)"
+        ),
         "version": "2.0.73",
         "redistributed": False,
     }
@@ -152,7 +160,7 @@ class WorldFrameRenderer:
         assets = official_asset_status()
         return {
             "ready": bool(assets["ready"]),
-            "renderer": "official-asset-world-map-v2",
+            "renderer": "full-factorio-world-map-v3",
             "asset_count": self._asset_count_now(),
             "sprite_count": self._asset_count_now(),
             "viewport_radius": round(self._last_radius, 2),
@@ -211,7 +219,9 @@ class WorldFrameRenderer:
         y: float,
         tile_pixels: float,
     ) -> Image.Image | None:
-        path = FLE_RESOURCE_DIR / name / f"{name}.png"
+        full_path = ENTITY_DIR / name / f"{name}.png"
+        fallback_path = FLE_RESOURCE_DIR / name / f"{name}.png"
+        path = full_path if full_path.is_file() else fallback_path
         if not path.is_file():
             return None
 
