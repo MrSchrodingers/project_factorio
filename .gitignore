@@ -24,3 +24,9 @@ models/
 .DS_Store
 
 .tmp/
+
+.venv-fle/
+
+.fle/
+
+.fle-local/
