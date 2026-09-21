@@ -22,3 +22,5 @@ models/
 *.gguf
 *.safetensors
 .DS_Store
+
+.tmp/
