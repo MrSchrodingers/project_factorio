@@ -30,3 +30,7 @@ models/
 .fle/
 
 .fle-local/
+
+# backup local de trabalho, nao versionar
+.worktree-backup/
+frontend/node_modules/
