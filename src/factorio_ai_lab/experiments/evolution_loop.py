@@ -830,6 +830,8 @@ def run_loop(
         for index in range(generations):
             iteration_seed = seed + iteration_offset + index
             state["current_iteration_seed"] = iteration_seed
+            state["updated_at"] = utc_now()
+            atomic_json(LOOP_STATE, state)
             existing_champion = read_json_object(EVOLUTION_CHAMPION)
             pending_configuration = (
                 _open_play_strategy(existing_champion)

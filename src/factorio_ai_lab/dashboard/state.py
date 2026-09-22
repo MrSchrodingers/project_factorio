@@ -984,7 +984,11 @@ class DashboardState:
             research=research,
             progression=progression,
             production=production,
-            action_context=execution.get("action", {}),
+            action_context=(
+                execution.get("action", {})
+                if execution.get("action_active")
+                else {}
+            ),
         )
         append_telemetry_jsonl(TELEMETRY_LOG, sample)
         self._last_telemetry_write = now
@@ -1024,7 +1028,11 @@ class DashboardState:
                 research=research,
                 progression=progression,
                 production=production,
-                action_context=execution.get("action", {}),
+                action_context=(
+                execution.get("action", {})
+                if execution.get("action_active")
+                else {}
+            ),
             )
             append_telemetry_jsonl(TELEMETRY_LOG, sample)
             self._last_telemetry_write = now
