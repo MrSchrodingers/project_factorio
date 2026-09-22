@@ -124,6 +124,7 @@ function repairReasonLabel(value) {
     electric_research_power_budget: "reforço do orçamento energético",
     structural_autonomy_counterexample: "mutação estrutural por falha de autonomia",
     electric_backbone_layout_counterexample: "variação de layout do backbone",
+    power_group_connection_counterexample: "reuso do grupo elétrico existente",
     bootstrap_collection_retry: "retry de coleta sem inflar alvo",
   }[String(value || "")] || String(value || "reparo");
 }

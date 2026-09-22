@@ -4159,6 +4159,7 @@ power_nodes=[
 power_connected=[power_nodes[0]]
 power_remaining=list(power_nodes[1:])
 power_edges=[]
+power_connection_group=None
 pole_requirement_estimates=[]
 pole_required=0
 while power_remaining:
@@ -4825,15 +4826,33 @@ for (
     target_label,
     target_entity,
 ) in power_edges[{edge_start}:{edge_end}]:
-    connection=connect_entities(
-        source_entity,
-        target_entity,
-        Prototype.SmallElectricPole,
+    poles_before=(
+        len(getattr(power_connection_group,'poles',[]))
+        if power_connection_group is not None
+        else 0
     )
+    if power_connection_group is None:
+        power_connection_group=connect_entities(
+            steam_engine,
+            target_entity,
+            Prototype.SmallElectricPole,
+        )
+        attachment='generator_to_consumer'
+    else:
+        power_connection_group=connect_entities(
+            target_entity,
+            power_connection_group,
+            Prototype.SmallElectricPole,
+        )
+        attachment='consumer_to_existing_group'
+    poles_after=len(getattr(power_connection_group,'poles',[]))
     power_batch_edges.append({{
-        'source':source_label,
+        'planned_source':source_label,
         'target':target_label,
-        'poles':len(getattr(connection,'poles',[])),
+        'attachment':attachment,
+        'poles_before':poles_before,
+        'poles_after':poles_after,
+        'poles_added':max(0,poles_after-poles_before),
     }})
 print({{'edges':power_batch_edges}})
 """

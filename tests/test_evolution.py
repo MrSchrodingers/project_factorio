@@ -451,6 +451,49 @@ class EvolutionLoopRepairTests(unittest.TestCase):
             )
         )
 
+    def test_power_topology_connection_failure_is_infrastructure_repair(self) -> None:
+        configuration = {
+            "open_play_iron_target": 1000,
+            "open_play_copper_target": 389,
+            "open_play_wood_target": 128,
+            "autonomy_layout_variant": 0,
+            "autonomy_belt_margin": 4,
+            "autonomy_route_detour_margin": 4,
+        }
+        repaired, repairs = _apply_deterministic_open_play_repairs(
+            current={
+                "stage": "Electric mining transition",
+                "metrics": {
+                    "electric_mining_transition": {
+                        "phase": "power_topology",
+                        "error_occurred": True,
+                        "result": (
+                            "Exception: Failed to connect {'SmallElectricPole'} "
+                            "from electric-mining-drill to electric-mining-drill"
+                        ),
+                        "route_iron": 546,
+                        "route_iron_target": 509,
+                        "route_copper": 293,
+                        "route_copper_target": 41,
+                        "route_wood": 117,
+                        "route_wood_target": 41,
+                    }
+                },
+            },
+            configuration=configuration,
+        )
+
+        self.assertEqual(repaired["open_play_iron_target"], 1000)
+        self.assertEqual(repaired["open_play_copper_target"], 389)
+        self.assertEqual(repaired["open_play_wood_target"], 128)
+        self.assertEqual(repaired["autonomy_layout_variant"], 0)
+        self.assertTrue(
+            any(
+                row.get("reason") == "power_group_connection_counterexample"
+                for row in repairs
+            )
+        )
+
     def test_autonomy_counterexample_mutates_structural_strategy(self) -> None:
         repaired, repairs = _apply_deterministic_open_play_repairs(
             current={

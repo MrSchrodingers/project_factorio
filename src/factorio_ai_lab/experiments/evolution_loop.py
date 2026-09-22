@@ -404,12 +404,30 @@ def _apply_deterministic_open_play_repairs(
             ):
                 power_starved = True
 
+        transition_phase = str(transition.get("phase") or "")
+        transition_result = str(transition.get("result") or "")
+        if (
+            transition_phase == "power_topology"
+            and "Failed to connect" in transition_result
+            and "SmallElectricPole" in transition_result
+        ):
+            repairs.append(
+                {
+                    "reason": "power_group_connection_counterexample",
+                    "stage": stage,
+                    "phase": transition_phase,
+                    "policy": (
+                        "attach each new consumer to the existing electricity "
+                        "group instead of connecting consumer entities directly"
+                    ),
+                    "failure": transition_result[:800],
+                }
+            )
+
         # A physical-backbone routing failure is a structural counterexample,
         # not a reason to inflate raw-material targets. Explore the next finite
         # layout variant deterministically so repeated validation performs a
         # bounded design-of-experiments sweep over the four topologies.
-        transition_phase = str(transition.get("phase") or "")
-        transition_result = str(transition.get("result") or "")
         routing_failure_markers = (
             "Cannot connect",
             "Failed to connect",
@@ -788,23 +806,28 @@ def _repair_open_play_strategy(
             )
         )
 
-    experience.append(
-        CounterexampleRecord(
-            run_id=str(current.get("run_id") or "unknown"),
-            stage=stage,
-            phase=phase,
-            detail=detail,
-            signature=signature,
-            diagnostics=transition,
-            configuration=previous,
-            repair={
-                "deterministic_repairs": deterministic_repairs,
-                "advice": advice.to_dict(),
-                "next_configuration": adjusted,
-            },
+    experience_error: str | None = None
+    try:
+        experience.append(
+            CounterexampleRecord(
+                run_id=str(current.get("run_id") or "unknown"),
+                stage=stage,
+                phase=phase,
+                detail=detail,
+                signature=signature,
+                diagnostics=transition,
+                configuration=previous,
+                repair={
+                    "deterministic_repairs": deterministic_repairs,
+                    "advice": advice.to_dict(),
+                    "next_configuration": adjusted,
+                },
+            )
         )
-    )
-    repeat_count = experience.signature_count(signature)
+        repeat_count = experience.signature_count(signature)
+    except OSError as exc:
+        experience_error = f"{type(exc).__name__}: {exc}"
+        repeat_count = 0
 
     atomic_json(
         OPEN_PLAY_STRATEGY,
@@ -818,6 +841,7 @@ def _repair_open_play_strategy(
             "counterexample_stage": current.get("stage"),
             "counterexample_signature": signature,
             "counterexample_repeat_count": repeat_count,
+            "counterexample_memory_error": experience_error,
         },
     )
     return adjusted
