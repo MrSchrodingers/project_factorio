@@ -433,6 +433,8 @@ class EvolutionLoopRepairTests(unittest.TestCase):
         )
 
         self.assertEqual(repaired["open_play_iron_target"], 1000)
+        self.assertEqual(repaired["open_play_copper_target"], 389)
+        self.assertEqual(repaired["open_play_wood_target"], 128)
         self.assertEqual(repaired["autonomy_belt_margin"], 4)
         self.assertEqual(repaired["autonomy_route_detour_margin"], 4)
         self.assertTrue(

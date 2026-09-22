@@ -471,6 +471,18 @@ def _apply_deterministic_open_play_repairs(
                 }
             )
         route_phase = str(transition.get("phase") or "")
+        if route_phase in {
+            "route_buffer",
+            "construction_materials",
+            "power_topology",
+            "belt_topology",
+            "physical_backbone",
+        }:
+            # These phases are reached only after the electric drills/inserters
+            # and earlier commissioning assets were successfully materialized.
+            # Their gross recipe bill is sunk cost for this run and must not be
+            # added again to the next bootstrap target.
+            raw = {}
         route_stop_reason = str(
             transition.get("route_stop_reason") or ""
         )
@@ -542,22 +554,12 @@ def _apply_deterministic_open_play_repairs(
         pole_required = float(
             transition.get("pole_required", 0.0) or 0.0
         )
-        if belt_required > 0:
-            belt_plan = EARLY_GAME_PRODUCTION_PLANNER.plan(
-                "transport-belt",
-                belt_required + 6.0,
-            )
-            for item, value in belt_plan.raw_requirements_per_s.items():
-                raw[item] = raw.get(item, 0.0) + float(value)
-        if pole_required > 0:
-            pole_plan = EARLY_GAME_PRODUCTION_PLANNER.plan(
-                "small-electric-pole",
-                pole_required + 10.0,
-            )
-            for item, value in pole_plan.raw_requirements_per_s.items():
-                raw[item] = raw.get(item, 0.0) + float(value)
 
         # Prefer measured deficits from the exact route buffer when available.
+        # Do not add the full gross infrastructure bill to bootstrap targets:
+        # most of that material may already be on hand, and older runs may
+        # report costs from a superseded topology (for example the former
+        # generator-to-every-consumer power star).
         route_values = {
             "iron": [
                 float(transition.get("route_iron", 0.0) or 0.0),
@@ -586,6 +588,30 @@ def _apply_deterministic_open_play_repairs(
         ):
             if route_values[resource][1] <= 0.0:
                 route_values[resource] = [float(observed), float(target)]
+
+        has_measured_route_targets = any(
+            values[1] > 0.0
+            for values in route_values.values()
+        )
+        if not has_measured_route_targets:
+            if belt_required > 0:
+                belt_plan = EARLY_GAME_PRODUCTION_PLANNER.plan(
+                    "transport-belt",
+                    belt_required + float(
+                        adjusted.get("autonomy_belt_margin", 6) or 6
+                    ),
+                )
+                for item, value in belt_plan.raw_requirements_per_s.items():
+                    raw[item] = raw.get(item, 0.0) + float(value)
+            if pole_required > 0:
+                pole_plan = EARLY_GAME_PRODUCTION_PLANNER.plan(
+                    "small-electric-pole",
+                    pole_required + float(
+                        adjusted.get("autonomy_pole_margin", 10) or 10
+                    ),
+                )
+                for item, value in pole_plan.raw_requirements_per_s.items():
+                    raw[item] = raw.get(item, 0.0) + float(value)
 
         measured_requirements = {
             "iron-plate": max(
