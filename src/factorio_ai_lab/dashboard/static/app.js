@@ -813,13 +813,32 @@ function aggregateRateSamples(samples, samplePeriodSeconds) {
   return output;
 }
 
-function smoothSeries(samples, alpha = 0.32) {
+// LuaFlowStatistics returns each sample already normalised to items/min over
+// a bucket of duration/300. Items are discrete, so at 1m precision (0.2 s
+// buckets) a single item reads as 300/min while the real rate is ~11/min:
+// the raw series is dominated by sampling quantisation, not by production.
+// A centred moving average over a window wide enough to contain several
+// events recovers the sustained rate, which is the quantity being asked for.
+function movingAverage(samples, window) {
   if (!samples.length) return [];
-  const output = [samples[0]];
-  for (let i = 1; i < samples.length; i += 1) {
-    output.push(alpha * samples[i] + (1 - alpha) * output[i - 1]);
+  const half = Math.max(1, Math.floor(window / 2));
+  const output = new Array(samples.length);
+  for (let i = 0; i < samples.length; i += 1) {
+    const from = Math.max(0, i - half);
+    const to = Math.min(samples.length - 1, i + half);
+    let sum = 0;
+    for (let j = from; j <= to; j += 1) sum += samples[j];
+    output[i] = sum / (to - from + 1);
   }
   return output;
+}
+
+function sustainedRateSeries(aggregated) {
+  // At least a fifth of the window, never fewer than 5 bins. Two passes of a
+  // box filter approximate a triangular one, which removes the square
+  // shoulders a single pass leaves around an isolated burst.
+  const window = Math.max(5, Math.round(aggregated.length * 0.2));
+  return movingAverage(movingAverage(aggregated, window), window);
 }
 
 function stableProductionScale(key, values) {
@@ -860,7 +879,7 @@ function drawNativeProductionChart(canvasId, mode) {
   );
   const preparedEntries = entries.map(([name, samples]) => {
     const aggregated = aggregateRateSamples(samples, samplePeriod);
-    return [name, aggregated, smoothSeries(aggregated)];
+    return [name, aggregated, sustainedRateSeries(aggregated)];
   });
   const maxY = stableProductionScale(
     state.productionPrecision + ":" + mode,
@@ -882,6 +901,36 @@ function drawNativeProductionChart(canvasId, mode) {
     ctx.moveTo(x, padTop);
     ctx.lineTo(x, height - padBottom);
     ctx.stroke();
+  }
+
+  // Window average from the API (produced_rate/consumed_rate). This is the
+  // sustained rate and does not depend on how the window was bucketed.
+  const rateField = mode === "produced" ? "produced_rate" : "consumed_rate";
+  let windowAverage = 0;
+  for (const [name] of preparedEntries) {
+    const row = series[name] || {};
+    windowAverage = Math.max(windowAverage, Math.max(0, Number(row[rateField] || 0)));
+  }
+  if (windowAverage > 0 && windowAverage <= maxY) {
+    const y = padTop + graphHeight - (windowAverage / maxY) * graphHeight;
+    ctx.save();
+    ctx.strokeStyle = "rgba(240,163,58,.45)";
+    ctx.setLineDash([4, 4]);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(padLeft, y);
+    ctx.lineTo(width - padRight, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = "rgba(240,163,58,.85)";
+    ctx.font = "9px ui-monospace, monospace";
+    ctx.textAlign = "left";
+    ctx.fillText(
+      "media da janela " + compactFactorioNumber(windowAverage) + "/min",
+      padLeft + 6,
+      Math.max(padTop + 9, y - 4)
+    );
+    ctx.restore();
   }
 
   ctx.fillStyle = "#707a82";
@@ -910,12 +959,31 @@ function drawNativeProductionChart(canvasId, mode) {
     ctx.stroke();
     ctx.restore();
 
+    const pointX = (i, length) =>
+      padLeft + (i / Math.max(length - 1, 1)) * graphWidth;
+    const pointY = (value) =>
+      padTop + graphHeight - (Math.max(0, value) / maxY) * graphHeight;
+
+    const gradient = ctx.createLinearGradient(0, padTop, 0, padTop + graphHeight);
+    gradient.addColorStop(0, color + "44");
+    gradient.addColorStop(1, color + "05");
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.moveTo(pointX(0, smoothed.length), padTop + graphHeight);
+    for (let i = 0; i < smoothed.length; i += 1) {
+      ctx.lineTo(pointX(i, smoothed.length), pointY(smoothed[i]));
+    }
+    ctx.lineTo(pointX(smoothed.length - 1, smoothed.length), padTop + graphHeight);
+    ctx.closePath();
+    ctx.fill();
+
     ctx.strokeStyle = color;
     ctx.lineWidth = 2.25;
+    ctx.lineJoin = "round";
     ctx.beginPath();
     for (let i = 0; i < smoothed.length; i += 1) {
-      const x = padLeft + (i / Math.max(smoothed.length - 1, 1)) * graphWidth;
-      const y = padTop + graphHeight - (Math.max(0, smoothed[i]) / maxY) * graphHeight;
+      const x = pointX(i, smoothed.length);
+      const y = pointY(smoothed[i]);
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     }
