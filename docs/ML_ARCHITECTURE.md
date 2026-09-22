@@ -188,3 +188,85 @@ records are compacted into horizontal terrain runs before crossing RCON.
 The renderer uses official local game textures for water, refined concrete, concrete and stone
 path. PNG frames are cached briefly by the dashboard so repeated requests do not recompose an
 unchanged scene.
+
+
+## Single-writer runtime and causal action telemetry
+
+Every lab/open-play experiment acquires an OS-level exclusive lease on the shared Factorio
+world before the first reset. A second writer fails fast instead of contaminating an experiment.
+
+Each FLE transaction receives a stable action id, semantic action class, code hash, start time,
+duration and acceptance result. While the transaction is active, a heartbeat is refreshed
+independently of Factorio ticks. The dashboard therefore distinguishes an executing action,
+the interval between actions and a genuinely idle runtime without inferring liveness from four
+equal world ticks.
+
+World telemetry is action-conditioned only while an action is active. The append-only
+`action_transitions.jsonl` is the authoritative causal trace; dashboard telemetry supplies the
+time-series state observed during that action.
+
+## Action-conditioned world model
+
+The trainable GRU is a controlled dynamics model. Its recurrent input is
+
+    [physical/production state, typed action control]
+
+while its target remains the next physical/production state. Historical snapshots without an
+action id are retained for descriptive analysis and the state-only ESN baseline, but cannot make
+the controlled GRU eligible. GRU training requires at least 500 action-labelled samples across
+three independent runs, followed by generation-level holdout.
+
+This prevents a model trained mainly on duplicated idle snapshots from being promoted as a
+control model.
+
+## Material requirements planning ledger
+
+Construction preflight uses a finite-horizon material ledger. For each item it distinguishes:
+
+- on-hand stock;
+- work in progress;
+- incoming material;
+- previously reserved material;
+- explicit safety stock.
+
+A requirement can consume only net available material. Electric-backbone construction exposes
+the ledger in its diagnostics, including shortages and projected surplus. This prevents the same
+plate buffer from being counted simultaneously for research, belts and later construction.
+
+## Structural infrastructure optimization
+
+Power distribution is costed and built as a shared minimum-spanning network over the generator
+and electric consumers instead of as independent generator-to-consumer star links.
+
+Belt estimates retain an explicit detour margin. A small route-buffer shortfall is treated first
+as a CAPEX/layout counterexample: the strategy tightens route and belt safety margins before it
+is allowed to inflate bootstrap iron. If the minimum structural margins still fail, material
+requirements may increase from measured evidence.
+
+Thus a failure such as `iron=546/602` can change the design rather than merely requesting more
+iron.
+
+## Cross-run counterexample replay
+
+Open-play failures are persisted in an append-only counterexample buffer with a deterministic
+failure signature, stage, phase, diagnostics, configuration and applied repair. Duplicate
+records from the same run/signature are rejected.
+
+The mutation advisor receives recent counterexamples from the same stage. Deterministic repair
+also uses repeated failures to change its structural response. This is the persistent symbolic
+learning path between independent processes.
+
+## Multi-seed survival qualification
+
+One successful open-play run is not sufficient to become an operationally validated champion.
+The same immutable champion/configuration must pass closed-loop open play on at least three
+distinct seeds. While this qualification is pending, the evolution loop freezes the candidate
+instead of replacing it with a new lab mutation.
+
+The systemd service deliberately executes one outer iteration per process. The seed is derived
+from the persistent evolution history, so service restarts cannot silently repeat the same seed.
+
+After a champion is validated, the loop continues. A later lab challenger is sent back through
+the complete open-play and multi-seed survival gate whenever its run id differs from the
+currently validated champion. `open_play_validated_champion.json` is therefore an incumbent,
+not a terminal flag.
