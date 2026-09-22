@@ -22,6 +22,7 @@ from factorio_ai_lab.integrations.fle import (
     list_environments,
 )
 from factorio_ai_lab.learning.autonomy import evaluate_factory_autonomy
+from factorio_ai_lab.learning.checkpoints import save_game_state
 from factorio_ai_lab.learning.robustness import OpenPlayRobustnessGate
 from factorio_ai_lab.planning.factorio_catalog import (
     EARLY_GAME_PRODUCTION_PLANNER,
@@ -34,6 +35,8 @@ RUNS_DIR = PROJECT_ROOT / "runs"
 VALIDATED_CHAMPION = RUNS_DIR / "open_play_validated_champion.json"
 OPEN_PLAY_HISTORY = RUNS_DIR / "open_play_validation_history.jsonl"
 OPEN_PLAY_ROBUSTNESS_STATE = RUNS_DIR / "open_play_robustness_state.json"
+OPEN_PLAY_CHECKPOINTS = RUNS_DIR / "checkpoints" / "open_play"
+LIFELONG_CHECKPOINT = RUNS_DIR / "lifelong_champion_state.json"
 
 
 OPEN_PLAY_CURRICULUM = [
@@ -5516,6 +5519,31 @@ def run_open_play_validation(
                 autonomy=autonomy_metrics,
             )
 
+        checkpoint_record: dict[str, Any] | None = None
+        checkpoint_error: str | None = None
+        if passed and executor.game_state is not None:
+            try:
+                checkpoint = save_game_state(
+                    OPEN_PLAY_CHECKPOINTS / f"{run_id}.json",
+                    executor.game_state,
+                    run_id=run_id,
+                    arena="open_play",
+                    qualified=False,
+                )
+                checkpoint_record = checkpoint.to_dict()
+                journal.event(
+                    "checkpoint",
+                    "Durable open-play survivor state persisted.",
+                    checkpoint=checkpoint_record,
+                )
+            except (OSError, TypeError, ValueError) as exc:
+                checkpoint_error = f"{type(exc).__name__}: {exc}"
+                journal.event(
+                    "warning",
+                    "Open-play survivor passed but durable checkpoint failed.",
+                    error=checkpoint_error,
+                )
+
         record = {
             "at": utc_now(),
             "run_id": run_id,
@@ -5526,6 +5554,8 @@ def run_open_play_validation(
             "lab_champion_configuration": champion.get("configuration", {}),
             "passed": passed,
             "metrics": journal.state.get("metrics", {}),
+            "checkpoint": checkpoint_record,
+            "checkpoint_error": checkpoint_error,
         }
         robustness = OpenPlayRobustnessGate(
             OPEN_PLAY_ROBUSTNESS_STATE,
@@ -5546,12 +5576,35 @@ def run_open_play_validation(
         append_jsonl(OPEN_PLAY_HISTORY, record)
 
         if passed and robustness.get("qualified"):
+            lifelong_checkpoint: dict[str, Any] | None = None
+            lifelong_checkpoint_error: str | None = None
+            if executor.game_state is not None:
+                try:
+                    lifelong_checkpoint = save_game_state(
+                        LIFELONG_CHECKPOINT,
+                        executor.game_state,
+                        run_id=run_id,
+                        arena="lifelong_root",
+                        qualified=True,
+                    ).to_dict()
+                    record["lifelong_checkpoint"] = lifelong_checkpoint
+                except (OSError, TypeError, ValueError) as exc:
+                    lifelong_checkpoint_error = (
+                        f"{type(exc).__name__}: {exc}"
+                    )
+                    journal.event(
+                        "warning",
+                        "Champion qualified but lifelong checkpoint failed.",
+                        error=lifelong_checkpoint_error,
+                    )
             validated = {
                 **champion,
                 "open_play_configuration": validation_configuration,
                 "open_play_validation": record,
                 "open_play_robustness": robustness,
                 "validation_status": "validated",
+                "lifelong_checkpoint": lifelong_checkpoint,
+                "lifelong_checkpoint_error": lifelong_checkpoint_error,
             }
             atomic_json(VALIDATED_CHAMPION, validated)
             journal.state["evolution"]["promotion"] = {

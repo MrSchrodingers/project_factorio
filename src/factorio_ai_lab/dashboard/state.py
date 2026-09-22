@@ -15,6 +15,7 @@ from typing import Any, ClassVar
 
 from factorio_ai_lab.dashboard.rendering import WorldFrameRenderer
 from factorio_ai_lab.learning.autonomy import evaluate_factory_autonomy
+from factorio_ai_lab.learning.factory_graph import build_factory_graph
 from factorio_ai_lab.learning.telemetry import (
     append_jsonl as append_telemetry_jsonl,
 )
@@ -27,6 +28,7 @@ from factorio_ai_lab.planning.progression import (
     DEFAULT_ENGINEERING_PLANNER,
     EngineeringState,
 )
+from factorio_ai_lab.planning.runtime_catalog import RuntimeFactorioCatalog
 from factorio_ai_lab.runtime import runtime_status
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -183,6 +185,7 @@ for _,e in pairs(p.surface.find_entities_filtered{force=p.force}) do
       name=e.name,
       type=e.type,
       direction=e.direction,
+      unit_number=e.unit_number,
       position={x=e.position.x,y=e.position.y}
     }
 
@@ -508,6 +511,182 @@ rcon.print(helpers.table_to_json({
 }))
 """
 
+    _GAME_KNOWLEDGE_COMMAND = r"""
+/c local p=storage.agent_characters and storage.agent_characters[1]
+if not p then
+  rcon.print(helpers.table_to_json({connected=false,error="agent character unavailable"}))
+  return
+end
+
+local function names_from_dictionary(values)
+  local out={}
+  if values then
+    for name,_ in pairs(values) do out[#out+1]=name end
+  end
+  table.sort(out)
+  return out
+end
+
+local function string_array(values)
+  local out={}
+  if values then
+    for key,value in pairs(values) do
+      if type(key)=="string" then
+        out[#out+1]=key
+      elseif type(value)=="string" then
+        out[#out+1]=value
+      end
+    end
+  end
+  table.sort(out)
+  return out
+end
+
+local function recipe_categories(recipe)
+  local ok_categories,categories=pcall(function()
+    return recipe.categories
+  end)
+  if ok_categories and categories then
+    return string_array(categories)
+  end
+  local ok_category,category=pcall(function()
+    return recipe.category
+  end)
+  if ok_category and category then
+    return {category}
+  end
+  return {"crafting"}
+end
+
+local function ingredient_rows(values)
+  local out={}
+  if values then
+    for _,value in pairs(values) do
+      out[#out+1]={
+        name=value.name,
+        type=value.type,
+        amount=value.amount or 0
+      }
+    end
+  end
+  return out
+end
+
+local function product_rows(values)
+  local out={}
+  if values then
+    for _,value in pairs(values) do
+      local amount=value.amount
+      if not amount then
+        local amin=value.amount_min or 0
+        local amax=value.amount_max or amin
+        amount=(amin+amax)/2
+      end
+      amount=amount*(value.probability or 1)
+      out[#out+1]={
+        name=value.name,
+        type=value.type,
+        amount=amount
+      }
+    end
+  end
+  return out
+end
+
+local recipes={}
+for name,recipe in pairs(prototypes.recipe) do
+  local force_recipe=p.force.recipes[name]
+  local categories={}
+  local ok_categories,raw_categories=pcall(function()
+    return recipe.categories
+  end)
+  if ok_categories and raw_categories then
+    categories=string_array(raw_categories)
+  else
+    local ok_category,category=pcall(function()
+      return recipe.category
+    end)
+    if ok_category and category then categories={tostring(category)} end
+  end
+  recipes[#recipes+1]={
+    name=name,
+    energy=recipe.energy,
+    categories=recipe_categories(recipe),
+    ingredients=ingredient_rows(recipe.ingredients),
+    products=product_rows(recipe.products),
+    enabled_by_default=recipe.enabled,
+    enabled=force_recipe and force_recipe.enabled or false,
+    hidden_from_player_crafting=recipe.hidden_from_player_crafting
+  }
+end
+table.sort(recipes,function(a,b) return a.name<b.name end)
+
+local technologies={}
+for name,technology in pairs(prototypes.technology) do
+  local force_technology=p.force.technologies[name]
+  local unlocks={}
+  for _,effect in pairs(technology.effects or {}) do
+    if effect.type=="unlock-recipe" and effect.recipe then
+      unlocks[#unlocks+1]=effect.recipe
+    end
+  end
+  table.sort(unlocks)
+  technologies[#technologies+1]={
+    name=name,
+    prerequisites=names_from_dictionary(technology.prerequisites),
+    unlocks=unlocks,
+    research_unit_ingredients=ingredient_rows(
+      technology.research_unit_ingredients
+    ),
+    researched=force_technology and force_technology.researched or false,
+    enabled=force_technology and force_technology.enabled or false
+  }
+end
+table.sort(technologies,function(a,b) return a.name<b.name end)
+
+local machines={}
+for name,entity in pairs(prototypes.entity) do
+  local ok_categories,categories=pcall(function()
+    return entity.crafting_categories
+  end)
+  local ok_speed,speed=pcall(function()
+    return entity.crafting_speed
+  end)
+  local ok_resources,resource_categories=pcall(function()
+    return entity.resource_categories
+  end)
+  local ok_mining,mining_speed=pcall(function()
+    return entity.mining_speed
+  end)
+  local crafting=ok_categories and categories and next(categories)~=nil
+  local mining=ok_resources and resource_categories and next(resource_categories)~=nil
+  if crafting or mining then
+    machines[#machines+1]={
+      name=name,
+      type=entity.type,
+      crafting_categories=crafting and string_array(categories) or {},
+      crafting_speed=ok_speed and speed or nil,
+      resource_categories=mining and string_array(resource_categories) or {},
+      mining_speed=ok_mining and mining_speed or nil
+    }
+  end
+end
+table.sort(machines,function(a,b) return a.name<b.name end)
+
+rcon.print(helpers.table_to_json({
+  connected=true,
+  factorio_version=script.active_mods.base or "base",
+  recipes=recipes,
+  technologies=technologies,
+  machines=machines,
+  counts={
+    recipes=#recipes,
+    technologies=#technologies,
+    machines=#machines
+  }
+}))
+"""
+
     def __init__(self, host: str = "127.0.0.1", port: int = 27000) -> None:
         self.host = host
         self.port = port
@@ -517,9 +696,15 @@ rcon.print(helpers.table_to_json({
         self._map_cache: dict[str, Any] | None = None
         self._map_cache_at = 0.0
         self._map_cache_center: tuple[float, float] | None = None
+        self._map_view_cache: dict[
+            tuple[float, float, float],
+            tuple[float, dict[str, Any]],
+        ] = {}
         self._production_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._resource_overview_cache: dict[str, Any] | None = None
         self._resource_overview_cache_at = 0.0
+        self._game_knowledge_cache: dict[str, Any] | None = None
+        self._game_knowledge_cache_at = 0.0
 
     def connected(self) -> bool:
         return _port_open(self.host, self.port)
@@ -547,18 +732,93 @@ rcon.print(helpers.table_to_json({
         self,
         *,
         max_age_s: float = 5.0,
+        center_x: float | None = None,
+        center_y: float | None = None,
+        radius: float | None = None,
     ) -> dict[str, Any]:
         now = time.monotonic()
+        explicit_view = (
+            center_x is not None
+            and center_y is not None
+            and radius is not None
+        )
+        view_key: tuple[float, float, float] | None = None
+        command = self._MAP_COMMAND
+
+        if explicit_view:
+            cx = float(center_x)
+            cy = float(center_y)
+            view_radius = min(96.0, max(6.0, float(radius)))
+            view_key = (
+                round(cx, 2),
+                round(cy, 2),
+                round(view_radius, 2),
+            )
+            cached = self._map_view_cache.get(view_key)
+            if cached is not None and now - cached[0] <= max_age_s:
+                return cached[1]
+
+            auto_block = """local min_x=p.position.x
+local max_x=p.position.x
+local min_y=p.position.y
+local max_y=p.position.y
+for _,e in pairs(s.find_entities_filtered{force=p.force}) do
+  if e.valid then
+    min_x=math.min(min_x,e.position.x)
+    max_x=math.max(max_x,e.position.x)
+    min_y=math.min(min_y,e.position.y)
+    max_y=math.max(max_y,e.position.y)
+  end
+end
+local margin=18
+local left=min_x-margin
+local right=max_x+margin
+local top=min_y-margin
+local bottom=max_y+margin
+local max_span=220
+if right-left>max_span then
+  local cx=(left+right)/2
+  left=cx-max_span/2
+  right=cx+max_span/2
+end
+if bottom-top>max_span then
+  local cy=(top+bottom)/2
+  top=cy-max_span/2
+  bottom=cy+max_span/2
+end
+"""
+            view_block = f"""local viewport_cx={cx:.6f}
+local viewport_cy={cy:.6f}
+local viewport_radius={view_radius:.6f}
+local left=viewport_cx-viewport_radius
+local right=viewport_cx+viewport_radius
+local top=viewport_cy-viewport_radius
+local bottom=viewport_cy+viewport_radius
+"""
+            if auto_block not in command:
+                raise RuntimeError("map command viewport block not found")
+            command = command.replace(auto_block, view_block, 1)
+            command = command.replace(
+                "center={x=p.position.x,y=p.position.y},",
+                (
+                    "center={x=viewport_cx,y=viewport_cy},"
+                    "viewport={center={x=viewport_cx,y=viewport_cy},"
+                    "radius=viewport_radius},"
+                ),
+                1,
+            )
+
         with self._lock:
             if (
-                self._map_cache is not None
+                not explicit_view
+                and self._map_cache is not None
                 and now - self._map_cache_at <= max_age_s
             ):
                 return self._map_cache
 
             try:
                 client = self._ensure_client()
-                raw = client.send_command(self._MAP_COMMAND)
+                raw = client.send_command(command)
                 if not raw:
                     raise RuntimeError("RCON map snapshot returned no payload")
                 payload = json.loads(raw)
@@ -573,8 +833,17 @@ rcon.print(helpers.table_to_json({
                         )
                     except (KeyError, TypeError, ValueError):
                         self._map_cache_center = None
-                self._map_cache = payload
-                self._map_cache_at = now
+                if explicit_view and view_key is not None:
+                    self._map_view_cache[view_key] = (now, payload)
+                    if len(self._map_view_cache) > 20:
+                        oldest = min(
+                            self._map_view_cache,
+                            key=lambda key: self._map_view_cache[key][0],
+                        )
+                        self._map_view_cache.pop(oldest, None)
+                else:
+                    self._map_cache = payload
+                    self._map_cache_at = now
                 return payload
             except (
                 OSError,
@@ -629,6 +898,65 @@ rcon.print(helpers.table_to_json({
                     "points": [],
                     "totals": {},
                     "nearest": {},
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+
+    def game_knowledge(
+        self,
+        *,
+        max_age_s: float = 300.0,
+    ) -> dict[str, Any]:
+        now = time.monotonic()
+        with self._lock:
+            if (
+                self._game_knowledge_cache is not None
+                and now - self._game_knowledge_cache_at <= max_age_s
+            ):
+                return self._game_knowledge_cache
+            try:
+                client = self._ensure_client()
+                raw = client.send_command(self._GAME_KNOWLEDGE_COMMAND)
+                if not raw:
+                    raise RuntimeError("RCON game knowledge returned no payload")
+                payload = json.loads(raw)
+                if not isinstance(payload, dict):
+                    raise TypeError("RCON game knowledge was not an object")
+                self._game_knowledge_cache = payload
+                self._game_knowledge_cache_at = now
+                try:
+                    knowledge_path = RUNS_DIR / "game_knowledge_graph.json"
+                    temporary = knowledge_path.with_suffix(".json.tmp")
+                    temporary.write_text(
+                        json.dumps(
+                            payload,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        )
+                        + "\n",
+                        encoding="utf-8",
+                    )
+                    temporary.replace(knowledge_path)
+                except OSError:
+                    pass
+                return payload
+            except (
+                OSError,
+                RuntimeError,
+                TypeError,
+                ValueError,
+                json.JSONDecodeError,
+            ) as exc:
+                self._client = None
+                return {
+                    "connected": False,
+                    "recipes": [],
+                    "technologies": [],
+                    "machines": [],
+                    "counts": {
+                        "recipes": 0,
+                        "technologies": 0,
+                        "machines": 0,
+                    },
                     "error": f"{type(exc).__name__}: {exc}",
                 }
 
@@ -1072,10 +1400,28 @@ class DashboardState:
                 production=production,
             ),
             "resource_overview": resource_overview,
+            "factory_graph": self.factory_graph_data(world=world),
+            "game_graph_summary": self.game_knowledge_summary_data(
+                progression=progression,
+            ),
             "evolution": self.evolution_data(research=research),
             "knowledge": self.knowledge_data(),
             "datasets": self.dataset_data(),
         }
+
+    def factory_graph_data(
+        self,
+        *,
+        world: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        world = world if world is not None else self.factorio.snapshot()
+        entities = world.get("entities", [])
+        if not isinstance(entities, list):
+            entities = []
+        graph = build_factory_graph(entities)
+        graph["tick"] = world.get("tick")
+        graph["connected"] = bool(world.get("connected", False))
+        return graph
 
     def autonomy_data(
         self,
@@ -1622,6 +1968,58 @@ class DashboardState:
             "terminal": not frontier,
         }
 
+    def game_knowledge_summary_data(
+        self,
+        *,
+        progression: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        progression = (
+            progression
+            if progression is not None
+            else self.engineering_progression_data()
+        )
+        next_goal = progression.get("next_goal")
+        goal_id = (
+            str(next_goal.get("goal_id"))
+            if isinstance(next_goal, dict) and next_goal.get("goal_id")
+            else ""
+        )
+        targets = {
+            "iron_backbone": "iron-plate",
+            "coal_mining": "coal",
+            "copper_mining": "copper-ore",
+            "steam_power": "steam-engine",
+            "copper_smelting": "copper-plate",
+            "electronics_trigger": "electronic-circuit",
+            "lab_bootstrap": "lab",
+            "automation_science": "automation-science-pack",
+            "lab_automation": "automation-science-pack",
+            "assembler_gears": "iron-gear-wheel",
+            "electronic_circuits": "electronic-circuit",
+            "logistic_science": "logistic-science-pack",
+            "research_logistics": "logistic-science-pack",
+            "electric_mining": "electric-mining-drill",
+        }
+        target = targets.get(goal_id)
+        cache_key = f"game-knowledge-summary:{goal_id or 'none'}"
+        cached = self._artifact_cache.get(cache_key)
+        now = time.time()
+        if cached is not None and now - cached[0] <= 5.0:
+            return cached[1]
+
+        payload = self.factorio.game_knowledge()
+        catalog = RuntimeFactorioCatalog(payload)
+        summary = catalog.summary()
+        summary["frontier_goal_id"] = goal_id or None
+        summary["frontier_target_item"] = target
+        summary["frontier_dependency_graph"] = (
+            catalog.dependency_subgraph(target)
+            if target
+            else None
+        )
+        self._artifact_cache[cache_key] = (now, summary)
+        return summary
+
     def production_plan_data(
         self,
         *,
@@ -1697,9 +2095,21 @@ class DashboardState:
                 "dag": None,
             }
         item, target_rate = target
-        dag = EARLY_GAME_PRODUCTION_PLANNER.plan(item, target_rate)
+        planner = EARLY_GAME_PRODUCTION_PLANNER
+        planner_source = "static_early_game_catalog"
+        try:
+            runtime_payload = self.factorio.game_knowledge()
+            if runtime_payload.get("connected"):
+                runtime_catalog = RuntimeFactorioCatalog(runtime_payload)
+                if runtime_catalog.recipe_choice(item) is not None:
+                    planner = runtime_catalog.planner()
+                    planner_source = "live_factorio_prototypes"
+        except (OSError, RuntimeError, TypeError, ValueError):
+            pass
+        dag = planner.plan(item, target_rate)
         return {
             "source": source,
+            "catalog_source": planner_source,
             "goal_id": goal_id,
             "goal_label": next_goal.get("label") if isinstance(next_goal, dict) else None,
             "factorio_data_version": FACTORIO_DATA_VERSION,
@@ -1707,15 +2117,38 @@ class DashboardState:
             "dag": dag.to_dict(),
         }
 
-    def render_world_frame(self, mode: str = "game") -> bytes:
+    def render_world_frame(
+        self,
+        mode: str = "game",
+        *,
+        center_x: float | None = None,
+        center_y: float | None = None,
+        radius: float | None = None,
+    ) -> bytes:
+        explicit_view = (
+            center_x is not None
+            and center_y is not None
+            and radius is not None
+            and mode != "overview"
+        )
+        view_key = (
+            mode,
+            round(float(center_x), 2) if explicit_view else None,
+            round(float(center_y), 2) if explicit_view else None,
+            round(float(radius), 2) if explicit_view else None,
+        )
         now = time.monotonic()
         with self._frame_cache_lock:
-            cached = self._frame_cache.get(mode)
-            if cached is not None and now - cached[0] <= 2.0:
+            cached = self._frame_cache.get(repr(view_key))
+            if cached is not None and now - cached[0] <= 5.0:
                 return cached[1]
 
         world = self.factorio.snapshot()
-        map_context = self.factorio.map_snapshot()
+        map_context = self.factorio.map_snapshot(
+            center_x=center_x if explicit_view else None,
+            center_y=center_y if explicit_view else None,
+            radius=radius if explicit_view else None,
+        )
         resource_overview = self.factorio.resource_overview()
         run = self.active_run_data()
         rendered = self.renderer.render(
@@ -1726,7 +2159,16 @@ class DashboardState:
             mode=mode,
         )
         with self._frame_cache_lock:
-            self._frame_cache[mode] = (time.monotonic(), rendered)
+            self._frame_cache[repr(view_key)] = (
+                time.monotonic(),
+                rendered,
+            )
+            if len(self._frame_cache) > 24:
+                oldest = min(
+                    self._frame_cache,
+                    key=lambda key: self._frame_cache[key][0],
+                )
+                self._frame_cache.pop(oldest, None)
         return rendered
 
     def learning_data(self) -> dict[str, Any]:

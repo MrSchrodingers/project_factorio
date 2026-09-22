@@ -126,6 +126,46 @@ class SurvivalSelectionTests(unittest.TestCase):
             any("autonomy score improved" in row for row in decision.improvements)
         )
 
+    def test_low_physical_processing_coverage_rejects_challenger(self) -> None:
+        champion = FitnessVector(
+            capabilities=frozenset({"iron_backbone", "coal_mining"}),
+            rates_per_s={"iron-plate": 1.0, "coal": 0.2},
+        )
+        challenger = FitnessVector(
+            capabilities=champion.capabilities,
+            rates_per_s={"iron-plate": 1.2, "coal": 0.3},
+            physical_processing_coverage=1 / 6,
+            fuel_starved_entities=0,
+        )
+
+        decision = compare_challenger(champion, challenger)
+
+        self.assertFalse(decision.promoted)
+        self.assertTrue(
+            any(
+                "physical processing coverage below 50%" in row
+                for row in decision.regressions
+            )
+        )
+
+    def test_fuel_starvation_rejects_post_coal_challenger(self) -> None:
+        challenger = FitnessVector(
+            capabilities=frozenset({"iron_backbone", "coal_mining"}),
+            rates_per_s={"iron-plate": 1.0, "coal": 0.2},
+            physical_processing_coverage=0.75,
+            fuel_starved_entities=2,
+        )
+
+        decision = compare_challenger(None, challenger)
+
+        self.assertFalse(decision.promoted)
+        self.assertTrue(
+            any(
+                "fuel starvation remains" in row
+                for row in decision.regressions
+            )
+        )
+
     def test_equal_candidate_does_not_replace_incumbent(self) -> None:
         champion = FitnessVector(
             capabilities=frozenset({"iron_backbone"}),

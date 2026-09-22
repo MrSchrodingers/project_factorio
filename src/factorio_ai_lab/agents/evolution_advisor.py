@@ -6,6 +6,87 @@ from typing import Any
 
 from factorio_ai_lab.agents.llm_router import default_free_router
 
+
+def _compact_llm_context(value: Any, depth: int = 0) -> Any:
+    """Bound advisor context so local 8k models receive only decision evidence."""
+    if depth >= 4:
+        if isinstance(value, (dict, list, tuple)):
+            return "<truncated>"
+        return value
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return value if len(value) <= 480 else value[:477] + "..."
+    if isinstance(value, dict):
+        preferred = (
+            "run_id",
+            "status",
+            "stage",
+            "detail",
+            "next_action",
+            "phase",
+            "reason",
+            "promoted",
+            "regressions",
+            "improvements",
+            "configuration",
+            "fitness",
+            "metrics",
+            "counterexample",
+            "recent_counterexamples",
+            "candidate_before_advice",
+            "previous_validation_strategy",
+            "champion_configuration",
+        )
+        ordered: list[tuple[str, Any]] = []
+        seen: set[str] = set()
+        for key in preferred:
+            if key in value:
+                ordered.append((key, value[key]))
+                seen.add(key)
+        for key in sorted(value):
+            if key in seen:
+                continue
+            item = value[key]
+            if isinstance(item, (str, int, float, bool, type(None))):
+                ordered.append((str(key), item))
+            if len(ordered) >= 24:
+                break
+        return {
+            str(key): _compact_llm_context(item, depth + 1)
+            for key, item in ordered[:24]
+        }
+    if isinstance(value, (list, tuple)):
+        rows = list(value)
+        if len(rows) > 8:
+            rows = rows[-8:]
+        return [_compact_llm_context(item, depth + 1) for item in rows]
+    return str(value)[:480]
+
+
+def _advisor_payload(context: dict[str, Any]) -> str:
+    compact = _compact_llm_context(context)
+    payload = json.dumps(compact, sort_keys=True, separators=(",", ":"), default=str)
+    if len(payload) <= 6200:
+        return payload
+    # Last-resort deterministic envelope keeps the most relevant decision fields.
+    fallback = {
+        "champion_configuration": compact.get("champion_configuration")
+        if isinstance(compact, dict)
+        else None,
+        "previous_validation_strategy": compact.get("previous_validation_strategy")
+        if isinstance(compact, dict)
+        else None,
+        "counterexample": compact.get("counterexample")
+        if isinstance(compact, dict)
+        else None,
+        "candidate_before_advice": compact.get("candidate_before_advice")
+        if isinstance(compact, dict)
+        else None,
+    }
+    return json.dumps(fallback, sort_keys=True, separators=(",", ":"), default=str)
+
+
 PARAMETERS = (
     "routing_turn_penalty",
     "placement_exploration",
@@ -105,7 +186,7 @@ def propose_evolution_advice(context: dict[str, Any]) -> EvolutionAdvice:
                 },
                 {
                     "role": "user",
-                    "content": json.dumps(context, sort_keys=True, default=str),
+                    "content": _advisor_payload(context),
                 },
             ],
             temperature=0.1,

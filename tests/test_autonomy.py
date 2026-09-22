@@ -331,6 +331,24 @@ class AutonomyEvaluationTests(unittest.TestCase):
         self.assertGreater(report.no_fuel_entities, 0)
         self.assertGreater(report.manual_logistics_calls, 0)
 
+    def test_stale_flow_spike_does_not_create_live_chain(self) -> None:
+        report = evaluate_factory_autonomy(
+            entities=[
+                entity("burner-mining-drill", 0, 0, "no_fuel"),
+                entity("wooden-chest", 0, 2),
+                entity("offshore-pump", 8, 0),
+                entity("boiler", 10, 0),
+                entity("steam-engine", 13, 0, "not_plugged_in_electric_network"),
+            ],
+            interventions={"manual_transfer_calls": 10},
+            production_rates_per_s={"coal": 0.4},
+            soak_runtime_s=0,
+        )
+
+        self.assertFalse(report.topology["coal_chain_live"])
+        self.assertFalse(report.topology["producing_material"])
+        self.assertFalse(report.closed_loop)
+
     def test_smelting_without_output_buffer_is_not_closed_loop(self) -> None:
         rows = [
             entity("electric-mining-drill", 0, 0),

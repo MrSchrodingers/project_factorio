@@ -194,24 +194,6 @@ def evaluate_factory_autonomy(
         and furnace_has_belt
         and smelting_output_distribution
     )
-    coal_chain_live = rates.get("coal", 0.0) > 0
-    iron_chain_live = rates.get("iron-plate", 0.0) > 0
-    copper_chain_live = rates.get("copper-plate", 0.0) > 0
-    producing_material = (
-        coal_chain_live
-        and iron_chain_live
-        and copper_chain_live
-    )
-    producing_industry = any(
-        rates.get(item, 0.0) > 0
-        for item in (
-            "iron-gear-wheel",
-            "electronic-circuit",
-            "automation-science-pack",
-            "logistic-science-pack",
-        )
-    )
-
     manual_harvest = int(interventions.get("manual_harvest_calls", 0) or 0)
     manual_transfer = int(interventions.get("manual_transfer_calls", 0) or 0)
     manual_craft = int(interventions.get("manual_craft_calls", 0) or 0)
@@ -228,6 +210,48 @@ def evaluate_factory_autonomy(
     power_consumers_present = bool(consumers or inserters)
     healthy_fuel = fuel_consumers_present and no_fuel == 0
     healthy_power = power_consumers_present and no_power == 0
+
+    # A recent flow-statistics spike is evidence that material moved, not that
+    # the producing chain still exists. "Live" autonomy therefore requires a
+    # compatible physical topology, a healthy energy state and a full
+    # zero-manual soak window in addition to positive production.
+    coal_chain_live = bool(
+        rates.get("coal", 0.0) > 0
+        and fuel_distribution
+        and healthy_fuel
+        and zero_manual_logistics
+    )
+    iron_chain_live = bool(
+        rates.get("iron-plate", 0.0) > 0
+        and smelting_distribution
+        and healthy_fuel
+        and zero_manual_logistics
+    )
+    copper_chain_live = bool(
+        rates.get("copper-plate", 0.0) > 0
+        and smelting_distribution
+        and healthy_fuel
+        and zero_manual_logistics
+    )
+    producing_material = (
+        coal_chain_live
+        and iron_chain_live
+        and copper_chain_live
+    )
+    producing_industry = bool(
+        electric_distribution
+        and healthy_power
+        and zero_manual_logistics
+        and any(
+            rates.get(item, 0.0) > 0
+            for item in (
+                "iron-gear-wheel",
+                "electronic-circuit",
+                "automation-science-pack",
+                "logistic-science-pack",
+            )
+        )
+    )
 
     topology = {
         "steam_physical": steam_physical,

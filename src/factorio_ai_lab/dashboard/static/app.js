@@ -12,6 +12,9 @@ const state = {
   productionPlan: {},
   autonomy: {},
   resourceOverview: { cells: [], points: [], totals: {}, nearest: {} },
+  factoryGraph: { nodes: [], edges: [], metrics: {} },
+  gameGraphSummary: {},
+  productionChartScale: {},
   evolution: {},
   knowledge: { count: 0, lessons: [] },
   socket: null,
@@ -23,6 +26,11 @@ const state = {
   worldZoom: 1,
   worldPanX: 0,
   worldPanY: 0,
+  worldCenterX: null,
+  worldCenterY: null,
+  worldRadius: null,
+  worldBaseRadius: null,
+  worldViewManual: false,
   worldDragging: false,
   worldDragStart: null,
   worldViewMode: "game",
@@ -208,6 +216,75 @@ function updateEntityMix() {
   );
 }
 
+function automaticWorldGeometry() {
+  const entities = Array.isArray(state.world && state.world.entities)
+    ? state.world.entities
+    : [];
+  const built = entities
+    .filter((entity) => getName(entity) !== "character")
+    .map((entity) => getPosition(entity))
+    .filter(Boolean);
+  if (built.length) {
+    const center = {
+      x: built.reduce((sum, pos) => sum + pos.x, 0) / built.length,
+      y: built.reduce((sum, pos) => sum + pos.y, 0) / built.length,
+    };
+    const extent = Math.max(
+      ...built.map((pos) =>
+        Math.max(Math.abs(pos.x - center.x), Math.abs(pos.y - center.y))
+      )
+    );
+    return {
+      center,
+      radius: Math.min(34, Math.max(12, extent + 7.5)),
+    };
+  }
+  const character = entities
+    .map((entity) => ({ name: getName(entity), pos: getPosition(entity) }))
+    .find((row) => row.name === "character" && row.pos);
+  return {
+    center: character ? character.pos : { x: 0, y: 0 },
+    radius: 18,
+  };
+}
+
+function currentWorldGeometry() {
+  if (
+    state.worldViewManual
+    && Number.isFinite(Number(state.worldCenterX))
+    && Number.isFinite(Number(state.worldCenterY))
+    && Number.isFinite(Number(state.worldRadius))
+  ) {
+    return {
+      center: {
+        x: Number(state.worldCenterX),
+        y: Number(state.worldCenterY),
+      },
+      radius: Number(state.worldRadius),
+    };
+  }
+  return automaticWorldGeometry();
+}
+
+function ensureManualWorldGeometry() {
+  const geometry = currentWorldGeometry();
+  if (!state.worldViewManual) {
+    state.worldCenterX = geometry.center.x;
+    state.worldCenterY = geometry.center.y;
+    state.worldRadius = geometry.radius;
+    state.worldBaseRadius = geometry.radius;
+    state.worldViewManual = true;
+    state.worldZoom = 1;
+  }
+  return {
+    center: {
+      x: Number(state.worldCenterX),
+      y: Number(state.worldCenterY),
+    },
+    radius: Number(state.worldRadius),
+  };
+}
+
 function renderWorldHotspots() {
   const overlay = $("worldAssetOverlay");
   if (!overlay) return;
@@ -224,19 +301,9 @@ function renderWorldHotspots() {
 
   if (!built.length) return;
 
-  const center = {
-    x: built.reduce((sum, item) => sum + item.position.x, 0) / built.length,
-    y: built.reduce((sum, item) => sum + item.position.y, 0) / built.length,
-  };
-  const extent = Math.max(
-    ...built.map((item) =>
-      Math.max(
-        Math.abs(item.position.x - center.x),
-        Math.abs(item.position.y - center.y)
-      )
-    )
-  );
-  const radius = Math.min(34, Math.max(12, extent + 7.5));
+  const geometry = currentWorldGeometry();
+  const center = geometry.center;
+  const radius = geometry.radius;
 
   const stage = $("worldStage");
   const rect = stage.getBoundingClientRect();
@@ -271,9 +338,16 @@ function renderWorldHotspots() {
       setText("worldInspectorName", name);
       const direction = Number(entity.direction || 0);
       const type = entity.type || categoryFor(name);
+      const status = String(entity.status || "unknown").replaceAll("_", " ");
+      const coalFuel = Number(entity.coal_fuel);
+      const fuelLabel = Number.isFinite(coalFuel)
+        ? " · coal " + formatNumber(coalFuel, 0)
+        : "";
       setText(
         "worldInspectorMeta",
-        type + " · x " + formatNumber(position.x)
+        type + " · " + status
+          + fuelLabel
+          + " · x " + formatNumber(position.x)
           + " · y " + formatNumber(position.y)
           + " · dir " + direction
       );
@@ -394,9 +468,16 @@ function refreshWorldFrame(force = false) {
   const now = Date.now();
   if (!force && now - state.frameLastRequestedAt < 5000) return;
   const tick = state.world && state.world.tick;
+  const geometry = currentWorldGeometry();
+  const viewportKey = state.worldViewManual && state.worldViewMode !== "overview"
+    ? ":" + geometry.center.x.toFixed(2)
+      + ":" + geometry.center.y.toFixed(2)
+      + ":" + geometry.radius.toFixed(2)
+    : ":auto";
   const key = String(tick ?? "none") + ":" + String((state.world && state.world.entity_count) || 0)
     + ":" + String(render.sprite_count || 0)
-    + ":" + state.worldViewMode;
+    + ":" + state.worldViewMode
+    + viewportKey;
   if (!force && state.frameTick === key) return;
   if (state.frameLoading && !force) return;
 
@@ -452,42 +533,93 @@ function refreshWorldFrame(force = false) {
     state.frameLoading = false;
     setClassText("renderBadge", render.ready ? "render degraded" : "sprites loading", "badge warn");
   };
-  probe.src = "/api/world/frame.png?mode=" + encodeURIComponent(requestedMode) + "&t=" + encodeURIComponent(key) + "&ts=" + Date.now();
+  const params = new URLSearchParams({
+    mode: requestedMode,
+    t: key,
+    ts: String(Date.now()),
+  });
+  if (state.worldViewManual && requestedMode !== "overview") {
+    params.set("cx", geometry.center.x.toFixed(4));
+    params.set("cy", geometry.center.y.toFixed(4));
+    params.set("radius", geometry.radius.toFixed(4));
+  }
+  probe.src = "/api/world/frame.png?" + params.toString();
 }
 
 function applyWorldView() {
   const viewport = $("worldViewport");
   if (!viewport) return;
   viewport.style.transform =
-    "translate(" + state.worldPanX + "px, " + state.worldPanY + "px) scale(" + state.worldZoom + ")";
+    "translate(" + state.worldPanX + "px, " + state.worldPanY + "px)";
   viewport.classList.toggle(
     "can-pan",
-    state.worldZoom > 1.001 || document.fullscreenElement === $("worldStage")
+    state.worldViewMode !== "overview"
   );
-  setText("zoomReset", state.worldZoom.toFixed(state.worldZoom < 2 ? 1 : 0) + "×");
+  const geometry = currentWorldGeometry();
+  const zoom = state.worldViewManual
+    ? Number(state.worldZoom || 1)
+    : 1;
+  setText(
+    "zoomReset",
+    zoom.toFixed(zoom < 2 ? 1 : 0) + "×"
+  );
+  const viewportLabel =
+    "x " + geometry.center.x.toFixed(1)
+    + " · y " + geometry.center.y.toFixed(1)
+    + " · raio " + geometry.radius.toFixed(1);
+  setText("viewportStatus", viewportLabel);
+  const stage = $("worldStage");
+  if (stage) stage.dataset.viewport = viewportLabel;
 }
 
 function setWorldZoom(nextZoom, anchorX = null, anchorY = null) {
+  if (state.worldViewMode === "overview") return;
   const stage = $("worldStage");
   const rect = stage.getBoundingClientRect();
-  const oldZoom = state.worldZoom;
-  const next = Math.max(1, Math.min(5, nextZoom));
-  if (anchorX !== null && anchorY !== null && oldZoom > 0) {
-    const localX = anchorX - rect.left - rect.width / 2;
-    const localY = anchorY - rect.top - rect.height / 2;
-    const factor = next / oldZoom;
-    state.worldPanX = localX - (localX - state.worldPanX) * factor;
-    state.worldPanY = localY - (localY - state.worldPanY) * factor;
+  const square = Math.max(1, Math.min(rect.width, rect.height));
+  const geometry = ensureManualWorldGeometry();
+  const baseRadius = Number(state.worldBaseRadius || geometry.radius);
+  const requestedZoom = Math.max(0.25, Math.min(6, Number(nextZoom)));
+  const nextRadius = Math.max(
+    6,
+    Math.min(96, baseRadius / requestedZoom)
+  );
+  const effectiveZoom = baseRadius / nextRadius;
+
+  if (anchorX !== null && anchorY !== null) {
+    const centerPxX = rect.left + rect.width / 2;
+    const centerPxY = rect.top + rect.height / 2;
+    const nx = (Number(anchorX) - centerPxX) * 2 / square;
+    const ny = (Number(anchorY) - centerPxY) * 2 / square;
+    const worldAnchorX = geometry.center.x + nx * geometry.radius;
+    const worldAnchorY = geometry.center.y + ny * geometry.radius;
+    state.worldCenterX = worldAnchorX - nx * nextRadius;
+    state.worldCenterY = worldAnchorY - ny * nextRadius;
   }
-  state.worldZoom = next;
+
+  state.worldRadius = nextRadius;
+  state.worldZoom = effectiveZoom;
+  state.worldPanX = 0;
+  state.worldPanY = 0;
   applyWorldView();
+  renderWorldHotspots();
+  state.frameTick = null;
+  refreshWorldFrame(true);
 }
 
 function resetWorldView() {
   state.worldZoom = 1;
   state.worldPanX = 0;
   state.worldPanY = 0;
+  state.worldCenterX = null;
+  state.worldCenterY = null;
+  state.worldRadius = null;
+  state.worldBaseRadius = null;
+  state.worldViewManual = false;
   applyWorldView();
+  renderWorldHotspots();
+  state.frameTick = null;
+  refreshWorldFrame(true);
 }
 
 function installWorldModeControls() {
@@ -551,8 +683,7 @@ function installWorldControls() {
 
   viewport.addEventListener("pointerdown", (event) => {
     const middleMouse = event.pointerType === "mouse" && event.button === 1;
-    const canPan = state.worldZoom > 1.001 || document.fullscreenElement === stage;
-    if (!middleMouse && !canPan) return;
+    if (state.worldViewMode === "overview") return;
     if (event.pointerType === "mouse" && event.button !== 0 && !middleMouse) return;
     event.preventDefault();
     state.worldDragging = true;
@@ -573,13 +704,31 @@ function installWorldControls() {
     applyWorldView();
   });
 
-  const stopDrag = () => {
+  const stopDrag = (commit) => {
+    if (commit && state.worldDragging) {
+      const rect = stage.getBoundingClientRect();
+      const square = Math.max(1, Math.min(rect.width, rect.height));
+      const geometry = ensureManualWorldGeometry();
+      state.worldCenterX = geometry.center.x
+        - (state.worldPanX / square) * geometry.radius * 2;
+      state.worldCenterY = geometry.center.y
+        - (state.worldPanY / square) * geometry.radius * 2;
+      state.worldPanX = 0;
+      state.worldPanY = 0;
+      state.frameTick = null;
+      renderWorldHotspots();
+      refreshWorldFrame(true);
+    } else {
+      state.worldPanX = 0;
+      state.worldPanY = 0;
+    }
     state.worldDragging = false;
     state.worldDragStart = null;
     viewport.classList.remove("dragging");
+    applyWorldView();
   };
-  viewport.addEventListener("pointerup", stopDrag);
-  viewport.addEventListener("pointercancel", stopDrag);
+  viewport.addEventListener("pointerup", () => stopDrag(true));
+  viewport.addEventListener("pointercancel", () => stopDrag(false));
   viewport.addEventListener("dblclick", resetWorldView);
   applyWorldView();
 }
@@ -626,13 +775,40 @@ function productionDurationLabel(seconds) {
   return (s / 3600) + " hour" + (s === 3600 ? "" : "s");
 }
 
-function smoothSeries(samples, alpha = 0.24) {
+function aggregateRateSamples(samples, samplePeriodSeconds) {
+  if (!samples.length) return [];
+  const period = Math.max(1e-6, Number(samplePeriodSeconds || 0));
+  const binSize = Math.max(1, Math.ceil(1 / period));
+  const output = [];
+  for (let i = 0; i < samples.length; i += binSize) {
+    const chunk = samples.slice(i, i + binSize).map(Number);
+    output.push(
+      chunk.reduce((sum, value) => sum + value, 0) / Math.max(1, chunk.length)
+    );
+  }
+  return output;
+}
+
+function smoothSeries(samples, alpha = 0.32) {
   if (!samples.length) return [];
   const output = [samples[0]];
   for (let i = 1; i < samples.length; i += 1) {
     output.push(alpha * samples[i] + (1 - alpha) * output[i - 1]);
   }
   return output;
+}
+
+function stableProductionScale(key, values) {
+  const positive = values.filter((value) => Number.isFinite(value) && value > 0);
+  const candidate = positive.length ? Math.max(1, ...positive) * 1.12 : 1;
+  const previous = Number(state.productionChartScale[key] || 0);
+  const next = previous <= 0
+    ? candidate
+    : candidate > previous
+      ? candidate
+      : Math.max(candidate, previous * 0.92);
+  state.productionChartScale[key] = next;
+  return next;
 }
 
 function drawNativeProductionChart(canvasId, mode) {
@@ -655,15 +831,17 @@ function drawNativeProductionChart(canvasId, mode) {
   const padBottom = 25;
   const graphWidth = Math.max(1, width - padLeft - padRight);
   const graphHeight = Math.max(1, height - padTop - padBottom);
-  const preparedEntries = entries.map(([name, samples]) => [
-    name,
-    samples,
-    smoothSeries(samples),
-  ]);
-  const maxY = Math.max(
-    1,
-    ...preparedEntries.flatMap(([, , smoothed]) => smoothed)
-  ) * 1.08;
+  const samplePeriod = Number(
+    (state.production && state.production.sample_period_seconds) || 0
+  );
+  const preparedEntries = entries.map(([name, samples]) => {
+    const aggregated = aggregateRateSamples(samples, samplePeriod);
+    return [name, aggregated, smoothSeries(aggregated)];
+  });
+  const maxY = stableProductionScale(
+    state.productionPrecision + ":" + mode,
+    preparedEntries.flatMap(([, , smoothed]) => smoothed)
+  );
 
   ctx.strokeStyle = "rgba(255,255,255,.07)";
   ctx.lineWidth = 1;
@@ -2147,6 +2325,299 @@ function drawGenerationTrends() {
   });
 }
 
+function renderGameKnowledgeGraph() {
+  const summary = state.gameGraphSummary || {};
+  const graph = summary.frontier_dependency_graph || null;
+  const canvas = $("gameKnowledgeCanvas");
+  if (!canvas) return;
+  const { ctx, width, height } = prepareCanvas(canvas);
+  ctx.clearRect(0, 0, width, height);
+
+  const counts = [
+    ["receitas", summary.recipe_count || 0],
+    ["produtos", summary.product_count || 0],
+    ["tecnologias", summary.technology_count || 0],
+    ["máquinas", summary.machine_count || 0],
+    ["receitas ativas", summary.enabled_recipe_count || 0],
+    ["pesquisadas", summary.researched_technology_count || 0],
+  ];
+  const metrics = $("gameKnowledgeMetrics");
+  if (metrics) {
+    metrics.innerHTML = counts.map(([label, value]) =>
+      '<span><b>' + escapeHtml(value) + '</b>' + escapeHtml(label) + '</span>'
+    ).join("");
+  }
+
+  setClassText(
+    "gameKnowledgeBadge",
+    summary.connected ? "runtime canônico" : "indisponível",
+    summary.connected ? "badge good" : "badge warn"
+  );
+  setText(
+    "gameKnowledgeTitle",
+    summary.frontier_target_item
+      ? "Dependências · " + humanizePrototype(summary.frontier_target_item)
+      : "Receitas e tecnologias do runtime"
+  );
+
+  if (!graph || !Array.isArray(graph.nodes) || !graph.nodes.length) {
+    ctx.fillStyle = "#78838d";
+    ctx.font = '10px "SFMono-Regular", Consolas, monospace';
+    ctx.fillText(
+      summary.connected
+        ? "Fronteira atual sem alvo produtivo mapeado."
+        : "Aguardando snapshot dos prototypes do Factorio.",
+      14,
+      28
+    );
+    setText(
+      "gameKnowledgeDetail",
+      summary.connected
+        ? "O catálogo canônico está carregado; o grafo muda com a fronteira de engenharia."
+        : String(summary.error || "runtime graph unavailable")
+    );
+    return;
+  }
+
+  const nodes = graph.nodes;
+  const edges = Array.isArray(graph.edges) ? graph.edges : [];
+  const byId = new Map(nodes.map((node) => [String(node.id), node]));
+  const target = String(graph.target || "");
+  const depths = new Map([[target, 0]]);
+  let changed = true;
+  for (let pass = 0; pass < nodes.length + 2 && changed; pass += 1) {
+    changed = false;
+    for (const edge of edges) {
+      const td = depths.get(String(edge.target));
+      if (td === undefined) continue;
+      const source = String(edge.source);
+      const next = td + 1;
+      if (depths.get(source) === undefined || next > depths.get(source)) {
+        depths.set(source, next);
+        changed = true;
+      }
+    }
+  }
+  const maxDepth = Math.max(0, ...Array.from(depths.values()));
+  const groups = new Map();
+  for (const node of nodes) {
+    const depth = depths.get(String(node.id)) ?? maxDepth + 1;
+    if (!groups.has(depth)) groups.set(depth, []);
+    groups.get(depth).push(node);
+  }
+
+  const padX = 36;
+  const padY = 24;
+  const positions = new Map();
+  for (const [depth, rows] of groups.entries()) {
+    rows.sort((a, b) => String(a.id).localeCompare(String(b.id)));
+    const x = maxDepth
+      ? padX + ((maxDepth - Math.min(depth, maxDepth)) / maxDepth)
+        * (width - padX * 2)
+      : width / 2;
+    rows.forEach((node, index) => {
+      const y = rows.length === 1
+        ? height / 2
+        : padY + (index / Math.max(1, rows.length - 1)) * (height - padY * 2);
+      positions.set(String(node.id), { x, y });
+    });
+  }
+
+  ctx.lineWidth = 1.4;
+  ctx.strokeStyle = "rgba(240,163,58,.55)";
+  for (const edge of edges) {
+    const a = positions.get(String(edge.source));
+    const b = positions.get(String(edge.target));
+    if (!a || !b) continue;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+  }
+
+  for (const node of nodes) {
+    const pos = positions.get(String(node.id));
+    if (!pos) continue;
+    const raw = node.kind === "raw_or_unresolved";
+    ctx.fillStyle = raw ? "#6ab5f7" : node.enabled ? "#64d98b" : "#f0a33a";
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, 5, 0, Math.PI * 2);
+    ctx.fill();
+
+    const label = humanizePrototype(node.id);
+    ctx.fillStyle = "#cbd1d5";
+    ctx.font = '8px "SFMono-Regular", Consolas, monospace';
+    ctx.textAlign = pos.x > width * 0.74 ? "right" : "left";
+    ctx.fillText(
+      label.length > 25 ? label.slice(0, 24) + "…" : label,
+      pos.x + (ctx.textAlign === "left" ? 8 : -8),
+      pos.y + 3
+    );
+  }
+  ctx.textAlign = "left";
+
+  const unlocks = nodes.flatMap((node) =>
+    Array.isArray(node.unlock_technologies) ? node.unlock_technologies : []
+  );
+  setText(
+    "gameKnowledgeDetail",
+    nodes.length + " nós · " + edges.length + " dependências"
+      + (unlocks.length
+        ? " · tecnologias relevantes: " + Array.from(new Set(unlocks)).join(", ")
+        : "")
+      + " · fatos do jogo, não inferências aprendidas."
+  );
+}
+
+
+function renderFactoryTopology() {
+  const graph = state.factoryGraph || {};
+  const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+  const edges = Array.isArray(graph.edges) ? graph.edges : [];
+  const metrics = graph.metrics || {};
+  const canvas = $("factoryTopologyCanvas");
+  if (!canvas) return;
+  const { ctx, width, height } = prepareCanvas(canvas);
+  ctx.clearRect(0, 0, width, height);
+
+  if (!nodes.length) {
+    ctx.fillStyle = "#78838d";
+    ctx.font = '10px "SFMono-Regular", Consolas, monospace';
+    ctx.fillText("Nenhuma entidade física observada.", 14, 28);
+    setClassText("topologyBadge", "sem grafo", "badge neutral");
+    setText("topologyDetail", "Aguardando entidades físicas no mundo.");
+    const target = $("topologyMetrics");
+    if (target) target.innerHTML = "";
+    return;
+  }
+
+  const xs = nodes.map((node) => Number(node.x)).filter(Number.isFinite);
+  const ys = nodes.map((node) => Number(node.y)).filter(Number.isFinite);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const pad = 30;
+  const spanX = Math.max(4, maxX - minX);
+  const spanY = Math.max(4, maxY - minY);
+  const scale = Math.min(
+    (width - pad * 2) / spanX,
+    (height - pad * 2) / spanY
+  );
+  const project = (node) => ({
+    x: pad + (Number(node.x) - minX) * scale
+      + (width - pad * 2 - spanX * scale) / 2,
+    y: pad + (Number(node.y) - minY) * scale
+      + (height - pad * 2 - spanY * scale) / 2,
+  });
+  const byId = new Map(nodes.map((node) => [String(node.id), node]));
+
+  const relationColors = {
+    belt_flow: "#f0a33a",
+    pickup: "#dfb65b",
+    drop: "#f1c76d",
+    material_output: "#6ab5f7",
+    power_backbone: "#64d98b",
+    power_supply: "#64d98b",
+    fluid_link: "#63d7d4",
+  };
+  for (const edge of edges) {
+    const source = byId.get(String(edge.source));
+    const target = byId.get(String(edge.target));
+    if (!source || !target) continue;
+    const a = project(source);
+    const b = project(target);
+    ctx.strokeStyle = relationColors[edge.relation] || "#6f7980";
+    ctx.globalAlpha = String(edge.relation).startsWith("power_") ? 0.38 : 0.78;
+    ctx.lineWidth = edge.relation === "belt_flow" ? 2.1 : 1.4;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+
+  const categoryColors = {
+    extraction: "#6ab5f7",
+    transport: "#f0a33a",
+    transfer: "#e3be69",
+    processing: "#b993f6",
+    buffer: "#aab3b9",
+    power: "#64d98b",
+    fluid_transport: "#63d7d4",
+    energy: "#ef6b73",
+    research: "#63d7d4",
+    agent: "#ffffff",
+    other: "#69737c",
+  };
+  for (const node of nodes) {
+    const point = project(node);
+    ctx.fillStyle = categoryColors[node.category] || categoryColors.other;
+    ctx.beginPath();
+    ctx.arc(
+      point.x,
+      point.y,
+      node.category === "transport" ? 2.4 : 4.2,
+      0,
+      Math.PI * 2
+    );
+    ctx.fill();
+  }
+
+  const producers = Number(metrics.producer_count || 0);
+  const processed = Number(metrics.producers_reaching_processor || 0);
+  const buffered = Number(metrics.producers_reaching_buffer || 0);
+  const coverage = Number(metrics.physical_processing_coverage || 0);
+  const fuelStarved = Number(metrics.fuel_starved_entities || 0);
+  const powerStarved = Number(metrics.power_starved_entities || 0);
+  const unhealthy = fuelStarved > 0
+    || powerStarved > 0
+    || (producers > 0 && coverage < 0.5);
+  setClassText(
+    "topologyBadge",
+    producers
+      ? formatNumber(coverage * 100, 0) + "% processado"
+        + (fuelStarved ? " · " + fuelStarved + " sem combustível" : "")
+      : "sem produtores",
+    unhealthy
+      ? "badge bad"
+      : producers && coverage >= 0.8
+        ? "badge good"
+        : producers
+          ? "badge warn"
+          : "badge neutral"
+  );
+  const target = $("topologyMetrics");
+  if (target) {
+    const rows = [
+      ["nós", metrics.node_count || 0],
+      ["arestas", metrics.edge_count || 0],
+      ["produtores", producers],
+      ["→ processo", processed],
+      ["→ buffer", buffered],
+      ["isolados", metrics.isolated_producers || 0],
+      ["sem combustível", fuelStarved],
+      ["sem energia", powerStarved],
+      ["vapor", metrics.steam_path_live ? "ok" : "--"],
+    ];
+    target.innerHTML = rows.map(([label, value]) =>
+      '<span><b>' + escapeHtml(value) + '</b>' + escapeHtml(label) + '</span>'
+    ).join("");
+  }
+  setText(
+    "topologyDetail",
+    producers
+      ? processed + "/" + producers
+        + " produtores possuem caminho físico inferido até processamento; "
+        + buffered + "/" + producers + " chegam a buffers"
+        + (fuelStarved ? " · " + fuelStarved + " entidades sem combustível" : "")
+        + (powerStarved ? " · " + powerStarved + " entidades sem energia" : "")
+        + "."
+      : "A topologia ainda não contém cadeia de extração."
+  );
+}
+
+
 function renderProductionDag() {
   const plan = state.productionPlan || {};
   const dag = plan.dag || null;
@@ -2155,7 +2626,10 @@ function renderProductionDag() {
       "productionDagTarget",
       plan.goal_id ? String(plan.goal_id) : "Waiting for frontier"
     );
-    setText("productionDagSource", String(plan.source || "--"));
+    setText(
+      "productionDagSource",
+      [plan.source, plan.catalog_source].filter(Boolean).join(" · ") || "--"
+    );
     const nodes = $("productionDagNodes");
     if (nodes) {
       nodes.innerHTML = '<span class="placeholder-row">No craftable DAG for this frontier.</span>';
@@ -2172,7 +2646,10 @@ function renderProductionDag() {
   );
   setText(
     "productionDagSource",
-    String(plan.source || "planner") + " · Factorio "
+    String(plan.source || "planner")
+      + " · "
+      + String(plan.catalog_source || "static catalog")
+      + " · Factorio "
       + String(plan.factorio_data_version || "")
   );
   const nodes = Array.isArray(dag.nodes) ? dag.nodes : [];
@@ -2460,6 +2937,8 @@ function renderModelMatrix() {
 
 function renderResearchAnalytics() {
   drawGenerationTrends();
+  renderGameKnowledgeGraph();
+  renderFactoryTopology();
   renderProductionDag();
   renderAutonomy();
   renderWipHealth();
@@ -3088,6 +3567,8 @@ function applyPayload(payload) {
   if (payload.production_plan) state.productionPlan = payload.production_plan;
   if (payload.autonomy) state.autonomy = payload.autonomy;
   if (payload.resource_overview) state.resourceOverview = payload.resource_overview;
+  if (payload.factory_graph) state.factoryGraph = payload.factory_graph;
+  if (payload.game_graph_summary) state.gameGraphSummary = payload.game_graph_summary;
   if (payload.evolution) state.evolution = payload.evolution;
   if (payload.knowledge) state.knowledge = payload.knowledge;
   if (payload.datasets) state.datasets = payload.datasets;
@@ -3134,6 +3615,8 @@ async function loadInitialState() {
     "/api/production-plan",
     "/api/autonomy",
     "/api/resource-overview",
+    "/api/factory-graph",
+    "/api/game-graph/summary",
     "/api/evolution",
     "/api/knowledge",
     "/api/datasets",
@@ -3151,9 +3634,11 @@ async function loadInitialState() {
     production_plan: payloads[7],
     autonomy: payloads[8],
     resource_overview: payloads[9],
-    evolution: payloads[10],
-    knowledge: payloads[11],
-    datasets: payloads[12],
+    factory_graph: payloads[10],
+    game_graph_summary: payloads[11],
+    evolution: payloads[12],
+    knowledge: payloads[13],
+    datasets: payloads[14],
   });
 }
 

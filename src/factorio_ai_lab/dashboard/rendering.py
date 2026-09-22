@@ -206,9 +206,27 @@ class WorldFrameRenderer:
             for item in resource_overview.get("cells", [])
             if isinstance(item, dict)
         )
+        viewport = map_context.get("viewport", {})
+        viewport_center = (
+            viewport.get("center", {})
+            if isinstance(viewport, dict)
+            else {}
+        )
+        viewport_key = (
+            viewport_center.get("x")
+            if isinstance(viewport_center, dict)
+            else None,
+            viewport_center.get("y")
+            if isinstance(viewport_center, dict)
+            else None,
+            viewport.get("radius")
+            if isinstance(viewport, dict)
+            else None,
+        )
         return (
             mode,
             world.get("tick"),
+            viewport_key,
             entities,
             len(map_context.get("resources", [])),
             int(map_context.get("water_tile_count", 0) or 0),
@@ -453,20 +471,81 @@ class WorldFrameRenderer:
         self,
         name: str,
         tile_pixels: float,
+        *,
+        direction: int = 0,
     ) -> Image.Image | None:
-        cache_key = ("static", name, round(tile_pixels, 1))
+        direction = _cardinal_direction(direction)
+        cache_key = (
+            "static",
+            name,
+            direction,
+            round(tile_pixels, 1),
+        )
         if cache_key in self._sprite_cache:
             return self._sprite_cache[cache_key]
 
-        candidates = {
+        # Single-frame entities can use the full official texture directly.
+        direct = {
             "wooden-chest": ENTITY_DIR / "wooden-chest" / "wooden-chest.png",
             "stone-furnace": ENTITY_DIR / "stone-furnace" / "stone-furnace.png",
         }
-        path = candidates.get(name)
+        path = direct.get(name)
+        crop_box: tuple[int, int, int, int] | None = None
+
+        # These base-game sheets have stable frame dimensions in Factorio
+        # 2.0.73. Rendering one authentic animation frame is substantially
+        # more legible than substituting an inventory icon.
+        sheet_specs: dict[str, tuple[Path, int, int]] = {
+            "electric-mining-drill": (
+                ENTITY_DIR
+                / "electric-mining-drill"
+                / "electric-mining-drill.png",
+                162,
+                156,
+            ),
+            "assembling-machine-1": (
+                ENTITY_DIR
+                / "assembling-machine-1"
+                / "assembling-machine-1.png",
+                214,
+                226,
+            ),
+            "lab": (
+                ENTITY_DIR / "lab" / "lab.png",
+                194,
+                174,
+            ),
+            "small-electric-pole": (
+                ENTITY_DIR
+                / "small-electric-pole"
+                / "small-electric-pole.png",
+                72,
+                220,
+            ),
+        }
+        if path is None and name in sheet_specs:
+            path, frame_width, frame_height = sheet_specs[name]
+            crop_box = (0, 0, frame_width, frame_height)
+
+        if path is None and name == "steam-engine":
+            horizontal = direction in {4, 12}
+            path = (
+                ENTITY_DIR
+                / "steam-engine"
+                / ("steam-engine-H.png" if horizontal else "steam-engine-V.png")
+            )
+            frame_width, frame_height = (
+                (352, 257) if horizontal else (165, 391)
+            )
+            crop_box = (0, 0, frame_width, frame_height)
+
         if path is None:
             return None
+
         try:
             sprite = Image.open(path).convert("RGBA")
+            if crop_box is not None:
+                sprite = sprite.crop(crop_box)
             sprite = self._resize_factorio_sprite(sprite, tile_pixels)
         except OSError:
             return None
@@ -479,6 +558,23 @@ class WorldFrameRenderer:
         map_context: dict[str, Any],
         max_radius: float,
     ) -> tuple[tuple[float, float], float]:
+        viewport = map_context.get("viewport")
+        if isinstance(viewport, dict):
+            center_raw = viewport.get("center")
+            try:
+                if isinstance(center_raw, dict):
+                    center = (
+                        float(center_raw["x"]),
+                        float(center_raw["y"]),
+                    )
+                    radius = min(
+                        96.0,
+                        max(6.0, float(viewport.get("radius", max_radius))),
+                    )
+                    return center, radius
+            except (KeyError, TypeError, ValueError):
+                pass
+
         built_positions = [
             pos
             for item in entities
@@ -1107,7 +1203,11 @@ class WorldFrameRenderer:
             elif name == "transport-belt":
                 sprite = self._belt_sprite(direction, tick, tile_pixels)
             else:
-                sprite = self._static_world_sprite(name, tile_pixels)
+                sprite = self._static_world_sprite(
+                    name,
+                    tile_pixels,
+                    direction=direction,
+                )
 
             if sprite is None:
                 size = max(22, round(tile_pixels * 1.15))

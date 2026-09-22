@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Factorio AI Lab</title>
-  <link rel="stylesheet" href="/static/styles.css?v=0.10.0">
+  <link rel="stylesheet" href="/static/styles.css?v=0.10.1">
 </head>
 <body>
   <header class="topbar">
@@ -339,13 +339,14 @@
           </div>
           <div class="world-hud">
             <span id="factorioStatus" class="hud-chip">Factorio --</span>
-            <span id="frameSource" class="hud-chip">live coordinates · live Factorio terrain + official assets</span>
+          <span id="viewportStatus" class="hud-chip">viewport --</span>
+            <span id="frameSource" class="hud-chip">coordenadas reais · terreno e assets oficiais</span>
           </div>
           <div id="resourceLegend" class="resource-legend" aria-live="polite"></div>
           <div class="world-provenance">
             Entities/resources/terrain: live Factorio state · visual textures: local official game assets
           </div>
-          <div class="world-navigation-hint">scroll page normally · Ctrl/Cmd+wheel to zoom · drag only when zoomed · double-click to fit</div>
+          <div class="world-navigation-hint">arraste para navegar no mundo · Ctrl/Cmd+roda para zoom · duplo clique recentraliza</div>
           <div class="world-controls" aria-label="World map controls">
             <button id="zoomOut" type="button" title="Zoom out">−</button>
             <button id="zoomReset" type="button" title="Reset view">1×</button>
@@ -493,6 +494,36 @@
           <span><i class="legend-manual"></i> manual logistics debt</span>
           <span><i class="legend-failure"></i> failed stages</span>
         </div>
+      </article>
+
+      <article class="card analytics-card game-knowledge-card">
+        <div class="card-head compact">
+          <div>
+            <span class="label">GRAFO CANÔNICO DO JOGO</span>
+            <h2 id="gameKnowledgeTitle">Receitas e tecnologias do runtime</h2>
+          </div>
+          <span id="gameKnowledgeBadge" class="badge neutral">carregando</span>
+        </div>
+        <div id="gameKnowledgeMetrics" class="topology-metrics"></div>
+        <canvas id="gameKnowledgeCanvas" aria-label="Runtime Factorio dependency graph"></canvas>
+        <small id="gameKnowledgeDetail" class="cockpit-note topology-note">
+          Fatos vêm dos prototypes do Factorio; resultados experimentais ficam em memória separada.
+        </small>
+      </article>
+
+      <article class="card analytics-card topology-card">
+        <div class="card-head compact">
+          <div>
+            <span class="label">TOPOLOGIA FÍSICA DA FÁBRICA</span>
+            <h2>Fluxo material e energia</h2>
+          </div>
+          <span id="topologyBadge" class="badge neutral">--</span>
+        </div>
+        <canvas id="factoryTopologyCanvas" aria-label="Factory topology graph"></canvas>
+        <div id="topologyMetrics" class="topology-metrics"></div>
+        <small id="topologyDetail" class="cockpit-note topology-note">
+          Arestas são inferidas da posição, direção e função das entidades físicas.
+        </small>
       </article>
 
       <article class="card analytics-card dag-card">
@@ -672,6 +703,6 @@
     </details>
   </main>
 
-  <script src="/static/app.js?v=0.10.2"></script>
+  <script src="/static/app.js?v=0.10.3"></script>
 </body>
 </html>

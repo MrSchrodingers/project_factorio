@@ -2543,3 +2543,62 @@ small { line-height: 1.35; }
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+.topology-card canvas {
+  width: 100%;
+  height: 300px;
+  display: block;
+  background:
+    linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px),
+    #0c0f11;
+  background-size: 28px 28px;
+  border-bottom: 1px solid var(--line);
+}
+
+.topology-metrics {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0,1fr));
+  gap: 6px;
+  padding: 10px 12px 0;
+}
+
+.topology-metrics span {
+  min-width: 0;
+  padding: 7px 6px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: rgba(255,255,255,.015);
+  color: var(--muted);
+  font: 8px/1.25 "SFMono-Regular", Consolas, monospace;
+  text-align: center;
+}
+
+.topology-metrics b {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--text);
+  font-size: 11px;
+}
+
+.topology-note {
+  padding: 0 12px 12px;
+}
+
+@media (max-width: 760px) {
+  .topology-metrics {
+    grid-template-columns: repeat(3, minmax(0,1fr));
+  }
+}
+
+.game-knowledge-card canvas {
+  width: 100%;
+  height: 300px;
+  display: block;
+  margin-top: 10px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background:
+    radial-gradient(circle at 50% 50%, rgba(240,163,58,.035), transparent 42%),
+    #0c0f11;
+}

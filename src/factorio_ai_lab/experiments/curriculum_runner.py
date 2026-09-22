@@ -19,6 +19,7 @@ from factorio_ai_lab.integrations.fle import (
 )
 from factorio_ai_lab.learning.bandit import UCB1Bandit
 from factorio_ai_lab.learning.evolution import apply_advice, challenger_genome
+from factorio_ai_lab.learning.factory_graph import build_factory_graph
 from factorio_ai_lab.learning.knowledge import verify_generated_knowledge
 from factorio_ai_lab.learning.spatial_policy import SpatialPolicy, route_cost
 from factorio_ai_lab.learning.survival import (
@@ -3842,6 +3843,7 @@ def finalize_evolution_selection(
     journal: ResearchJournal,
     *,
     achieved: set[str],
+    physical_graph: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     failed_stages = sum(
         1
@@ -3852,6 +3854,7 @@ def finalize_evolution_selection(
         metrics=journal.state.get("metrics", {}),
         achieved=achieved,
         resource_accounting=journal.state.get("resource_accounting", {}),
+        physical_graph=physical_graph,
         failed_stages=failed_stages,
     )
 
@@ -4265,9 +4268,29 @@ def run_curriculum(
             "scope": "entire_lab_generation",
         }
 
+        physical_graph: dict[str, Any] | None = None
+        try:
+            physical_entities = env.unwrapped.instance.namespace._save_entity_state(
+                distance=500,
+                player_entities=True,
+                resource_entities=False,
+                items_on_ground=False,
+                encode=False,
+                compress=False,
+            )
+            physical_graph = build_factory_graph(physical_entities)
+            journal.state["metrics"]["physical_factory_graph"] = dict(
+                physical_graph.get("metrics", {})
+            )
+        except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+            journal.state["metrics"]["physical_factory_graph_error"] = (
+                f"{type(exc).__name__}: {exc}"
+            )
+
         selection = finalize_evolution_selection(
             journal,
             achieved=achieved,
+            physical_graph=physical_graph,
         )
         final_status = (
             "generation_complete"

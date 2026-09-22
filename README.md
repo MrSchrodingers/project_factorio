@@ -61,13 +61,14 @@ Por isso o primeiro modelo sugerido é **Qwen3-4B GGUF Q4_K_M via llama.cpp**. N
 9B v2 pode entrar como benchmark secundário quantizado; modelos MoE de ~30B ficam fora do
 baseline de RAM.
 
-## Estado do marco v0.9.0
+## Estado do marco v0.11.0
 
-A v0.9 transforma o laboratório de um currículo observável em um sistema de pesquisa
-geracional, competitivo e treinável.
+A v0.11 consolida o laboratório como sistema de pesquisa geracional orientado por evidência
+física, com conhecimento canônico extraído do runtime do Factorio e gates estruturais de
+maturidade.
 
 O runtime continua usando Factorio 2.0.73 + FLE, Qwen3-4B local e execução transacional, mas
-agora existem quatro loops de aprendizado separados:
+agora existem seis camadas de aprendizado e validação separadas:
 
 1. evolução de engenharia — champion/challenger com genome estrutural, survival gates e rollback;
 2. modelo de mundo — ESN e GRU PyTorch treinados sobre telemetria temporal e avaliados por
@@ -75,7 +76,11 @@ agora existem quatro loops de aprendizado separados:
 3. política espacial — MLP e Transformer/attention aprendem de demonstrações A* e competem por
    rollout/custo relativo ao A*;
 4. conhecimento generativo — Qwen sintetiza hipóteses/lessons, mas um verifier determinístico
-   rejeita números e taxas sem suporte nos fatos medidos.
+   rejeita números e taxas sem suporte nos fatos medidos;
+5. conhecimento canônico do jogo — receitas, tecnologias, máquinas e dependências são extraídas
+   dos prototypes do Factorio 2.0.73 e usadas pelo Production DAG quando o runtime está disponível;
+6. topologia física — extração, belts, inserters, processamento, buffers, energia e fluidos formam
+   um grafo observado, com starvation e cobertura até processamento entrando nos survival gates.
 
 O currículo lab-play possui 16 estágios, avançando de iron mining até electronic circuits,
 logistic science e otimização destrutiva/rebuild. Green science usa um DAG rate-balanced de
@@ -108,9 +113,12 @@ e melhoria em dimensões comparáveis.
 
 ### Control plane
 
-O dashboard v0.9 inclui Generation Health, Champion vs Challenger, Generation Report,
-tendências geracionais, Production DAG, WIP/safety stock, starvation, matriz de modelos,
-qualidade do knowledge generativo, Production/Consumption nativo e fases explícitas do loop.
+O dashboard v0.11 inclui Generation Health, Champion vs Challenger, Generation Report,
+tendências geracionais, Production DAG, grafo canônico do jogo, topologia física viva,
+WIP/safety stock, starvation, matriz de modelos e Production/Consumption nativo. O mapa usa
+viewport em coordenadas reais do mundo; pan/zoom requisitam uma nova janela ao Factorio em vez
+de apenas transformar uma imagem fixa. Séries de produção discretas são agregadas antes do plot
+para reduzir aliasing visual de buckets sub-segundo.
 
 A arquitetura de ML/LLM está detalhada em docs/ML_ARCHITECTURE.md e a seleção evolutiva em
 docs/EVOLUTION.md.

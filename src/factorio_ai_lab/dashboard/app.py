@@ -37,7 +37,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Factorio AI Lab Dashboard",
-    version="0.9.0",
+    version="0.11.0",
     lifespan=lifespan,
 )
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -86,6 +86,12 @@ async def api_production(precision: str = "1m") -> dict[str, Any]:
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/factory-graph")
+async def api_factory_graph() -> dict[str, Any]:
+    world = await asyncio.to_thread(state.factorio.snapshot)
+    return state.factory_graph_data(world=world)
 
 
 @app.get("/api/autonomy")
@@ -137,6 +143,16 @@ async def api_resource_overview() -> dict[str, Any]:
     return await asyncio.to_thread(state.factorio.resource_overview)
 
 
+@app.get("/api/game-graph")
+async def api_game_graph() -> dict[str, Any]:
+    return await asyncio.to_thread(state.factorio.game_knowledge)
+
+
+@app.get("/api/game-graph/summary")
+async def api_game_graph_summary() -> dict[str, Any]:
+    return await asyncio.to_thread(state.game_knowledge_summary_data)
+
+
 @app.get("/api/knowledge")
 def api_knowledge() -> dict[str, Any]:
     return state.knowledge_data()
@@ -168,11 +184,27 @@ def api_official_icon(entity_name: str) -> FileResponse:
 
 
 @app.get("/api/world/frame.png")
-async def api_world_frame(mode: str = "game") -> Response:
+async def api_world_frame(
+    mode: str = "game",
+    cx: float | None = None,
+    cy: float | None = None,
+    radius: float | None = None,
+) -> Response:
     if mode not in {"game", "overview", "tactical"}:
         raise HTTPException(400, "mode must be game, overview or tactical")
+    supplied = [cx is not None, cy is not None, radius is not None]
+    if any(supplied) and not all(supplied):
+        raise HTTPException(400, "cx, cy and radius must be supplied together")
+    if radius is not None and not 6.0 <= radius <= 96.0:
+        raise HTTPException(400, "radius must be in [6, 96]")
     try:
-        png = await asyncio.to_thread(state.render_world_frame, mode)
+        png = await asyncio.to_thread(
+            state.render_world_frame,
+            mode,
+            center_x=cx,
+            center_y=cy,
+            radius=radius,
+        )
     except Exception as exc:
         raise HTTPException(503, f"world renderer unavailable: {exc}") from exc
     return Response(
