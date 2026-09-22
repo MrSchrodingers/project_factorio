@@ -117,6 +117,12 @@ class FitnessVector:
         )
 
 
+_NEW_METRIC_REASON = (
+    "incumbent was never measured for it; new metric, floor is set by the "
+    "first challenger promoted on commensurate evidence"
+)
+
+
 @dataclass(frozen=True)
 class PromotionDecision:
     promoted: bool
@@ -124,6 +130,8 @@ class PromotionDecision:
     regressions: tuple[str, ...]
     improvements: tuple[str, ...]
     retention_ratio: float
+    compared_metrics: tuple[str, ...] = ()
+    incommensurable_metrics: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -132,6 +140,8 @@ class PromotionDecision:
             "regressions": list(self.regressions),
             "improvements": list(self.improvements),
             "retention_ratio": self.retention_ratio,
+            "compared_metrics": list(self.compared_metrics),
+            "incommensurable_metrics": list(self.incommensurable_metrics),
         }
 
 
@@ -149,6 +159,11 @@ def compare_challenger(
     an established capability, regress an established production rate below the
     configured retention floor, add external dependencies, or add failures.
     Only survivors are eligible for promotion.
+
+    Constraints on optional metrics are only enforced against an incumbent that
+    was measured by the same instrument; see ``_commensurate`` below. The
+    decision reports which metrics carried the comparison and which were left
+    out as incommensurable.
     """
     if not 0 < retention_ratio <= 1:
         raise ValueError("retention_ratio must be in (0, 1]")
@@ -156,13 +171,57 @@ def compare_challenger(
         raise ValueError("throughput_improvement_ratio must be >= 1")
 
     regressions: list[str] = []
+    compared_metrics: list[str] = []
+    incommensurable_metrics: list[str] = []
+
+    def _mark_compared(metric: str) -> None:
+        if metric not in compared_metrics:
+            compared_metrics.append(metric)
+
+    def _mark_incommensurable(metric: str, reason: str) -> None:
+        entry = f"{metric}: {reason}"
+        if entry not in incommensurable_metrics:
+            incommensurable_metrics.append(entry)
+
+    def _commensurate(metric: str, challenger_value: Any) -> bool:
+        """
+        Report whether `metric` may carry the incumbent/challenger comparison.
+
+        Optional metrics entered the fitness vector generation by generation,
+        so an incumbent promoted before a metric existed stores None for it.
+        Rejecting a challenger on such a metric enforces a rule the incumbent
+        itself was never measured by, which makes the incumbent unbeatable
+        instead of merely hard to beat. A metric therefore participates in the
+        comparison, as rejection ground or as credit, only when both sides were
+        measured by the same instrument. When the incumbent lacks it the metric
+        is reported as incommensurable and no verdict is drawn from it; the
+        floor is established by the first challenger promoted on commensurate
+        evidence, because the promoted fitness vector is stored whole and
+        carries the new metric into the next comparison.
+        """
+        if champion is None:
+            # No incumbent: the absolute survival floors below decide the first
+            # champion and have nothing to be commensurate with.
+            return challenger_value is not None
+        if challenger_value is None:
+            _mark_incommensurable(metric, "challenger did not measure it")
+            return False
+        if getattr(champion, metric) is None:
+            _mark_incommensurable(metric, _NEW_METRIC_REASON)
+            return False
+        _mark_compared(metric)
+        return True
+
     processing_capability = bool(
         {"iron_backbone", "copper_mining", "copper_smelting"}
         & set(challenger.capabilities)
     )
     if (
         processing_capability
-        and challenger.physical_processing_coverage is not None
+        and _commensurate(
+            "physical_processing_coverage",
+            challenger.physical_processing_coverage,
+        )
         and challenger.physical_processing_coverage < 0.50
     ):
         regressions.append(
@@ -171,7 +230,7 @@ def compare_challenger(
         )
     if (
         "coal_mining" in challenger.capabilities
-        and challenger.fuel_starved_entities is not None
+        and _commensurate("fuel_starved_entities", challenger.fuel_starved_entities)
         and challenger.fuel_starved_entities > 0
     ):
         regressions.append(
@@ -180,7 +239,7 @@ def compare_challenger(
         )
     if (
         "steam_power" in challenger.capabilities
-        and challenger.power_starved_entities is not None
+        and _commensurate("power_starved_entities", challenger.power_starved_entities)
         and challenger.power_starved_entities > 0
     ):
         regressions.append(
@@ -215,6 +274,12 @@ def compare_challenger(
         )
 
     improvements: list[str] = []
+
+    # Present on every fitness vector, so always commensurate.
+    _mark_compared("capabilities")
+    _mark_compared("rates_per_s")
+    _mark_compared("external_dependencies")
+    _mark_compared("failures")
 
     lost_capabilities = sorted(champion.capabilities - challenger.capabilities)
     if lost_capabilities:
@@ -288,8 +353,7 @@ def compare_challenger(
     improvements.extend(rate_improvements)
 
     if (
-        champion.route_cost is not None
-        and challenger.route_cost is not None
+        _commensurate("route_cost", challenger.route_cost)
         and challenger.route_cost + 1e-9 < champion.route_cost
     ):
         improvements.append(
@@ -298,8 +362,7 @@ def compare_challenger(
         )
 
     if (
-        champion.route_turns is not None
-        and challenger.route_turns is not None
+        _commensurate("route_turns", challenger.route_turns)
         and challenger.route_turns < champion.route_turns
     ):
         improvements.append(
@@ -307,10 +370,7 @@ def compare_challenger(
             f"{challenger.route_turns}"
         )
 
-    if (
-        champion.manual_logistics_calls is not None
-        and challenger.manual_logistics_calls is not None
-    ):
+    if _commensurate("manual_logistics_calls", challenger.manual_logistics_calls):
         if challenger.manual_logistics_calls > champion.manual_logistics_calls:
             regressions.append(
                 "manual logistics increased "
@@ -324,10 +384,7 @@ def compare_challenger(
                 f"{challenger.manual_logistics_calls}"
             )
 
-    if (
-        champion.autonomy_score is not None
-        and challenger.autonomy_score is not None
-    ):
+    if _commensurate("autonomy_score", challenger.autonomy_score):
         if challenger.autonomy_score + 1e-12 < champion.autonomy_score:
             regressions.append(
                 "autonomy score regressed "
@@ -341,9 +398,9 @@ def compare_challenger(
                 f"{challenger.autonomy_score:.3f}"
             )
 
-    if (
-        champion.physical_processing_coverage is not None
-        and challenger.physical_processing_coverage is not None
+    if _commensurate(
+        "physical_processing_coverage",
+        challenger.physical_processing_coverage,
     ):
         if (
             challenger.physical_processing_coverage + 1e-12
@@ -364,24 +421,27 @@ def compare_challenger(
                 f"{challenger.physical_processing_coverage:.1%}"
             )
 
-    for label, incumbent_value, challenger_value in (
+    for label, metric, incumbent_value, challenger_value in (
         (
             "isolated producers",
+            "isolated_producers",
             champion.isolated_producers,
             challenger.isolated_producers,
         ),
         (
             "fuel-starved entities",
+            "fuel_starved_entities",
             champion.fuel_starved_entities,
             challenger.fuel_starved_entities,
         ),
         (
             "power-starved entities",
+            "power_starved_entities",
             champion.power_starved_entities,
             challenger.power_starved_entities,
         ),
     ):
-        if incumbent_value is None or challenger_value is None:
+        if not _commensurate(metric, challenger_value):
             continue
         if challenger_value > incumbent_value:
             regressions.append(
@@ -392,16 +452,20 @@ def compare_challenger(
                 f"{label} reduced {incumbent_value}→{challenger_value}"
             )
 
-    if (
-        champion.closed_loop_autonomy is True
-        and challenger.closed_loop_autonomy is not True
-    ):
-        regressions.append("closed-loop autonomy was lost")
-    elif (
-        champion.closed_loop_autonomy is not True
-        and challenger.closed_loop_autonomy is True
-    ):
-        improvements.append("closed-loop autonomy established")
+    # Closed-loop autonomy keeps the reading already applied to production
+    # rates: not reported by the challenger means not demonstrated, so an
+    # incumbent that demonstrated it is not overtaken by a silent challenger.
+    # An incumbent that was never measured for it stays incommensurable.
+    if champion.closed_loop_autonomy is None:
+        _mark_incommensurable("closed_loop_autonomy", _NEW_METRIC_REASON)
+    elif champion.closed_loop_autonomy is True:
+        _mark_compared("closed_loop_autonomy")
+        if challenger.closed_loop_autonomy is not True:
+            regressions.append("closed-loop autonomy was lost")
+    else:
+        _mark_compared("closed_loop_autonomy")
+        if challenger.closed_loop_autonomy is True:
+            improvements.append("closed-loop autonomy established")
 
     if regressions:
         return PromotionDecision(
@@ -410,6 +474,8 @@ def compare_challenger(
             regressions=tuple(regressions),
             improvements=tuple(improvements),
             retention_ratio=retention_ratio,
+            compared_metrics=tuple(compared_metrics),
+            incommensurable_metrics=tuple(incommensurable_metrics),
         )
 
     if improvements:
@@ -419,6 +485,8 @@ def compare_challenger(
             regressions=(),
             improvements=tuple(improvements),
             retention_ratio=retention_ratio,
+            compared_metrics=tuple(compared_metrics),
+            incommensurable_metrics=tuple(incommensurable_metrics),
         )
 
     return PromotionDecision(
@@ -427,6 +495,8 @@ def compare_challenger(
         regressions=(),
         improvements=(),
         retention_ratio=retention_ratio,
+        compared_metrics=tuple(compared_metrics),
+        incommensurable_metrics=tuple(incommensurable_metrics),
     )
 
 
