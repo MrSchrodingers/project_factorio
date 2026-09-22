@@ -84,6 +84,8 @@ export class FactoryMap {
   private userHasMoved = false;
   private lastPopulatedAt = 0;
   private resetNoticeUntil = 0;
+  private locked = false;
+  private activePointers = 0;
 
   private hudEls: Record<string, HTMLElement> = {};
 
@@ -140,6 +142,7 @@ export class FactoryMap {
         <button type="button" data-act="in" title="Aproximar" aria-label="Aproximar">+</button>
         <button type="button" data-act="full" title="Tela cheia" aria-label="Tela cheia">${EXPAND_ICON}</button>
       </div>
+      <button class="fmap-lock" type="button" data-el="lock" aria-pressed="false">mapa livre</button>
       <div class="fmap-legend" data-el="legend"></div>
       <div class="fmap-scale"><i data-el="scalebar"></i><span data-el="scaletext">--</span></div>
       <aside class="fmap-inspector" data-el="inspector" hidden></aside>
@@ -160,6 +163,14 @@ export class FactoryMap {
         this.renderLegend();
       });
     }
+
+    const lock = this.hudEls.lock as HTMLButtonElement | undefined;
+    lock?.addEventListener("click", () => {
+      this.locked = !this.locked;
+      this.root.classList.toggle("fmap-locked", this.locked);
+      lock.textContent = this.locked ? "mapa travado" : "mapa livre";
+      lock.setAttribute("aria-pressed", String(this.locked));
+    });
 
     for (const button of hud.querySelectorAll<HTMLButtonElement>("[data-act]")) {
       button.addEventListener("click", () => {
@@ -248,6 +259,12 @@ export class FactoryMap {
     );
 
     canvas.addEventListener("pointerdown", (event) => {
+      if (event.pointerType === "touch") this.activePointers += 1;
+      // One finger scrolls the page unless the map is locked or a second
+      // finger says the gesture is meant for the map.
+      const touchPans =
+        event.pointerType !== "touch" || this.locked || this.activePointers >= 2;
+      if (!touchPans) return;
       canvas.setPointerCapture(event.pointerId);
       this.dragging = true;
       this.dragMoved = false;
@@ -282,6 +299,9 @@ export class FactoryMap {
       }
     };
     canvas.addEventListener("pointerup", (event) => {
+      if (event.pointerType === "touch") {
+        this.activePointers = Math.max(0, this.activePointers - 1);
+      }
       const rect = canvas.getBoundingClientRect();
       const wasDrag = this.dragMoved;
       endDrag();
@@ -293,7 +313,12 @@ export class FactoryMap {
         this.renderInspector();
       }
     });
-    canvas.addEventListener("pointercancel", endDrag);
+    canvas.addEventListener("pointercancel", (event) => {
+      if (event.pointerType === "touch") {
+        this.activePointers = Math.max(0, this.activePointers - 1);
+      }
+      endDrag();
+    });
     canvas.addEventListener("pointerleave", () => {
       this.hovered = null;
       endDrag();

@@ -36,6 +36,17 @@
   cursor: grab;
   touch-action: none;
 }
+
+/*
+ * On a touch screen a canvas that claims every gesture traps the page: the
+ * reader cannot scroll past the map with one finger. So on coarse pointers
+ * one finger scrolls the page and two fingers pan the map, unless the reader
+ * explicitly locks the map for navigation.
+ */
+@media (pointer: coarse) {
+  .fmap-canvas { touch-action: pan-y; }
+  .fmap-root.fmap-locked .fmap-canvas { touch-action: none; }
+}
 .fmap-canvas.dragging { cursor: grabbing; }
 
 .fmap-hud {
@@ -294,8 +305,40 @@
 
 .fmap-root:fullscreen { height: 100vh; }
 
+.fmap-lock {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  display: none;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 9px;
+  border: 1px solid var(--fmap-line);
+  border-radius: 5px;
+  background: var(--fmap-panel);
+  backdrop-filter: blur(8px);
+  color: #c9d0d5;
+  font: 700 9px ui-monospace, SFMono-Regular, Consolas, monospace;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.fmap-root.fmap-locked .fmap-lock {
+  background: var(--fmap-accent);
+  color: #171109;
+  border-color: var(--fmap-accent);
+}
+
+@media (pointer: coarse) {
+  .fmap-lock { display: inline-flex; }
+  /* Touch targets: 24x24 minimum, per WCAG 2.2 target size. */
+  .fmap-toolbar button { min-height: 32px; min-width: 44px; }
+  .fmap-zoom button { min-width: 44px; height: 40px; }
+  .fmap-close { width: 32px; height: 32px; font-size: 20px; }
+}
+
 @media (max-width: 720px) {
   .fmap-root { height: clamp(320px, 62vh, 560px); }
+  .fmap-topbar { top: 8px; left: 8px; right: 92px; }
   .fmap-toolbar { top: 40px; gap: 3px; padding: 2px; }
   .fmap-toolbar button { min-height: 24px; padding: 0 7px; font-size: 8px; }
   .fmap-legend { display: none; }
