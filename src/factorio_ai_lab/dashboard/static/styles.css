@@ -2377,3 +2377,169 @@ small { line-height: 1.35; }
   font-size: 8px;
   overflow-wrap: anywhere;
 }
+
+.learning-observatory {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 10px 0;
+}
+
+.learning-observer-card {
+  min-height: 205px;
+  padding: 14px;
+  overflow: hidden;
+}
+
+.learning-observer-card .card-head {
+  margin-bottom: 14px;
+}
+
+.learning-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.learning-metric-grid > div {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(255,255,255,.018);
+}
+
+.learning-metric-grid span,
+.robustness-hero span {
+  display: block;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.25;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+}
+
+.learning-metric-grid strong {
+  display: block;
+  margin-top: 5px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.observatory-progress {
+  margin: 12px 0 8px;
+}
+
+.robustness-hero {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: linear-gradient(90deg, rgba(100,217,139,.045), transparent);
+}
+
+.robustness-hero strong {
+  font-size: 24px;
+  letter-spacing: -.04em;
+}
+
+.strategy-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.strategy-metric {
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-3);
+}
+
+.strategy-metric span {
+  display: block;
+  color: var(--muted);
+  font-size: 8px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+
+.strategy-metric strong {
+  display: block;
+  margin-top: 4px;
+  font: 700 12px/1.25 "SFMono-Regular", Consolas, monospace;
+}
+
+.strategy-repair {
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.strategy-repair strong {
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.counterexample-list {
+  display: grid;
+  gap: 6px;
+  max-height: 142px;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+
+.counterexample-row {
+  padding: 8px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(255,255,255,.015);
+}
+
+.counterexample-row header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.counterexample-row strong {
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.counterexample-row b {
+  color: var(--accent);
+  font: 700 9px "SFMono-Regular", Consolas, monospace;
+  white-space: nowrap;
+}
+
+.counterexample-row small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 8.5px;
+  line-height: 1.35;
+}
+
+@media (max-width: 1380px) {
+  .learning-observatory {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .learning-observatory {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .learning-metric-grid,
+  .strategy-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

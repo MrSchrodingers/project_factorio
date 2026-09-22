@@ -808,9 +808,25 @@ class DashboardState:
         self._last_telemetry_write = 0.0
         self._frame_cache: dict[str, tuple[float, bytes]] = {}
         self._frame_cache_lock = threading.Lock()
+        self._artifact_cache: dict[str, tuple[float, Any]] = {}
 
     def close(self) -> None:
         self.factorio.close()
+
+    def _cached_artifact(
+        self,
+        key: str,
+        *,
+        ttl_s: float,
+        loader: Any,
+    ) -> Any:
+        now = time.time()
+        cached = self._artifact_cache.get(key)
+        if cached is not None and now - cached[0] <= ttl_s:
+            return cached[1]
+        value = loader()
+        self._artifact_cache[key] = (now, value)
+        return value
 
     def llm_status(self) -> dict[str, Any]:
         url = "http://127.0.0.1:18081/v1/models"
@@ -1247,6 +1263,56 @@ class DashboardState:
             except (OSError, json.JSONDecodeError):
                 loop_state = {}
 
+        def load_learning_artifacts() -> dict[str, Any]:
+            strategy: dict[str, Any] = {}
+            robustness: dict[str, Any] = {}
+            counterexamples: list[dict[str, Any]] = []
+
+            for artifact_name, target in (
+                ("open_play_strategy.json", "strategy"),
+                ("open_play_robustness_state.json", "robustness"),
+            ):
+                path = RUNS_DIR / artifact_name
+                if not path.exists():
+                    continue
+                try:
+                    loaded = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                if not isinstance(loaded, dict):
+                    continue
+                if target == "strategy":
+                    strategy = loaded
+                else:
+                    robustness = loaded
+
+            counterexample_path = RUNS_DIR / "counterexamples.jsonl"
+            if counterexample_path.exists():
+                try:
+                    for raw_line in counterexample_path.read_text(
+                        encoding="utf-8"
+                    ).splitlines():
+                        if not raw_line.strip():
+                            continue
+                        row = json.loads(raw_line)
+                        if isinstance(row, dict):
+                            counterexamples.append(row)
+                except (OSError, json.JSONDecodeError):
+                    counterexamples = []
+
+            return {
+                "strategy": strategy or None,
+                "robustness": robustness or None,
+                "counterexamples": counterexamples[-8:],
+                "counterexample_count": len(counterexamples),
+            }
+
+        learning_artifacts = self._cached_artifact(
+            "evolution-learning-artifacts",
+            ttl_s=5.0,
+            loader=load_learning_artifacts,
+        )
+
         if isinstance(current, dict) and current:
             payload = dict(current)
             if not payload.get("champion") and champion:
@@ -1255,6 +1321,7 @@ class DashboardState:
             payload["history"] = history
             payload["continuous_loop"] = loop_state or None
             payload["latest_report"] = latest_report
+            payload["learning_artifacts"] = learning_artifacts
             return payload
 
         run = self.active_run_data()
@@ -1268,6 +1335,7 @@ class DashboardState:
             "history": history,
             "continuous_loop": loop_state or None,
             "latest_report": latest_report,
+            "learning_artifacts": learning_artifacts,
             "challenger": {
                 "run_id": run.get("run_id"),
                 "status": (
@@ -1286,6 +1354,11 @@ class DashboardState:
         }
 
     def dataset_data(self) -> dict[str, Any]:
+        cached = self._artifact_cache.get("dataset-data")
+        now = time.time()
+        if cached is not None and now - cached[0] <= 5.0:
+            return cached[1]
+
         spatial_path = RUNS_DIR / "datasets" / "spatial_demonstrations.jsonl"
         telemetry_path = RUNS_DIR / "telemetry" / "world_samples.jsonl"
         model_metadata_path = RUNS_DIR / "models" / "recurrent_world_model.json"
@@ -1333,17 +1406,31 @@ class DashboardState:
             except (OSError, json.JSONDecodeError):
                 spatial_policy = None
 
-        return {
+        payload = {
             "spatial_demonstrations": len(rows),
             "accepted_demonstrations": accepted,
             "training_ready": len(rows) >= 250,
             "minimum_training_target": 250,
             "telemetry_samples": telemetry_samples,
+            "action_labeled_samples": int(
+                (recurrent_model or {}).get("action_labeled_samples", 0) or 0
+            ),
+            "action_labeled_runs": int(
+                (recurrent_model or {}).get("action_labeled_runs", 0) or 0
+            ),
             "recurrent_world_model": recurrent_model,
             "spatial_policy": spatial_policy,
         }
+        self._artifact_cache["dataset-data"] = (now, payload)
+        return payload
 
     def knowledge_data(self, limit: int = 12) -> dict[str, Any]:
+        cache_key = f"knowledge-data-{limit}"
+        cached = self._artifact_cache.get(cache_key)
+        now = time.time()
+        if cached is not None and now - cached[0] <= 5.0:
+            return cached[1]
+
         path = RUNS_DIR / "knowledge.jsonl"
         if not path.exists():
             return {
@@ -1374,7 +1461,7 @@ class DashboardState:
             and row.get("source") == "deterministic_fallback"
         )
         auditable = verified_count + fallback_count
-        return {
+        payload = {
             "count": len(lines),
             "lessons": lessons,
             "verified_count": verified_count,
@@ -1385,6 +1472,8 @@ class DashboardState:
                 else 0.0
             ),
         }
+        self._artifact_cache[cache_key] = (now, payload)
+        return payload
 
     def engineering_progression_data(
         self,

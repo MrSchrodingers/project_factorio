@@ -19,6 +19,7 @@ const state = {
   frameLoadedAt: null,
   frameLoading: false,
   frameRequestId: 0,
+  frameLastRequestedAt: 0,
   worldZoom: 1,
   worldPanX: 0,
   worldPanY: 0,
@@ -54,6 +55,77 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+const stageLabelsPt = {
+  "Raw bootstrap": "Bootstrap de recursos",
+  "Technology triggers": "Gatilhos tecnológicos",
+  "Coal commissioning": "Comissionamento de carvão",
+  "Steam commissioning": "Comissionamento a vapor",
+  "Lab bootstrap": "Bootstrap do laboratório",
+  "Powered red science": "Ciência vermelha energizada",
+  "Electric mining transition": "Transição para mineração elétrica",
+  "Logistic-science unlock": "Desbloqueio da ciência logística",
+  "Green-science industry": "Indústria de ciência verde",
+  "Logistics research": "Pesquisa de Logística",
+  "Autonomy soak": "Teste prolongado de autonomia",
+  "Baseline iron mining": "Mineração de ferro baseline",
+  "Online placement learning": "Aprendizado online de posicionamento",
+  "Scale mining": "Escala de mineração",
+  "Smelting probe": "Teste de fundição",
+  "A* belt logistics": "Logística de esteiras A*",
+};
+
+const actionLabelsPt = {
+  build: "construção",
+  craft: "fabricação",
+  logistics: "logística",
+  move: "movimento",
+  research: "pesquisa",
+  wait: "espera",
+  other: "ação",
+  idle: "ocioso",
+};
+
+const statusLabelsPt = {
+  starting: "iniciando",
+  running: "executando",
+  learning: "aprendendo",
+  validating: "validando",
+  completed: "concluído",
+  generation_complete: "geração concluída",
+  generation_rejected: "geração rejeitada",
+  partial_success: "sucesso parcial",
+  validation_pass: "validação aprovada",
+  error: "erro",
+  failed: "falhou",
+  idle: "ocioso",
+};
+
+function stageLabel(value) {
+  const raw = String(value || "");
+  return stageLabelsPt[raw] || raw || "--";
+}
+
+function actionLabel(value) {
+  const raw = String(value || "idle");
+  return actionLabelsPt[raw] || raw;
+}
+
+function statusLabel(value) {
+  const raw = String(value || "idle");
+  return statusLabelsPt[raw] || raw.replaceAll("_", " ");
+}
+
+function repairReasonLabel(value) {
+  return {
+    route_capex_counterexample: "redução de CAPEX/rota antes de aumentar material",
+    electric_transition_material_budget: "ajuste de orçamento material medido",
+    electric_research_power_budget: "reforço do orçamento energético",
+    structural_autonomy_counterexample: "mutação estrutural por falha de autonomia",
+    electric_backbone_layout_counterexample: "variação de layout do backbone",
+    bootstrap_collection_retry: "retry de coleta sem inflar alvo",
+  }[String(value || "")] || String(value || "reparo");
 }
 
 function getPosition(entity) {
@@ -318,6 +390,8 @@ function drawStructuredFallback() {
 
 function refreshWorldFrame(force = false) {
   const render = (state.status && state.status.render) || {};
+  const now = Date.now();
+  if (!force && now - state.frameLastRequestedAt < 2800) return;
   const tick = state.world && state.world.tick;
   const key = String(tick ?? "none") + ":" + String((state.world && state.world.entity_count) || 0)
     + ":" + String(render.sprite_count || 0)
@@ -326,6 +400,7 @@ function refreshWorldFrame(force = false) {
   if (state.frameLoading && !force) return;
 
   state.frameLoading = true;
+  state.frameLastRequestedAt = now;
   const requestId = ++state.frameRequestId;
   const requestedMode = state.worldViewMode;
   const probe = new Image();
@@ -1165,6 +1240,190 @@ function contenderSummary(record, fallbackFitness) {
     record && record.configuration
   );
 }
+
+function renderLearningObservatory() {
+  const datasets = state.datasets || {};
+  const recurrent = datasets.recurrent_world_model || {};
+  const evolution = state.evolution || {};
+  const artifacts = evolution.learning_artifacts || {};
+  const strategy = artifacts.strategy || {};
+  const robustness = artifacts.robustness || {};
+  const counterexamples = Array.isArray(artifacts.counterexamples)
+    ? artifacts.counterexamples.slice().reverse()
+    : [];
+  const execution = (state.status && state.status.execution) || {};
+
+  const labeledSamples = Number(
+    datasets.action_labeled_samples
+      ?? recurrent.action_labeled_samples
+      ?? 0
+  );
+  const labeledRuns = Number(
+    datasets.action_labeled_runs
+      ?? recurrent.action_labeled_runs
+      ?? 0
+  );
+  const sampleTarget = 500;
+  const runTarget = 3;
+  const sampleRatio = Math.min(1, labeledSamples / sampleTarget);
+  const runRatio = Math.min(1, labeledRuns / runTarget);
+  const causalProgress = Math.min(sampleRatio, runRatio) * 100;
+  const causalReady = labeledSamples >= sampleTarget && labeledRuns >= runTarget;
+
+  setText("causalSamples", formatNumber(labeledSamples, 0) + " / " + sampleTarget);
+  setText("causalRuns", formatNumber(labeledRuns, 0) + " / " + runTarget);
+  setText(
+    "causalAction",
+    execution.action_active
+      ? actionLabel((execution.action || {}).action_kind)
+      : execution.writer_active
+        ? "entre ações"
+        : "ocioso"
+  );
+  const causalBar = $("causalProgressBar");
+  if (causalBar) causalBar.style.width = causalProgress + "%";
+  setClassText(
+    "causalLearningBadge",
+    causalReady ? "elegível para treino" : "coletando",
+    causalReady ? "badge good" : "badge live"
+  );
+
+  const holdout = recurrent.generation_holdout || {};
+  const modelSelection = recurrent.model_selection || {};
+  setText(
+    "causalLearningDetail",
+    causalReady
+      ? (
+          holdout.usable
+            ? "Dados mínimos atingidos · holdout entre gerações disponível · "
+              + String(modelSelection.reason || "aguardando seleção")
+            : "Dados mínimos atingidos · aguardando holdout entre gerações suficiente"
+        )
+      : "Gate causal: "
+        + Math.max(0, sampleTarget - labeledSamples)
+        + " amostras e "
+        + Math.max(0, runTarget - labeledRuns)
+        + " run(s) ainda faltando. Snapshots antigos não promovem o GRU."
+  );
+
+  const requiredPasses = Number(robustness.required_passes || 3);
+  const passCount = Number(
+    robustness.distinct_pass_seed_count
+      ?? robustness.pass_count
+      ?? 0
+  );
+  const qualified = !!robustness.qualified;
+  setText("robustnessPasses", passCount + " / " + requiredPasses);
+  const robustnessBar = $("robustnessProgressBar");
+  if (robustnessBar) {
+    robustnessBar.style.width = (
+      Math.min(100, (passCount / Math.max(1, requiredPasses)) * 100)
+    ) + "%";
+  }
+  setClassText(
+    "robustnessBadge",
+    qualified
+      ? "qualificado"
+      : passCount
+        ? "em qualificação"
+        : "aguardando primeiro passe",
+    qualified ? "badge good" : passCount ? "badge live" : "badge neutral"
+  );
+  const passSeeds = Array.isArray(robustness.distinct_pass_seeds)
+    ? robustness.distinct_pass_seeds
+    : [];
+  setText(
+    "robustnessDetail",
+    qualified
+      ? "Campeão qualificado em seeds independentes: " + passSeeds.join(", ")
+      : (
+          passSeeds.length
+            ? "Seeds aprovadas: " + passSeeds.join(", ")
+              + " · candidato congelado até completar o gate."
+            : "Nenhuma seed aprovada ainda para esta configuração. "
+              + "Uma única run não promove o campeão."
+        )
+  );
+
+  const configuration = strategy.configuration || {};
+  const strategyContainer = $("strategyMetrics");
+  if (strategyContainer) {
+    const rows = [
+      ["Fe", configuration.open_play_iron_target],
+      ["Cu", configuration.open_play_copper_target],
+      ["Madeira", configuration.open_play_wood_target],
+      ["Margem belt", configuration.autonomy_belt_margin],
+      ["Detour", configuration.autonomy_route_detour_margin],
+      ["Margem poste", configuration.autonomy_pole_margin],
+    ];
+    strategyContainer.innerHTML = rows.map(([label, value]) =>
+      '<div class="strategy-metric">'
+        + '<span>' + escapeHtml(label) + '</span>'
+        + '<strong>' + escapeHtml(value ?? "--") + '</strong>'
+        + '</div>'
+    ).join("");
+  }
+  setClassText(
+    "strategyBadge",
+    strategy.counterexample_run ? "adaptada" : "baseline",
+    strategy.counterexample_run ? "badge live" : "badge neutral"
+  );
+
+  const repairs = Array.isArray(strategy.deterministic_repairs)
+    ? strategy.deterministic_repairs
+    : [];
+  const repairContainer = $("strategyRepair");
+  if (repairContainer) {
+    repairContainer.innerHTML = repairs.length
+      ? repairs.slice(0, 3).map((repair) =>
+          '<div><strong>' + escapeHtml(repairReasonLabel(repair.reason)) + '</strong>'
+          + (
+              repair.shortfall_ratio !== undefined
+                ? ' · déficit ' + formatNumber(Number(repair.shortfall_ratio) * 100, 1) + '%'
+                : ''
+            )
+          + (
+              repair.detour_margin
+                ? ' · detour ' + escapeHtml(repair.detour_margin.before)
+                  + '→' + escapeHtml(repair.detour_margin.after)
+                : ''
+            )
+          + (
+              repair.belt_margin
+                ? ' · belt ' + escapeHtml(repair.belt_margin.before)
+                  + '→' + escapeHtml(repair.belt_margin.after)
+                : ''
+            )
+          + '</div>'
+        ).join("")
+      : '<span class="placeholder-row">Sem reparo estrutural registrado.</span>';
+  }
+
+  setText(
+    "counterexampleCount",
+    String(Number(artifacts.counterexample_count || counterexamples.length || 0))
+  );
+  const memoryContainer = $("counterexampleList");
+  if (memoryContainer) {
+    memoryContainer.innerHTML = counterexamples.length
+      ? counterexamples.slice(0, 4).map((row) => {
+          const repair = row.repair || {};
+          const deterministic = Array.isArray(repair.deterministic_repairs)
+            ? repair.deterministic_repairs
+            : [];
+          const reasons = deterministic
+            .map((item) => repairReasonLabel(item.reason))
+            .filter(Boolean);
+          return '<article class="counterexample-row">'
+            + '<header><strong>' + escapeHtml(stageLabel(row.stage))
+            + '</strong><b>' + escapeHtml(row.phase || "--") + '</b></header>'
+            + '<small>' + escapeHtml(reasons.join(" · ") || row.detail || "falha registrada")
+            + '</small></article>';
+        }).join("")
+      : '<span class="placeholder-row">Nenhum counterexample persistido.</span>';
+  }
+}
+
 
 function renderEvolution() {
   const researchEvolution = (state.research && state.research.evolution) || {};
@@ -2482,14 +2741,29 @@ function updateMission() {
     || curriculum.find((stage) => ["running", "learning", "validating"].includes(stage.status))
     || null;
 
-  setText("missionTitle", research.objective || (state.run && state.run.objective) || "Waiting for research loop…");
+  setText(
+    "missionTitle",
+    research.objective
+      || (state.run && state.run.objective)
+      || "Aguardando ciclo de pesquisa…"
+  );
   setText(
     "missionDetail",
     research.detail
-      || ((state.run && state.run.status) ? "Last validated run: " + state.run.status : "No active curriculum stage.")
+      || (
+        (state.run && state.run.status)
+          ? "Último estado observado: " + statusLabel(state.run.status)
+          : "Nenhum estágio ativo."
+      )
   );
-  setText("stageName", (current && current.name) || research.stage || "stage --");
-  setText("nextAction", research.next_action || "await curriculum runner");
+  setText(
+    "stageName",
+    stageLabel((current && current.name) || research.stage || "estágio --")
+  );
+  setText(
+    "nextAction",
+    research.next_action || "aguardando executor do currículo"
+  );
 
   let progress = Number(research.progress ?? 0);
   if (!Number.isFinite(progress)) progress = 0;
@@ -2518,10 +2792,10 @@ function updateMission() {
   setClassText(
     "researchBadge",
     semanticStatus === "generation_complete"
-      ? "generation complete"
+      ? "geração concluída"
       : semanticStatus === "generation_rejected"
-        ? "generation rejected"
-        : "research " + semanticStatus,
+        ? "geração rejeitada"
+        : "pesquisa · " + statusLabel(semanticStatus),
     badgeClass
   );
 }
@@ -2748,12 +3022,12 @@ function updateKpis() {
   const factorioLabel = !factorio.connected
     ? "Factorio offline"
     : execution.action_active
-      ? "Factorio · executing " + actionKind
+      ? "Factorio · executando " + actionLabel(actionKind)
       : execution.writer_active
-        ? "Factorio · between actions"
+        ? "Factorio · entre ações"
         : simulating
-          ? "Factorio · simulating"
-          : "Factorio · idle";
+          ? "Factorio · simulando"
+          : "Factorio · ocioso";
   setClassText(
     "factorioStatus",
     factorioLabel,
@@ -2768,8 +3042,8 @@ function updateKpis() {
           formatNumber(activeAction.elapsed_s || 0, 1) + " s",
         ].filter(Boolean).join(" · ")
       : execution.writer_active
-        ? "experimental writer owns the Factorio world lease"
-        : "no experimental writer owns the Factorio world";
+        ? "executor experimental possui o lease exclusivo do mundo"
+        : "nenhum executor experimental possui o lease do mundo";
   }
   setClassText("llmStatus", llm.connected ? "Qwen inference" : "offline", llm.connected ? "good" : "bad");
   setText(
@@ -2790,7 +3064,7 @@ function updateKpis() {
   const runStatus = String((state.run && state.run.status) || "--");
   setClassText(
     "runStatus",
-    runStatus,
+    statusLabel(runStatus),
     ["success", "completed", "generation_complete"].includes(runStatus) ? "badge good"
       : ["running", "starting", "learning", "validating"].includes(runStatus) ? "badge live"
       : runStatus === "--" ? "badge neutral" : "badge warn"
@@ -2824,6 +3098,7 @@ function applyPayload(payload) {
   renderResourceLegend();
   renderCapabilityHealth();
   renderEvolution();
+  renderLearningObservatory();
   renderResearchCockpit();
   renderResearchAnalytics();
   renderCurriculum();
@@ -2951,5 +3226,11 @@ Promise.all([loadConfig(), loadInitialState(), loadProduction()])
   .finally(connectSocket);
 
 setInterval(updateFrameAge, 1000);
-setInterval(() => refreshWorldFrame(true), 2000);
-setInterval(() => loadProduction(state.productionPrecision), 4000);
+setInterval(() => {
+  if (document.visibilityState === "visible") refreshWorldFrame(false);
+}, 3000);
+setInterval(() => {
+  if (document.visibilityState === "visible") {
+    loadProduction(state.productionPrecision);
+  }
+}, 6000);

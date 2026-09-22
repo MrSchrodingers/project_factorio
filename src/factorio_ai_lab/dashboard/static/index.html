@@ -1,15 +1,15 @@
 <!doctype html>
-<html lang="en">
+<html lang="pt-BR">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Factorio AI Lab</title>
-  <link rel="stylesheet" href="/static/styles.css?v=0.9.2">
+  <link rel="stylesheet" href="/static/styles.css?v=0.10.0">
 </head>
 <body>
   <header class="topbar">
     <div class="brand">
-      <div class="eyebrow">RESEARCH CONTROL PLANE</div>
+      <div class="eyebrow">PLANO DE CONTROLE DE PESQUISA</div>
       <div class="brand-row">
         <h1>Factorio AI Lab</h1>
         <span id="socketBadge" class="badge neutral">connecting</span>
@@ -25,7 +25,7 @@
   <main class="shell">
     <section class="mission-strip card">
       <div class="mission-copy">
-        <span class="label">CURRENT OBJECTIVE</span>
+        <span class="label">OBJETIVO ATUAL</span>
         <strong id="missionTitle">Waiting for research loop…</strong>
         <small id="missionDetail">No active curriculum stage.</small>
       </div>
@@ -37,49 +37,49 @@
         <div class="progress-track"><div id="stageProgressBar" class="progress-fill"></div></div>
       </div>
       <div class="mission-next">
-        <span class="label">NEXT ACTION</span>
+        <span class="label">PRÓXIMA AÇÃO</span>
         <strong id="nextAction">--</strong>
       </div>
     </section>
 
     <section class="kpi-grid">
       <article class="card kpi">
-        <span class="label">WORLD</span>
+        <span class="label">MUNDO</span>
         <strong><span id="entityCount">0</span> entities</strong>
         <small><span id="worldTick">tick --</span> · <span id="probeLatency">-- ms</span></small>
       </article>
       <article class="card kpi">
-        <span class="label">PRODUCTION</span>
+        <span class="label">PRODUÇÃO</span>
         <strong id="productionPrimary">--</strong>
         <small id="productionSecondary">no measured flow</small>
       </article>
       <article class="card kpi">
-        <span class="label">ONLINE LEARNING</span>
+        <span class="label">APRENDIZADO ONLINE</span>
         <strong id="onlineLearner">idle</strong>
         <small id="onlineLearnerDetail">no real-world trials yet</small>
       </article>
       <article class="card kpi">
-        <span class="label">RESEARCH LOOP</span>
+        <span class="label">CICLO DE PESQUISA</span>
         <strong id="researchLoop">idle</strong>
         <small id="researchLoopDetail">no active agent process</small>
       </article>
       <article class="card kpi evolution-kpi">
-        <span class="label">SURVIVAL SELECTION</span>
+        <span class="label">SELEÇÃO POR SOBREVIVÊNCIA</span>
         <strong id="evolutionKpi">G-- · evaluating</strong>
         <small id="evolutionKpiDetail">Champion -- · Challenger --</small>
       </article>
       <article class="card kpi engineering-kpi">
-        <span class="label">NEXT FACTORY GOAL</span>
+        <span class="label">PRÓXIMO OBJETIVO DA FÁBRICA</span>
         <strong id="engineeringGoal">discovering frontier</strong>
         <small id="engineeringGoalDetail">waiting for production state</small>
       </article>
       <article class="card kpi">
-        <span class="label">KNOWLEDGE MEMORY</span>
+        <span class="label">MEMÓRIA DE CONHECIMENTO</span>
         <strong id="knowledgeCount">0 lessons</strong>
         <small id="knowledgeLatest">no learned lesson yet</small>
       </article>
       <article class="card kpi">
-        <span class="label">LOCAL MODEL</span>
+        <span class="label">MODELO LOCAL</span>
         <strong id="llmStatus">--</strong>
         <small id="llmDetail">llama.cpp :18081</small>
       </article>
@@ -88,9 +88,9 @@
     <section class="card evolution-arena">
       <div class="arena-head">
         <div>
-          <span class="label">EVOLUTIONARY SELECTION</span>
-          <h2>Generation arena</h2>
-          <small>Incumbent-preserving selection · capability survival before promotion</small>
+          <span class="label">SELEÇÃO EVOLUTIVA</span>
+          <h2>Arena de gerações</h2>
+          <small>Seleção preserva o incumbente · sobrevivência de capacidades antes da promoção</small>
         </div>
         <div class="arena-badges">
           <span id="validationBadge" class="badge neutral">open-play pending</span>
@@ -100,7 +100,7 @@
 
       <div class="arena-grid">
         <article class="arena-contender champion">
-          <span class="arena-role">CHAMPION</span>
+          <span class="arena-role">CAMPEÃO</span>
           <strong id="championLabel">not selected</strong>
           <small id="championFitness">waiting for first validated generation</small>
         </article>
@@ -113,15 +113,15 @@
         </div>
 
         <article class="arena-contender challenger">
-          <span class="arena-role">CHALLENGER</span>
+          <span class="arena-role">DESAFIANTE</span>
           <strong id="challengerLabel">current run</strong>
           <small id="challengerFitness">collecting fitness evidence</small>
         </article>
       </div>
       <div class="generation-history-wrap">
         <div class="generation-history-head">
-          <span class="label">SELECTION HISTORY</span>
-          <small>survival pressure across attempts</small>
+          <span class="label">HISTÓRICO DE SELEÇÃO</span>
+          <small>pressão de sobrevivência entre tentativas</small>
         </div>
         <div id="generationHistory" class="generation-history">
           <span class="generation-empty">No completed generations yet.</span>
@@ -133,7 +133,7 @@
       <article class="card cockpit-card generation-health-card">
         <div class="card-head compact">
           <div>
-            <span class="label">GENERATION HEALTH</span>
+            <span class="label">SAÚDE DA GERAÇÃO</span>
             <h2 id="generationHealthTitle">G-- · waiting</h2>
           </div>
           <span id="generationHealthBadge" class="badge neutral">--</span>
@@ -159,8 +159,8 @@
       <article class="card cockpit-card model-arena-card">
         <div class="card-head compact">
           <div>
-            <span class="label">MODEL ARENA</span>
-            <h2>Neural eligibility</h2>
+            <span class="label">ARENA DE MODELOS</span>
+            <h2>Elegibilidade neural</h2>
           </div>
           <span id="modelArenaBadge" class="badge neutral">gated</span>
         </div>
@@ -195,7 +195,7 @@
       <article class="card cockpit-card generation-report-card">
         <div class="card-head compact">
           <div>
-            <span class="label">RESEARCH SUMMARY</span>
+            <span class="label">RESUMO DA PESQUISA</span>
             <h2 id="researchSummaryTitle">Waiting for evidence</h2>
           </div>
           <span id="researchSummaryBadge" class="badge neutral">--</span>
@@ -219,18 +219,97 @@
       </article>
     </section>
 
+    <section class="learning-observatory">
+      <article class="card learning-observer-card causal-card">
+        <div class="card-head compact">
+          <div>
+            <span class="label">APRENDIZADO PERSISTENTE</span>
+            <h2>Evidência causal entre runs</h2>
+          </div>
+          <span id="causalLearningBadge" class="badge neutral">coletando</span>
+        </div>
+        <div class="learning-metric-grid">
+          <div>
+            <span>Amostras com ação</span>
+            <strong id="causalSamples">0 / 500</strong>
+          </div>
+          <div>
+            <span>Runs independentes</span>
+            <strong id="causalRuns">0 / 3</strong>
+          </div>
+          <div>
+            <span>Ação atual</span>
+            <strong id="causalAction">idle</strong>
+          </div>
+        </div>
+        <div class="progress-track observatory-progress">
+          <div id="causalProgressBar" class="progress-fill"></div>
+        </div>
+        <small id="causalLearningDetail" class="cockpit-note">
+          O GRU só recebe autoridade após evidência causal e holdout entre gerações.
+        </small>
+      </article>
+
+      <article class="card learning-observer-card robustness-card">
+        <div class="card-head compact">
+          <div>
+            <span class="label">ROBUSTEZ ENTRE RUNS</span>
+            <h2>Qualificação multi-seed</h2>
+          </div>
+          <span id="robustnessBadge" class="badge neutral">aguardando</span>
+        </div>
+        <div class="robustness-hero">
+          <strong id="robustnessPasses">0 / 3</strong>
+          <span>seeds aprovadas</span>
+        </div>
+        <div class="progress-track observatory-progress">
+          <div id="robustnessProgressBar" class="progress-fill"></div>
+        </div>
+        <small id="robustnessDetail" class="cockpit-note">
+          O mesmo campeão precisa sobreviver em três seeds distintas.
+        </small>
+      </article>
+
+      <article class="card learning-observer-card strategy-card">
+        <div class="card-head compact">
+          <div>
+            <span class="label">ESTRATÉGIA ESTRUTURAL ATIVA</span>
+            <h2>Recursos, CAPEX e roteamento</h2>
+          </div>
+          <span id="strategyBadge" class="badge neutral">--</span>
+        </div>
+        <div id="strategyMetrics" class="strategy-metrics"></div>
+        <div id="strategyRepair" class="strategy-repair">
+          <span class="placeholder-row">Sem reparo estrutural registrado.</span>
+        </div>
+      </article>
+
+      <article class="card learning-observer-card memory-card">
+        <div class="card-head compact">
+          <div>
+            <span class="label">MEMÓRIA DE COUNTEREXAMPLES</span>
+            <h2>Falhas que alteraram a estratégia</h2>
+          </div>
+          <span id="counterexampleCount" class="badge neutral">0</span>
+        </div>
+        <div id="counterexampleList" class="counterexample-list">
+          <span class="placeholder-row">Nenhum counterexample persistido.</span>
+        </div>
+      </article>
+    </section>
+
     <section class="workspace-grid">
       <article class="card factory-card">
         <div class="card-head world-card-head">
           <div>
-            <span class="label">LIVE FACTORY</span>
-            <h2>Live factory map</h2>
+            <span class="label">FÁBRICA AO VIVO</span>
+            <h2>Mapa da fábrica</h2>
           </div>
           <div class="world-head-actions">
             <div class="view-mode-toggle" role="group" aria-label="World view mode">
-              <button type="button" data-world-mode="game" class="active">Factory</button>
-              <button type="button" data-world-mode="overview">Resources</button>
-              <button type="button" data-world-mode="tactical">Tactical</button>
+              <button type="button" data-world-mode="game" class="active">Fábrica</button>
+              <button type="button" data-world-mode="overview">Recursos</button>
+              <button type="button" data-world-mode="tactical">Tático</button>
             </div>
             <div class="world-health">
               <span id="renderBadge" class="badge neutral">renderer checking</span>
@@ -292,7 +371,7 @@
         <article class="card execution-card">
           <div class="card-head compact">
             <div>
-              <span class="label">AUTONOMOUS EXECUTION</span>
+              <span class="label">EXECUÇÃO AUTÔNOMA</span>
               <h2>Curriculum</h2>
             </div>
             <span id="runStatus" class="badge neutral">--</span>
@@ -305,8 +384,8 @@
         <article class="card execution-card">
           <div class="card-head compact">
             <div>
-              <span class="label">DECISION TRACE</span>
-              <h2>Live timeline</h2>
+              <span class="label">RASTRO DE DECISÕES</span>
+              <h2>Linha do tempo</h2>
             </div>
             <span id="runId" class="mono">no run</span>
           </div>
@@ -320,8 +399,8 @@
     <section class="card production-monitor">
       <div class="card-head production-head">
         <div>
-          <span class="label">FACTORIO PRODUCTION STATISTICS</span>
-          <h2>Factory production / consumption</h2>
+          <span class="label">FACTORIO PRODUÇÃO STATISTICS</span>
+          <h2>Fábrica production / consumption</h2>
           <small id="productionSource">native LuaFlowStatistics · resources, intermediates and science · items/min</small>
         </div>
         <div class="production-range" aria-label="Production statistics time range">
@@ -339,13 +418,13 @@
         <span class="mono">bars are relative to the highest rate on each side</span>
       </div>
       <div class="capability-health-wrap">
-        <span class="label">CAPABILITY SURVIVAL</span>
+        <span class="label">SOBREVIVÊNCIA DE CAPACIDADES</span>
         <div id="capabilityHealth" class="capability-health"></div>
       </div>
       <div class="production-panels">
         <section class="production-side">
           <div class="production-side-head">
-            <strong>Production</strong>
+            <strong>Produção</strong>
             <span id="producedPeak" class="mono">peak --/min</span>
           </div>
           <canvas id="producedCanvas" aria-label="Ore production over time"></canvas>
@@ -353,7 +432,7 @@
         </section>
         <section class="production-side">
           <div class="production-side-head">
-            <strong>Consumption</strong>
+            <strong>Consumo</strong>
             <span id="consumedPeak" class="mono">peak --/min</span>
           </div>
           <canvas id="consumedCanvas" aria-label="Ore consumption over time"></canvas>
@@ -366,14 +445,14 @@
       <article class="card analytics-card autonomy-card">
         <div class="card-head compact">
           <div>
-            <span class="label">AUTONOMY / SURVIVAL</span>
-            <h2>Physical closed-loop evidence</h2>
+            <span class="label">AUTONOMIA / SOBREVIVÊNCIA</span>
+            <h2>Evidência física de ciclo fechado</h2>
           </div>
           <span id="autonomyLevel" class="badge neutral">unknown</span>
         </div>
         <div class="autonomy-hero">
           <div>
-            <span class="label">AUTONOMY SCORE</span>
+            <span class="label">ÍNDICE DE AUTONOMIA</span>
             <strong id="autonomyScore">--</strong>
             <small id="autonomySource">waiting for physical evidence</small>
           </div>
@@ -383,27 +462,27 @@
             <small>zero-intervention validation window</small>
           </div>
           <div>
-            <span class="label">MANUAL LOGISTICS</span>
+            <span class="label">LOGÍSTICA MANUAL</span>
             <strong id="autonomyManual">--</strong>
             <small id="autonomyManualDetail">instrumentation pending</small>
           </div>
           <div>
-            <span class="label">STARVATION</span>
+            <span class="label">FALTA DE RECURSOS</span>
             <strong id="autonomyStarved">--</strong>
             <small>no fuel / no power</small>
           </div>
         </div>
         <div id="autonomyGates" class="autonomy-gates"></div>
         <div class="autonomy-strategy">
-          <span class="label">PHYSICAL GENOME</span>
+          <span class="label">GENOMA FÍSICO</span>
           <span id="autonomyGenome" class="mono">layout -- · coal -- · belt margin -- · pole margin --</span>
         </div>
       </article>
       <article class="card analytics-card generation-trends-card">
         <div class="card-head compact">
           <div>
-            <span class="label">GENERATIONAL METRICS</span>
-            <h2>Evolution across generations</h2>
+            <span class="label">MÉTRICAS GERACIONAIS</span>
+            <h2>Evolução entre gerações</h2>
           </div>
           <span id="generationDuration" class="mono">duration --</span>
         </div>
@@ -419,7 +498,7 @@
       <article class="card analytics-card dag-card">
         <div class="card-head compact">
           <div>
-            <span class="label">PRODUCTION DAG</span>
+            <span class="label">PRODUÇÃO DAG</span>
             <h2 id="productionDagTarget">Waiting for frontier</h2>
           </div>
           <span id="productionDagSource" class="mono">--</span>
@@ -433,8 +512,8 @@
       <article class="card analytics-card wip-card">
         <div class="card-head compact">
           <div>
-            <span class="label">WIP / SAFETY STOCK</span>
-            <h2>Material health</h2>
+            <span class="label">WIP / ESTOQUE DE SEGURANÇA</span>
+            <h2>Saúde de materiais</h2>
           </div>
           <span id="wipStatus" class="badge neutral">observing</span>
         </div>
@@ -444,8 +523,8 @@
       <article class="card analytics-card model-matrix-card">
         <div class="card-head compact">
           <div>
-            <span class="label">MODEL EVALUATION MATRIX</span>
-            <h2>Baseline vs challenger</h2>
+            <span class="label">MATRIZ DE AVALIAÇÃO DE MODELOS</span>
+            <h2>Baseline vs desafiante</h2>
           </div>
           <span class="mono">lower loss / lower cost is better</span>
         </div>
@@ -457,8 +536,8 @@
       <article class="card chart-card">
         <div class="card-head compact">
           <div>
-            <span class="label">REAL-WORLD LEARNING</span>
-            <h2>Online reward / trials</h2>
+            <span class="label">REAL-MUNDO LEARNING</span>
+            <h2>Recompensa online / tentativas</h2>
           </div>
           <span id="onlineLearningSource" class="mono">waiting</span>
         </div>
@@ -468,7 +547,7 @@
       <article class="card chart-card">
         <div class="card-head compact">
           <div>
-            <span class="label">OFFLINE LEARNING</span>
+            <span class="label">APRENDIZADO OFFLINE</span>
             <h2>A* UCB1 reward</h2>
           </div>
           <span id="offlineLearningSource" class="mono">turn penalty</span>
@@ -479,7 +558,7 @@
       <article class="card chart-card">
         <div class="card-head compact">
           <div>
-            <span class="label">LIVE TELEMETRY</span>
+            <span class="label">TELEMETRIA AO VIVO</span>
             <h2>Entities / probe latency</h2>
           </div>
           <span class="mono">last 600 samples</span>
@@ -492,8 +571,8 @@
       <article class="card knowledge-card">
         <div class="card-head">
           <div>
-            <span class="label">GENERATED KNOWLEDGE</span>
-            <h2>Lessons retained by the lab</h2>
+            <span class="label">CONHECIMENTO GERADO</span>
+            <h2>Lições retidas pelo laboratório</h2>
           </div>
           <span id="knowledgeMode" class="badge neutral">structured memory</span>
         </div>
@@ -505,8 +584,8 @@
       <article class="card truth-card">
         <div class="card-head">
           <div>
-            <span class="label">WHAT IS ACTUALLY LEARNING?</span>
-            <h2>Capability truth table</h2>
+            <span class="label">O QUE ESTÁ REALMENTE APRENDENDO?</span>
+            <h2>Tabela de verdade das capacidades</h2>
           </div>
         </div>
         <div class="truth-list">
@@ -553,8 +632,8 @@
     <details class="card advanced-panel">
       <summary>
         <span>
-          <span class="label">ADVANCED CONTROLS</span>
-          Runtime parameters, router and raw run state
+          <span class="label">CONTROLES AVANÇADOS</span>
+          Parâmetros, roteamento e estado bruto da run
         </span>
         <span class="mono">expand</span>
       </summary>
@@ -593,6 +672,6 @@
     </details>
   </main>
 
-  <script src="/static/app.js?v=0.9.3"></script>
+  <script src="/static/app.js?v=0.10.0"></script>
 </body>
 </html>
