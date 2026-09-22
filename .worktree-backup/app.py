@@ -11,12 +11,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 
 from factorio_ai_lab.dashboard.rendering import resolve_official_icon
-from factorio_ai_lab.dashboard.sprites import SpriteLibrary, sprite_manifest
 from factorio_ai_lab.dashboard.state import DashboardState, json_finite
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 state = DashboardState()
-sprites = SpriteLibrary()
 
 
 async def _telemetry_loop() -> None:
@@ -183,53 +181,6 @@ def api_official_icon(entity_name: str) -> FileResponse:
             "X-Asset-Source": "Factorio official demo 2.0.73",
         },
     )
-
-
-@app.get("/api/assets/sprites.json")
-def api_sprite_manifest() -> dict[str, Any]:
-    manifest = sprite_manifest()
-    manifest["library"] = sprites.status()
-    return manifest
-
-
-@app.get("/api/assets/sprite/{entity_name}.png")
-def api_entity_sprite(
-    entity_name: str,
-    direction: int = 0,
-    frame: int = 0,
-) -> Response:
-    png = sprites.render(entity_name, direction, frame)
-    if png is None:
-        raise HTTPException(404, "no verified sprite spec for this entity")
-    return Response(
-        content=png,
-        media_type="image/png",
-        headers={
-            # Deterministic crop of a fixed asset: safe to cache hard.
-            "Cache-Control": "public, max-age=86400, immutable",
-            "X-Asset-Source": "Factorio official graphics 2.0.73 (local only)",
-        },
-    )
-
-
-@app.get("/api/world/scene")
-async def api_world_scene(
-    cx: float | None = None,
-    cy: float | None = None,
-    radius: float | None = None,
-) -> dict[str, Any]:
-    supplied = [cx is not None, cy is not None, radius is not None]
-    if any(supplied) and not all(supplied):
-        raise HTTPException(400, "cx, cy and radius must be supplied together")
-    if radius is not None and not 6.0 <= radius <= 96.0:
-        raise HTTPException(400, "radius must be in [6, 96]")
-    scene = await asyncio.to_thread(
-        state.world_scene,
-        center_x=cx,
-        center_y=cy,
-        radius=radius,
-    )
-    return json_finite(scene)
 
 
 @app.get("/api/world/frame.png")

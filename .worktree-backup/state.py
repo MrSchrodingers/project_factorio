@@ -729,8 +729,6 @@ rcon.print(helpers.table_to_json({
         self._resource_overview_cache_at = 0.0
         self._game_knowledge_cache: dict[str, Any] | None = None
         self._game_knowledge_cache_at = 0.0
-        self._entity_prototype_cache: dict[str, Any] | None = None
-        self._entity_prototype_cache_at = 0.0
 
     def connected(self) -> bool:
         return _port_open(self.host, self.port)
@@ -1090,77 +1088,6 @@ rcon.print(helpers.table_to_json({{
                         6,
                     ),
                     "series": {},
-                    "error": f"{type(exc).__name__}: {exc}",
-                }
-
-    _ENTITY_PROTOTYPE_COMMAND = r"""/c local rows={}
-for name,e in pairs(prototypes.entity) do
-  local ok,items=pcall(function() return e.items_to_place_this end)
-  if ok and items and next(items)~=nil then
-    local sb=e.selection_box
-    local cb=e.collision_box
-    rows[#rows+1]={
-      name=name,
-      type=e.type,
-      tile_width=e.tile_width,
-      tile_height=e.tile_height,
-      selection_box={sb.left_top.x,sb.left_top.y,sb.right_bottom.x,sb.right_bottom.y},
-      collision_box={cb.left_top.x,cb.left_top.y,cb.right_bottom.x,cb.right_bottom.y}
-    }
-  end
-end
-table.sort(rows,function(a,b) return a.name<b.name end)
-rcon.print(helpers.table_to_json({connected=true,count=#rows,prototypes=rows}))
-"""
-
-    def entity_prototypes(
-        self,
-        *,
-        max_age_s: float = 900.0,
-    ) -> dict[str, Any]:
-        """Footprint metadata for every player-placeable entity.
-
-        The client needs ``tile_width``/``tile_height`` and the selection box
-        to seat a sprite on the exact tiles the entity occupies. Without it a
-        sprite can only be centred on the position, which is what makes the
-        current map look misaligned.
-        """
-        now = time.monotonic()
-        with self._lock:
-            if (
-                self._entity_prototype_cache is not None
-                and now - self._entity_prototype_cache_at <= max_age_s
-            ):
-                return self._entity_prototype_cache
-            try:
-                client = self._ensure_client()
-                raw = client.send_command(self._ENTITY_PROTOTYPE_COMMAND)
-                if not raw:
-                    raise RuntimeError("RCON entity prototypes returned no payload")
-                payload = json.loads(raw)
-                if not isinstance(payload, dict):
-                    raise TypeError("RCON entity prototypes were not an object")
-                by_name: dict[str, Any] = {}
-                for row in payload.get("prototypes", []):
-                    if isinstance(row, dict) and isinstance(row.get("name"), str):
-                        by_name[row["name"]] = row
-                payload["by_name"] = by_name
-                self._entity_prototype_cache = payload
-                self._entity_prototype_cache_at = now
-                return payload
-            except (
-                OSError,
-                RuntimeError,
-                TypeError,
-                ValueError,
-                json.JSONDecodeError,
-            ) as exc:
-                self._client = None
-                return {
-                    "connected": False,
-                    "count": 0,
-                    "prototypes": [],
-                    "by_name": {},
                     "error": f"{type(exc).__name__}: {exc}",
                 }
 
@@ -2212,87 +2139,6 @@ class DashboardState:
             "factorio_data_version": FACTORIO_DATA_VERSION,
             "target_rate_per_s": target_rate,
             "dag": dag.to_dict(),
-        }
-
-    def world_scene(
-        self,
-        *,
-        center_x: float | None = None,
-        center_y: float | None = None,
-        radius: float | None = None,
-    ) -> dict[str, Any]:
-        """Vector description of a world viewport, for client-side rendering.
-
-        The PNG path re-composes and re-transfers a raster every frame, so it
-        cannot pan, zoom or animate without a server round trip. This returns
-        the same underlying live state as geometry instead, letting the client
-        draw it at any scale.
-        """
-        explicit_view = (
-            center_x is not None
-            and center_y is not None
-            and radius is not None
-        )
-        world = self.factorio.snapshot()
-        map_context = self.factorio.map_snapshot(
-            center_x=center_x if explicit_view else None,
-            center_y=center_y if explicit_view else None,
-            radius=radius if explicit_view else None,
-        )
-        prototypes = self.factorio.entity_prototypes()
-
-        entities: list[dict[str, Any]] = []
-        character: dict[str, Any] | None = None
-        for entity in world.get("entities", []):
-            if not isinstance(entity, dict):
-                continue
-            position = entity.get("position")
-            if not isinstance(position, dict):
-                continue
-            name = str(entity.get("name", ""))
-            row = {
-                "name": name,
-                "type": entity.get("type"),
-                "x": position.get("x"),
-                "y": position.get("y"),
-                "direction": entity.get("direction", 0),
-                "status": entity.get("status"),
-                "recipe": entity.get("recipe"),
-                "energy": entity.get("energy"),
-                "coal_fuel": entity.get("coal_fuel"),
-            }
-            if name == "character":
-                character = row
-            else:
-                entities.append(row)
-
-        return {
-            "connected": bool(
-                world.get("connected", False)
-                and map_context.get("connected", False)
-            ),
-            "tick": world.get("tick"),
-            "bounds": map_context.get("bounds"),
-            "center": map_context.get("center"),
-            "requested_view": (
-                {
-                    "center_x": center_x,
-                    "center_y": center_y,
-                    "radius": radius,
-                }
-                if explicit_view
-                else None
-            ),
-            "entities": entities,
-            "entity_count": len(entities),
-            "character": character,
-            "resources": map_context.get("resources", []),
-            "natural": map_context.get("natural", []),
-            "terrain_runs": map_context.get("terrain_runs", []),
-            "water_tile_count": map_context.get("water_tile_count", 0),
-            "prototypes": prototypes.get("by_name", {}),
-            "prototype_count": prototypes.get("count", 0),
-            "error": world.get("error") or map_context.get("error"),
         }
 
     def render_world_frame(
