@@ -392,7 +392,7 @@ function drawStructuredFallback() {
 function refreshWorldFrame(force = false) {
   const render = (state.status && state.status.render) || {};
   const now = Date.now();
-  if (!force && now - state.frameLastRequestedAt < 2800) return;
+  if (!force && now - state.frameLastRequestedAt < 5000) return;
   const tick = state.world && state.world.tick;
   const key = String(tick ?? "none") + ":" + String((state.world && state.world.entity_count) || 0)
     + ":" + String(render.sprite_count || 0)
