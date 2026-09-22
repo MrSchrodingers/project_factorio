@@ -33,6 +33,7 @@ from factorio_ai_lab.planning.factorio_catalog import (
     EARLY_GAME_PRODUCTION_PLANNER,
     FACTORIO_DATA_VERSION,
 )
+from factorio_ai_lab.planning.footprints import blocked_tiles, prototype_footprints
 from factorio_ai_lab.planning.progression import (
     DEFAULT_ENGINEERING_PLANNER,
     EngineeringState,
@@ -1130,6 +1131,29 @@ def _chest_item_count(
         return 0
 
 
+def _runtime_entity_footprints(instance: Any) -> dict[str, tuple[int, int]]:
+    """Tile footprints for every placeable entity, straight from the runtime.
+
+    Reuses the dashboard prototype command over the RCON client this stage
+    already holds, so the Lua that reads ``prototypes.entity`` is stated once
+    in the codebase. Best effort by design: any RCON or payload failure
+    returns an empty map and the caller falls back to the ``tile_dimensions``
+    the entity snapshot carries, then to the static table in
+    ``factorio_ai_lab.planning.footprints``.
+    """
+    try:
+        from factorio_ai_lab.dashboard.state import FactorioObserver
+
+        raw = instance.rcon_client.send_command(
+            FactorioObserver._ENTITY_PROTOTYPE_COMMAND
+        )
+        if not raw:
+            return {}
+        return prototype_footprints(json.loads(raw))
+    except (AttributeError, ImportError, OSError, TypeError, ValueError):
+        return {}
+
+
 def stage_astar_logistics(
     executor: TransactionalFLEExecutor,
     env: Any,
@@ -1156,7 +1180,6 @@ def stage_astar_logistics(
     min_y = math.floor(float(left_top.get("y", center[1] - 14)))
     max_y = math.ceil(float(right_bottom.get("y", center[1] + 14)))
 
-    blocked: set[GridPoint] = set()
     entities = namespace._save_entity_state(
         distance=500,
         player_entities=True,
@@ -1165,20 +1188,11 @@ def stage_astar_logistics(
         encode=False,
         compress=False,
     )
-    large = {"burner-mining-drill", "stone-furnace"}
-    for entity in entities:
-        if entity.get("name") == "character":
-            continue
-        position = entity.get("position") or {}
-        try:
-            gx = round(float(position["x"]) - 0.5)
-            gy = round(float(position["y"]) - 0.5)
-        except (KeyError, TypeError, ValueError):
-            continue
-        radius = 1 if entity.get("name") in large else 0
-        for dx in range(-radius, radius + 1):
-            for dy in range(-radius, radius + 1):
-                blocked.add(GridPoint(gx + dx, gy + dy))
+    # Block the tiles each entity really occupies. A guessed radius both
+    # over-blocks 2x2 entities and leaves 3x3 machines open, which is how a
+    # planned belt ends up crossing a machine and only failing at place_entity.
+    runtime_footprints = _runtime_entity_footprints(instance)
+    blocked: set[GridPoint] = blocked_tiles(entities, runtime_footprints)
 
     blocked.discard(start)
     blocked.discard(goal)
@@ -1269,6 +1283,10 @@ def stage_astar_logistics(
         "plan",
         "Routing planner generated a persistent belt-route challenger.",
         planner=planner_name,
+        footprint_source=(
+            "runtime_prototypes" if runtime_footprints else "entity_snapshot_or_static"
+        ),
+        blocked_tile_count=len(blocked),
         astar_cost=astar_route.cost,
         neural_cost=neural_candidate.cost if neural_candidate is not None else None,
         belt_count=len(path),
