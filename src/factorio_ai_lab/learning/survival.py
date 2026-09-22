@@ -15,6 +15,13 @@ class FitnessVector:
     failures: int = 0
     route_cost: float | None = None
     route_turns: int | None = None
+    autonomy_score: float | None = None
+    manual_logistics_calls: int | None = None
+    closed_loop_autonomy: bool | None = None
+    physical_processing_coverage: float | None = None
+    isolated_producers: int | None = None
+    fuel_starved_entities: int | None = None
+    power_starved_entities: int | None = None
 
     @property
     def total_rate_per_s(self) -> float:
@@ -50,6 +57,13 @@ class FitnessVector:
         )
         route_cost_raw = payload.get("route_cost")
         route_turns_raw = payload.get("route_turns")
+        autonomy_score_raw = payload.get("autonomy_score")
+        manual_logistics_raw = payload.get("manual_logistics_calls")
+        closed_loop_raw = payload.get("closed_loop_autonomy")
+        physical_coverage_raw = payload.get("physical_processing_coverage")
+        isolated_producers_raw = payload.get("isolated_producers")
+        fuel_starved_raw = payload.get("fuel_starved_entities")
+        power_starved_raw = payload.get("power_starved_entities")
         return cls(
             capabilities=capabilities,
             rates_per_s=rates,
@@ -63,6 +77,41 @@ class FitnessVector:
             route_turns=(
                 int(route_turns_raw)
                 if isinstance(route_turns_raw, (int, float))
+                else None
+            ),
+            autonomy_score=(
+                float(autonomy_score_raw)
+                if isinstance(autonomy_score_raw, (int, float))
+                else None
+            ),
+            manual_logistics_calls=(
+                int(manual_logistics_raw)
+                if isinstance(manual_logistics_raw, (int, float))
+                else None
+            ),
+            closed_loop_autonomy=(
+                bool(closed_loop_raw)
+                if isinstance(closed_loop_raw, bool)
+                else None
+            ),
+            physical_processing_coverage=(
+                float(physical_coverage_raw)
+                if isinstance(physical_coverage_raw, (int, float))
+                else None
+            ),
+            isolated_producers=(
+                int(isolated_producers_raw)
+                if isinstance(isolated_producers_raw, (int, float))
+                else None
+            ),
+            fuel_starved_entities=(
+                int(fuel_starved_raw)
+                if isinstance(fuel_starved_raw, (int, float))
+                else None
+            ),
+            power_starved_entities=(
+                int(power_starved_raw)
+                if isinstance(power_starved_raw, (int, float))
                 else None
             ),
         )
@@ -106,8 +155,40 @@ def compare_challenger(
     if throughput_improvement_ratio < 1:
         raise ValueError("throughput_improvement_ratio must be >= 1")
 
+    regressions: list[str] = []
+    processing_capability = bool(
+        {"iron_backbone", "copper_mining", "copper_smelting"}
+        & set(challenger.capabilities)
+    )
+    if (
+        processing_capability
+        and challenger.physical_processing_coverage is not None
+        and challenger.physical_processing_coverage < 0.50
+    ):
+        regressions.append(
+            "physical processing coverage below 50% "
+            f"({challenger.physical_processing_coverage:.1%})"
+        )
+    if (
+        "coal_mining" in challenger.capabilities
+        and challenger.fuel_starved_entities is not None
+        and challenger.fuel_starved_entities > 0
+    ):
+        regressions.append(
+            "fuel starvation remains after coal capability "
+            f"({challenger.fuel_starved_entities} entities)"
+        )
+    if (
+        "steam_power" in challenger.capabilities
+        and challenger.power_starved_entities is not None
+        and challenger.power_starved_entities > 0
+    ):
+        regressions.append(
+            "power starvation remains after steam-power capability "
+            f"({challenger.power_starved_entities} entities)"
+        )
+
     if champion is None:
-        regressions: list[str] = []
         if challenger.failures > 0:
             regressions.append(
                 f"challenger has {challenger.failures} failed validation stage(s)"
@@ -133,7 +214,6 @@ def compare_challenger(
             retention_ratio=retention_ratio,
         )
 
-    regressions: list[str] = []
     improvements: list[str] = []
 
     lost_capabilities = sorted(champion.capabilities - challenger.capabilities)
@@ -181,19 +261,31 @@ def compare_challenger(
     if new_capabilities:
         improvements.append("new capabilities: " + ", ".join(new_capabilities))
 
-    champion_total = champion.total_rate_per_s
-    challenger_total = challenger.total_rate_per_s
-    if champion_total <= 0 < challenger_total:
-        improvements.append("validated aggregate production throughput")
-    elif (
-        champion_total > 0
-        and challenger_total
-        >= champion_total * throughput_improvement_ratio
-    ):
-        improvements.append(
-            f"aggregate rate improved {champion_total:.4g}→"
-            f"{challenger_total:.4g}/s"
-        )
+    comparable_rates = sorted(
+        set(champion.rates_per_s) & set(challenger.rates_per_s)
+    )
+    rate_improvements: list[str] = []
+    for name in comparable_rates:
+        baseline = max(0.0, float(champion.rates_per_s[name]))
+        candidate = max(0.0, float(challenger.rates_per_s[name]))
+        if baseline <= 0:
+            if candidate > 0:
+                rate_improvements.append(f"{name} established at {candidate:.4g}/s")
+            continue
+        if candidate >= baseline * throughput_improvement_ratio:
+            rate_improvements.append(
+                f"{name} improved {baseline:.4g}→{candidate:.4g}/s"
+            )
+
+    new_rate_keys = sorted(
+        set(challenger.rates_per_s) - set(champion.rates_per_s)
+    )
+    for name in new_rate_keys:
+        candidate = max(0.0, float(challenger.rates_per_s[name]))
+        if candidate > 0:
+            rate_improvements.append(f"new measured flow {name}={candidate:.4g}/s")
+
+    improvements.extend(rate_improvements)
 
     if (
         champion.route_cost is not None
@@ -214,6 +306,102 @@ def compare_challenger(
             f"route turns improved {champion.route_turns}→"
             f"{challenger.route_turns}"
         )
+
+    if (
+        champion.manual_logistics_calls is not None
+        and challenger.manual_logistics_calls is not None
+    ):
+        if challenger.manual_logistics_calls > champion.manual_logistics_calls:
+            regressions.append(
+                "manual logistics increased "
+                f"{champion.manual_logistics_calls}→"
+                f"{challenger.manual_logistics_calls}"
+            )
+        elif challenger.manual_logistics_calls < champion.manual_logistics_calls:
+            improvements.append(
+                "manual logistics reduced "
+                f"{champion.manual_logistics_calls}→"
+                f"{challenger.manual_logistics_calls}"
+            )
+
+    if (
+        champion.autonomy_score is not None
+        and challenger.autonomy_score is not None
+    ):
+        if challenger.autonomy_score + 1e-12 < champion.autonomy_score:
+            regressions.append(
+                "autonomy score regressed "
+                f"{champion.autonomy_score:.3f}→"
+                f"{challenger.autonomy_score:.3f}"
+            )
+        elif challenger.autonomy_score > champion.autonomy_score + 1e-12:
+            improvements.append(
+                "autonomy score improved "
+                f"{champion.autonomy_score:.3f}→"
+                f"{challenger.autonomy_score:.3f}"
+            )
+
+    if (
+        champion.physical_processing_coverage is not None
+        and challenger.physical_processing_coverage is not None
+    ):
+        if (
+            challenger.physical_processing_coverage + 1e-12
+            < champion.physical_processing_coverage
+        ):
+            regressions.append(
+                "physical processing coverage regressed "
+                f"{champion.physical_processing_coverage:.1%}→"
+                f"{challenger.physical_processing_coverage:.1%}"
+            )
+        elif (
+            challenger.physical_processing_coverage
+            > champion.physical_processing_coverage + 1e-12
+        ):
+            improvements.append(
+                "physical processing coverage improved "
+                f"{champion.physical_processing_coverage:.1%}→"
+                f"{challenger.physical_processing_coverage:.1%}"
+            )
+
+    for label, incumbent_value, challenger_value in (
+        (
+            "isolated producers",
+            champion.isolated_producers,
+            challenger.isolated_producers,
+        ),
+        (
+            "fuel-starved entities",
+            champion.fuel_starved_entities,
+            challenger.fuel_starved_entities,
+        ),
+        (
+            "power-starved entities",
+            champion.power_starved_entities,
+            challenger.power_starved_entities,
+        ),
+    ):
+        if incumbent_value is None or challenger_value is None:
+            continue
+        if challenger_value > incumbent_value:
+            regressions.append(
+                f"{label} increased {incumbent_value}→{challenger_value}"
+            )
+        elif challenger_value < incumbent_value:
+            improvements.append(
+                f"{label} reduced {incumbent_value}→{challenger_value}"
+            )
+
+    if (
+        champion.closed_loop_autonomy is True
+        and challenger.closed_loop_autonomy is not True
+    ):
+        regressions.append("closed-loop autonomy was lost")
+    elif (
+        champion.closed_loop_autonomy is not True
+        and challenger.closed_loop_autonomy is True
+    ):
+        improvements.append("closed-loop autonomy established")
 
     if regressions:
         return PromotionDecision(
@@ -247,6 +435,7 @@ def fitness_from_research(
     metrics: Mapping[str, Any],
     achieved: set[str] | frozenset[str],
     resource_accounting: Mapping[str, Any] | None = None,
+    physical_graph: Mapping[str, Any] | None = None,
     failed_stages: int = 0,
 ) -> FitnessVector:
     rates: dict[str, float] = {}
@@ -286,6 +475,38 @@ def fitness_from_research(
 
     route_cost_raw = metrics.get("logistics_route_cost")
     route_turns_raw = metrics.get("logistics_turns")
+    autonomy_raw = metrics.get("autonomy")
+    autonomy = autonomy_raw if isinstance(autonomy_raw, Mapping) else {}
+    interventions_raw = metrics.get("interventions")
+    interventions = (
+        interventions_raw
+        if isinstance(interventions_raw, Mapping)
+        else {}
+    )
+    committed_raw = (
+        interventions.get("post_bootstrap_committed")
+        or interventions.get("committed")
+        or {}
+    )
+    committed = (
+        committed_raw
+        if isinstance(committed_raw, Mapping)
+        else {}
+    )
+    manual_logistics_raw = autonomy.get("manual_logistics_calls")
+    if not isinstance(manual_logistics_raw, (int, float)):
+        manual_logistics_raw = committed.get("manual_logistics_calls")
+
+    physical_metrics_raw = (
+        physical_graph.get("metrics", {})
+        if isinstance(physical_graph, Mapping)
+        else {}
+    )
+    physical_metrics = (
+        physical_metrics_raw
+        if isinstance(physical_metrics_raw, Mapping)
+        else {}
+    )
 
     return FitnessVector(
         capabilities=frozenset(str(item) for item in achieved),
@@ -300,6 +521,44 @@ def fitness_from_research(
         route_turns=(
             int(route_turns_raw)
             if isinstance(route_turns_raw, (int, float))
+            else None
+        ),
+        autonomy_score=(
+            float(autonomy["score"])
+            if isinstance(autonomy.get("score"), (int, float))
+            else None
+        ),
+        manual_logistics_calls=(
+            int(manual_logistics_raw)
+            if isinstance(manual_logistics_raw, (int, float))
+            else None
+        ),
+        closed_loop_autonomy=(
+            bool(autonomy["closed_loop"])
+            if isinstance(autonomy.get("closed_loop"), bool)
+            else None
+        ),
+        physical_processing_coverage=(
+            float(physical_metrics["physical_processing_coverage"])
+            if isinstance(
+                physical_metrics.get("physical_processing_coverage"),
+                (int, float),
+            )
+            else None
+        ),
+        isolated_producers=(
+            int(physical_metrics["isolated_producers"])
+            if isinstance(physical_metrics.get("isolated_producers"), (int, float))
+            else None
+        ),
+        fuel_starved_entities=(
+            int(physical_metrics["fuel_starved_entities"])
+            if isinstance(physical_metrics.get("fuel_starved_entities"), (int, float))
+            else None
+        ),
+        power_starved_entities=(
+            int(physical_metrics["power_starved_entities"])
+            if isinstance(physical_metrics.get("power_starved_entities"), (int, float))
             else None
         ),
     )

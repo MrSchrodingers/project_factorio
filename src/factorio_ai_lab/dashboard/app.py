@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
 
@@ -17,15 +17,27 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 state = DashboardState()
 
 
+async def _telemetry_loop() -> None:
+    while True:
+        await asyncio.to_thread(state.record_telemetry)
+        await asyncio.sleep(2.0)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    yield
-    state.close()
+    telemetry_task = asyncio.create_task(_telemetry_loop())
+    try:
+        yield
+    finally:
+        telemetry_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await telemetry_task
+        state.close()
 
 
 app = FastAPI(
     title="Factorio AI Lab Dashboard",
-    version="0.6.1",
+    version="0.11.0",
     lifespan=lifespan,
 )
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -76,6 +88,26 @@ async def api_production(precision: str = "1m") -> dict[str, Any]:
         raise HTTPException(400, str(exc)) from exc
 
 
+@app.get("/api/factory-graph")
+async def api_factory_graph() -> dict[str, Any]:
+    world = await asyncio.to_thread(state.factorio.snapshot)
+    return state.factory_graph_data(world=world)
+
+
+@app.get("/api/autonomy")
+async def api_autonomy() -> dict[str, Any]:
+    world = await asyncio.to_thread(state.factorio.snapshot)
+    production = await asyncio.to_thread(
+        state.factorio.production_statistics,
+        "5s",
+    )
+    return state.autonomy_data(
+        world=world,
+        research=state.research_data(),
+        production=production,
+    )
+
+
 @app.get("/api/learning")
 def api_learning() -> dict[str, Any]:
     return state.learning_data()
@@ -101,9 +133,24 @@ async def api_progression() -> dict[str, Any]:
     )
 
 
+@app.get("/api/production-plan")
+async def production_plan() -> dict:
+    return state.production_plan_data()
+
+
 @app.get("/api/resource-overview")
 async def api_resource_overview() -> dict[str, Any]:
     return await asyncio.to_thread(state.factorio.resource_overview)
+
+
+@app.get("/api/game-graph")
+async def api_game_graph() -> dict[str, Any]:
+    return await asyncio.to_thread(state.factorio.game_knowledge)
+
+
+@app.get("/api/game-graph/summary")
+async def api_game_graph_summary() -> dict[str, Any]:
+    return await asyncio.to_thread(state.game_knowledge_summary_data)
 
 
 @app.get("/api/knowledge")
@@ -137,11 +184,27 @@ def api_official_icon(entity_name: str) -> FileResponse:
 
 
 @app.get("/api/world/frame.png")
-async def api_world_frame(mode: str = "game") -> Response:
+async def api_world_frame(
+    mode: str = "game",
+    cx: float | None = None,
+    cy: float | None = None,
+    radius: float | None = None,
+) -> Response:
     if mode not in {"game", "overview", "tactical"}:
         raise HTTPException(400, "mode must be game, overview or tactical")
+    supplied = [cx is not None, cy is not None, radius is not None]
+    if any(supplied) and not all(supplied):
+        raise HTTPException(400, "cx, cy and radius must be supplied together")
+    if radius is not None and not 6.0 <= radius <= 96.0:
+        raise HTTPException(400, "radius must be in [6, 96]")
     try:
-        png = await asyncio.to_thread(state.render_world_frame, mode)
+        png = await asyncio.to_thread(
+            state.render_world_frame,
+            mode,
+            center_x=cx,
+            center_y=cy,
+            radius=radius,
+        )
     except Exception as exc:
         raise HTTPException(503, f"world renderer unavailable: {exc}") from exc
     return Response(

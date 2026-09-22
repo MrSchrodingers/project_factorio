@@ -61,67 +61,67 @@ Por isso o primeiro modelo sugerido é **Qwen3-4B GGUF Q4_K_M via llama.cpp**. N
 9B v2 pode entrar como benchmark secundário quantizado; modelos MoE de ~30B ficam fora do
 baseline de RAM.
 
-## Estado do marco v0.8.0
+## Estado do marco v0.11.0
 
-O laboratório executa Factorio 2.0.73 via FLE com checkpoints transacionais, Qwen3-4B local,
-planners determinísticos, aprendizado UCB1 e um control plane web em tempo real. Nenhum
-provider pago é necessário.
+A v0.11 consolida o laboratório como sistema de pesquisa geracional orientado por evidência
+física, com conhecimento canônico extraído do runtime do Factorio e gates estruturais de
+maturidade.
 
-A pesquisa agora é dividida em duas arenas:
+O runtime continua usando Factorio 2.0.73 + FLE, Qwen3-4B local e execução transacional, mas
+agora existem seis camadas de aprendizado e validação separadas:
 
-1. Lab arena: ambiente FLE acelerado para experimentos quantitativos de placement, A*,
-   logística, smelting, buffers, alocação de combustível e survival gates.
-2. Open-play validation: inventário vazio e árvore tecnológica real. Somente um champion
-   sobrevivente do lab pode entrar nessa arena.
+1. evolução de engenharia — champion/challenger com genome estrutural, survival gates e rollback;
+2. modelo de mundo — ESN e GRU PyTorch treinados sobre telemetria temporal e avaliados por
+   holdout de gerações inteiras;
+3. política espacial — MLP e Transformer/attention aprendem de demonstrações A* e competem por
+   rollout/custo relativo ao A*;
+4. conhecimento generativo — Qwen sintetiza hipóteses/lessons, mas um verifier determinístico
+   rejeita números e taxas sem suporte nos fatos medidos;
+5. conhecimento canônico do jogo — receitas, tecnologias, máquinas e dependências são extraídas
+   dos prototypes do Factorio 2.0.73 e usadas pelo Production DAG quando o runtime está disponível;
+6. topologia física — extração, belts, inserters, processamento, buffers, energia e fluidos formam
+   um grafo observado, com starvation e cobertura até processamento entrando nos survival gates.
 
-O currículo do lab possui treze estágios:
+O currículo lab-play possui 16 estágios, avançando de iron mining até electronic circuits,
+logistic science e otimização destrutiva/rebuild. Green science usa um DAG rate-balanced de
+receitas do Factorio 2.0.73; matéria-prima e intermediários deixam de ser tratados como sobras
+ocasionais de inventário.
 
-1. baseline de mineração de ferro;
-2. aprendizado online UCB1 de placement;
-3. promoção da melhor célula;
-4. smelting direto;
-5. logística física por A*;
-6. smelting alimentado por belt;
-7. carvão endógeno com quarentena do bootstrap;
-8. expansão para cobre;
-9. smelting de cobre com carvão interno;
-10. survival soak simultâneo de ferro, carvão, cobre e fundição;
-11. energia a vapor;
-12. manufatura elétrica;
-13. automation science.
+A seleção não usa uma soma de taxas heterogêneas. Ferro/s, copper/s, science/s e outros fluxos
+permanecem métricas separadas. Promoção exige retenção de capabilities, ausência de novas falhas
+e melhoria em dimensões comparáveis.
 
-Cada execução é um challenger. Falhar um survival gate impede promoção. O primeiro champion
-precisa completar os gates do lab; depois ainda precisa passar open_play para se tornar um
-champion validado. A ausência de champion é um resultado experimental válido.
+### Estado experimental atual
 
-O carvão usa uma política explícita de safety stock: consumidores só podem retirar o excedente
-acima da reserva mínima, enquanto o produtor recebe refuel operacional. Isso evita que cobre ou
-smelting matem a própria cadeia de combustível.
+- champion do laboratório: geração G6; este é um lab champion, não um autonomous champion;
+- gerações recentes preservam iron/coal/copper/power/red science e convergem para electronic
+  circuits;
+- milhares de amostras temporais reais alimentam o world model;
+- o GRU está treinado, mas permanece fora do controle quando não vence persistence de forma
+  consistente no holdout entre gerações;
+- a política espacial neural recebe autoridade somente conforme os gates contra A*;
+- não existe ainda um open-play validated champion; esse artefato só pode ser criado quando
+  o gate final registra closed-loop autonomy com zero logística manual na janela de soak;
+- o open-play prioriza agora Electric Mining Transition antes do scale-up industrial pesado:
+  commissioning manual → Automation → mineração elétrica → coal/iron/copper físicos → science;
+- harvest, insert e extract são medidos separadamente como intervention debt; tentativas
+  rejeitadas e ações commitadas não são misturadas;
+- milestones de carvão e vapor são rotulados como commissioning até que a fábrica sobreviva
+  ao soak físico sem intervenção;
+- open-play usa inventário vazio e a árvore tecnológica real; fallback de navegação causado por
+  limitação do FLE é registrado como assisted navigation, nunca como validação espacial estrita.
 
-No Factorio 2.0.73, a validação open-play respeita os gatilhos reais do início do jogo:
-craftar 50 iron plates libera Steam Power; craftar 10 copper plates libera Electronics;
-depois de ambos, craftar um lab libera Automation Science Pack. Só então red science e
-Automation entram na fronteira.
+### Control plane
 
-O que aprende hoje:
+O dashboard v0.11 inclui Generation Health, Champion vs Challenger, Generation Report,
+tendências geracionais, Production DAG, grafo canônico do jogo, topologia física viva,
+WIP/safety stock, starvation, matriz de modelos e Production/Consumption nativo. O mapa usa
+viewport em coordenadas reais do mundo; pan/zoom requisitam uma nova janela ao Factorio em vez
+de apenas transformar uma imagem fixa. Séries de produção discretas são agregadas antes do plot
+para reduzir aliasing visual de buckets sub-segundo.
 
-- UCB1 aprende valores de placements em trials reais no Factorio;
-- o learner offline calibra custos do A*;
-- champion/challenger seleciona configurações por sobrevivência e fitness;
-- knowledge memory retém lessons e counterexamples tipados;
-- demonstrações espaciais aceitas alimentam o futuro dataset supervisionado.
-
-Os pesos do Qwen3-4B permanecem estáticos. A CNN/RNN e o residual neural world model ainda
-não são declarados como treinados: eles só entram quando houver dataset e hipótese temporal
-suficientes.
-
-O dashboard mostra Factory, Resources e Tactical views, Production/Consumption nativo do
-LuaFlowStatistics, estado físico das máquinas, capability survival, safety stock de carvão,
-Champion vs Challenger, progression frontier e knowledge memory. Recursos e entidades usam
-coordenadas reais do Factorio e assets locais fornecidos pelo usuário; o terreno não aquático
-ainda é texturizado/reconstruído, enquanto água e recursos são observados do mundo real.
-
-A especificação completa da seleção evolutiva está em docs/EVOLUTION.md.
+A arquitetura de ML/LLM está detalhada em docs/ML_ARCHITECTURE.md e a seleção evolutiva em
+docs/EVOLUTION.md.
 
 ## Comandos principais
 
@@ -143,7 +143,16 @@ A especificação completa da seleção evolutiva está em docs/EVOLUTION.md.
     PYTHONPATH=src .venv-fle/bin/python -m factorio_ai_lab.experiments.run_iron_miner \
       --seed 20260921 --settle-seconds 20
 
-    # Currículo autônomo com aprendizado online + rollback
+    # Uma geração evolutiva completa: lab -> treino -> selection -> open-play
+    ./scripts/run_evolution_loop.sh --generations 1
+
+    # Treino/eval dos modelos recorrentes
+    ./scripts/train_recurrent_world_model.sh
+
+    # Treino/eval da política espacial
+    ./scripts/train_spatial_policy.sh
+
+    # Currículo lab isolado
     ./scripts/run_curriculum.sh
 
     # Dashboard manual
@@ -154,15 +163,14 @@ A especificação completa da seleção evolutiva está em docs/EVOLUTION.md.
 
 ## Próximos experimentos
 
-1. continuar coletando demonstrações A* reais até o gate inicial de 250 exemplos;
-2. executar variantes transacionais de rota e otimizar throughput normalizado contra belts,
-   curvas e área ocupada;
-3. treinar política espacial supervisionada e comparar CNN, CNN+self-attention e GNN;
-4. adicionar grafo de receitas e otimização de capacidade/produção;
-5. fazer o LLM gerar planos tipados em vez de comandos livres;
-6. acoplar um orquestrador persistente que consuma next_action sem resetar o checkpoint aceito;
-7. ampliar o ciclo de auto-healing;
-8. somente depois adicionar perturbações dinâmicas e insetos.
+1. resolver electronic circuits usando material allocation/DAG em vez de estoques incidentais;
+2. fechar o primeiro open-play production/technology validated champion;
+3. ampliar o catálogo de receitas e allocator para green science, mall/bus e produção elétrica;
+4. coletar mais gerações independentes para o GRU atingir o gate cross-generation;
+5. evoluir políticas espaciais de imitation para DAgger e depois RL onde A* não for suficiente;
+6. expandir destructive rebuild para células industriais e medir throughput/área/WIP;
+7. adicionar perturbações dinâmicas e biters após a fábrica autônoma manter capacidades sob
+   múltiplos seeds.
 
 Consulte docs/ARCHITECTURE.md, docs/DASHBOARD.md, docs/FLE_RUNTIME.md,
 docs/LLM_RUNTIME.md, docs/RESEARCH_BASELINE.md e docs/ROADMAP.md.

@@ -21,6 +21,12 @@ ICON_DIR = ASSET_ROOT / "icons"
 ENTITY_DIR = ASSET_ROOT / "entity"
 TERRAIN_GRASS = ASSET_ROOT / "terrain/grass-2.png"
 TERRAIN_DIRT = ASSET_ROOT / "terrain/dirt-1.png"
+TERRAIN_REFINED_CONCRETE = (
+    ASSET_ROOT / "terrain/concrete/refined-concrete.png"
+)
+TERRAIN_CONCRETE = ASSET_ROOT / "terrain/concrete/concrete.png"
+TERRAIN_STONE_PATH = ASSET_ROOT / "terrain/stone-path/stone-path-1.png"
+TERRAIN_WATER = ASSET_ROOT / "terrain/water/water1.png"
 FLE_ICON_DIR = Path("/home/ti/.fle/spritemaps/__base__/graphics/icons")
 FLE_RESOURCE_DIR = Path("/home/ti/.fle/spritemaps/__base__/graphics/resources")
 
@@ -142,6 +148,8 @@ class WorldFrameRenderer:
         self._icon_cache: dict[tuple[str, int], Image.Image] = {}
         self._sprite_cache: dict[tuple[Any, ...], Image.Image] = {}
         self._terrain_tiles: dict[str, list[Image.Image]] = {}
+        self._terrain_render_cache: dict[tuple[str, int], Image.Image] = {}
+        self._terrain_strip_cache: dict[tuple[str, int, int], Image.Image] = {}
         self._background_cache: Image.Image | None = None
         self._asset_count_checked_at = 0.0
         self._asset_count = 0
@@ -160,10 +168,12 @@ class WorldFrameRenderer:
         assets = official_asset_status()
         return {
             "ready": bool(assets["ready"]),
-            "renderer": "full-factorio-world-map-v8",
+            "renderer": "full-factorio-world-map-v9",
             "asset_count": self._asset_count_now(),
             "sprite_count": self._asset_count_now(),
             "viewport_radius": round(self._last_radius, 2),
+            "terrain_render_cache": len(self._terrain_render_cache),
+            "terrain_strip_cache": len(self._terrain_strip_cache),
             "last_error": self._last_error,
             "official_assets": assets,
         }
@@ -196,12 +206,31 @@ class WorldFrameRenderer:
             for item in resource_overview.get("cells", [])
             if isinstance(item, dict)
         )
+        viewport = map_context.get("viewport", {})
+        viewport_center = (
+            viewport.get("center", {})
+            if isinstance(viewport, dict)
+            else {}
+        )
+        viewport_key = (
+            viewport_center.get("x")
+            if isinstance(viewport_center, dict)
+            else None,
+            viewport_center.get("y")
+            if isinstance(viewport_center, dict)
+            else None,
+            viewport.get("radius")
+            if isinstance(viewport, dict)
+            else None,
+        )
         return (
             mode,
             world.get("tick"),
+            viewport_key,
             entities,
             len(map_context.get("resources", [])),
-            len(map_context.get("water_tiles", [])),
+            int(map_context.get("water_tile_count", 0) or 0),
+            len(map_context.get("terrain_runs", [])),
             overview_cells if mode == "overview" else (),
             len(resource_overview.get("points", [])) if mode == "overview" else 0,
             repr(run.get("stage")) if isinstance(run, dict) else None,
@@ -286,7 +315,15 @@ class WorldFrameRenderer:
         if kind in self._terrain_tiles:
             return self._terrain_tiles[kind]
 
-        source = TERRAIN_GRASS if kind == "grass" else TERRAIN_DIRT
+        sources = {
+            "grass": TERRAIN_GRASS,
+            "dirt": TERRAIN_DIRT,
+            "refined-concrete": TERRAIN_REFINED_CONCRETE,
+            "concrete": TERRAIN_CONCRETE,
+            "stone-path": TERRAIN_STONE_PATH,
+            "water": TERRAIN_WATER,
+        }
+        source = sources.get(kind, TERRAIN_GRASS)
         tiles: list[Image.Image] = []
         try:
             sheet = Image.open(source).convert("RGBA")
@@ -434,20 +471,81 @@ class WorldFrameRenderer:
         self,
         name: str,
         tile_pixels: float,
+        *,
+        direction: int = 0,
     ) -> Image.Image | None:
-        cache_key = ("static", name, round(tile_pixels, 1))
+        direction = _cardinal_direction(direction)
+        cache_key = (
+            "static",
+            name,
+            direction,
+            round(tile_pixels, 1),
+        )
         if cache_key in self._sprite_cache:
             return self._sprite_cache[cache_key]
 
-        candidates = {
+        # Single-frame entities can use the full official texture directly.
+        direct = {
             "wooden-chest": ENTITY_DIR / "wooden-chest" / "wooden-chest.png",
             "stone-furnace": ENTITY_DIR / "stone-furnace" / "stone-furnace.png",
         }
-        path = candidates.get(name)
+        path = direct.get(name)
+        crop_box: tuple[int, int, int, int] | None = None
+
+        # These base-game sheets have stable frame dimensions in Factorio
+        # 2.0.73. Rendering one authentic animation frame is substantially
+        # more legible than substituting an inventory icon.
+        sheet_specs: dict[str, tuple[Path, int, int]] = {
+            "electric-mining-drill": (
+                ENTITY_DIR
+                / "electric-mining-drill"
+                / "electric-mining-drill.png",
+                162,
+                156,
+            ),
+            "assembling-machine-1": (
+                ENTITY_DIR
+                / "assembling-machine-1"
+                / "assembling-machine-1.png",
+                214,
+                226,
+            ),
+            "lab": (
+                ENTITY_DIR / "lab" / "lab.png",
+                194,
+                174,
+            ),
+            "small-electric-pole": (
+                ENTITY_DIR
+                / "small-electric-pole"
+                / "small-electric-pole.png",
+                72,
+                220,
+            ),
+        }
+        if path is None and name in sheet_specs:
+            path, frame_width, frame_height = sheet_specs[name]
+            crop_box = (0, 0, frame_width, frame_height)
+
+        if path is None and name == "steam-engine":
+            horizontal = direction in {4, 12}
+            path = (
+                ENTITY_DIR
+                / "steam-engine"
+                / ("steam-engine-H.png" if horizontal else "steam-engine-V.png")
+            )
+            frame_width, frame_height = (
+                (352, 257) if horizontal else (165, 391)
+            )
+            crop_box = (0, 0, frame_width, frame_height)
+
         if path is None:
             return None
+
         try:
             sprite = Image.open(path).convert("RGBA")
+            if crop_box is not None:
+                sprite = sprite.crop(crop_box)
             sprite = self._resize_factorio_sprite(sprite, tile_pixels)
         except OSError:
             return None
@@ -460,6 +558,23 @@ class WorldFrameRenderer:
         map_context: dict[str, Any],
         max_radius: float,
     ) -> tuple[tuple[float, float], float]:
+        viewport = map_context.get("viewport")
+        if isinstance(viewport, dict):
+            center_raw = viewport.get("center")
+            try:
+                if isinstance(center_raw, dict):
+                    center = (
+                        float(center_raw["x"]),
+                        float(center_raw["y"]),
+                    )
+                    radius = min(
+                        96.0,
+                        max(6.0, float(viewport.get("radius", max_radius))),
+                    )
+                    return center, radius
+            except (KeyError, TypeError, ValueError):
+                pass
+
         built_positions = [
             pos
             for item in entities
@@ -794,30 +909,90 @@ class WorldFrameRenderer:
                 round((y - center[1] + radius) * scale_y),
             )
 
-        # Water is a continuous layer, not one rectangle per tile.
-        water_mask = Image.new("L", (width, height), 0)
-        water_draw = ImageDraw.Draw(water_mask)
-        water_radius = max(2, round(tile_pixels * 0.62))
-        for tile in map_context.get("water_tiles", []):
-            if not isinstance(tile, dict):
-                continue
-            try:
-                px, py = project(float(tile["x"]), float(tile["y"]))
-            except (KeyError, TypeError, ValueError):
-                continue
-            water_draw.ellipse((
-                px - water_radius,
-                py - water_radius,
-                px + water_radius,
-                py + water_radius,
-            ), fill=235)
-        if water_mask.getbbox():
-            water_mask = water_mask.filter(
-                ImageFilter.GaussianBlur(radius=max(1.0, tile_pixels * 0.34))
-            )
-            water_layer = Image.new("RGBA", (width, height), (38, 92, 127, 0))
-            water_layer.putalpha(water_mask.point(lambda value: int(value * 0.88)))
-            canvas = Image.alpha_composite(canvas, water_layer)
+        # Overlay exact Factorio terrain/pavement runs captured from RCON.
+        # RCON compacts thousands of same-row tiles into horizontal runs.
+        terrain_runs = map_context.get("terrain_runs", [])
+        if isinstance(terrain_runs, list):
+            for terrain_run in terrain_runs:
+                if not isinstance(terrain_run, dict):
+                    continue
+                try:
+                    y = float(terrain_run["y"])
+                    x1 = float(terrain_run["x1"])
+                    x2 = float(terrain_run["x2"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if (
+                    y < center[1] - radius - 1
+                    or y > center[1] + radius + 1
+                    or x2 < center[0] - radius - 1
+                    or x1 > center[0] + radius + 1
+                ):
+                    continue
+
+                raw_name = str(terrain_run.get("name", ""))
+                if "water" in raw_name:
+                    kind = "water"
+                elif "refined" in raw_name and "concrete" in raw_name:
+                    kind = "refined-concrete"
+                elif "concrete" in raw_name:
+                    kind = "concrete"
+                elif raw_name == "stone-path":
+                    kind = "stone-path"
+                else:
+                    continue
+
+                target = max(2, round(tile_pixels * 1.06))
+                tile_key = (kind, target)
+                rendered = self._terrain_render_cache.get(tile_key)
+                if rendered is None:
+                    samples = self._terrain_samples(kind)
+                    rendered = samples[0].resize(
+                        (target, target),
+                        Image.Resampling.LANCZOS,
+                    )
+                    self._terrain_render_cache[tile_key] = rendered
+
+                clipped_x1 = max(x1, center[0] - radius - 1)
+                clipped_x2 = min(x2, center[0] + radius + 1)
+                tile_count = max(
+                    1,
+                    round(clipped_x2 - clipped_x1) + 1,
+                )
+                strip_key = (kind, target, tile_count)
+                strip = self._terrain_strip_cache.get(strip_key)
+                if strip is None:
+                    strip = Image.new(
+                        "RGBA",
+                        (target * tile_count, target),
+                        (0, 0, 0, 0),
+                    )
+                    for index in range(tile_count):
+                        strip.alpha_composite(
+                            rendered,
+                            (index * target, 0),
+                        )
+                    self._terrain_strip_cache[strip_key] = strip
+
+                start_x = clipped_x1 + 0.5
+                end_x = clipped_x1 + tile_count - 0.5
+                px1, py = project(start_x, y + 0.5)
+                px2, _ = project(end_x, y + 0.5)
+                expected_width = max(target, abs(px2 - px1) + target)
+                if strip.width != expected_width:
+                    strip_to_paste = strip.resize(
+                        (expected_width, target),
+                        Image.Resampling.BILINEAR,
+                    )
+                else:
+                    strip_to_paste = strip
+                canvas.alpha_composite(
+                    strip_to_paste,
+                    (
+                        min(px1, px2) - target // 2,
+                        py - target // 2,
+                    ),
+                )
 
         # Game View uses the actual resource sheets from the local FLE
         # sprite cache. Tactical View adds a subtle map-color field below them.
@@ -1028,7 +1203,11 @@ class WorldFrameRenderer:
             elif name == "transport-belt":
                 sprite = self._belt_sprite(direction, tick, tile_pixels)
             else:
-                sprite = self._static_world_sprite(name, tile_pixels)
+                sprite = self._static_world_sprite(
+                    name,
+                    tile_pixels,
+                    direction=direction,
+                )
 
             if sprite is None:
                 size = max(22, round(tile_pixels * 1.15))

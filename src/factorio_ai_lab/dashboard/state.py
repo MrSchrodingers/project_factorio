@@ -14,14 +14,27 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from factorio_ai_lab.dashboard.rendering import WorldFrameRenderer
+from factorio_ai_lab.learning.autonomy import evaluate_factory_autonomy
+from factorio_ai_lab.learning.factory_graph import build_factory_graph
+from factorio_ai_lab.learning.telemetry import (
+    append_jsonl as append_telemetry_jsonl,
+)
+from factorio_ai_lab.learning.telemetry import compact_telemetry_sample
+from factorio_ai_lab.planning.factorio_catalog import (
+    EARLY_GAME_PRODUCTION_PLANNER,
+    FACTORIO_DATA_VERSION,
+)
 from factorio_ai_lab.planning.progression import (
     DEFAULT_ENGINEERING_PLANNER,
     EngineeringState,
 )
+from factorio_ai_lab.planning.runtime_catalog import RuntimeFactorioCatalog
+from factorio_ai_lab.runtime import runtime_status
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 RUNS_DIR = PROJECT_ROOT / "runs"
 RUNTIME_CONFIG = RUNS_DIR / "runtime_config.json"
+TELEMETRY_LOG = RUNS_DIR / "telemetry" / "world_samples.jsonl"
 
 
 DEFAULT_RUNTIME_CONFIG: dict[str, Any] = {
@@ -172,6 +185,7 @@ for _,e in pairs(p.surface.find_entities_filtered{force=p.force}) do
       name=e.name,
       type=e.type,
       direction=e.direction,
+      unit_number=e.unit_number,
       position={x=e.position.x,y=e.position.y}
     }
 
@@ -284,10 +298,37 @@ if not p then
   return
 end
 local s=p.surface
-local radius=42
+local min_x=p.position.x
+local max_x=p.position.x
+local min_y=p.position.y
+local max_y=p.position.y
+for _,e in pairs(s.find_entities_filtered{force=p.force}) do
+  if e.valid then
+    min_x=math.min(min_x,e.position.x)
+    max_x=math.max(max_x,e.position.x)
+    min_y=math.min(min_y,e.position.y)
+    max_y=math.max(max_y,e.position.y)
+  end
+end
+local margin=18
+local left=min_x-margin
+local right=max_x+margin
+local top=min_y-margin
+local bottom=max_y+margin
+local max_span=220
+if right-left>max_span then
+  local cx=(left+right)/2
+  left=cx-max_span/2
+  right=cx+max_span/2
+end
+if bottom-top>max_span then
+  local cy=(top+bottom)/2
+  top=cy-max_span/2
+  bottom=cy+max_span/2
+end
 local area={
-  left_top={x=p.position.x-radius,y=p.position.y-radius},
-  right_bottom={x=p.position.x+radius,y=p.position.y+radius}
+  left_top={x=left,y=top},
+  right_bottom={x=right,y=bottom}
 }
 local resources={}
 for _,e in pairs(s.find_entities_filtered{area=area,type="resource"}) do
@@ -312,24 +353,69 @@ for _,kind in pairs(natural_types) do
     end
   end
 end
-local water={}
-local water_names={
+local terrain_names={
   "water","deepwater","water-green","deepwater-green",
-  "water-shallow","water-mud"
+  "water-shallow","water-mud",
+  "stone-path","concrete","refined-concrete",
+  "hazard-concrete-left","hazard-concrete-right",
+  "refined-hazard-concrete-left","refined-hazard-concrete-right"
 }
-for _,tile in pairs(s.find_tiles_filtered{area=area,name=water_names}) do
-  table.insert(water,{x=tile.position.x,y=tile.position.y})
+local terrain_rows={}
+local terrain_tile_count=0
+local water_tile_count=0
+for _,tile in pairs(s.find_tiles_filtered{area=area,name=terrain_names}) do
+  terrain_tile_count=terrain_tile_count+1
+  if string.find(tile.name,"water",1,true) then
+    water_tile_count=water_tile_count+1
+  end
+  local y=tile.position.y
+  local key=tile.name..":"..tostring(y)
+  local row=terrain_rows[key]
+  if not row then
+    row={name=tile.name,y=y,xs={}}
+    terrain_rows[key]=row
+  end
+  row.xs[#row.xs+1]=tile.position.x
+end
+local terrain_runs={}
+for _,row in pairs(terrain_rows) do
+  table.sort(row.xs)
+  local first=nil
+  local previous=nil
+  for _,x in ipairs(row.xs) do
+    if first==nil then
+      first=x
+      previous=x
+    elseif x==previous+1 then
+      previous=x
+    else
+      terrain_runs[#terrain_runs+1]={
+        name=row.name,y=row.y,x1=first,x2=previous
+      }
+      first=x
+      previous=x
+    end
+  end
+  if first~=nil then
+    terrain_runs[#terrain_runs+1]={
+      name=row.name,y=row.y,x1=first,x2=previous
+    }
+  end
 end
 rcon.print(helpers.table_to_json({
   connected=true,
   center={x=p.position.x,y=p.position.y},
-  radius=radius,
+  bounds={
+    left_top={x=left,y=top},
+    right_bottom={x=right,y=bottom}
+  },
   resources=resources,
   natural=natural,
-  water_tiles=water
+  terrain_runs=terrain_runs,
+  terrain_tile_count=terrain_tile_count,
+  water_tile_count=water_tile_count
 }))
 """
-
     _RESOURCE_OVERVIEW_COMMAND = r"""
 /c local p=storage.agent_characters and storage.agent_characters[1]
 if not p then
@@ -425,6 +511,182 @@ rcon.print(helpers.table_to_json({
 }))
 """
 
+    _GAME_KNOWLEDGE_COMMAND = r"""
+/c local p=storage.agent_characters and storage.agent_characters[1]
+if not p then
+  rcon.print(helpers.table_to_json({connected=false,error="agent character unavailable"}))
+  return
+end
+
+local function names_from_dictionary(values)
+  local out={}
+  if values then
+    for name,_ in pairs(values) do out[#out+1]=name end
+  end
+  table.sort(out)
+  return out
+end
+
+local function string_array(values)
+  local out={}
+  if values then
+    for key,value in pairs(values) do
+      if type(key)=="string" then
+        out[#out+1]=key
+      elseif type(value)=="string" then
+        out[#out+1]=value
+      end
+    end
+  end
+  table.sort(out)
+  return out
+end
+
+local function recipe_categories(recipe)
+  local ok_categories,categories=pcall(function()
+    return recipe.categories
+  end)
+  if ok_categories and categories then
+    return string_array(categories)
+  end
+  local ok_category,category=pcall(function()
+    return recipe.category
+  end)
+  if ok_category and category then
+    return {category}
+  end
+  return {"crafting"}
+end
+
+local function ingredient_rows(values)
+  local out={}
+  if values then
+    for _,value in pairs(values) do
+      out[#out+1]={
+        name=value.name,
+        type=value.type,
+        amount=value.amount or 0
+      }
+    end
+  end
+  return out
+end
+
+local function product_rows(values)
+  local out={}
+  if values then
+    for _,value in pairs(values) do
+      local amount=value.amount
+      if not amount then
+        local amin=value.amount_min or 0
+        local amax=value.amount_max or amin
+        amount=(amin+amax)/2
+      end
+      amount=amount*(value.probability or 1)
+      out[#out+1]={
+        name=value.name,
+        type=value.type,
+        amount=amount
+      }
+    end
+  end
+  return out
+end
+
+local recipes={}
+for name,recipe in pairs(prototypes.recipe) do
+  local force_recipe=p.force.recipes[name]
+  local categories={}
+  local ok_categories,raw_categories=pcall(function()
+    return recipe.categories
+  end)
+  if ok_categories and raw_categories then
+    categories=string_array(raw_categories)
+  else
+    local ok_category,category=pcall(function()
+      return recipe.category
+    end)
+    if ok_category and category then categories={tostring(category)} end
+  end
+  recipes[#recipes+1]={
+    name=name,
+    energy=recipe.energy,
+    categories=recipe_categories(recipe),
+    ingredients=ingredient_rows(recipe.ingredients),
+    products=product_rows(recipe.products),
+    enabled_by_default=recipe.enabled,
+    enabled=force_recipe and force_recipe.enabled or false,
+    hidden_from_player_crafting=recipe.hidden_from_player_crafting
+  }
+end
+table.sort(recipes,function(a,b) return a.name<b.name end)
+
+local technologies={}
+for name,technology in pairs(prototypes.technology) do
+  local force_technology=p.force.technologies[name]
+  local unlocks={}
+  for _,effect in pairs(technology.effects or {}) do
+    if effect.type=="unlock-recipe" and effect.recipe then
+      unlocks[#unlocks+1]=effect.recipe
+    end
+  end
+  table.sort(unlocks)
+  technologies[#technologies+1]={
+    name=name,
+    prerequisites=names_from_dictionary(technology.prerequisites),
+    unlocks=unlocks,
+    research_unit_ingredients=ingredient_rows(
+      technology.research_unit_ingredients
+    ),
+    researched=force_technology and force_technology.researched or false,
+    enabled=force_technology and force_technology.enabled or false
+  }
+end
+table.sort(technologies,function(a,b) return a.name<b.name end)
+
+local machines={}
+for name,entity in pairs(prototypes.entity) do
+  local ok_categories,categories=pcall(function()
+    return entity.crafting_categories
+  end)
+  local ok_speed,speed=pcall(function()
+    return entity.crafting_speed
+  end)
+  local ok_resources,resource_categories=pcall(function()
+    return entity.resource_categories
+  end)
+  local ok_mining,mining_speed=pcall(function()
+    return entity.mining_speed
+  end)
+  local crafting=ok_categories and categories and next(categories)~=nil
+  local mining=ok_resources and resource_categories and next(resource_categories)~=nil
+  if crafting or mining then
+    machines[#machines+1]={
+      name=name,
+      type=entity.type,
+      crafting_categories=crafting and string_array(categories) or {},
+      crafting_speed=ok_speed and speed or nil,
+      resource_categories=mining and string_array(resource_categories) or {},
+      mining_speed=ok_mining and mining_speed or nil
+    }
+  end
+end
+table.sort(machines,function(a,b) return a.name<b.name end)
+
+rcon.print(helpers.table_to_json({
+  connected=true,
+  factorio_version=script.active_mods.base or "base",
+  recipes=recipes,
+  technologies=technologies,
+  machines=machines,
+  counts={
+    recipes=#recipes,
+    technologies=#technologies,
+    machines=#machines
+  }
+}))
+"""
+
     def __init__(self, host: str = "127.0.0.1", port: int = 27000) -> None:
         self.host = host
         self.port = port
@@ -434,9 +696,15 @@ rcon.print(helpers.table_to_json({
         self._map_cache: dict[str, Any] | None = None
         self._map_cache_at = 0.0
         self._map_cache_center: tuple[float, float] | None = None
+        self._map_view_cache: dict[
+            tuple[float, float, float],
+            tuple[float, dict[str, Any]],
+        ] = {}
         self._production_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._resource_overview_cache: dict[str, Any] | None = None
         self._resource_overview_cache_at = 0.0
+        self._game_knowledge_cache: dict[str, Any] | None = None
+        self._game_knowledge_cache_at = 0.0
 
     def connected(self) -> bool:
         return _port_open(self.host, self.port)
@@ -464,18 +732,93 @@ rcon.print(helpers.table_to_json({
         self,
         *,
         max_age_s: float = 5.0,
+        center_x: float | None = None,
+        center_y: float | None = None,
+        radius: float | None = None,
     ) -> dict[str, Any]:
         now = time.monotonic()
+        explicit_view = (
+            center_x is not None
+            and center_y is not None
+            and radius is not None
+        )
+        view_key: tuple[float, float, float] | None = None
+        command = self._MAP_COMMAND
+
+        if explicit_view:
+            cx = float(center_x)
+            cy = float(center_y)
+            view_radius = min(96.0, max(6.0, float(radius)))
+            view_key = (
+                round(cx, 2),
+                round(cy, 2),
+                round(view_radius, 2),
+            )
+            cached = self._map_view_cache.get(view_key)
+            if cached is not None and now - cached[0] <= max_age_s:
+                return cached[1]
+
+            auto_block = """local min_x=p.position.x
+local max_x=p.position.x
+local min_y=p.position.y
+local max_y=p.position.y
+for _,e in pairs(s.find_entities_filtered{force=p.force}) do
+  if e.valid then
+    min_x=math.min(min_x,e.position.x)
+    max_x=math.max(max_x,e.position.x)
+    min_y=math.min(min_y,e.position.y)
+    max_y=math.max(max_y,e.position.y)
+  end
+end
+local margin=18
+local left=min_x-margin
+local right=max_x+margin
+local top=min_y-margin
+local bottom=max_y+margin
+local max_span=220
+if right-left>max_span then
+  local cx=(left+right)/2
+  left=cx-max_span/2
+  right=cx+max_span/2
+end
+if bottom-top>max_span then
+  local cy=(top+bottom)/2
+  top=cy-max_span/2
+  bottom=cy+max_span/2
+end
+"""
+            view_block = f"""local viewport_cx={cx:.6f}
+local viewport_cy={cy:.6f}
+local viewport_radius={view_radius:.6f}
+local left=viewport_cx-viewport_radius
+local right=viewport_cx+viewport_radius
+local top=viewport_cy-viewport_radius
+local bottom=viewport_cy+viewport_radius
+"""
+            if auto_block not in command:
+                raise RuntimeError("map command viewport block not found")
+            command = command.replace(auto_block, view_block, 1)
+            command = command.replace(
+                "center={x=p.position.x,y=p.position.y},",
+                (
+                    "center={x=viewport_cx,y=viewport_cy},"
+                    "viewport={center={x=viewport_cx,y=viewport_cy},"
+                    "radius=viewport_radius},"
+                ),
+                1,
+            )
+
         with self._lock:
             if (
-                self._map_cache is not None
+                not explicit_view
+                and self._map_cache is not None
                 and now - self._map_cache_at <= max_age_s
             ):
                 return self._map_cache
 
             try:
                 client = self._ensure_client()
-                raw = client.send_command(self._MAP_COMMAND)
+                raw = client.send_command(command)
                 if not raw:
                     raise RuntimeError("RCON map snapshot returned no payload")
                 payload = json.loads(raw)
@@ -490,8 +833,17 @@ rcon.print(helpers.table_to_json({
                         )
                     except (KeyError, TypeError, ValueError):
                         self._map_cache_center = None
-                self._map_cache = payload
-                self._map_cache_at = now
+                if explicit_view and view_key is not None:
+                    self._map_view_cache[view_key] = (now, payload)
+                    if len(self._map_view_cache) > 20:
+                        oldest = min(
+                            self._map_view_cache,
+                            key=lambda key: self._map_view_cache[key][0],
+                        )
+                        self._map_view_cache.pop(oldest, None)
+                else:
+                    self._map_cache = payload
+                    self._map_cache_at = now
                 return payload
             except (
                 OSError,
@@ -503,7 +855,9 @@ rcon.print(helpers.table_to_json({
                     "connected": False,
                     "resources": [],
                     "natural": [],
-                    "water_tiles": [],
+                    "terrain_runs": [],
+                    "terrain_tile_count": 0,
+                    "water_tile_count": 0,
                     "error": f"{type(exc).__name__}: {exc}",
                 }
 
@@ -544,6 +898,65 @@ rcon.print(helpers.table_to_json({
                     "points": [],
                     "totals": {},
                     "nearest": {},
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+
+    def game_knowledge(
+        self,
+        *,
+        max_age_s: float = 300.0,
+    ) -> dict[str, Any]:
+        now = time.monotonic()
+        with self._lock:
+            if (
+                self._game_knowledge_cache is not None
+                and now - self._game_knowledge_cache_at <= max_age_s
+            ):
+                return self._game_knowledge_cache
+            try:
+                client = self._ensure_client()
+                raw = client.send_command(self._GAME_KNOWLEDGE_COMMAND)
+                if not raw:
+                    raise RuntimeError("RCON game knowledge returned no payload")
+                payload = json.loads(raw)
+                if not isinstance(payload, dict):
+                    raise TypeError("RCON game knowledge was not an object")
+                self._game_knowledge_cache = payload
+                self._game_knowledge_cache_at = now
+                try:
+                    knowledge_path = RUNS_DIR / "game_knowledge_graph.json"
+                    temporary = knowledge_path.with_suffix(".json.tmp")
+                    temporary.write_text(
+                        json.dumps(
+                            payload,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        )
+                        + "\n",
+                        encoding="utf-8",
+                    )
+                    temporary.replace(knowledge_path)
+                except OSError:
+                    pass
+                return payload
+            except (
+                OSError,
+                RuntimeError,
+                TypeError,
+                ValueError,
+                json.JSONDecodeError,
+            ) as exc:
+                self._client = None
+                return {
+                    "connected": False,
+                    "recipes": [],
+                    "technologies": [],
+                    "machines": [],
+                    "counts": {
+                        "recipes": 0,
+                        "technologies": 0,
+                        "machines": 0,
+                    },
                     "error": f"{type(exc).__name__}: {exc}",
                 }
 
@@ -720,9 +1133,28 @@ class DashboardState:
         self.renderer = WorldFrameRenderer()
         self.history: deque[dict[str, Any]] = deque(maxlen=600)
         self.history_lock = threading.Lock()
+        self._last_telemetry_write = 0.0
+        self._frame_cache: dict[str, tuple[float, bytes]] = {}
+        self._frame_cache_lock = threading.Lock()
+        self._artifact_cache: dict[str, tuple[float, Any]] = {}
 
     def close(self) -> None:
         self.factorio.close()
+
+    def _cached_artifact(
+        self,
+        key: str,
+        *,
+        ttl_s: float,
+        loader: Any,
+    ) -> Any:
+        now = time.time()
+        cached = self._artifact_cache.get(key)
+        if cached is not None and now - cached[0] <= ttl_s:
+            return cached[1]
+        value = loader()
+        self._artifact_cache[key] = (now, value)
+        return value
 
     def llm_status(self) -> dict[str, Any]:
         url = "http://127.0.0.1:18081/v1/models"
@@ -750,28 +1182,108 @@ class DashboardState:
             }
 
     def _research_runner_status(self) -> dict[str, Any]:
+        execution = runtime_status()
+        if execution.get("writer_active"):
+            action = execution.get("action", {})
+            action = action if isinstance(action, dict) else {}
+            lease = execution.get("lease", {})
+            lease = lease if isinstance(lease, dict) else {}
+            arena = str(
+                action.get("arena")
+                or lease.get("arena")
+                or "factorio"
+            )
+            phase = (
+                "open_play_validation"
+                if arena == "open_play"
+                else "lab_generation"
+                if arena == "lab_play"
+                else "factorio_execution"
+            )
+            return {
+                "active": True,
+                "process": str(
+                    lease.get("owner")
+                    or action.get("owner")
+                    or "factorio_world_writer"
+                ),
+                "arena": arena,
+                "phase": phase,
+                "model_training": False,
+                "heartbeat": {
+                    "action_active": execution.get("action_active", False),
+                    "heartbeat_age_s": execution.get("heartbeat_age_s"),
+                    "action_id": action.get("action_id"),
+                    "action_kind": action.get("action_kind"),
+                    "stage": action.get("stage"),
+                    "elapsed_s": action.get("elapsed_s"),
+                },
+            }
+
+        evolution_loop_active = _process_running(
+            "factorio_ai_lab.experiments.evolution_loop"
+        )
         open_play_active = _process_running(
             "factorio_ai_lab.experiments.open_play_runner"
         )
         curriculum_active = _process_running(
             "factorio_ai_lab.experiments.curriculum_runner"
         )
+        model_training_active = (
+            _process_running(
+                "factorio_ai_lab.experiments.train_recurrent_world_model"
+            )
+            or _process_running(
+                "factorio_ai_lab.experiments.train_spatial_policy"
+            )
+        )
+
+        if evolution_loop_active:
+            if model_training_active:
+                phase = "model_training"
+            elif open_play_active:
+                phase = "open_play_validation"
+            else:
+                research = self.research_data()
+                research_status = str(research.get("status", ""))
+                if research_status in {
+                    "starting",
+                    "running",
+                    "learning",
+                    "validating",
+                }:
+                    phase = "lab_generation"
+                else:
+                    phase = "selection_transition"
+            return {
+                "active": True,
+                "process": "evolution_loop",
+                "arena": "continuous_evolution",
+                "phase": phase,
+                "model_training": model_training_active,
+            }
         if open_play_active:
             return {
                 "active": True,
                 "process": "open_play_runner",
                 "arena": "open_play",
+                "phase": "open_play_validation",
+                "model_training": False,
             }
         if curriculum_active:
             return {
                 "active": True,
                 "process": "curriculum_runner",
                 "arena": "lab_play",
+                "phase": "lab_generation",
+                "model_training": False,
             }
         return {
             "active": False,
             "process": None,
             "arena": None,
+            "phase": "idle",
+            "model_training": False,
         }
 
     def status(self) -> dict[str, Any]:
@@ -788,16 +1300,59 @@ class DashboardState:
             "llm": self.llm_status(),
             "memory": _memory_status(),
             "runtime": self.config.read(),
+            "execution": runtime_status(),
             "render": self.renderer.status(),
             "research_runner": self._research_runner_status(),
         }
+
+    def record_telemetry(self) -> bool:
+        now = time.time()
+        if now - self._last_telemetry_write < 1.5:
+            return False
+        world = self.factorio.snapshot()
+        if not world.get("connected", False):
+            return False
+        research = self.research_data()
+        progression = self.engineering_progression_data(
+            world=world,
+            research=research,
+        )
+        production = self.factorio.production_statistics(
+            precision_key="5s",
+            max_age_s=2.5,
+        )
+        execution = runtime_status()
+        sample = compact_telemetry_sample(
+            timestamp=now,
+            world=world,
+            research=research,
+            progression=progression,
+            production=production,
+            action_context=(
+                execution.get("action", {})
+                if execution.get("action_active")
+                else {}
+            ),
+        )
+        append_telemetry_jsonl(TELEMETRY_LOG, sample)
+        self._last_telemetry_write = now
+        return True
 
     def sample(self) -> dict[str, Any]:
         world = self.factorio.snapshot()
         research = self.research_data()
         resource_overview = self.factorio.resource_overview()
+        progression = self.engineering_progression_data(
+            world=world,
+            research=research,
+        )
+        production = self.factorio.production_statistics(
+            precision_key="5s",
+            max_age_s=2.5,
+        )
+        now = time.time()
         point = {
-            "timestamp": time.time(),
+            "timestamp": now,
             "tick": world.get("tick"),
             "entity_count": world.get("entity_count", 0),
             "probe_latency_ms": world.get("latency_ms", 0.0),
@@ -805,6 +1360,27 @@ class DashboardState:
         }
         with self.history_lock:
             self.history.append(point)
+
+        if (
+            world.get("connected", False)
+            and now - self._last_telemetry_write >= 1.5
+        ):
+            execution = runtime_status()
+            sample = compact_telemetry_sample(
+                timestamp=now,
+                world=world,
+                research=research,
+                progression=progression,
+                production=production,
+                action_context=(
+                execution.get("action", {})
+                if execution.get("action_active")
+                else {}
+            ),
+            )
+            append_telemetry_jsonl(TELEMETRY_LOG, sample)
+            self._last_telemetry_write = now
+
         return {
             "timestamp": point["timestamp"],
             "status": self.status(),
@@ -813,15 +1389,128 @@ class DashboardState:
             "learning": self.learning_data(),
             "run": self.active_run_data(),
             "research": research,
-            "progression": self.engineering_progression_data(
+            "progression": progression,
+            "production_plan": self.production_plan_data(
+                research=research,
+                progression=progression,
+            ),
+            "autonomy": self.autonomy_data(
                 world=world,
                 research=research,
+                production=production,
             ),
             "resource_overview": resource_overview,
+            "factory_graph": self.factory_graph_data(world=world),
+            "game_graph_summary": self.game_knowledge_summary_data(
+                progression=progression,
+            ),
             "evolution": self.evolution_data(research=research),
             "knowledge": self.knowledge_data(),
             "datasets": self.dataset_data(),
         }
+
+    def factory_graph_data(
+        self,
+        *,
+        world: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        world = world if world is not None else self.factorio.snapshot()
+        entities = world.get("entities", [])
+        if not isinstance(entities, list):
+            entities = []
+        graph = build_factory_graph(entities)
+        graph["tick"] = world.get("tick")
+        graph["connected"] = bool(world.get("connected", False))
+        return graph
+
+    def autonomy_data(
+        self,
+        *,
+        world: dict[str, Any] | None = None,
+        research: dict[str, Any] | None = None,
+        production: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        world = world if world is not None else self.factorio.snapshot()
+        research = (
+            research
+            if research is not None
+            else self.research_data()
+        )
+        production = (
+            production
+            if production is not None
+            else self.factorio.production_statistics(
+                precision_key="5s",
+                max_age_s=2.5,
+            )
+        )
+
+        metrics = research.get("metrics", {})
+        if not isinstance(metrics, dict):
+            metrics = {}
+        intervention_state = metrics.get("interventions", {})
+        instrumented = isinstance(intervention_state, dict) and bool(
+            intervention_state
+        )
+
+        committed: dict[str, int] = {}
+        assisted_navigation = 0
+        soak_runtime = float(
+            metrics.get("autonomy_soak_runtime_s", 0.0) or 0.0
+        )
+        if instrumented:
+            candidate = (
+                intervention_state.get("autonomy_window_committed")
+                or intervention_state.get("post_bootstrap_committed")
+                or intervention_state.get("committed")
+                or {}
+            )
+            if isinstance(candidate, dict):
+                committed = {
+                    str(key): int(value or 0)
+                    for key, value in candidate.items()
+                    if isinstance(value, (int, float))
+                }
+            assisted_navigation = int(
+                intervention_state.get(
+                    "assisted_navigation_count",
+                    metrics.get(
+                        "assisted_navigation_count",
+                        0,
+                    ),
+                )
+                or 0
+            )
+
+        rates: dict[str, float] = {}
+        series = production.get("series", {})
+        if isinstance(series, dict):
+            for item, row in series.items():
+                if not isinstance(row, dict):
+                    continue
+                raw = row.get("produced_rate", 0.0)
+                if isinstance(raw, (int, float)) and float(raw) > 0:
+                    rates[str(item)] = float(raw) / 60.0
+
+        evidence = evaluate_factory_autonomy(
+            entities=world.get("entities", []),
+            interventions=committed,
+            production_rates_per_s=rates,
+            soak_runtime_s=soak_runtime,
+            assisted_navigation_count=assisted_navigation,
+        ).to_dict()
+        evidence["intervention_instrumented"] = instrumented
+        if not instrumented:
+            evidence["manual_harvest_calls"] = None
+            evidence["manual_transfer_calls"] = None
+            evidence["manual_logistics_calls"] = None
+            evidence["manual_craft_calls"] = None
+        evidence["measurement_source"] = (
+            "live Factorio entities + LuaFlowStatistics + instrumented executor"
+            if instrumented
+            else "live Factorio entities + LuaFlowStatistics; intervention history unavailable for legacy run"
+        )
+        return evidence
 
     def history_data(self) -> list[dict[str, Any]]:
         with self.history_lock:
@@ -873,6 +1562,24 @@ class DashboardState:
                 history = []
         history = history[-16:]
 
+        latest_report: dict[str, Any] | None = None
+        report_dir = RUNS_DIR / "generation_reports"
+        if report_dir.exists():
+            try:
+                report_candidates = sorted(
+                    report_dir.glob("generation-*.json"),
+                    key=lambda path: path.stat().st_mtime,
+                    reverse=True,
+                )
+                if report_candidates:
+                    loaded = json.loads(
+                        report_candidates[0].read_text(encoding="utf-8")
+                    )
+                    if isinstance(loaded, dict):
+                        latest_report = loaded
+            except (OSError, json.JSONDecodeError):
+                latest_report = None
+
         champion_path = RUNS_DIR / "evolution_champion.json"
         validated_path = RUNS_DIR / "open_play_validated_champion.json"
         champion: dict[str, Any] = {}
@@ -892,12 +1599,75 @@ class DashboardState:
             except (OSError, json.JSONDecodeError):
                 validated = {}
 
+        loop_state_path = RUNS_DIR / "evolution_loop_state.json"
+        loop_state: dict[str, Any] = {}
+        if loop_state_path.exists():
+            try:
+                loaded = json.loads(loop_state_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    loop_state = loaded
+            except (OSError, json.JSONDecodeError):
+                loop_state = {}
+
+        def load_learning_artifacts() -> dict[str, Any]:
+            strategy: dict[str, Any] = {}
+            robustness: dict[str, Any] = {}
+            counterexamples: list[dict[str, Any]] = []
+
+            for artifact_name, target in (
+                ("open_play_strategy.json", "strategy"),
+                ("open_play_robustness_state.json", "robustness"),
+            ):
+                path = RUNS_DIR / artifact_name
+                if not path.exists():
+                    continue
+                try:
+                    loaded = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                if not isinstance(loaded, dict):
+                    continue
+                if target == "strategy":
+                    strategy = loaded
+                else:
+                    robustness = loaded
+
+            counterexample_path = RUNS_DIR / "counterexamples.jsonl"
+            if counterexample_path.exists():
+                try:
+                    for raw_line in counterexample_path.read_text(
+                        encoding="utf-8"
+                    ).splitlines():
+                        if not raw_line.strip():
+                            continue
+                        row = json.loads(raw_line)
+                        if isinstance(row, dict):
+                            counterexamples.append(row)
+                except (OSError, json.JSONDecodeError):
+                    counterexamples = []
+
+            return {
+                "strategy": strategy or None,
+                "robustness": robustness or None,
+                "counterexamples": counterexamples[-8:],
+                "counterexample_count": len(counterexamples),
+            }
+
+        learning_artifacts = self._cached_artifact(
+            "evolution-learning-artifacts",
+            ttl_s=5.0,
+            loader=load_learning_artifacts,
+        )
+
         if isinstance(current, dict) and current:
             payload = dict(current)
             if not payload.get("champion") and champion:
                 payload["champion"] = champion
             payload["validated_champion"] = validated or None
             payload["history"] = history
+            payload["continuous_loop"] = loop_state or None
+            payload["latest_report"] = latest_report
+            payload["learning_artifacts"] = learning_artifacts
             return payload
 
         run = self.active_run_data()
@@ -909,6 +1679,9 @@ class DashboardState:
             "champion": champion or None,
             "validated_champion": validated or None,
             "history": history,
+            "continuous_loop": loop_state or None,
+            "latest_report": latest_report,
+            "learning_artifacts": learning_artifacts,
             "challenger": {
                 "run_id": run.get("run_id"),
                 "status": (
@@ -927,46 +1700,126 @@ class DashboardState:
         }
 
     def dataset_data(self) -> dict[str, Any]:
-        path = RUNS_DIR / "datasets" / "spatial_demonstrations.jsonl"
-        if not path.exists():
-            return {
-                "spatial_demonstrations": 0,
-                "training_ready": False,
-            }
-        try:
-            rows = [
-                json.loads(line)
-                for line in path.read_text().splitlines()
-                if line.strip()
-            ]
-        except (OSError, json.JSONDecodeError):
-            return {
-                "spatial_demonstrations": 0,
-                "training_ready": False,
-                "error": "invalid spatial demonstration dataset",
-            }
+        cached = self._artifact_cache.get("dataset-data")
+        now = time.time()
+        if cached is not None and now - cached[0] <= 5.0:
+            return cached[1]
+
+        spatial_path = RUNS_DIR / "datasets" / "spatial_demonstrations.jsonl"
+        telemetry_path = RUNS_DIR / "telemetry" / "world_samples.jsonl"
+        model_metadata_path = RUNS_DIR / "models" / "recurrent_world_model.json"
+        spatial_model_path = RUNS_DIR / "models" / "spatial_policy.json"
+
+        rows: list[dict[str, Any]] = []
+        if spatial_path.exists():
+            try:
+                rows = [
+                    json.loads(line)
+                    for line in spatial_path.read_text().splitlines()
+                    if line.strip()
+                ]
+            except (OSError, json.JSONDecodeError):
+                rows = []
+
         accepted = sum(
             1
             for row in rows
             if isinstance(row, dict) and bool(row.get("accepted"))
         )
-        return {
+
+        telemetry_samples = 0
+        if telemetry_path.exists():
+            try:
+                with telemetry_path.open(encoding="utf-8") as handle:
+                    telemetry_samples = sum(1 for line in handle if line.strip())
+            except OSError:
+                telemetry_samples = 0
+
+        recurrent_model: dict[str, Any] | None = None
+        spatial_policy: dict[str, Any] | None = None
+        if model_metadata_path.exists():
+            try:
+                loaded = json.loads(model_metadata_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    recurrent_model = loaded
+            except (OSError, json.JSONDecodeError):
+                recurrent_model = None
+        if spatial_model_path.exists():
+            try:
+                loaded = json.loads(spatial_model_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    spatial_policy = loaded
+            except (OSError, json.JSONDecodeError):
+                spatial_policy = None
+
+        payload = {
             "spatial_demonstrations": len(rows),
             "accepted_demonstrations": accepted,
             "training_ready": len(rows) >= 250,
             "minimum_training_target": 250,
+            "telemetry_samples": telemetry_samples,
+            "action_labeled_samples": int(
+                (recurrent_model or {}).get("action_labeled_samples", 0) or 0
+            ),
+            "action_labeled_runs": int(
+                (recurrent_model or {}).get("action_labeled_runs", 0) or 0
+            ),
+            "recurrent_world_model": recurrent_model,
+            "spatial_policy": spatial_policy,
         }
+        self._artifact_cache["dataset-data"] = (now, payload)
+        return payload
 
     def knowledge_data(self, limit: int = 12) -> dict[str, Any]:
+        cache_key = f"knowledge-data-{limit}"
+        cached = self._artifact_cache.get(cache_key)
+        now = time.time()
+        if cached is not None and now - cached[0] <= 5.0:
+            return cached[1]
+
         path = RUNS_DIR / "knowledge.jsonl"
         if not path.exists():
-            return {"count": 0, "lessons": []}
+            return {
+                "count": 0,
+                "lessons": [],
+                "verified_count": 0,
+                "fallback_count": 0,
+                "verified_ratio": 0.0,
+            }
         try:
             lines = [line for line in path.read_text().splitlines() if line.strip()]
-            lessons = [json.loads(line) for line in lines[-limit:]]
+            records = [json.loads(line) for line in lines]
+            lessons = records[-limit:]
         except (OSError, json.JSONDecodeError):
             return {"count": 0, "lessons": [], "error": "invalid knowledge log"}
-        return {"count": len(lines), "lessons": lessons}
+
+        verified_count = sum(
+            1
+            for row in records
+            if isinstance(row, dict)
+            and row.get("source") == "llm_verified"
+            and bool((row.get("verification") or {}).get("verified", False))
+        )
+        fallback_count = sum(
+            1
+            for row in records
+            if isinstance(row, dict)
+            and row.get("source") == "deterministic_fallback"
+        )
+        auditable = verified_count + fallback_count
+        payload = {
+            "count": len(lines),
+            "lessons": lessons,
+            "verified_count": verified_count,
+            "fallback_count": fallback_count,
+            "verified_ratio": (
+                verified_count / auditable
+                if auditable
+                else 0.0
+            ),
+        }
+        self._artifact_cache[cache_key] = (now, payload)
+        return payload
 
     def engineering_progression_data(
         self,
@@ -984,11 +1837,31 @@ class DashboardState:
         if not isinstance(engineering, dict):
             engineering = {}
 
+        validated_source = engineering.get(
+            "validated_achieved",
+            engineering.get("achieved", []),
+        )
         achieved = {
             str(goal)
-            for goal in engineering.get("achieved", [])
+            for goal in validated_source
             if isinstance(goal, str)
         }
+        arena = research.get("arena", {})
+        arena = arena if isinstance(arena, dict) else {}
+        assumptions = {
+            str(goal)
+            for goal in engineering.get("planning_assumptions", [])
+            if isinstance(goal, str)
+        }
+        if (
+            arena.get("technology") == "pre_unlocked"
+            and not assumptions
+        ):
+            assumptions = {
+                "electronics_trigger",
+                "lab_bootstrap",
+                "lab_automation",
+            }
         production = world.get("production", {})
         outputs = (
             production.get("produced", production.get("output", {}))
@@ -1051,8 +1924,9 @@ class DashboardState:
             and float(value) > 0
         }
 
+        planning_achieved = achieved | assumptions
         state = EngineeringState(
-            achieved=frozenset(achieved),
+            achieved=frozenset(planning_achieved),
             item_rates=item_signals,
             entity_counts=entity_counts,
             researched=researched,
@@ -1083,6 +1957,10 @@ class DashboardState:
         ]
         return {
             "achieved": sorted(inferred),
+            "validated_achieved": sorted(achieved),
+            "planning_assumptions": sorted(assumptions),
+            "arena_mode": arena.get("mode"),
+            "technology_mode": arena.get("technology"),
             "next_goal": frontier[0] if frontier else None,
             "frontier": frontier,
             "dependency_debt": list(dependency_debt),
@@ -1090,18 +1968,208 @@ class DashboardState:
             "terminal": not frontier,
         }
 
-    def render_world_frame(self, mode: str = "game") -> bytes:
+    def game_knowledge_summary_data(
+        self,
+        *,
+        progression: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        progression = (
+            progression
+            if progression is not None
+            else self.engineering_progression_data()
+        )
+        next_goal = progression.get("next_goal")
+        goal_id = (
+            str(next_goal.get("goal_id"))
+            if isinstance(next_goal, dict) and next_goal.get("goal_id")
+            else ""
+        )
+        targets = {
+            "iron_backbone": "iron-plate",
+            "coal_mining": "coal",
+            "copper_mining": "copper-ore",
+            "steam_power": "steam-engine",
+            "copper_smelting": "copper-plate",
+            "electronics_trigger": "electronic-circuit",
+            "lab_bootstrap": "lab",
+            "automation_science": "automation-science-pack",
+            "lab_automation": "automation-science-pack",
+            "assembler_gears": "iron-gear-wheel",
+            "electronic_circuits": "electronic-circuit",
+            "logistic_science": "logistic-science-pack",
+            "research_logistics": "logistic-science-pack",
+            "electric_mining": "electric-mining-drill",
+        }
+        target = targets.get(goal_id)
+        cache_key = f"game-knowledge-summary:{goal_id or 'none'}"
+        cached = self._artifact_cache.get(cache_key)
+        now = time.time()
+        if cached is not None and now - cached[0] <= 5.0:
+            return cached[1]
+
+        payload = self.factorio.game_knowledge()
+        catalog = RuntimeFactorioCatalog(payload)
+        summary = catalog.summary()
+        summary["frontier_goal_id"] = goal_id or None
+        summary["frontier_target_item"] = target
+        summary["frontier_dependency_graph"] = (
+            catalog.dependency_subgraph(target)
+            if target
+            else None
+        )
+        self._artifact_cache[cache_key] = (now, summary)
+        return summary
+
+    def production_plan_data(
+        self,
+        *,
+        research: dict[str, Any] | None = None,
+        progression: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        research = research if research is not None else self.research_data()
+        progression = (
+            progression
+            if progression is not None
+            else self.engineering_progression_data(research=research)
+        )
+        plans = research.get("production_plans", {})
+        if isinstance(plans, dict) and plans:
+            key = next(reversed(plans))
+            plan = plans.get(key)
+            if isinstance(plan, dict):
+                return {
+                    "source": "validated_run_plan",
+                    "plan_id": key,
+                    **plan,
+                }
+
+        next_goal = progression.get("next_goal")
+        goal_id = (
+            str(next_goal.get("goal_id"))
+            if isinstance(next_goal, dict) and next_goal.get("goal_id")
+            else ""
+        )
+        targets = {
+            "assembler_gears": ("iron-gear-wheel", 0.20),
+            "automation_science": ("automation-science-pack", 0.10),
+            "electronic_circuits": ("electronic-circuit", 0.20),
+            "logistic_science": ("logistic-science-pack", 0.10),
+        }
+        target = targets.get(goal_id)
+        source = "frontier"
+        if target is None:
+            report_dir = RUNS_DIR / "generation_reports"
+            if report_dir.exists():
+                try:
+                    report_candidates = sorted(
+                        report_dir.glob("generation-*.json"),
+                        key=lambda path: path.stat().st_mtime,
+                        reverse=True,
+                    )
+                    if report_candidates:
+                        latest = json.loads(
+                            report_candidates[0].read_text(encoding="utf-8")
+                        )
+                        report_progression = latest.get(
+                            "engineering_progression",
+                            {},
+                        )
+                        report_goal = report_progression.get("next_goal")
+                        if isinstance(report_goal, dict):
+                            report_goal_id = str(
+                                report_goal.get("goal_id") or ""
+                            )
+                            report_target = targets.get(report_goal_id)
+                            if report_target is not None:
+                                goal_id = report_goal_id
+                                next_goal = report_goal
+                                target = report_target
+                                source = "latest_lab_generation"
+                except (OSError, json.JSONDecodeError):
+                    pass
+        if target is None:
+            return {
+                "source": source,
+                "goal_id": goal_id or None,
+                "factorio_data_version": FACTORIO_DATA_VERSION,
+                "dag": None,
+            }
+        item, target_rate = target
+        planner = EARLY_GAME_PRODUCTION_PLANNER
+        planner_source = "static_early_game_catalog"
+        try:
+            runtime_payload = self.factorio.game_knowledge()
+            if runtime_payload.get("connected"):
+                runtime_catalog = RuntimeFactorioCatalog(runtime_payload)
+                if runtime_catalog.recipe_choice(item) is not None:
+                    planner = runtime_catalog.planner()
+                    planner_source = "live_factorio_prototypes"
+        except (OSError, RuntimeError, TypeError, ValueError):
+            pass
+        dag = planner.plan(item, target_rate)
+        return {
+            "source": source,
+            "catalog_source": planner_source,
+            "goal_id": goal_id,
+            "goal_label": next_goal.get("label") if isinstance(next_goal, dict) else None,
+            "factorio_data_version": FACTORIO_DATA_VERSION,
+            "target_rate_per_s": target_rate,
+            "dag": dag.to_dict(),
+        }
+
+    def render_world_frame(
+        self,
+        mode: str = "game",
+        *,
+        center_x: float | None = None,
+        center_y: float | None = None,
+        radius: float | None = None,
+    ) -> bytes:
+        explicit_view = (
+            center_x is not None
+            and center_y is not None
+            and radius is not None
+            and mode != "overview"
+        )
+        view_key = (
+            mode,
+            round(float(center_x), 2) if explicit_view else None,
+            round(float(center_y), 2) if explicit_view else None,
+            round(float(radius), 2) if explicit_view else None,
+        )
+        now = time.monotonic()
+        with self._frame_cache_lock:
+            cached = self._frame_cache.get(repr(view_key))
+            if cached is not None and now - cached[0] <= 5.0:
+                return cached[1]
+
         world = self.factorio.snapshot()
-        map_context = self.factorio.map_snapshot()
+        map_context = self.factorio.map_snapshot(
+            center_x=center_x if explicit_view else None,
+            center_y=center_y if explicit_view else None,
+            radius=radius if explicit_view else None,
+        )
         resource_overview = self.factorio.resource_overview()
         run = self.active_run_data()
-        return self.renderer.render(
+        rendered = self.renderer.render(
             world,
             run,
             map_context,
             resource_overview=resource_overview,
             mode=mode,
         )
+        with self._frame_cache_lock:
+            self._frame_cache[repr(view_key)] = (
+                time.monotonic(),
+                rendered,
+            )
+            if len(self._frame_cache) > 24:
+                oldest = min(
+                    self._frame_cache,
+                    key=lambda key: self._frame_cache[key][0],
+                )
+                self._frame_cache.pop(oldest, None)
+        return rendered
 
     def learning_data(self) -> dict[str, Any]:
         history_path = RUNS_DIR / "turn_penalty_learning.jsonl"

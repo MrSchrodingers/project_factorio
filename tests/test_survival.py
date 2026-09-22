@@ -58,6 +58,114 @@ class SurvivalSelectionTests(unittest.TestCase):
             any("new capabilities" in value for value in decision.improvements)
         )
 
+    def test_heterogeneous_rate_sum_cannot_promote_regression(self) -> None:
+        champion = FitnessVector(
+            capabilities=frozenset({"iron_backbone", "automation_science"}),
+            rates_per_s={"iron-system": 2.0, "automation-science-pack": 0.2},
+        )
+        challenger = FitnessVector(
+            capabilities=champion.capabilities,
+            rates_per_s={"iron-system": 1.7, "automation-science-pack": 0.2},
+        )
+        decision = compare_challenger(champion, challenger)
+        self.assertFalse(decision.promoted)
+        self.assertFalse(decision.improvements)
+
+    def test_individual_rate_improvement_can_promote(self) -> None:
+        champion = FitnessVector(
+            capabilities=frozenset({"iron_backbone"}),
+            rates_per_s={"iron-system": 2.0},
+        )
+        challenger = FitnessVector(
+            capabilities=champion.capabilities,
+            rates_per_s={"iron-system": 2.2},
+        )
+        decision = compare_challenger(champion, challenger)
+        self.assertTrue(decision.promoted)
+        self.assertTrue(any("iron-system improved" in item for item in decision.improvements))
+
+    def test_more_manual_logistics_rejects_challenger(self) -> None:
+        champion = FitnessVector(
+            capabilities=frozenset({"iron_backbone"}),
+            rates_per_s={"iron-plate": 1.5},
+            autonomy_score=0.5,
+            manual_logistics_calls=2,
+        )
+        challenger = FitnessVector(
+            capabilities=champion.capabilities,
+            rates_per_s={"iron-plate": 2.0},
+            autonomy_score=0.5,
+            manual_logistics_calls=3,
+        )
+
+        decision = compare_challenger(champion, challenger)
+
+        self.assertFalse(decision.promoted)
+        self.assertTrue(
+            any("manual logistics increased" in row for row in decision.regressions)
+        )
+
+    def test_autonomy_improvement_can_promote(self) -> None:
+        champion = FitnessVector(
+            capabilities=frozenset({"iron_backbone"}),
+            rates_per_s={"iron-plate": 1.5},
+            autonomy_score=0.5,
+            manual_logistics_calls=2,
+        )
+        challenger = FitnessVector(
+            capabilities=champion.capabilities,
+            rates_per_s={"iron-plate": 1.5},
+            autonomy_score=0.75,
+            manual_logistics_calls=1,
+        )
+
+        decision = compare_challenger(champion, challenger)
+
+        self.assertTrue(decision.promoted)
+        self.assertTrue(
+            any("autonomy score improved" in row for row in decision.improvements)
+        )
+
+    def test_low_physical_processing_coverage_rejects_challenger(self) -> None:
+        champion = FitnessVector(
+            capabilities=frozenset({"iron_backbone", "coal_mining"}),
+            rates_per_s={"iron-plate": 1.0, "coal": 0.2},
+        )
+        challenger = FitnessVector(
+            capabilities=champion.capabilities,
+            rates_per_s={"iron-plate": 1.2, "coal": 0.3},
+            physical_processing_coverage=1 / 6,
+            fuel_starved_entities=0,
+        )
+
+        decision = compare_challenger(champion, challenger)
+
+        self.assertFalse(decision.promoted)
+        self.assertTrue(
+            any(
+                "physical processing coverage below 50%" in row
+                for row in decision.regressions
+            )
+        )
+
+    def test_fuel_starvation_rejects_post_coal_challenger(self) -> None:
+        challenger = FitnessVector(
+            capabilities=frozenset({"iron_backbone", "coal_mining"}),
+            rates_per_s={"iron-plate": 1.0, "coal": 0.2},
+            physical_processing_coverage=0.75,
+            fuel_starved_entities=2,
+        )
+
+        decision = compare_challenger(None, challenger)
+
+        self.assertFalse(decision.promoted)
+        self.assertTrue(
+            any(
+                "fuel starvation remains" in row
+                for row in decision.regressions
+            )
+        )
+
     def test_equal_candidate_does_not_replace_incumbent(self) -> None:
         champion = FitnessVector(
             capabilities=frozenset({"iron_backbone"}),

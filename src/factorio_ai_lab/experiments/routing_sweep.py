@@ -9,7 +9,12 @@ from time import perf_counter
 
 from factorio_ai_lab.domain.state import GridPoint
 from factorio_ai_lab.metrics.routing import routing_metrics
-from factorio_ai_lab.planning.astar import RoutingWeights, blocked_from, rectangular_bounds, weighted_astar
+from factorio_ai_lab.planning.astar import (
+    RoutingWeights,
+    blocked_from,
+    rectangular_bounds,
+    weighted_astar,
+)
 
 
 @dataclass(frozen=True)

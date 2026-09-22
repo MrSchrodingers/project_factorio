@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
+
+from factorio_ai_lab.runtime import ActionRuntimeRecorder
 
 
 class FactorioEnvironment(Protocol):
@@ -51,6 +54,104 @@ def list_environments() -> list[str]:
     return list(list_available_environments())
 
 
+def enforce_minimum_eval_timeout(
+    environment: Any,
+    *,
+    minimum_seconds: int,
+) -> int:
+    """Install a local compatibility floor for FLE action evaluation.
+
+    FLE 0.4.3 hard-codes timeout=120 in FactorioGymEnv.step. Complex but
+    bounded physical construction actions can legitimately exceed that
+    wall-clock budget even while Factorio is progressing. This shim raises
+    only the lower bound passed to FactorioInstance.eval; callers asking for
+    a larger timeout keep their larger value.
+
+    The patch is instance-local, idempotent, and does not modify site-packages.
+    """
+    minimum = int(minimum_seconds)
+    if minimum <= 0:
+        raise ValueError("minimum_seconds must be positive")
+
+    unwrapped = getattr(environment, "unwrapped", environment)
+    instance = getattr(unwrapped, "instance", None)
+    if instance is None:
+        raise TypeError("environment does not expose a FactorioInstance")
+
+    current_floor = int(
+        getattr(instance, "_factorio_ai_eval_timeout_floor_s", 0) or 0
+    )
+    if current_floor >= minimum:
+        return current_floor
+
+    original_eval = getattr(
+        instance,
+        "_factorio_ai_original_eval",
+        None,
+    )
+    if original_eval is None:
+        original_eval = instance.eval
+        instance._factorio_ai_original_eval = original_eval
+
+    def eval_with_timeout_floor(
+        expr: Any,
+        agent_idx: int = 0,
+        timeout: int = 60,
+    ) -> Any:
+        return original_eval(
+            expr,
+            agent_idx=agent_idx,
+            timeout=max(int(timeout), minimum),
+        )
+
+    instance.eval = eval_with_timeout_floor
+    instance._factorio_ai_eval_timeout_floor_s = minimum
+    return minimum
+
+
+_INTERVENTION_CALLS = {
+    "harvest_resource": "manual_harvest_calls",
+    "insert_item": "manual_insert_calls",
+    "extract_item": "manual_extract_calls",
+    "craft_item": "manual_craft_calls",
+}
+
+
+def intervention_counts_from_code(code: str) -> dict[str, int]:
+    counts = {
+        metric: 0
+        for metric in _INTERVENTION_CALLS.values()
+    }
+    for call_name, metric in _INTERVENTION_CALLS.items():
+        counts[metric] = len(
+            re.findall(
+                rf"\b{re.escape(call_name)}\s*\(",
+                code,
+            )
+        )
+    counts["manual_transfer_calls"] = (
+        counts["manual_insert_calls"] + counts["manual_extract_calls"]
+    )
+    counts["manual_logistics_calls"] = (
+        counts["manual_harvest_calls"] + counts["manual_transfer_calls"]
+    )
+    return counts
+
+
+def intervention_delta(
+    current: Mapping[str, int],
+    baseline: Mapping[str, int],
+) -> dict[str, int]:
+    keys = set(current) | set(baseline)
+    return {
+        key: max(
+            0,
+            int(current.get(key, 0)) - int(baseline.get(key, 0)),
+        )
+        for key in sorted(keys)
+    }
+
+
 class TransactionalFLEExecutor:
     def __init__(
         self,
@@ -58,18 +159,42 @@ class TransactionalFLEExecutor:
         *,
         agent_idx: int = 0,
         action_factory: ActionFactory = default_action_factory,
+        runtime_context: Callable[[], Mapping[str, Any]] | None = None,
     ) -> None:
         self.environment = environment
         self.agent_idx = agent_idx
         self.action_factory = action_factory
         self.game_state: Any | None = None
+        self._attempted_interventions: dict[str, int] = {}
+        self._committed_interventions: dict[str, int] = {}
+        self._action_runtime = (
+            ActionRuntimeRecorder(context_provider=runtime_context)
+            if runtime_context is not None
+            else None
+        )
 
     def reset(self, *, seed: int | None = None, game_state: Any | None = None) -> Any:
         self.game_state = game_state
+        self._attempted_interventions = {}
+        self._committed_interventions = {}
         return self.environment.reset(
             options={'game_state': game_state},
             seed=seed,
         )
+
+    @staticmethod
+    def _accumulate(
+        target: dict[str, int],
+        counts: Mapping[str, int],
+    ) -> None:
+        for key, value in counts.items():
+            target[key] = int(target.get(key, 0)) + int(value)
+
+    def intervention_snapshot(self) -> dict[str, dict[str, int]]:
+        return {
+            "attempted": dict(self._attempted_interventions),
+            "committed": dict(self._committed_interventions),
+        }
 
     def execute(
         self,
@@ -79,9 +204,31 @@ class TransactionalFLEExecutor:
         use_checkpoint_for_action: bool = True,
     ) -> FLEStep:
         checkpoint = self.game_state
+        counts = intervention_counts_from_code(code)
+        self._accumulate(self._attempted_interventions, counts)
         action_state = checkpoint if use_checkpoint_for_action else None
         action = self.action_factory(self.agent_idx, code, action_state)
-        observation, reward, terminated, truncated, info = self.environment.step(action)
+        runtime_token = (
+            self._action_runtime.begin(code)
+            if self._action_runtime is not None
+            else None
+        )
+        try:
+            observation, reward, terminated, truncated, info = (
+                self.environment.step(action)
+            )
+        except Exception as exc:
+            if self._action_runtime is not None and runtime_token is not None:
+                self._action_runtime.finish(
+                    runtime_token,
+                    accepted=False,
+                    reward=0.0,
+                    terminated=False,
+                    truncated=False,
+                    info={},
+                    error=exc,
+                )
+            raise
         candidate_state = info.get('output_game_state')
 
         provisional = FLEStep(
@@ -108,12 +255,23 @@ class TransactionalFLEExecutor:
         )
 
         if accepted:
+            self._accumulate(self._committed_interventions, counts)
             self.game_state = candidate_state
         else:
             # Restore the exact pre-action checkpoint. Passing None restores
             # the environment's initial task state on the first rejected step.
             self.environment.reset(options={'game_state': checkpoint})
             self.game_state = checkpoint
+
+        if self._action_runtime is not None and runtime_token is not None:
+            self._action_runtime.finish(
+                runtime_token,
+                accepted=accepted,
+                reward=result.reward,
+                terminated=result.terminated,
+                truncated=result.truncated,
+                info=result.info,
+            )
 
         return result
 

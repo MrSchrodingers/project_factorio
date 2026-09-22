@@ -9,6 +9,7 @@ from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
+from factorio_ai_lab.agents.evolution_advisor import propose_evolution_advice
 from factorio_ai_lab.agents.llm_router import default_free_router
 from factorio_ai_lab.domain.state import GridPoint
 from factorio_ai_lab.integrations.fle import (
@@ -17,18 +18,26 @@ from factorio_ai_lab.integrations.fle import (
     list_environments,
 )
 from factorio_ai_lab.learning.bandit import UCB1Bandit
-from factorio_ai_lab.learning.evolution import challenger_genome
+from factorio_ai_lab.learning.evolution import apply_advice, challenger_genome
+from factorio_ai_lab.learning.factory_graph import build_factory_graph
+from factorio_ai_lab.learning.knowledge import verify_generated_knowledge
+from factorio_ai_lab.learning.spatial_policy import SpatialPolicy, route_cost
 from factorio_ai_lab.learning.survival import (
     FitnessVector,
     compare_challenger,
     fitness_from_research,
 )
 from factorio_ai_lab.metrics.rates import normalized_rate_ratio, rate_per_second
-from factorio_ai_lab.planning.astar import RoutingWeights, weighted_astar
+from factorio_ai_lab.planning.astar import RouteResult, RoutingWeights, weighted_astar
+from factorio_ai_lab.planning.factorio_catalog import (
+    EARLY_GAME_PRODUCTION_PLANNER,
+    FACTORIO_DATA_VERSION,
+)
 from factorio_ai_lab.planning.progression import (
     DEFAULT_ENGINEERING_PLANNER,
     EngineeringState,
 )
+from factorio_ai_lab.runtime import FactorioWorldLease
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 RUNS_DIR = PROJECT_ROOT / "runs"
@@ -39,17 +48,10 @@ RESEARCH_HISTORY = RUNS_DIR / "research"
 SPATIAL_DEMOS = RUNS_DIR / "datasets" / "spatial_demonstrations.jsonl"
 EVOLUTION_CHAMPION = RUNS_DIR / "evolution_champion.json"
 EVOLUTION_HISTORY = RUNS_DIR / "evolution_history.jsonl"
+GENERATION_REPORTS = RUNS_DIR / "generation_reports"
 
 THROUGHPUT_EQUIVALENCE_TOLERANCE = 1.0
 
-# Internal-coal allocation policy. Downstream consumers may spend only coal
-# above the safety stock; the coal producer receives an operational refill so
-# the supply chain remains productive while later stages execute.
-COAL_SAFETY_STOCK = 4
-COAL_PRODUCER_REFUEL = 3
-COAL_COPPER_MINING_BUDGET = 2
-COAL_COPPER_SMELTING_BUDGET = 2
-COAL_SURVIVAL_BUDGET = 6
 
 
 PLACEMENT_ARMS: dict[str, tuple[float, float]] = {
@@ -236,6 +238,30 @@ class ResearchJournal:
                         "iron gears and copper plates."
                     ),
                 },
+                {
+                    "name": "Electronic circuits",
+                    "status": "pending",
+                    "detail": (
+                        "Build a powered copper-cable-to-electronic-circuit chain "
+                        "and validate intermediate production."
+                    ),
+                },
+                {
+                    "name": "Logistic science",
+                    "status": "pending",
+                    "detail": (
+                        "Manufacture belts and inserters electrically and consume "
+                        "them in a powered logistic-science assembler."
+                    ),
+                },
+                {
+                    "name": "Transactional rebuild optimization",
+                    "status": "pending",
+                    "detail": (
+                        "Demolish a dominated logistics branch only when a compact "
+                        "survivor retains throughput; otherwise rollback the destruction."
+                    ),
+                },
             ],
             "online_learning": {
                 "algorithm": "ucb1_real_factorio_placement",
@@ -391,8 +417,13 @@ def synthesize_lesson(
                 "properties": {
                     "lesson": {"type": "string"},
                     "next_hypothesis": {"type": "string"},
+                    "evidence_keys": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 1,
+                    },
                 },
-                "required": ["lesson", "next_hypothesis"],
+                "required": ["lesson", "next_hypothesis", "evidence_keys"],
                 "additionalProperties": False,
             },
         },
@@ -410,7 +441,9 @@ def synthesize_lesson(
                         "You are the research notebook for a Factorio AI lab. "
                         "Summarize only evidence in the supplied JSON. "
                         "Do not claim neural training unless the facts show it. "
-                        "Keep each field under 35 words."
+                        "Do not invent rates, counts, ratios, durations or units. "
+                        "List the exact top-level fact keys supporting the claims "
+                        "in evidence_keys. Keep each prose field under 35 words."
                     ),
                 },
                 {
@@ -427,11 +460,34 @@ def synthesize_lesson(
             response_format=schema,
         )
         parsed = json.loads(result["choices"][0]["message"]["content"])
-        lesson = parsed["lesson"]
-        hypothesis = parsed["next_hypothesis"]
+        generated_lesson = parsed["lesson"]
+        generated_hypothesis = parsed["next_hypothesis"]
+        evidence_keys = parsed["evidence_keys"]
+        verification = verify_generated_knowledge(
+            lesson=generated_lesson,
+            hypothesis=generated_hypothesis,
+            facts=facts,
+            evidence_keys=evidence_keys,
+        )
         provider = result.get("_router")
+        if verification.verified:
+            lesson = generated_lesson
+            hypothesis = generated_hypothesis
+            source = "llm_verified"
+        else:
+            lesson = fallback_lesson
+            hypothesis = fallback_hypothesis
+            source = "deterministic_fallback"
     except (OSError, RuntimeError, ValueError, KeyError, json.JSONDecodeError) as exc:
         provider = {"error": f"{type(exc).__name__}: {exc}"}
+        evidence_keys = []
+        verification = verify_generated_knowledge(
+            lesson=fallback_lesson,
+            hypothesis=fallback_hypothesis,
+            facts=facts,
+            evidence_keys=[],
+        )
+        source = "deterministic_fallback"
 
     record = {
         "at": utc_now(),
@@ -440,6 +496,9 @@ def synthesize_lesson(
         "next_hypothesis": hypothesis,
         "facts": facts,
         "provider": provider,
+        "source": source,
+        "evidence_keys": evidence_keys,
+        "verification": verification.to_dict(),
     }
     append_jsonl(KNOWLEDGE_LOG, record)
     return record
@@ -587,6 +646,7 @@ def stage_online_learning(
     episodes: int,
     settle_seconds: int,
     exploration: float,
+    radius_scale: float,
 ) -> str:
     namespace = env.unwrapped.instance.namespace
     champion = journal.state.get("evolution", {}).get("champion") or {}
@@ -596,7 +656,11 @@ def stage_online_learning(
         else {}
     )
     incumbent_arm = champion_config.get("placement_best_arm")
-    arm_order = list(PLACEMENT_ARMS)
+    scaled_arms = {
+        arm: (dx * radius_scale, dy * radius_scale)
+        for arm, (dx, dy) in PLACEMENT_ARMS.items()
+    }
+    arm_order = list(scaled_arms)
     if incumbent_arm in PLACEMENT_ARMS:
         arm_order.remove(incumbent_arm)
         arm_order.insert(0, incumbent_arm)
@@ -618,12 +682,13 @@ def stage_online_learning(
         "learning",
         "Online UCB1 placement learning started on the live Factorio engine.",
         episodes=episodes,
-        arms=list(PLACEMENT_ARMS),
+        arms=scaled_arms,
+        radius_scale=radius_scale,
     )
 
     for episode in range(episodes):
         arm = bandit.select()
-        dx, dy = PLACEMENT_ARMS[arm]
+        dx, dy = scaled_arms[arm]
         target = (center[0] + dx, center[1] + dy)
         fast_reposition(env, x=target[0], y=target[1])
 
@@ -714,7 +779,7 @@ print({{'trial_inventory': inspect_inventory(trial_chest)}})
     ucb_best = bandit.best_observed()
     output_by_arm: dict[str, list[float]] = {
         arm: []
-        for arm in PLACEMENT_ARMS
+        for arm in scaled_arms
     }
     for row in online["history"]:
         if row["valid"]:
@@ -731,14 +796,14 @@ print({{'trial_inventory': inspect_inventory(trial_chest)}})
         if max_mean_output - mean_output <= THROUGHPUT_EQUIVALENCE_TOLERANCE
     ]
     min_distance = min(
-        math.hypot(*PLACEMENT_ARMS[arm])
+        math.hypot(*scaled_arms[arm])
         for arm in equivalent_throughput_arms
     )
     compact_candidates = [
         arm
         for arm in equivalent_throughput_arms
         if math.isclose(
-            math.hypot(*PLACEMENT_ARMS[arm]),
+            math.hypot(*scaled_arms[arm]),
             min_distance,
             rel_tol=1e-9,
             abs_tol=1e-9,
@@ -746,7 +811,7 @@ print({{'trial_inventory': inspect_inventory(trial_chest)}})
     ]
     best = next(
         arm
-        for arm in PLACEMENT_ARMS
+        for arm in scaled_arms
         if arm in compact_candidates
     )
 
@@ -764,6 +829,7 @@ print({{'trial_inventory': inspect_inventory(trial_chest)}})
     )
     journal.state["metrics"]["placement_compact_candidates"] = compact_candidates
     journal.state["metrics"]["placement_trials"] = episodes
+    journal.state["metrics"]["placement_radius_scale"] = radius_scale
     journal.complete_stage(
         1,
         (
@@ -816,9 +882,11 @@ def stage_scale_mining(
     center: tuple[float, float],
     best_arm: str,
     settle_seconds: int,
+    radius_scale: float,
 ) -> None:
     namespace = env.unwrapped.instance.namespace
-    dx, dy = PLACEMENT_ARMS[best_arm]
+    base_dx, base_dy = PLACEMENT_ARMS[best_arm]
+    dx, dy = base_dx * radius_scale, base_dy * radius_scale
     target = (center[0] + dx, center[1] + dy)
 
     journal.set_stage(
@@ -1132,6 +1200,42 @@ def stage_astar_logistics(
         journal.fail_stage(4, "A* could not find a valid logistics route.")
         return None
 
+    astar_route = route
+    planner_name = "weighted_astar"
+    neural_metadata_path = RUNS_DIR / "models" / "spatial_policy.json"
+    neural_model_path = RUNS_DIR / "models" / "spatial_policy.npz"
+    neural_candidate: RouteResult | None = None
+    if neural_metadata_path.exists() and neural_model_path.exists():
+        try:
+            metadata = json.loads(neural_metadata_path.read_text(encoding="utf-8"))
+            if isinstance(metadata, dict) and metadata.get("usable"):
+                policy = SpatialPolicy.load(neural_model_path)
+                neural_path = policy.rollout(
+                    start,
+                    goal,
+                    is_blocked=blocked.__contains__,
+                    in_bounds=lambda point: (
+                        min_x <= point.x <= max_x
+                        and min_y <= point.y <= max_y
+                    ),
+                    max_steps=512,
+                )
+                if neural_path is not None:
+                    neural_cost = route_cost(
+                        neural_path,
+                        turn_penalty=turn_penalty,
+                    )
+                    neural_candidate = RouteResult(
+                        path=neural_path,
+                        cost=neural_cost,
+                        expanded_nodes=len(neural_path),
+                    )
+                    if neural_cost <= astar_route.cost * 1.10:
+                        route = neural_candidate
+                        planner_name = "neural_spatial_policy"
+        except (OSError, ValueError, KeyError, json.JSONDecodeError):
+            neural_candidate = None
+
     path = route.path
     turns = _count_route_turns(path)
     belt_lines: list[str] = []
@@ -1163,7 +1267,10 @@ def stage_astar_logistics(
     )
     journal.event(
         "plan",
-        "A* generated the first persistent belt route.",
+        "Routing planner generated a persistent belt-route challenger.",
+        planner=planner_name,
+        astar_cost=astar_route.cost,
+        neural_cost=neural_candidate.cost if neural_candidate is not None else None,
         belt_count=len(path),
         turns=turns,
         cost=route.cost,
@@ -1277,7 +1384,8 @@ print({{'logistics_chest': inspect_inventory(logistics_chest)}})
             "at": utc_now(),
             "run_id": journal.run_id,
             "task": "belt_route",
-            "planner": "weighted_astar",
+            "planner": planner_name,
+            "teacher_planner": "weighted_astar",
             "weights": asdict(
                 RoutingWeights(
                     step=1.0,
@@ -1305,12 +1413,15 @@ print({{'logistics_chest': inspect_inventory(logistics_chest)}})
                 "delivered_iron": measured["chest_iron"],
             },
             "accepted": True,
+            "neural_candidate_available": neural_candidate is not None,
         },
     )
     lesson = synthesize_lesson(
         stage="astar_belt_logistics",
         facts={
             "accepted": True,
+            "planner": planner_name,
+            "astar_cost": astar_route.cost,
             "belt_count": len(path),
             "turns": turns,
             "route_cost": route.cost,
@@ -1336,6 +1447,8 @@ print({{'logistics_chest': inspect_inventory(logistics_chest)}})
     )
     journal.event("knowledge", lesson["lesson"])
     return {
+        "planner": planner_name,
+        "astar_cost": astar_route.cost,
         "belt_count": len(path),
         "turns": turns,
         "route_cost": route.cost,
@@ -1533,6 +1646,869 @@ print({{
     return True
 
 
+def stage_electronic_circuits(
+    executor: TransactionalFLEExecutor,
+    env: Any,
+    journal: ResearchJournal,
+    *,
+    settle_seconds: int,
+) -> bool:
+    namespace = env.unwrapped.instance.namespace
+    journal.set_stage(
+        13,
+        status="running",
+        detail=(
+            "Producing copper cable and electronic circuits in electrically "
+            "powered assemblers."
+        ),
+        next_action="validate electronic-circuit manufacturing chain",
+    )
+    before = production_output(namespace, "electronic-circuit")
+    measured: dict[str, float] = {}
+
+    code = f"""
+# Reactivate upstream production first. This stage must prove a causal
+# coal -> copper ore -> copper plate -> cable -> circuit chain rather than
+# consuming leftovers from red-science validation.
+move_to(coal_chest.position)
+circuit_coal_available=inspect_inventory(coal_chest)[Prototype.Coal]
+circuit_coal=0
+if circuit_coal_available>0:
+    circuit_coal=extract_item(
+        Prototype.Coal,
+        coal_chest,
+        quantity=min(10,circuit_coal_available),
+    )
+if circuit_coal>=1:
+    coal_drill=insert_item(Prototype.Coal,coal_drill,quantity=1)
+if circuit_coal>=2:
+    copper_drill=insert_item(Prototype.Coal,copper_drill,quantity=1)
+if circuit_coal>=3:
+    drill=insert_item(Prototype.Coal,drill,quantity=1)
+if circuit_coal>=4:
+    scale_drill=insert_item(Prototype.Coal,scale_drill,quantity=1)
+sleep(14)
+
+move_to(copper_chest.position)
+circuit_copper_buffer_before=inspect_inventory(copper_chest)[Prototype.CopperOre]
+circuit_copper_ore=0
+if circuit_copper_buffer_before>0:
+    circuit_copper_ore=extract_item(
+        Prototype.CopperOre,
+        copper_chest,
+        quantity=min(24,circuit_copper_buffer_before),
+    )
+move_to(chest.position)
+circuit_iron_ore=inspect_inventory(chest)[Prototype.IronOre]
+if circuit_iron_ore>0:
+    circuit_iron_ore=extract_item(
+        Prototype.IronOre,
+        chest,
+        quantity=min(24,circuit_iron_ore),
+    )
+
+move_to(copper_furnace.position)
+if circuit_coal>=5:
+    copper_furnace=insert_item(
+        Prototype.Coal,
+        copper_furnace,
+        quantity=2,
+    )
+if circuit_copper_ore>0:
+    copper_furnace=insert_item(
+        Prototype.CopperOre,
+        copper_furnace,
+        quantity=circuit_copper_ore,
+    )
+move_to(smelt_furnace.position)
+if circuit_coal>=7:
+    smelt_furnace=insert_item(
+        Prototype.Coal,
+        smelt_furnace,
+        quantity=2,
+    )
+if circuit_iron_ore>0:
+    smelt_furnace=insert_item(
+        Prototype.IronOre,
+        smelt_furnace,
+        quantity=circuit_iron_ore,
+    )
+sleep(20)
+
+move_to(copper_furnace.position)
+circuit_copper=inspect_inventory(copper_furnace)[Prototype.CopperPlate]
+if circuit_copper>0:
+    circuit_copper=extract_item(
+        Prototype.CopperPlate,
+        copper_furnace,
+        quantity=min(24,circuit_copper),
+    )
+move_to(smelt_furnace.position)
+circuit_iron=inspect_inventory(smelt_furnace)[Prototype.IronPlate]
+if circuit_iron>0:
+    circuit_iron=extract_item(
+        Prototype.IronPlate,
+        smelt_furnace,
+        quantity=min(24,circuit_iron),
+    )
+
+cable_area=nearest_buildable(
+    Prototype.AssemblingMachine2,
+    BuildingBox(width=9,height=9),
+    science_assembler.position,
+)
+move_to(cable_area.center)
+cable_assembler=place_entity(
+    Prototype.AssemblingMachine2,
+    position=cable_area.center,
+)
+cable_assembler=set_entity_recipe(cable_assembler,Prototype.CopperCable)
+if circuit_copper>0:
+    cable_assembler=insert_item(
+        Prototype.CopperPlate,
+        cable_assembler,
+        quantity=circuit_copper,
+    )
+cable_power=connect_entities(
+    steam_engine,
+    cable_assembler,
+    Prototype.MediumElectricPole,
+)
+sleep({max(6, settle_seconds // 2)})
+cable_inventory=inspect_inventory(cable_assembler)[Prototype.CopperCable]
+cable_transfer=0
+if cable_inventory>0:
+    cable_transfer=extract_item(
+        Prototype.CopperCable,
+        cable_assembler,
+        quantity=cable_inventory,
+    )
+
+circuit_area=nearest_buildable(
+    Prototype.AssemblingMachine2,
+    BuildingBox(width=9,height=9),
+    cable_assembler.position,
+)
+move_to(circuit_area.center)
+circuit_assembler=place_entity(
+    Prototype.AssemblingMachine2,
+    position=circuit_area.center,
+)
+circuit_assembler=set_entity_recipe(
+    circuit_assembler,
+    Prototype.ElectronicCircuit,
+)
+if cable_transfer>0:
+    circuit_assembler=insert_item(
+        Prototype.CopperCable,
+        circuit_assembler,
+        quantity=cable_transfer,
+    )
+if circuit_iron>0:
+    circuit_assembler=insert_item(
+        Prototype.IronPlate,
+        circuit_assembler,
+        quantity=circuit_iron,
+    )
+circuit_power=connect_entities(
+    steam_engine,
+    circuit_assembler,
+    Prototype.MediumElectricPole,
+)
+sleep({settle_seconds})
+circuit_inventory=inspect_inventory(
+    circuit_assembler,
+)[Prototype.ElectronicCircuit]
+print({{
+    'circuit_coal_available':circuit_coal_available,
+    'circuit_coal':circuit_coal,
+    'circuit_copper_buffer_before':circuit_copper_buffer_before,
+    'circuit_copper_ore':circuit_copper_ore,
+    'circuit_iron_ore':circuit_iron_ore,
+    'circuit_copper':circuit_copper,
+    'circuit_iron':circuit_iron,
+    'cable_transfer':cable_transfer,
+    'circuit_inventory':circuit_inventory,
+}})
+"""
+
+    def validate(result: Any) -> bool:
+        output = max(
+            0.0,
+            production_output(namespace, "electronic-circuit") - before,
+        )
+        measured["output"] = output
+        measured["inventory"] = float(
+            getattr(namespace, "circuit_inventory", 0.0) or 0.0
+        )
+        measured["cable"] = float(
+            getattr(namespace, "cable_transfer", 0.0) or 0.0
+        )
+        for key in (
+            "circuit_coal_available",
+            "circuit_coal",
+            "circuit_copper_buffer_before",
+            "circuit_copper_ore",
+            "circuit_iron_ore",
+            "circuit_copper",
+            "circuit_iron",
+        ):
+            measured[key] = float(getattr(namespace, key, 0.0) or 0.0)
+        return (
+            not bool(result.info.get("error_occurred"))
+            and result.candidate_game_state is not None
+            and measured["cable"] > 0
+            and (output > 0 or measured["inventory"] > 0)
+        )
+
+    step = executor.execute(
+        code,
+        accept=validate,
+        use_checkpoint_for_action=False,
+    )
+    output = max(measured.get("output", 0.0), measured.get("inventory", 0.0))
+    journal.state["metrics"]["electronic_circuit_output"] = output
+    journal.state["metrics"]["electronic_circuit_rate_per_s"] = rate_per_second(
+        output,
+        settle_seconds,
+    )
+    if not step.accepted:
+        journal.state["metrics"]["electronic_circuit_counterexample"] = {
+            **measured,
+            "error_occurred": bool(step.info.get("error_occurred")),
+            "error": step.info.get("error"),
+        }
+        journal.fail_stage(
+            13,
+            "Electronic-circuit causal chain produced no validated circuits.",
+        )
+        journal.event(
+            "counterexample",
+            "Electronic-circuit DAG rejected with causal buffer measurements.",
+            measurements=measured,
+            error=step.info.get("error"),
+        )
+        return False
+
+    journal.complete_stage(
+        13,
+        f"Electronic-circuit chain accepted with {output:.0f} circuits.",
+    )
+    journal.event(
+        "accept",
+        "Powered copper-cable and electronic-circuit assemblers accepted.",
+        measurements=measured,
+    )
+    return True
+
+
+def stage_logistic_science(
+    executor: TransactionalFLEExecutor,
+    env: Any,
+    journal: ResearchJournal,
+    *,
+    settle_seconds: int,
+) -> bool:
+    namespace = env.unwrapped.instance.namespace
+    target_rate = 0.10
+    dag = EARLY_GAME_PRODUCTION_PLANNER.plan(
+        "logistic-science-pack",
+        target_rate,
+    )
+    horizon = max(30, settle_seconds)
+    safety_factor = 2.0
+    iron_plate_budget = max(
+        12,
+        math.ceil(
+            float(dag.raw_requirements_per_s.get("iron-plate", 0.0))
+            * horizon
+            * safety_factor
+        ),
+    )
+    copper_plate_budget = max(
+        8,
+        math.ceil(
+            float(dag.raw_requirements_per_s.get("copper-plate", 0.0))
+            * horizon
+            * safety_factor
+        ),
+    )
+    gear_node = dag.node("iron-gear-wheel")
+    circuit_node = dag.node("electronic-circuit")
+    green_target = max(2, math.ceil(target_rate * settle_seconds))
+
+    journal.state.setdefault("production_plans", {})["logistic_science"] = {
+        "factorio_data_version": FACTORIO_DATA_VERSION,
+        "target_rate_per_s": target_rate,
+        "validation_horizon_s": horizon,
+        "safety_factor": safety_factor,
+        "dag": dag.to_dict(),
+        "material_budget": {
+            "iron_plate": iron_plate_budget,
+            "copper_plate": copper_plate_budget,
+        },
+    }
+    journal.event(
+        "production_plan",
+        "Rate-balanced production DAG generated for logistic science.",
+        factorio_data_version=FACTORIO_DATA_VERSION,
+        target_rate_per_s=target_rate,
+        raw_requirements_per_s=dict(dag.raw_requirements_per_s),
+        minimum_machine_count=sum(
+            node.minimum_machines(crafting_speed=0.75)
+            for node in dag.nodes
+        ),
+    )
+    journal.set_stage(
+        14,
+        status="running",
+        detail=(
+            "Execute the Factorio 2.0.73 rate-balanced green-science DAG using "
+            "only validated internal plate/fuel buffers."
+        ),
+        next_action="validate green-science industrial DAG",
+    )
+    before = production_output(namespace, "logistic-science-pack")
+    measured: dict[str, float] = {}
+
+    gear_plate_budget = max(
+        8,
+        math.ceil(
+            (gear_node.target_rate_per_s if gear_node else 0.15)
+            * 2.0
+            * horizon
+            * safety_factor
+        ),
+    )
+    circuit_target = max(
+        4,
+        math.ceil(
+            (circuit_node.target_rate_per_s if circuit_node else 0.10)
+            * horizon
+            * safety_factor
+        ),
+    )
+
+    code = f"""
+# Pull endogenous fuel and raw ore from the validated supply chains.
+move_to(coal_chest.position)
+green_coal_available=inspect_inventory(coal_chest)[Prototype.Coal]
+green_coal=0
+if green_coal_available>0:
+    green_coal=extract_item(
+        Prototype.Coal,
+        coal_chest,
+        quantity=min(10,green_coal_available),
+    )
+
+move_to(chest.position)
+green_iron_ore_available=inspect_inventory(chest)[Prototype.IronOre]
+green_iron_ore=0
+if green_iron_ore_available>0:
+    green_iron_ore=extract_item(
+        Prototype.IronOre,
+        chest,
+        quantity=min({iron_plate_budget * 2},green_iron_ore_available),
+    )
+if green_iron_ore<{iron_plate_budget}:
+    move_to(scale_chest.position)
+    scale_iron_available=inspect_inventory(scale_chest)[Prototype.IronOre]
+    if scale_iron_available>0:
+        green_iron_ore+=extract_item(
+            Prototype.IronOre,
+            scale_chest,
+            quantity=min(
+                {iron_plate_budget * 2}-green_iron_ore,
+                scale_iron_available,
+            ),
+        )
+
+move_to(copper_chest.position)
+green_copper_ore_available=inspect_inventory(copper_chest)[Prototype.CopperOre]
+green_copper_ore=0
+if green_copper_ore_available>0:
+    green_copper_ore=extract_item(
+        Prototype.CopperOre,
+        copper_chest,
+        quantity=min({copper_plate_budget * 2},green_copper_ore_available),
+    )
+
+# Refill the proven furnaces; no benchmark inventory is used for materials.
+move_to(smelt_furnace.position)
+if green_coal>0:
+    smelt_furnace=insert_item(
+        Prototype.Coal,
+        smelt_furnace,
+        quantity=min(4,green_coal),
+    )
+if green_iron_ore>0:
+    smelt_furnace=insert_item(
+        Prototype.IronOre,
+        smelt_furnace,
+        quantity=green_iron_ore,
+    )
+move_to(copper_furnace.position)
+if green_coal>4:
+    copper_furnace=insert_item(
+        Prototype.Coal,
+        copper_furnace,
+        quantity=min(4,green_coal-4),
+    )
+if green_copper_ore>0:
+    copper_furnace=insert_item(
+        Prototype.CopperOre,
+        copper_furnace,
+        quantity=green_copper_ore,
+    )
+sleep(20)
+
+move_to(smelt_furnace.position)
+green_iron_available=inspect_inventory(smelt_furnace)[Prototype.IronPlate]
+green_iron=0
+if green_iron_available>0:
+    green_iron=extract_item(
+        Prototype.IronPlate,
+        smelt_furnace,
+        quantity=min({iron_plate_budget},green_iron_available),
+    )
+move_to(copper_furnace.position)
+green_copper_available=inspect_inventory(copper_furnace)[Prototype.CopperPlate]
+green_copper=0
+if green_copper_available>0:
+    green_copper=extract_item(
+        Prototype.CopperPlate,
+        copper_furnace,
+        quantity=min({copper_plate_budget},green_copper_available),
+    )
+
+# Replenish the shared gear cell from internally smelted iron.
+move_to(gear_assembler.position)
+if green_iron>0:
+    gear_input=min({gear_plate_budget},green_iron)
+    gear_assembler=insert_item(
+        Prototype.IronPlate,
+        gear_assembler,
+        quantity=gear_input,
+    )
+    green_iron-=gear_input
+
+# Replenish cable/circuit intermediates from internally smelted plates.
+move_to(cable_assembler.position)
+if green_copper>0:
+    cable_assembler=insert_item(
+        Prototype.CopperPlate,
+        cable_assembler,
+        quantity=green_copper,
+    )
+sleep(10)
+green_cables=inspect_inventory(cable_assembler)[Prototype.CopperCable]
+if green_cables>0:
+    green_cables=extract_item(
+        Prototype.CopperCable,
+        cable_assembler,
+        quantity=green_cables,
+    )
+
+move_to(circuit_assembler.position)
+if green_cables>0:
+    circuit_assembler=insert_item(
+        Prototype.CopperCable,
+        circuit_assembler,
+        quantity=green_cables,
+    )
+if green_iron>0:
+    circuit_iron_input=min({circuit_target},green_iron)
+    circuit_assembler=insert_item(
+        Prototype.IronPlate,
+        circuit_assembler,
+        quantity=circuit_iron_input,
+    )
+    green_iron-=circuit_iron_input
+sleep(10)
+
+green_gears=inspect_inventory(gear_assembler)[Prototype.IronGearWheel]
+if green_gears>0:
+    green_gears=extract_item(
+        Prototype.IronGearWheel,
+        gear_assembler,
+        quantity=green_gears,
+    )
+green_circuits=inspect_inventory(
+    circuit_assembler,
+)[Prototype.ElectronicCircuit]
+if green_circuits>0:
+    green_circuits=extract_item(
+        Prototype.ElectronicCircuit,
+        circuit_assembler,
+        quantity=green_circuits,
+    )
+
+belt_area=nearest_buildable(
+    Prototype.AssemblingMachine2,
+    BuildingBox(width=9,height=9),
+    circuit_assembler.position,
+)
+move_to(belt_area.center)
+belt_assembler=place_entity(
+    Prototype.AssemblingMachine2,
+    position=belt_area.center,
+)
+belt_assembler=set_entity_recipe(
+    belt_assembler,
+    Prototype.TransportBelt,
+)
+if green_gears>0:
+    belt_gear_input=min(max(2,{green_target}),green_gears)
+    belt_assembler=insert_item(
+        Prototype.IronGearWheel,
+        belt_assembler,
+        quantity=belt_gear_input,
+    )
+    green_gears-=belt_gear_input
+if green_iron>0:
+    belt_iron_input=min(max(2,{green_target}),green_iron)
+    belt_assembler=insert_item(
+        Prototype.IronPlate,
+        belt_assembler,
+        quantity=belt_iron_input,
+    )
+    green_iron-=belt_iron_input
+belt_power=connect_entities(
+    steam_engine,
+    belt_assembler,
+    Prototype.MediumElectricPole,
+)
+
+inserter_area=nearest_buildable(
+    Prototype.AssemblingMachine2,
+    BuildingBox(width=9,height=9),
+    belt_assembler.position,
+)
+move_to(inserter_area.center)
+inserter_assembler=place_entity(
+    Prototype.AssemblingMachine2,
+    position=inserter_area.center,
+)
+inserter_assembler=set_entity_recipe(
+    inserter_assembler,
+    Prototype.Inserter,
+)
+if green_gears>0:
+    inserter_gear_input=min(max(2,{green_target}),green_gears)
+    inserter_assembler=insert_item(
+        Prototype.IronGearWheel,
+        inserter_assembler,
+        quantity=inserter_gear_input,
+    )
+if green_iron>0:
+    inserter_iron_input=min(max(2,{green_target}),green_iron)
+    inserter_assembler=insert_item(
+        Prototype.IronPlate,
+        inserter_assembler,
+        quantity=inserter_iron_input,
+    )
+if green_circuits>0:
+    inserter_circuit_input=min(max(2,{green_target}),green_circuits)
+    inserter_assembler=insert_item(
+        Prototype.ElectronicCircuit,
+        inserter_assembler,
+        quantity=inserter_circuit_input,
+    )
+inserter_power=connect_entities(
+    steam_engine,
+    inserter_assembler,
+    Prototype.MediumElectricPole,
+)
+sleep(10)
+
+green_belts=inspect_inventory(belt_assembler)[Prototype.TransportBelt]
+if green_belts>0:
+    green_belts=extract_item(
+        Prototype.TransportBelt,
+        belt_assembler,
+        quantity=green_belts,
+    )
+green_inserters=inspect_inventory(inserter_assembler)[Prototype.Inserter]
+if green_inserters>0:
+    green_inserters=extract_item(
+        Prototype.Inserter,
+        inserter_assembler,
+        quantity=green_inserters,
+    )
+
+green_area=nearest_buildable(
+    Prototype.AssemblingMachine2,
+    BuildingBox(width=9,height=9),
+    inserter_assembler.position,
+)
+move_to(green_area.center)
+green_assembler=place_entity(
+    Prototype.AssemblingMachine2,
+    position=green_area.center,
+)
+green_assembler=set_entity_recipe(
+    green_assembler,
+    Prototype.LogisticsSciencePack,
+)
+if green_belts>0:
+    green_assembler=insert_item(
+        Prototype.TransportBelt,
+        green_assembler,
+        quantity=green_belts,
+    )
+if green_inserters>0:
+    green_assembler=insert_item(
+        Prototype.Inserter,
+        green_assembler,
+        quantity=green_inserters,
+    )
+green_power=connect_entities(
+    steam_engine,
+    green_assembler,
+    Prototype.MediumElectricPole,
+)
+sleep({settle_seconds})
+green_inventory=inspect_inventory(
+    green_assembler,
+)[Prototype.LogisticsSciencePack]
+print({{
+    'green_iron_ore':green_iron_ore,
+    'green_copper_ore':green_copper_ore,
+    'green_gears':green_gears,
+    'green_circuits':green_circuits,
+    'green_belts':green_belts,
+    'green_inserters':green_inserters,
+    'green_inventory':green_inventory,
+}})
+"""
+
+    def validate(result: Any) -> bool:
+        output = max(
+            0.0,
+            production_output(namespace, "logistic-science-pack") - before,
+        )
+        measured["output"] = output
+        measured["inventory"] = float(
+            getattr(namespace, "green_inventory", 0.0) or 0.0
+        )
+        measured["belts"] = float(
+            getattr(namespace, "green_belts", 0.0) or 0.0
+        )
+        measured["inserters"] = float(
+            getattr(namespace, "green_inserters", 0.0) or 0.0
+        )
+        measured["iron_ore"] = float(
+            getattr(namespace, "green_iron_ore", 0.0) or 0.0
+        )
+        measured["copper_ore"] = float(
+            getattr(namespace, "green_copper_ore", 0.0) or 0.0
+        )
+        return (
+            not bool(result.info.get("error_occurred"))
+            and result.candidate_game_state is not None
+            and measured["iron_ore"] > 0
+            and measured["copper_ore"] > 0
+            and measured["belts"] > 0
+            and measured["inserters"] > 0
+            and (output > 0 or measured["inventory"] > 0)
+        )
+
+    step = executor.execute(
+        code,
+        accept=validate,
+        use_checkpoint_for_action=False,
+    )
+    output = max(measured.get("output", 0.0), measured.get("inventory", 0.0))
+    journal.state["metrics"]["logistic_science_output"] = output
+    journal.state["metrics"]["logistic_science_rate_per_s"] = rate_per_second(
+        output,
+        settle_seconds,
+    )
+    journal.state["metrics"]["logistic_science_dag_target_rate_per_s"] = target_rate
+    if not step.accepted:
+        journal.fail_stage(
+            14,
+            "Internal industrial DAG produced no validated logistic science.",
+        )
+        journal.event(
+            "reject",
+            "Green-science DAG rejected; internal material chain was insufficient.",
+            measurements=measured,
+            production_plan=dag.to_dict(),
+        )
+        return False
+
+    journal.complete_stage(
+        14,
+        f"Internal logistic-science DAG accepted with {output:.0f} packs.",
+    )
+    journal.event(
+        "accept",
+        "Rate-balanced belts/inserters chain fed powered logistic science.",
+        measurements=measured,
+        production_plan=dag.to_dict(),
+    )
+    return True
+
+
+def stage_transactional_rebuild(
+    executor: TransactionalFLEExecutor,
+    env: Any,
+    journal: ResearchJournal,
+    *,
+    logistics: dict[str, Any] | None,
+    settle_seconds: int,
+    gain_threshold: float,
+) -> bool:
+    namespace = env.unwrapped.instance.namespace
+    belt_rate = float(
+        journal.state["metrics"].get("belt_smelting_plate_rate_per_s", 0.0)
+        or 0.0
+    )
+    direct_rate = float(
+        journal.state["metrics"].get("direct_smelting_plate_rate_per_s", 0.0)
+        or 0.0
+    )
+    ratio = (
+        belt_rate / direct_rate
+        if direct_rate > 0
+        else None
+    )
+
+    journal.set_stage(
+        15,
+        status="validating",
+        detail=(
+            "Testing whether a dominated belt/smelting branch can be removed "
+            "without sacrificing the validated compact iron capability."
+        ),
+        next_action="transactionally demolish dominated branch or retain it",
+    )
+
+    if (
+        logistics is None
+        or ratio is None
+        or ratio >= 1.0 - gain_threshold
+    ):
+        journal.state["metrics"]["rebuild_attempted"] = False
+        journal.state["metrics"]["rebuild_committed"] = False
+        journal.complete_stage(
+            15,
+            "No demolition attempted: the logistics branch is not sufficiently dominated.",
+        )
+        return True
+
+    pickup_lines = []
+    for point in logistics.get("path", []):
+        pickup_lines.append(
+            "if pickup_entity("
+            "Prototype.TransportBelt,"
+            f"Position(x={float(point['x'])},y={float(point['y'])})"
+            "): removed_count+=1"
+        )
+
+    plate_before = production_output(namespace, "iron-plate")
+    measured: dict[str, float] = {}
+
+    code = f"""
+removed_count=0
+{chr(10).join(pickup_lines)}
+for entity in (
+    logistics_inserter,
+    logistics_chest,
+    smelt_out_inserter,
+    belt_furnace,
+    logistics_drill,
+):
+    try:
+        if pickup_entity(entity):
+            removed_count+=1
+    except Exception:
+        pass
+
+smelt_drill=insert_item(Prototype.Coal,smelt_drill,quantity=6)
+smelt_furnace=insert_item(Prototype.Coal,smelt_furnace,quantity=6)
+sleep({settle_seconds})
+print({{
+    'removed_count':removed_count,
+    'direct_furnace':inspect_inventory(smelt_furnace),
+}})
+"""
+
+    def validate(result: Any) -> bool:
+        plate_after = production_output(namespace, "iron-plate")
+        output = max(0.0, plate_after - plate_before)
+        candidate_rate = rate_per_second(output, settle_seconds)
+        removed = float(getattr(namespace, "removed_count", 0) or 0)
+        measured.update(
+            {
+                "plate_output": output,
+                "plate_rate_per_s": candidate_rate,
+                "removed_entities": removed,
+                "rate_retention": (
+                    candidate_rate / direct_rate
+                    if direct_rate > 0
+                    else 0.0
+                ),
+            }
+        )
+        return (
+            not bool(result.info.get("error_occurred"))
+            and result.candidate_game_state is not None
+            and removed >= float(logistics.get("belt_count", 0))
+            and candidate_rate >= direct_rate * (1.0 - gain_threshold)
+        )
+
+    step = executor.execute(
+        code,
+        accept=validate,
+        use_checkpoint_for_action=False,
+    )
+    journal.state["metrics"].update(
+        {
+            "rebuild_attempted": True,
+            "rebuild_committed": bool(step.accepted),
+            "rebuild_removed_entities": measured.get("removed_entities", 0.0),
+            "rebuild_plate_rate_per_s": measured.get("plate_rate_per_s", 0.0),
+            "rebuild_rate_retention": measured.get("rate_retention", 0.0),
+            "rebuild_gain_threshold": gain_threshold,
+        }
+    )
+
+    if step.accepted:
+        journal.complete_stage(
+            15,
+            (
+                "Dominated belt branch demolished and compact iron production "
+                "retained within the configured survival threshold."
+            ),
+        )
+        journal.event(
+            "rebuild",
+            "Transactional demolition committed after throughput-retention validation.",
+            measurements=measured,
+        )
+        return True
+
+    journal.complete_stage(
+        15,
+        "Demolition challenger rejected; checkpoint rollback preserved the original factory.",
+    )
+    journal.event(
+        "rebuild",
+        "Transactional demolition rolled back because the compact survivor did not dominate.",
+        measurements=measured,
+    )
+    return True
+
+
+LAB_PREUNLOCKED_PLANNING_GOALS = frozenset({
+    "electronics_trigger",
+    "lab_bootstrap",
+    "lab_automation",
+})
+
+
 def update_engineering_frontier(
     journal: ResearchJournal,
     *,
@@ -1540,8 +2516,14 @@ def update_engineering_frontier(
     stalled_attempts: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     stalled = dict(stalled_attempts or {})
+    planning_assumptions = (
+        LAB_PREUNLOCKED_PLANNING_GOALS
+        if journal.state.get("arena", {}).get("technology") == "pre_unlocked"
+        else frozenset()
+    )
+    planning_achieved = set(achieved) | set(planning_assumptions)
     state = EngineeringState(
-        achieved=frozenset(achieved),
+        achieved=frozenset(planning_achieved),
         stalled_attempts=stalled,
     )
     inferred = DEFAULT_ENGINEERING_PLANNER.inferred_achieved(state)
@@ -1565,6 +2547,8 @@ def update_engineering_frontier(
     progression = journal.state["engineering_progression"]
     progression["status"] = "active" if frontier else "frontier_complete"
     progression["achieved"] = sorted(inferred)
+    progression["validated_achieved"] = sorted(achieved)
+    progression["planning_assumptions"] = sorted(planning_assumptions)
     progression["stalled_attempts"] = stalled
     progression["frontier"] = frontier
     progression["next_goal"] = frontier[0] if frontier else None
@@ -1578,6 +2562,8 @@ def stage_coal_mining(
     journal: ResearchJournal,
     *,
     settle_seconds: int,
+    safety_stock: int,
+    producer_refuel: int,
 ) -> tuple[bool, tuple[float, float] | None]:
     namespace = env.unwrapped.instance.namespace
     journal.set_stage(
@@ -1727,13 +2713,13 @@ endogenous_growth=max(0,internal_stock_after-internal_stock_before)
 operational_refuel=0
 available_for_refuel=max(
     0,
-    internal_stock_after-{COAL_SAFETY_STOCK},
+    internal_stock_after-{safety_stock},
 )
 if available_for_refuel>0:
     operational_refuel=extract_item(
         Prototype.Coal,
         coal_chest,
-        quantity=min({COAL_PRODUCER_REFUEL},available_for_refuel),
+        quantity=min({producer_refuel},available_for_refuel),
     )
 if operational_refuel>0:
     coal_drill=insert_item(
@@ -1791,7 +2777,7 @@ print({{
             "coal_endogenous_growth": measured["endogenous_growth"],
             "coal_endogenous_stockpile": measured["endogenous_stockpile"],
             "coal_operational_refuel": measured["operational_refuel"],
-            "coal_safety_stock_target": float(COAL_SAFETY_STOCK),
+            "coal_safety_stock_target": float(safety_stock),
             "coal_mining_reward": step.reward,
         }
     )
@@ -1816,7 +2802,7 @@ print({{
             "endogenous_growth": measured["endogenous_growth"],
             "endogenous_stockpile": measured["endogenous_stockpile"],
             "operational_refuel": measured["operational_refuel"],
-            "safety_stock_target": COAL_SAFETY_STOCK,
+            "safety_stock_target": safety_stock,
         }
     )
 
@@ -1869,6 +2855,8 @@ def stage_copper_mining(
     journal: ResearchJournal,
     *,
     settle_seconds: int,
+    safety_stock: int,
+    fuel_budget: int,
 ) -> tuple[bool, tuple[float, float] | None]:
     namespace = env.unwrapped.instance.namespace
     journal.set_stage(
@@ -1939,17 +2927,17 @@ move_to(coal_chest.position)
 copper_mining_fuel=0
 for _ in range(6):
     available_internal=inspect_inventory(coal_chest)[Prototype.Coal]
-    spendable=max(0,available_internal-{COAL_SAFETY_STOCK})
+    spendable=max(0,available_internal-{safety_stock})
     if spendable>0:
         break
     sleep(6)
 available_internal=inspect_inventory(coal_chest)[Prototype.Coal]
-spendable=max(0,available_internal-{COAL_SAFETY_STOCK})
+spendable=max(0,available_internal-{safety_stock})
 if spendable>0:
     copper_mining_fuel=extract_item(
         Prototype.Coal,
         coal_chest,
-        quantity=min({COAL_COPPER_MINING_BUDGET},spendable),
+        quantity=min({fuel_budget},spendable),
     )
 
 move_to(Position(x={center[0]},y={center[1]}))
@@ -2034,6 +3022,9 @@ def stage_copper_smelting(
     *,
     center: tuple[float, float],
     settle_seconds: int,
+    safety_stock: int,
+    fuel_budget: int,
+    buffer_target: int,
 ) -> bool:
     namespace = env.unwrapped.instance.namespace
 
@@ -2075,24 +3066,24 @@ if copper_ore_available>0:
     copper_ore_transfer=extract_item(
         Prototype.CopperOre,
         copper_chest,
-        quantity=min(32,copper_ore_available),
+        quantity=min({buffer_target},copper_ore_available),
     )
 
 move_to(coal_chest.position)
 copper_smelting_fuel=0
 for _ in range(6):
     available_internal=inspect_inventory(coal_chest)[Prototype.Coal]
-    spendable=max(0,available_internal-{COAL_SAFETY_STOCK})
+    spendable=max(0,available_internal-{safety_stock})
     if spendable>0:
         break
     sleep(6)
 available_internal=inspect_inventory(coal_chest)[Prototype.Coal]
-spendable=max(0,available_internal-{COAL_SAFETY_STOCK})
+spendable=max(0,available_internal-{safety_stock})
 if spendable>0:
     copper_smelting_fuel=extract_item(
         Prototype.Coal,
         coal_chest,
-        quantity=min({COAL_COPPER_SMELTING_BUDGET},spendable),
+        quantity=min({fuel_budget},spendable),
     )
 
 furnace_box=BuildingBox(
@@ -2210,6 +3201,7 @@ def stage_capability_survival(
     coal_center: tuple[float, float],
     copper_center: tuple[float, float],
     settle_seconds: int,
+    fuel_budget: int,
 ) -> bool:
     namespace = env.unwrapped.instance.namespace
     journal.set_stage(
@@ -2237,7 +3229,7 @@ survival_transfer=0
 survival_wait_seconds=0
 for _ in range(8):
     available_internal=inspect_inventory(coal_chest)[Prototype.Coal]
-    if available_internal>={COAL_SURVIVAL_BUDGET}:
+    if available_internal>={fuel_budget}:
         break
     sleep(6)
     survival_wait_seconds+=6
@@ -2246,7 +3238,7 @@ if available_internal>0:
     survival_transfer=extract_item(
         Prototype.Coal,
         coal_chest,
-        quantity=min({COAL_SURVIVAL_BUDGET},available_internal),
+        quantity=min({fuel_budget},available_internal),
     )
 
 refueled_count=0
@@ -2851,6 +3843,7 @@ def finalize_evolution_selection(
     journal: ResearchJournal,
     *,
     achieved: set[str],
+    physical_graph: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     failed_stages = sum(
         1
@@ -2861,6 +3854,7 @@ def finalize_evolution_selection(
         metrics=journal.state.get("metrics", {}),
         achieved=achieved,
         resource_accounting=journal.state.get("resource_accounting", {}),
+        physical_graph=physical_graph,
         failed_stages=failed_stages,
     )
 
@@ -2878,16 +3872,15 @@ def finalize_evolution_selection(
     )
 
     metrics = journal.state.get("metrics", {})
-    configuration = {
-        "placement_best_arm": metrics.get("placement_best_arm"),
-        "placement_ucb_best_arm": metrics.get("placement_ucb_best_arm"),
-        "routing_turn_penalty": evolution.get("challenger", {})
-        .get("configuration", {})
-        .get("routing_turn_penalty"),
-        "placement_exploration": evolution.get("challenger", {})
-        .get("configuration", {})
-        .get("placement_exploration"),
-    }
+    configuration = dict(
+        evolution.get("challenger", {}).get("configuration", {})
+    )
+    configuration.update(
+        {
+            "placement_best_arm": metrics.get("placement_best_arm"),
+            "placement_ucb_best_arm": metrics.get("placement_ucb_best_arm"),
+        }
+    )
     generation = int(evolution.get("generation", 1) or 1)
     candidate_record = {
         "run_id": journal.run_id,
@@ -2916,16 +3909,67 @@ def finalize_evolution_selection(
     else:
         evolution["champion"] = incumbent or None
 
-    append_jsonl(
-        EVOLUTION_HISTORY,
-        {
-            "at": utc_now(),
-            "generation": generation,
-            "challenger": candidate_record,
-            "incumbent_run_id": incumbent.get("run_id") if incumbent else None,
-            "decision": decision.to_dict(),
-        },
+    failed_stage_names = [
+        str(stage.get("name"))
+        for stage in journal.state.get("curriculum", [])
+        if isinstance(stage, dict) and stage.get("status") == "failed"
+    ]
+    completed_stage_names = [
+        str(stage.get("name"))
+        for stage in journal.state.get("curriculum", [])
+        if isinstance(stage, dict) and stage.get("status") == "completed"
+    ]
+    selected_at = str(candidate_record["selected_at"])
+    started_at = journal.state.get("started_at")
+    duration_s: float | None = None
+    if isinstance(started_at, str):
+        try:
+            duration_s = max(
+                0.0,
+                (
+                    datetime.fromisoformat(selected_at)
+                    - datetime.fromisoformat(started_at)
+                ).total_seconds(),
+            )
+        except ValueError:
+            duration_s = None
+
+    report = {
+        "at": selected_at,
+        "generation": generation,
+        "run_id": journal.run_id,
+        "challenger": candidate_record,
+        "incumbent_run_id": incumbent.get("run_id") if incumbent else None,
+        "incumbent_generation": incumbent.get("generation") if incumbent else None,
+        "decision": decision.to_dict(),
+        "bottleneck": failed_stage_names[0] if failed_stage_names else None,
+        "failed_stages": failed_stage_names,
+        "completed_stages": completed_stage_names,
+        "completed_stage_count": len(completed_stage_names),
+        "total_stage_count": len(journal.state.get("curriculum", [])),
+        "duration_s": duration_s,
+        "next_action": journal.state.get("next_action"),
+        "engineering_progression": journal.state.get(
+            "engineering_progression",
+            {},
+        ),
+        "production_plans": journal.state.get("production_plans", {}),
+        "metrics": journal.state.get("metrics", {}),
+    }
+    append_jsonl(EVOLUTION_HISTORY, report)
+    atomic_json(
+        GENERATION_REPORTS / f"generation-{generation:04d}-{journal.run_id}.json",
+        report,
     )
+    journal.state["generation_report"] = {
+        "path": str(
+            GENERATION_REPORTS
+            / f"generation-{generation:04d}-{journal.run_id}.json"
+        ),
+        "bottleneck": report["bottleneck"],
+        "completed_stage_count": report["completed_stage_count"],
+        "total_stage_count": report["total_stage_count"],
+    }
     journal.event(
         "selection",
         (
@@ -2959,9 +4003,24 @@ def run_curriculum(
 
     list_environments()
     env = gym.make("iron_ore_throughput", run_idx=0)
-    executor = TransactionalFLEExecutor(env)
     run_id = datetime.now(UTC).strftime("curriculum-%Y%m%dT%H%M%SZ")
+    previous_research = read_json_object(RESEARCH_STATE)
     journal = ResearchJournal(run_id)
+    executor = TransactionalFLEExecutor(
+        env,
+        runtime_context=lambda: {
+            "run_id": journal.run_id,
+            "arena": "lab_play",
+            "stage": journal.state.get("stage"),
+            "run_status": journal.state.get("status"),
+            "progress": journal.state.get("progress"),
+        },
+    )
+    world_lease = FactorioWorldLease(
+        run_id=run_id,
+        arena="lab_play",
+        owner="curriculum_runner",
+    ).acquire()
     evolution = journal.state["evolution"]
     champion = evolution.get("champion") or {}
     champion_configuration = (
@@ -2969,11 +4028,32 @@ def run_curriculum(
         if isinstance(champion, dict)
         else {}
     )
-    genome = challenger_genome(
+    base_genome = challenger_genome(
         attempt=int(evolution.get("generation", 1) or 1),
         champion_configuration=champion_configuration,
         default_exploration=exploration,
+        seed=seed,
     )
+    advice = propose_evolution_advice(
+        {
+            "champion_configuration": champion_configuration,
+            "previous_run": {
+                "run_id": previous_research.get("run_id"),
+                "arena": previous_research.get("arena"),
+                "status": previous_research.get("status"),
+                "stage": previous_research.get("stage"),
+                "detail": previous_research.get("detail"),
+                "next_action": previous_research.get("next_action"),
+                "promotion": previous_research.get("evolution", {}).get("promotion")
+                if isinstance(previous_research.get("evolution"), dict)
+                else None,
+                "metrics": previous_research.get("metrics", {}),
+            },
+            "candidate_before_advice": base_genome.to_dict(),
+        }
+    )
+    genome = apply_advice(base_genome, advice.adjustments)
+    evolution["advisor"] = advice.to_dict()
     effective_exploration = genome.placement_exploration
     turn_penalty = genome.routing_turn_penalty
     evolution["challenger"]["configuration"].update(
@@ -2987,6 +4067,7 @@ def run_curriculum(
         "mutation",
         "Evolutionary challenger genome selected.",
         configuration=evolution["challenger"]["configuration"],
+        advisor=advice.to_dict(),
     )
 
     try:
@@ -3011,6 +4092,7 @@ def run_curriculum(
             episodes=placement_episodes,
             settle_seconds=trial_settle,
             exploration=effective_exploration,
+            radius_scale=genome.placement_radius_scale,
         )
         stage_scale_mining(
             executor,
@@ -3019,6 +4101,7 @@ def run_curriculum(
             center=center,
             best_arm=best_arm,
             settle_seconds=scale_settle,
+            radius_scale=genome.placement_radius_scale,
         )
         smelting_ok = stage_smelting_probe(
             executor,
@@ -3066,6 +4149,8 @@ def run_curriculum(
                 env,
                 journal,
                 settle_seconds=coal_mine_settle,
+                safety_stock=genome.coal_safety_stock,
+                producer_refuel=genome.coal_producer_refuel,
             )
         if coal_ok:
             achieved.add("coal_mining")
@@ -3076,6 +4161,8 @@ def run_curriculum(
                 env,
                 journal,
                 settle_seconds=copper_mine_settle,
+                safety_stock=genome.coal_safety_stock,
+                fuel_budget=genome.coal_copper_mining_budget,
             )
         if copper_ok and copper_center is not None:
             achieved.add("copper_mining")
@@ -3087,6 +4174,9 @@ def run_curriculum(
                     journal,
                     center=copper_center,
                     settle_seconds=copper_smelt_settle,
+                    safety_stock=genome.coal_safety_stock,
+                    fuel_budget=genome.coal_copper_smelting_budget,
+                    buffer_target=genome.buffer_target,
                 )
         if copper_smelt_ok:
             achieved.add("copper_smelting")
@@ -3107,6 +4197,7 @@ def run_curriculum(
                 coal_center=coal_center,
                 copper_center=copper_center,
                 settle_seconds=20,
+                fuel_budget=genome.coal_survival_budget,
             )
 
         if survival_ok:
@@ -3132,17 +4223,74 @@ def run_curriculum(
                 journal,
                 settle_seconds=20,
             )
+        circuits_ok = False
+        logistic_science_ok = False
+        optimization_ok = False
         if science_ok:
             achieved.add("automation_science")
+            achieved.add("assembler_gears")
+            circuits_ok = stage_electronic_circuits(
+                executor,
+                env,
+                journal,
+                settle_seconds=18,
+            )
+        if circuits_ok:
+            achieved.add("electronic_circuits")
+            logistic_science_ok = stage_logistic_science(
+                executor,
+                env,
+                journal,
+                settle_seconds=24,
+            )
+        if logistic_science_ok:
+            achieved.add("logistic_science")
+            optimization_ok = stage_transactional_rebuild(
+                executor,
+                env,
+                journal,
+                logistics=logistics,
+                settle_seconds=18,
+                gain_threshold=genome.rebuild_gain_threshold,
+            )
 
         progression = update_engineering_frontier(
             journal,
             achieved=achieved,
         )
 
+        intervention_snapshot = executor.intervention_snapshot()
+        journal.state["metrics"]["interventions"] = {
+            **intervention_snapshot,
+            "post_bootstrap_committed": dict(
+                intervention_snapshot.get("committed", {})
+            ),
+            "scope": "entire_lab_generation",
+        }
+
+        physical_graph: dict[str, Any] | None = None
+        try:
+            physical_entities = env.unwrapped.instance.namespace._save_entity_state(
+                distance=500,
+                player_entities=True,
+                resource_entities=False,
+                items_on_ground=False,
+                encode=False,
+                compress=False,
+            )
+            physical_graph = build_factory_graph(physical_entities)
+            journal.state["metrics"]["physical_factory_graph"] = dict(
+                physical_graph.get("metrics", {})
+            )
+        except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+            journal.state["metrics"]["physical_factory_graph_error"] = (
+                f"{type(exc).__name__}: {exc}"
+            )
+
         selection = finalize_evolution_selection(
             journal,
             achieved=achieved,
+            physical_graph=physical_graph,
         )
         final_status = (
             "generation_complete"
@@ -3155,6 +4303,9 @@ def run_curriculum(
                 and power_ok
                 and manufacturing_ok
                 and science_ok
+                and circuits_ok
+                and logistic_science_ok
+                and optimization_ok
             )
             else "partial_success"
         )
@@ -3192,6 +4343,7 @@ def run_curriculum(
         raise
     finally:
         executor.close()
+        world_lease.release()
 
 
 def main() -> None:
