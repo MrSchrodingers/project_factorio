@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Factorio AI Lab</title>
-  <link rel="stylesheet" href="/static/styles.css?v=0.7.0">
+  <link rel="stylesheet" href="/static/styles.css?v=0.8.7">
 </head>
 <body>
   <header class="topbar">
@@ -16,6 +16,7 @@
       </div>
     </div>
     <div class="top-meta">
+      <span id="arenaBadge" class="badge neutral">arena --</span>
       <span id="researchBadge" class="badge neutral">research idle</span>
       <span id="commitBadge" class="mono">git --</span>
     </div>
@@ -62,6 +63,11 @@
         <strong id="researchLoop">idle</strong>
         <small id="researchLoopDetail">no active agent process</small>
       </article>
+      <article class="card kpi evolution-kpi">
+        <span class="label">SURVIVAL SELECTION</span>
+        <strong id="evolutionKpi">G-- · evaluating</strong>
+        <small id="evolutionKpiDetail">Champion -- · Challenger --</small>
+      </article>
       <article class="card kpi engineering-kpi">
         <span class="label">NEXT FACTORY GOAL</span>
         <strong id="engineeringGoal">discovering frontier</strong>
@@ -79,6 +85,50 @@
       </article>
     </section>
 
+    <section class="card evolution-arena">
+      <div class="arena-head">
+        <div>
+          <span class="label">EVOLUTIONARY SELECTION</span>
+          <h2>Generation arena</h2>
+          <small>Incumbent-preserving selection · capability survival before promotion</small>
+        </div>
+        <div class="arena-badges">
+          <span id="validationBadge" class="badge neutral">open-play pending</span>
+          <span id="generationBadge" class="badge neutral">generation --</span>
+        </div>
+      </div>
+
+      <div class="arena-grid">
+        <article class="arena-contender champion">
+          <span class="arena-role">CHAMPION</span>
+          <strong id="championLabel">not selected</strong>
+          <small id="championFitness">waiting for first validated generation</small>
+        </article>
+
+        <div class="arena-selection">
+          <span class="arena-vs">VS</span>
+          <strong id="promotionLabel">evaluating</strong>
+          <small id="promotionDetail">hard survival gates precede promotion</small>
+          <div id="survivalGates" class="survival-gates"></div>
+        </div>
+
+        <article class="arena-contender challenger">
+          <span class="arena-role">CHALLENGER</span>
+          <strong id="challengerLabel">current run</strong>
+          <small id="challengerFitness">collecting fitness evidence</small>
+        </article>
+      </div>
+      <div class="generation-history-wrap">
+        <div class="generation-history-head">
+          <span class="label">SELECTION HISTORY</span>
+          <small>survival pressure across attempts</small>
+        </div>
+        <div id="generationHistory" class="generation-history">
+          <span class="generation-empty">No completed generations yet.</span>
+        </div>
+      </div>
+    </section>
+
     <section class="workspace-grid">
       <article class="card factory-card">
         <div class="card-head world-card-head">
@@ -88,7 +138,8 @@
           </div>
           <div class="world-head-actions">
             <div class="view-mode-toggle" role="group" aria-label="World view mode">
-              <button type="button" data-world-mode="game" class="active">Game</button>
+              <button type="button" data-world-mode="game" class="active">Factory</button>
+              <button type="button" data-world-mode="overview">Resources</button>
               <button type="button" data-world-mode="tactical">Tactical</button>
             </div>
             <div class="world-health">
@@ -119,9 +170,13 @@
           </div>
           <div class="world-hud">
             <span id="factorioStatus" class="hud-chip">Factorio --</span>
-            <span id="frameSource" class="hud-chip">Factorio runtime renderer</span>
+            <span id="frameSource" class="hud-chip">live coordinates · reconstructed terrain</span>
           </div>
-          <div class="world-navigation-hint">drag to pan · wheel to zoom · double-click to fit</div>
+          <div id="resourceLegend" class="resource-legend" aria-live="polite"></div>
+          <div class="world-provenance">
+            Entities/resources: live Factorio coordinates · Terrain texture: reconstructed from game assets
+          </div>
+          <div class="world-navigation-hint">scroll page normally · Ctrl/Cmd+wheel to zoom · drag only when zoomed · double-click to fit</div>
           <div class="world-controls" aria-label="World map controls">
             <button id="zoomOut" type="button" title="Zoom out">−</button>
             <button id="zoomReset" type="button" title="Reset view">1×</button>
@@ -134,6 +189,7 @@
           <div>
             <span class="label">ENTITY MIX</span>
             <div id="entityTypes" class="type-pills"></div>
+            <div id="entityHealth" class="entity-health-pills"></div>
           </div>
           <div class="factory-bounds">
             <span class="label">LIVE STATE</span>
@@ -191,6 +247,10 @@
       <div class="production-meta">
         <span id="productionWindow" class="mono">1 minute · 300 native samples</span>
         <span class="mono">bars are relative to the highest rate on each side</span>
+      </div>
+      <div class="capability-health-wrap">
+        <span class="label">CAPABILITY SURVIVAL</span>
+        <div id="capabilityHealth" class="capability-health"></div>
       </div>
       <div class="production-panels">
         <section class="production-side">
@@ -282,6 +342,14 @@
             <b id="truthKnowledge" class="warn">starting</b>
           </div>
           <div class="truth-row">
+            <span>Evolutionary survival selector</span>
+            <b id="truthEvolution" class="warn">no champion</b>
+          </div>
+          <div class="truth-row">
+            <span>Technology-tree realism</span>
+            <b id="truthTechTree" class="warn">benchmark pre-unlocked</b>
+          </div>
+          <div class="truth-row">
             <span>Spatial demonstration dataset</span>
             <b id="truthDataset" class="muted">0 demos</b>
           </div>
@@ -340,6 +408,6 @@
     </details>
   </main>
 
-  <script src="/static/app.js?v=0.7.0"></script>
+  <script src="/static/app.js?v=0.8.7"></script>
 </body>
 </html>

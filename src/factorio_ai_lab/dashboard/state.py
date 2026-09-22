@@ -168,29 +168,80 @@ end
 local entities={}
 for _,e in pairs(p.surface.find_entities_filtered{force=p.force}) do
   if e.valid then
-    table.insert(entities,{
+    local row={
       name=e.name,
       type=e.type,
       direction=e.direction,
       position={x=e.position.x,y=e.position.y}
-    })
+    }
+
+    local status=e.status
+    if status then
+      row.status=tostring(status)
+      for key,value in pairs(defines.entity_status) do
+        if value==status then
+          row.status=key
+          break
+        end
+      end
+    end
+
+    local ok_fuel,fuel_inventory=pcall(function()
+      return e.get_fuel_inventory()
+    end)
+    if ok_fuel and fuel_inventory and fuel_inventory.valid then
+      local ok_count,count=pcall(function()
+        return fuel_inventory.get_item_count("coal")
+      end)
+      if ok_count then
+        row.coal_fuel=count
+      end
+    end
+
+    local ok_recipe,recipe=pcall(function()
+      return e.get_recipe()
+    end)
+    if ok_recipe and recipe then
+      row.recipe=recipe.name
+    end
+
+    local ok_energy,energy=pcall(function()
+      return e.energy
+    end)
+    if ok_energy and energy then
+      row.energy=energy
+    end
+
+    table.insert(entities,row)
   end
 end
-local production={input={},output={}}
+local production={produced={},consumed={},input={},output={}}
 local surface=p.surface
 local item_stats=p.force.get_item_production_statistics(surface)
 local fluid_stats=p.force.get_fluid_production_statistics(surface)
 for name,count in pairs(item_stats.input_counts) do
-  if count ~= 0 then production.output[name]=count end
+  if count ~= 0 then
+    production.produced[name]=count
+    production.output[name]=count
+  end
 end
 for name,count in pairs(item_stats.output_counts) do
-  if count ~= 0 then production.input[name]=count end
+  if count ~= 0 then
+    production.consumed[name]=count
+    production.input[name]=count
+  end
 end
 for name,count in pairs(fluid_stats.input_counts) do
-  if count ~= 0 then production.output[name]=count end
+  if count ~= 0 then
+    production.produced[name]=count
+    production.output[name]=count
+  end
 end
 for name,count in pairs(fluid_stats.output_counts) do
-  if count ~= 0 then production.input[name]=count end
+  if count ~= 0 then
+    production.consumed[name]=count
+    production.input[name]=count
+  end
 end
 rcon.print(helpers.table_to_json({
   connected=true,
@@ -279,6 +330,101 @@ rcon.print(helpers.table_to_json({
 }))
 """
 
+    _RESOURCE_OVERVIEW_COMMAND = r"""
+/c local p=storage.agent_characters and storage.agent_characters[1]
+if not p then
+  rcon.print(helpers.table_to_json({connected=false,error="agent character unavailable"}))
+  return
+end
+local s=p.surface
+local radius=192
+local cell_size=16
+local area={
+  left_top={x=p.position.x-radius,y=p.position.y-radius},
+  right_bottom={x=p.position.x+radius,y=p.position.y+radius}
+}
+local cells={}
+local totals={}
+local nearest={}
+local points={}
+for _,e in pairs(s.find_entities_filtered{area=area,type="resource"}) do
+  if e.valid then
+    points[#points+1]={
+      name=e.name,
+      x=e.position.x,
+      y=e.position.y,
+      amount=e.amount or 1
+    }
+    local bx=math.floor(e.position.x/cell_size)
+    local by=math.floor(e.position.y/cell_size)
+    local key=e.name..":"..bx..":"..by
+    local c=cells[key]
+    if not c then
+      c={
+        name=e.name,count=0,amount=0,
+        min_x=e.position.x,max_x=e.position.x,
+        min_y=e.position.y,max_y=e.position.y,
+        sum_x=0,sum_y=0
+      }
+      cells[key]=c
+    end
+    c.count=c.count+1
+    c.amount=c.amount+(e.amount or 1)
+    c.min_x=math.min(c.min_x,e.position.x)
+    c.max_x=math.max(c.max_x,e.position.x)
+    c.min_y=math.min(c.min_y,e.position.y)
+    c.max_y=math.max(c.max_y,e.position.y)
+    c.sum_x=c.sum_x+e.position.x
+    c.sum_y=c.sum_y+e.position.y
+
+    local t=totals[e.name]
+    if not t then
+      t={count=0,amount=0}
+      totals[e.name]=t
+    end
+    t.count=t.count+1
+    t.amount=t.amount+(e.amount or 1)
+
+    local dx=e.position.x-p.position.x
+    local dy=e.position.y-p.position.y
+    local d2=dx*dx+dy*dy
+    local n=nearest[e.name]
+    if not n or d2<n.d2 then
+      nearest[e.name]={
+        x=e.position.x,y=e.position.y,d2=d2
+      }
+    end
+  end
+end
+local packed={}
+for _,c in pairs(cells) do
+  table.insert(packed,{
+    name=c.name,
+    count=c.count,
+    amount=c.amount,
+    center={x=c.sum_x/c.count,y=c.sum_y/c.count},
+    bounds={
+      left_top={x=c.min_x,y=c.min_y},
+      right_bottom={x=c.max_x,y=c.max_y}
+    }
+  })
+end
+for _,n in pairs(nearest) do
+  n.distance=math.sqrt(n.d2)
+  n.d2=nil
+end
+rcon.print(helpers.table_to_json({
+  connected=true,
+  center={x=p.position.x,y=p.position.y},
+  radius=radius,
+  cell_size=cell_size,
+  cells=packed,
+  points=points,
+  totals=totals,
+  nearest=nearest
+}))
+"""
+
     def __init__(self, host: str = "127.0.0.1", port: int = 27000) -> None:
         self.host = host
         self.port = port
@@ -289,6 +435,8 @@ rcon.print(helpers.table_to_json({
         self._map_cache_at = 0.0
         self._map_cache_center: tuple[float, float] | None = None
         self._production_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+        self._resource_overview_cache: dict[str, Any] | None = None
+        self._resource_overview_cache_at = 0.0
 
     def connected(self) -> bool:
         return _port_open(self.host, self.port)
@@ -356,6 +504,46 @@ rcon.print(helpers.table_to_json({
                     "resources": [],
                     "natural": [],
                     "water_tiles": [],
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+
+    def resource_overview(
+        self,
+        *,
+        max_age_s: float = 15.0,
+    ) -> dict[str, Any]:
+        now = time.monotonic()
+        with self._lock:
+            if (
+                self._resource_overview_cache is not None
+                and now - self._resource_overview_cache_at <= max_age_s
+            ):
+                return self._resource_overview_cache
+            try:
+                client = self._ensure_client()
+                raw = client.send_command(self._RESOURCE_OVERVIEW_COMMAND)
+                if not raw:
+                    raise RuntimeError("RCON resource overview returned no payload")
+                payload = json.loads(raw)
+                if not isinstance(payload, dict):
+                    raise TypeError("RCON resource overview was not an object")
+                self._resource_overview_cache = payload
+                self._resource_overview_cache_at = now
+                return payload
+            except (
+                OSError,
+                RuntimeError,
+                TypeError,
+                ValueError,
+                json.JSONDecodeError,
+            ) as exc:
+                self._client = None
+                return {
+                    "connected": False,
+                    "cells": [],
+                    "points": [],
+                    "totals": {},
+                    "nearest": {},
                     "error": f"{type(exc).__name__}: {exc}",
                 }
 
@@ -496,7 +684,7 @@ rcon.print(helpers.table_to_json({{
                     "entity_count": len(entities),
                     "production": payload.get(
                         "production",
-                        {"input": {}, "output": {}},
+                        {"produced": {}, "consumed": {}, "input": {}, "output": {}},
                     ),
                     "latency_ms": round(
                         (time.perf_counter() - started) * 1000.0,
@@ -561,6 +749,31 @@ class DashboardState:
                 "error": f"{type(exc).__name__}: {exc}",
             }
 
+    def _research_runner_status(self) -> dict[str, Any]:
+        open_play_active = _process_running(
+            "factorio_ai_lab.experiments.open_play_runner"
+        )
+        curriculum_active = _process_running(
+            "factorio_ai_lab.experiments.curriculum_runner"
+        )
+        if open_play_active:
+            return {
+                "active": True,
+                "process": "open_play_runner",
+                "arena": "open_play",
+            }
+        if curriculum_active:
+            return {
+                "active": True,
+                "process": "curriculum_runner",
+                "arena": "lab_play",
+            }
+        return {
+            "active": False,
+            "process": None,
+            "arena": None,
+        }
+
     def status(self) -> dict[str, Any]:
         return {
             "project": "Factorio AI Lab",
@@ -576,17 +789,13 @@ class DashboardState:
             "memory": _memory_status(),
             "runtime": self.config.read(),
             "render": self.renderer.status(),
-            "research_runner": {
-                "active": _process_running(
-                    "factorio_ai_lab.experiments.curriculum_runner"
-                ),
-                "process": "curriculum_runner",
-            },
+            "research_runner": self._research_runner_status(),
         }
 
     def sample(self) -> dict[str, Any]:
         world = self.factorio.snapshot()
         research = self.research_data()
+        resource_overview = self.factorio.resource_overview()
         point = {
             "timestamp": time.time(),
             "tick": world.get("tick"),
@@ -608,6 +817,8 @@ class DashboardState:
                 world=world,
                 research=research,
             ),
+            "resource_overview": resource_overview,
+            "evolution": self.evolution_data(research=research),
             "knowledge": self.knowledge_data(),
             "datasets": self.dataset_data(),
         }
@@ -640,6 +851,80 @@ class DashboardState:
         except (OSError, json.JSONDecodeError):
             return {"status": "degraded", "error": "invalid research_state.json"}
         return loaded if isinstance(loaded, dict) else {}
+
+    def evolution_data(
+        self,
+        *,
+        research: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        research = research if research is not None else self.research_data()
+        current = research.get("evolution", {})
+        history_path = RUNS_DIR / "evolution_history.jsonl"
+        history: list[dict[str, Any]] = []
+        if history_path.exists():
+            try:
+                for raw_line in history_path.read_text(encoding="utf-8").splitlines():
+                    if not raw_line.strip():
+                        continue
+                    row = json.loads(raw_line)
+                    if isinstance(row, dict):
+                        history.append(row)
+            except (OSError, json.JSONDecodeError):
+                history = []
+        history = history[-16:]
+
+        champion_path = RUNS_DIR / "evolution_champion.json"
+        validated_path = RUNS_DIR / "open_play_validated_champion.json"
+        champion: dict[str, Any] = {}
+        validated: dict[str, Any] = {}
+        if champion_path.exists():
+            try:
+                loaded = json.loads(champion_path.read_text())
+                if isinstance(loaded, dict):
+                    champion = loaded
+            except (OSError, json.JSONDecodeError):
+                champion = {}
+        if validated_path.exists():
+            try:
+                loaded = json.loads(validated_path.read_text())
+                if isinstance(loaded, dict):
+                    validated = loaded
+            except (OSError, json.JSONDecodeError):
+                validated = {}
+
+        if isinstance(current, dict) and current:
+            payload = dict(current)
+            if not payload.get("champion") and champion:
+                payload["champion"] = champion
+            payload["validated_champion"] = validated or None
+            payload["history"] = history
+            return payload
+
+        run = self.active_run_data()
+        generation = int(champion.get("generation", 0) or 0) + 1
+        return {
+            "scheme": "incumbent_plus_challenger",
+            "generation": generation,
+            "retention_ratio": 0.80,
+            "champion": champion or None,
+            "validated_champion": validated or None,
+            "history": history,
+            "challenger": {
+                "run_id": run.get("run_id"),
+                "status": (
+                    "evaluating"
+                    if run.get("status") in {
+                        "starting",
+                        "running",
+                        "learning",
+                        "validating",
+                    }
+                    else "awaiting_selection"
+                ),
+                "fitness": None,
+            },
+            "promotion": None,
+        }
 
     def dataset_data(self) -> dict[str, Any]:
         path = RUNS_DIR / "datasets" / "spatial_demonstrations.jsonl"
@@ -705,7 +990,11 @@ class DashboardState:
             if isinstance(goal, str)
         }
         production = world.get("production", {})
-        outputs = production.get("output", {}) if isinstance(production, dict) else {}
+        outputs = (
+            production.get("produced", production.get("output", {}))
+            if isinstance(production, dict)
+            else {}
+        )
         if not isinstance(outputs, dict):
             outputs = {}
 
@@ -715,6 +1004,11 @@ class DashboardState:
             or float(metrics.get("iron_plate_output", 0.0) or 0.0) > 0
         ):
             achieved.add("iron_backbone")
+        if (
+            float(outputs.get("coal", 0.0) or 0.0) > 0
+            or float(metrics.get("coal_output", 0.0) or 0.0) > 0
+        ):
+            achieved.add("coal_mining")
         if (
             float(outputs.get("copper-ore", 0.0) or 0.0) > 0
             or float(metrics.get("copper_ore_output", 0.0) or 0.0) > 0
@@ -765,6 +1059,7 @@ class DashboardState:
             stalled_attempts=stalled_attempts,
         )
         inferred = DEFAULT_ENGINEERING_PLANNER.inferred_achieved(state)
+        dependency_debt = DEFAULT_ENGINEERING_PLANNER.dependency_debt(state)
         ranked = DEFAULT_ENGINEERING_PLANNER.ranked_frontier(
             EngineeringState(
                 achieved=inferred,
@@ -790,6 +1085,7 @@ class DashboardState:
             "achieved": sorted(inferred),
             "next_goal": frontier[0] if frontier else None,
             "frontier": frontier,
+            "dependency_debt": list(dependency_debt),
             "stalled_attempts": stalled_attempts,
             "terminal": not frontier,
         }
@@ -797,8 +1093,15 @@ class DashboardState:
     def render_world_frame(self, mode: str = "game") -> bytes:
         world = self.factorio.snapshot()
         map_context = self.factorio.map_snapshot()
+        resource_overview = self.factorio.resource_overview()
         run = self.active_run_data()
-        return self.renderer.render(world, run, map_context, mode=mode)
+        return self.renderer.render(
+            world,
+            run,
+            map_context,
+            resource_overview=resource_overview,
+            mode=mode,
+        )
 
     def learning_data(self) -> dict[str, Any]:
         history_path = RUNS_DIR / "turn_penalty_learning.jsonl"

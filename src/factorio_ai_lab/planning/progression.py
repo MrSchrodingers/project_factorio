@@ -96,12 +96,15 @@ class ProductionEngineeringPlanner:
         self._by_id = {goal.goal_id: goal for goal in goals}
 
     def inferred_achieved(self, state: EngineeringState) -> frozenset[str]:
-        achieved = set(state.achieved)
+        claimed = set(state.achieved)
+        achieved: set[str] = set()
         changed = True
         while changed:
             changed = False
             for goal in self.goals:
                 if goal.goal_id in achieved:
+                    continue
+                if not goal.prerequisites.issubset(achieved):
                     continue
                 candidate_state = EngineeringState(
                     achieved=frozenset(achieved),
@@ -110,12 +113,33 @@ class ProductionEngineeringPlanner:
                     researched=state.researched,
                     stalled_attempts=state.stalled_attempts,
                 )
-                if goal.prerequisites.issubset(achieved) and goal.is_satisfied(
-                    candidate_state
+                if (
+                    goal.goal_id in claimed
+                    or goal.is_satisfied(candidate_state)
                 ):
                     achieved.add(goal.goal_id)
                     changed = True
         return frozenset(achieved)
+
+    def dependency_debt(
+        self,
+        state: EngineeringState,
+    ) -> tuple[dict[str, object], ...]:
+        valid = self.inferred_achieved(state)
+        debt: list[dict[str, object]] = []
+        for goal_id in sorted(set(state.achieved) - set(valid)):
+            goal = self._by_id.get(goal_id)
+            if goal is None:
+                continue
+            missing = sorted(set(goal.prerequisites) - set(valid))
+            debt.append(
+                {
+                    "goal_id": goal.goal_id,
+                    "label": goal.label,
+                    "missing_prerequisites": missing,
+                }
+            )
+        return tuple(debt)
 
     def frontier(self, state: EngineeringState) -> tuple[EngineeringGoal, ...]:
         achieved = self.inferred_achieved(state)
@@ -190,6 +214,16 @@ EARLY_GAME_ENGINEERING_GOALS: tuple[EngineeringGoal, ...] = (
         introduces=frozenset({"iron-ore", "iron-plate"}),
     ),
     EngineeringGoal(
+        goal_id="coal_mining",
+        label="Establish self-sufficient coal mining",
+        kind="resource_expansion",
+        prerequisites=frozenset({"iron_backbone"}),
+        unlock_value=8.0,
+        estimated_cost=2.0,
+        target_item_rates={"coal": 0.1},
+        introduces=frozenset({"coal"}),
+    ),
+    EngineeringGoal(
         goal_id="copper_mining",
         label="Discover and mine copper",
         kind="resource_expansion",
@@ -203,13 +237,13 @@ EARLY_GAME_ENGINEERING_GOALS: tuple[EngineeringGoal, ...] = (
         goal_id="steam_power",
         label="Establish a powered factory bus",
         kind="infrastructure",
-        prerequisites=frozenset({"iron_backbone"}),
+        prerequisites=frozenset({"iron_backbone", "coal_mining"}),
         unlock_value=5.5,
         estimated_cost=4.0,
         target_entities={
             "boiler": 1,
             "steam-engine": 1,
-            "small-electric-pole": 2,
+            "medium-electric-pole": 1,
         },
         introduces=frozenset({"electric-power"}),
     ),
@@ -217,18 +251,41 @@ EARLY_GAME_ENGINEERING_GOALS: tuple[EngineeringGoal, ...] = (
         goal_id="copper_smelting",
         label="Automate copper plate production",
         kind="throughput",
-        prerequisites=frozenset({"copper_mining"}),
+        prerequisites=frozenset({"copper_mining", "coal_mining"}),
         unlock_value=7.5,
         estimated_cost=3.0,
         target_item_rates={"copper-plate": 1.0},
         introduces=frozenset({"copper-plate"}),
     ),
     EngineeringGoal(
+        goal_id="electronics_trigger",
+        label="Unlock electronics from sustained copper-plate production",
+        kind="technology_trigger",
+        prerequisites=frozenset({"copper_smelting"}),
+        unlock_value=8.0,
+        estimated_cost=2.0,
+        target_research=frozenset({"electronics"}),
+        introduces=frozenset(
+            {"copper-cable", "electronic-circuit", "small-electric-pole"}
+        ),
+    ),
+    EngineeringGoal(
+        goal_id="lab_bootstrap",
+        label="Craft a lab and unlock automation science",
+        kind="technology_trigger",
+        prerequisites=frozenset({"steam_power", "electronics_trigger"}),
+        unlock_value=9.0,
+        estimated_cost=3.0,
+        target_entities={"lab": 1},
+        target_research=frozenset({"automation-science-pack"}),
+        introduces=frozenset({"lab", "automation-science-pack"}),
+    ),
+    EngineeringGoal(
         goal_id="automation_science",
         label="Produce automation science packs",
         kind="science",
-        prerequisites=frozenset({"iron_backbone", "copper_smelting"}),
-        unlock_value=9.0,
+        prerequisites=frozenset({"lab_bootstrap"}),
+        unlock_value=10.0,
         estimated_cost=4.0,
         target_item_rates={"automation-science-pack": 0.1},
         introduces=frozenset(
@@ -240,7 +297,7 @@ EARLY_GAME_ENGINEERING_GOALS: tuple[EngineeringGoal, ...] = (
         label="Research Automation in a working lab",
         kind="technology",
         prerequisites=frozenset({"automation_science"}),
-        unlock_value=9.5,
+        unlock_value=10.5,
         estimated_cost=3.0,
         target_entities={"lab": 1},
         target_research=frozenset({"automation"}),

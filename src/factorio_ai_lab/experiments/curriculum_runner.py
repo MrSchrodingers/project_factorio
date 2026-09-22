@@ -17,6 +17,12 @@ from factorio_ai_lab.integrations.fle import (
     list_environments,
 )
 from factorio_ai_lab.learning.bandit import UCB1Bandit
+from factorio_ai_lab.learning.evolution import challenger_genome
+from factorio_ai_lab.learning.survival import (
+    FitnessVector,
+    compare_challenger,
+    fitness_from_research,
+)
 from factorio_ai_lab.metrics.rates import normalized_rate_ratio, rate_per_second
 from factorio_ai_lab.planning.astar import RoutingWeights, weighted_astar
 from factorio_ai_lab.planning.progression import (
@@ -31,8 +37,19 @@ KNOWLEDGE_LOG = RUNS_DIR / "knowledge.jsonl"
 ACTIVE_RUN = RUNS_DIR / "active_run.json"
 RESEARCH_HISTORY = RUNS_DIR / "research"
 SPATIAL_DEMOS = RUNS_DIR / "datasets" / "spatial_demonstrations.jsonl"
+EVOLUTION_CHAMPION = RUNS_DIR / "evolution_champion.json"
+EVOLUTION_HISTORY = RUNS_DIR / "evolution_history.jsonl"
 
 THROUGHPUT_EQUIVALENCE_TOLERANCE = 1.0
+
+# Internal-coal allocation policy. Downstream consumers may spend only coal
+# above the safety stock; the coal producer receives an operational refill so
+# the supply chain remains productive while later stages execute.
+COAL_SAFETY_STOCK = 4
+COAL_PRODUCER_REFUEL = 3
+COAL_COPPER_MINING_BUDGET = 2
+COAL_COPPER_SMELTING_BUDGET = 2
+COAL_SURVIVAL_BUDGET = 6
 
 
 PLACEMENT_ARMS: dict[str, tuple[float, float]] = {
@@ -65,6 +82,20 @@ def append_jsonl(path: Path, payload: dict[str, Any]) -> None:
         handle.write(json.dumps(payload, sort_keys=True, default=str) + "\n")
 
 
+def read_json_object(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def incumbent_champion() -> dict[str, Any]:
+    return read_json_object(EVOLUTION_CHAMPION)
+
+
 def patch_center(patch: Any) -> tuple[float, float]:
     box = patch.bounding_box
     return (
@@ -76,12 +107,37 @@ def patch_center(patch: Any) -> tuple[float, float]:
 class ResearchJournal:
     def __init__(self, run_id: str) -> None:
         self.run_id = run_id
+        champion = incumbent_champion()
+        champion_generation = int(champion.get("generation", 0) or 0)
+        history_generation = 0
+        if EVOLUTION_HISTORY.exists():
+            try:
+                for raw_line in EVOLUTION_HISTORY.read_text(
+                    encoding="utf-8"
+                ).splitlines():
+                    if not raw_line.strip():
+                        continue
+                    row = json.loads(raw_line)
+                    history_generation = max(
+                        history_generation,
+                        int(row.get("generation", 0) or 0),
+                    )
+            except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                history_generation = 0
+        generation = max(champion_generation, history_generation) + 1
         self.state: dict[str, Any] = {
             "run_id": run_id,
             "status": "starting",
+            "arena": {
+                "mode": "lab_play",
+                "environment": "iron_ore_throughput",
+                "inventory": "populated_benchmark",
+                "technology": "pre_unlocked",
+                "promotion_scope": "experimental_champion",
+            },
             "objective": (
-                "Grow a validated iron-production factory while learning "
-                "placement choices from real Factorio trials"
+                "Evolve a self-sustaining production factory while preserving "
+                "validated capabilities and promoting only surviving challengers"
             ),
             "detail": "Bootstrapping live curriculum.",
             "stage": "bootstrap",
@@ -127,6 +183,14 @@ class ResearchJournal:
                     ),
                 },
                 {
+                    "name": "Coal self-sufficiency",
+                    "status": "pending",
+                    "detail": (
+                        "Discover coal, establish real coal extraction and retire "
+                        "bootstrap fuel as an external dependency."
+                    ),
+                },
+                {
                     "name": "Copper expansion",
                     "status": "pending",
                     "detail": (
@@ -138,6 +202,38 @@ class ResearchJournal:
                     "status": "pending",
                     "detail": (
                         "Convert mined copper into validated copper-plate production."
+                    ),
+                },
+                {
+                    "name": "Capability survival soak",
+                    "status": "pending",
+                    "detail": (
+                        "Refuel from internally mined coal and require iron, coal and "
+                        "copper capabilities to remain alive simultaneously."
+                    ),
+                },
+                {
+                    "name": "Steam power",
+                    "status": "pending",
+                    "detail": (
+                        "Build offshore pump, boiler and steam engine using endogenous "
+                        "fuel and validate electric generation."
+                    ),
+                },
+                {
+                    "name": "Powered manufacturing",
+                    "status": "pending",
+                    "detail": (
+                        "Use an electrically powered assembling machine to manufacture "
+                        "iron gear wheels from the surviving iron chain."
+                    ),
+                },
+                {
+                    "name": "Automation science",
+                    "status": "pending",
+                    "detail": (
+                        "Produce automation science packs in a powered assembler using "
+                        "iron gears and copper plates."
                     ),
                 },
             ],
@@ -173,6 +269,30 @@ class ResearchJournal:
                 "stalled_attempts": {},
                 "frontier": [],
                 "next_goal": None,
+            },
+            "resource_accounting": {
+                "exogenous_inputs": {
+                    "coal": {
+                        "status": "bootstrap",
+                        "reason": (
+                            "Starter inventory is used only to bootstrap burner entities "
+                            "until validated coal extraction exists."
+                        ),
+                    }
+                }
+            },
+            "evolution": {
+                "scheme": "incumbent_plus_challenger",
+                "generation": generation,
+                "retention_ratio": 0.80,
+                "champion": champion or None,
+                "challenger": {
+                    "run_id": run_id,
+                    "status": "evaluating",
+                    "fitness": None,
+                    "configuration": {},
+                },
+                "promotion": None,
             },
             "metrics": {},
             "events": [],
@@ -229,7 +349,7 @@ class ResearchJournal:
 
     def finish(self, status: str, next_action: str) -> None:
         self.state["status"] = status
-        if status == "completed":
+        if status in {"completed", "generation_complete"}:
             self.state["progress"] = 1.0
         self.state["next_action"] = next_action
         self.state["finished_at"] = utc_now()
@@ -422,6 +542,10 @@ print({{'chest_inventory': inspect_inventory(chest)}})
         raise RuntimeError("baseline mining cell did not produce iron")
 
     journal.state["metrics"]["baseline_iron_output"] = measurement["iron_output"]
+    journal.state["metrics"]["baseline_iron_rate_per_s"] = rate_per_second(
+        measurement["iron_output"],
+        settle_seconds,
+    )
     journal.state["metrics"]["baseline_reward"] = step.reward
     journal.complete_stage(
         0,
@@ -465,8 +589,22 @@ def stage_online_learning(
     exploration: float,
 ) -> str:
     namespace = env.unwrapped.instance.namespace
-    bandit = UCB1Bandit(tuple(PLACEMENT_ARMS), exploration=exploration)
+    champion = journal.state.get("evolution", {}).get("champion") or {}
+    champion_config = (
+        champion.get("configuration", {})
+        if isinstance(champion, dict)
+        else {}
+    )
+    incumbent_arm = champion_config.get("placement_best_arm")
+    arm_order = list(PLACEMENT_ARMS)
+    if incumbent_arm in PLACEMENT_ARMS:
+        arm_order.remove(incumbent_arm)
+        arm_order.insert(0, incumbent_arm)
+    bandit = UCB1Bandit(tuple(arm_order), exploration=exploration)
     online = journal.state["online_learning"]
+    online["incumbent_arm"] = (
+        incumbent_arm if incumbent_arm in PLACEMENT_ARMS else None
+    )
     online["status"] = "learning"
     online["history"] = []
 
@@ -729,6 +867,10 @@ print({{'scale_inventory': inspect_inventory(scale_chest)}})
         raise RuntimeError("learned placement failed promotion")
 
     journal.state["metrics"]["scaled_iron_output"] = measured["iron_output"]
+    journal.state["metrics"]["scaled_iron_rate_per_s"] = rate_per_second(
+        measured["iron_output"],
+        settle_seconds,
+    )
     journal.state["metrics"]["scaled_reward"] = step.reward
     journal.complete_stage(
         2,
@@ -927,6 +1069,7 @@ def stage_astar_logistics(
     *,
     center: tuple[float, float],
     settle_seconds: int,
+    turn_penalty: float,
 ) -> dict[str, Any] | None:
     namespace = env.unwrapped.instance.namespace
     instance = env.unwrapped.instance
@@ -979,7 +1122,11 @@ def stage_astar_logistics(
             min_x <= point.x <= max_x
             and min_y <= point.y <= max_y
         ),
-        weights=RoutingWeights(step=1.0, turn=0.25, occupied=8.0),
+        weights=RoutingWeights(
+            step=1.0,
+            turn=turn_penalty,
+            occupied=8.0,
+        ),
     )
     if route is None:
         journal.fail_stage(4, "A* could not find a valid logistics route.")
@@ -1132,7 +1279,11 @@ print({{'logistics_chest': inspect_inventory(logistics_chest)}})
             "task": "belt_route",
             "planner": "weighted_astar",
             "weights": asdict(
-                RoutingWeights(step=1.0, turn=0.25, occupied=8.0)
+                RoutingWeights(
+                    step=1.0,
+                    turn=turn_penalty,
+                    occupied=8.0,
+                )
             ),
             "start": {
                 "x": path[0].x + 0.5,
@@ -1421,7 +1572,7 @@ def update_engineering_frontier(
     return progression
 
 
-def stage_copper_mining(
+def stage_coal_mining(
     executor: TransactionalFLEExecutor,
     env: Any,
     journal: ResearchJournal,
@@ -1431,6 +1582,297 @@ def stage_copper_mining(
     namespace = env.unwrapped.instance.namespace
     journal.set_stage(
         6,
+        status="running",
+        detail=(
+            "Locating coal, quarantining remaining bootstrap fuel and requiring "
+            "the mine to survive on coal that it produced itself."
+        ),
+        next_action="prove endogenous coal survival",
+    )
+
+    perception = executor.execute(
+        """
+coal = nearest(Resource.Coal)
+coal_patch = get_resource_patch(Resource.Coal, coal, radius=30)
+print({'coal': coal, 'patch': coal_patch})
+""",
+        accept=lambda result: (
+            not bool(result.info.get("error_occurred"))
+            and result.candidate_game_state is not None
+        ),
+    )
+    if not perception.accepted:
+        journal.fail_stage(6, "Coal patch perception failed and was rolled back.")
+        return False, None
+
+    patch = namespace.coal_patch
+    center = patch_center(patch)
+    journal.state.setdefault("world", {})["coal_patch"] = {
+        "size": patch.size,
+        "center": {"x": center[0], "y": center[1]},
+        "bounds": {
+            "left_top": {
+                "x": float(patch.bounding_box.left_top.x),
+                "y": float(patch.bounding_box.left_top.y),
+            },
+            "right_bottom": {
+                "x": float(patch.bounding_box.right_bottom.x),
+                "y": float(patch.bounding_box.right_bottom.y),
+            },
+        },
+    }
+    journal.event(
+        "world_model",
+        "Coal resource patch added to the explicit world model.",
+        center={"x": center[0], "y": center[1]},
+        patch_size=patch.size,
+    )
+
+    fast_reposition(env, x=center[0], y=center[1])
+    output_before = production_output(namespace, "coal")
+    measured: dict[str, float] = {}
+    # One external coal lasts roughly one burner-drill fuel cycle. We wait
+    # beyond that cycle before transferring mined coal back into the drill, so
+    # the second production window is causally powered by endogenous fuel.
+    bootstrap_seed = 1
+    seed_seconds = max(30, settle_seconds)
+
+    def validate_coal(result: Any) -> bool:
+        output_after = production_output(namespace, "coal")
+        delta = max(0.0, output_after - output_before)
+        measured["coal_output"] = delta
+        for key in (
+            "bootstrap_total",
+            "bootstrap_quarantine",
+            "seed_phase_count",
+            "transfer_1",
+            "internal_stock_before",
+            "internal_stock_after",
+            "endogenous_growth",
+            "endogenous_stockpile",
+            "operational_refuel",
+        ):
+            measured[key] = float(getattr(namespace, key, 0.0) or 0.0)
+        return (
+            not bool(result.info.get("error_occurred"))
+            and result.candidate_game_state is not None
+            and delta > 0
+            and measured["transfer_1"] >= 1
+            and measured["endogenous_growth"] > 0
+            and measured["endogenous_stockpile"] > 0
+        )
+
+    code = f"""
+bootstrap_total=inspect_inventory()[Prototype.Coal]
+bootstrap_quarantine=max(0,bootstrap_total-{bootstrap_seed})
+bootstrap_vault=place_entity(
+    Prototype.WoodenChest,
+    position=Position(x={center[0] + 5.5},y={center[1]}),
+    exact=False,
+)
+if bootstrap_quarantine>0:
+    bootstrap_vault=insert_item(
+        Prototype.Coal,
+        bootstrap_vault,
+        quantity=bootstrap_quarantine,
+    )
+
+coal_drill=place_entity(
+    Prototype.BurnerMiningDrill,
+    position=Position(x={center[0]},y={center[1]}),
+    direction=Direction.DOWN,
+)
+coal_drill=insert_item(
+    Prototype.Coal,
+    coal_drill,
+    quantity={bootstrap_seed},
+)
+coal_chest=place_entity_next_to(
+    Prototype.WoodenChest,
+    coal_drill.position,
+    direction=Direction.DOWN,
+)
+
+sleep({seed_seconds})
+seed_phase_count=inspect_inventory(coal_chest)[Prototype.Coal]
+transfer_1=0
+if seed_phase_count>0:
+    transfer_1=extract_item(
+        Prototype.Coal,
+        coal_chest,
+        quantity=min(3,seed_phase_count),
+    )
+
+# The original one-coal seed has now had enough time to be exhausted. From
+# here onward, any new output is powered by coal mined by this same cell.
+if transfer_1>0:
+    coal_drill=insert_item(
+        Prototype.Coal,
+        coal_drill,
+        quantity=1,
+    )
+player_internal=inspect_inventory()[Prototype.Coal]
+if player_internal>0:
+    coal_chest=insert_item(
+        Prototype.Coal,
+        coal_chest,
+        quantity=player_internal,
+    )
+
+internal_stock_before=inspect_inventory(coal_chest)[Prototype.Coal]
+sleep({settle_seconds})
+internal_stock_after=inspect_inventory(coal_chest)[Prototype.Coal]
+endogenous_growth=max(0,internal_stock_after-internal_stock_before)
+
+operational_refuel=0
+available_for_refuel=max(
+    0,
+    internal_stock_after-{COAL_SAFETY_STOCK},
+)
+if available_for_refuel>0:
+    operational_refuel=extract_item(
+        Prototype.Coal,
+        coal_chest,
+        quantity=min({COAL_PRODUCER_REFUEL},available_for_refuel),
+    )
+if operational_refuel>0:
+    coal_drill=insert_item(
+        Prototype.Coal,
+        coal_drill,
+        quantity=operational_refuel,
+    )
+endogenous_stockpile=inspect_inventory(coal_chest)[Prototype.Coal]
+
+print({{
+    'bootstrap_total':bootstrap_total,
+    'bootstrap_quarantine':bootstrap_quarantine,
+    'seed_phase_count':seed_phase_count,
+    'transfer_1':transfer_1,
+    'internal_stock_before':internal_stock_before,
+    'internal_stock_after':internal_stock_after,
+    'endogenous_growth':endogenous_growth,
+    'endogenous_stockpile':endogenous_stockpile,
+    'operational_refuel':operational_refuel,
+    'player_coal_after':inspect_inventory()[Prototype.Coal],
+}})
+"""
+    step = executor.execute(
+        code,
+        accept=validate_coal,
+        use_checkpoint_for_action=False,
+    )
+    if not step.accepted:
+        journal.fail_stage(
+            6,
+            (
+                "Coal failed endogenous-fuel survival: bootstrap fuel was "
+                "quarantined and the mine did not survive a second window."
+            ),
+        )
+        journal.event(
+            "reject",
+            "Coal self-sufficiency challenger rejected.",
+            measurements=measured,
+        )
+        return False, center
+
+    output = measured["coal_output"]
+    coal_chest = namespace.coal_chest
+    bootstrap_vault = namespace.bootstrap_vault
+    duration = float(seed_seconds + settle_seconds)
+    journal.state["metrics"].update(
+        {
+            "coal_output": output,
+            "coal_mining_duration_s": duration,
+            "coal_rate_per_s": rate_per_second(output, duration),
+            "coal_bootstrap_seed": float(bootstrap_seed),
+            "coal_bootstrap_quarantined": measured["bootstrap_quarantine"],
+            "coal_endogenous_transfer": measured["transfer_1"],
+            "coal_endogenous_growth": measured["endogenous_growth"],
+            "coal_endogenous_stockpile": measured["endogenous_stockpile"],
+            "coal_operational_refuel": measured["operational_refuel"],
+            "coal_safety_stock_target": float(COAL_SAFETY_STOCK),
+            "coal_mining_reward": step.reward,
+        }
+    )
+    coal_world = journal.state.setdefault("world", {}).setdefault("coal_patch", {})
+    coal_world["output_chest"] = {
+        "x": float(coal_chest.position.x),
+        "y": float(coal_chest.position.y),
+    }
+    coal_world["bootstrap_vault"] = {
+        "x": float(bootstrap_vault.position.x),
+        "y": float(bootstrap_vault.position.y),
+    }
+
+    accounting = journal.state["resource_accounting"]["exogenous_inputs"]["coal"]
+    accounting.update(
+        {
+            "status": "self_sufficient",
+            "validated_internal_production": output,
+            "bootstrap_seed_used": bootstrap_seed,
+            "bootstrap_quarantined": measured["bootstrap_quarantine"],
+            "endogenous_transfer": measured["transfer_1"],
+            "endogenous_growth": measured["endogenous_growth"],
+            "endogenous_stockpile": measured["endogenous_stockpile"],
+            "operational_refuel": measured["operational_refuel"],
+            "safety_stock_target": COAL_SAFETY_STOCK,
+        }
+    )
+
+    journal.complete_stage(
+        6,
+        (
+            f"Coal survived endogenous refueling: {output:.0f} produced, "
+            f"{measured['endogenous_stockpile']:.0f} buffered internally, with "
+            f"{measured['bootstrap_quarantine']:.0f} bootstrap coal quarantined."
+        ),
+    )
+    journal.event(
+        "accept",
+        "Coal extraction survived a second window using internally mined fuel.",
+        coal_output=output,
+        bootstrap_seed=bootstrap_seed,
+        bootstrap_quarantined=measured["bootstrap_quarantine"],
+        endogenous_transfer=measured["transfer_1"],
+        endogenous_growth=measured["endogenous_growth"],
+        center={"x": center[0], "y": center[1]},
+    )
+    lesson = synthesize_lesson(
+        stage="coal_self_sufficiency",
+        facts={
+            "accepted": True,
+            "coal_output": output,
+            "bootstrap_seed": bootstrap_seed,
+            "bootstrap_quarantined": measured["bootstrap_quarantine"],
+            "endogenous_transfer": measured["transfer_1"],
+            "endogenous_growth": measured["endogenous_growth"],
+            "sustained_second_window": measured["internal_stock_after"],
+            "patch_size": patch.size,
+        },
+        fallback_lesson=(
+            "Coal is self-sustaining only after bootstrap fuel is quarantined "
+            "and mined coal keeps the drill alive through a second window."
+        ),
+        fallback_hypothesis=(
+            "Use the endogenous coal buffer to keep iron and copper capabilities "
+            "alive simultaneously before promoting the factory."
+        ),
+    )
+    journal.event("knowledge", lesson["lesson"])
+    return True, center
+
+
+def stage_copper_mining(
+    executor: TransactionalFLEExecutor,
+    env: Any,
+    journal: ResearchJournal,
+    *,
+    settle_seconds: int,
+) -> tuple[bool, tuple[float, float] | None]:
+    namespace = env.unwrapped.instance.namespace
+    journal.set_stage(
+        7,
         status="running",
         detail="Expanding the factory to a measured copper resource patch.",
         next_action="discover and validate copper extraction",
@@ -1448,7 +1890,7 @@ print({'copper': copper, 'patch': copper_patch})
         ),
     )
     if not perception.accepted:
-        journal.fail_stage(6, "Copper patch perception failed and was rolled back.")
+        journal.fail_stage(7, "Copper patch perception failed and was rolled back.")
         return False, None
 
     patch = namespace.copper_patch
@@ -1482,19 +1924,46 @@ print({'copper': copper, 'patch': copper_patch})
         output_after = production_output(namespace, "copper-ore")
         delta = max(0.0, output_after - output_before)
         measured["copper_ore_output"] = delta
+        measured["internal_fuel"] = float(
+            getattr(namespace, "copper_mining_fuel", 0.0) or 0.0
+        )
         return (
             not bool(result.info.get("error_occurred"))
             and result.candidate_game_state is not None
+            and measured["internal_fuel"] > 0
             and delta > 0
         )
 
     code = f"""
+move_to(coal_chest.position)
+copper_mining_fuel=0
+for _ in range(6):
+    available_internal=inspect_inventory(coal_chest)[Prototype.Coal]
+    spendable=max(0,available_internal-{COAL_SAFETY_STOCK})
+    if spendable>0:
+        break
+    sleep(6)
+available_internal=inspect_inventory(coal_chest)[Prototype.Coal]
+spendable=max(0,available_internal-{COAL_SAFETY_STOCK})
+if spendable>0:
+    copper_mining_fuel=extract_item(
+        Prototype.Coal,
+        coal_chest,
+        quantity=min({COAL_COPPER_MINING_BUDGET},spendable),
+    )
+
+move_to(Position(x={center[0]},y={center[1]}))
 copper_drill=place_entity(
     Prototype.BurnerMiningDrill,
     position=Position(x={center[0]},y={center[1]}),
     direction=Direction.DOWN,
 )
-copper_drill=insert_item(Prototype.Coal,copper_drill,quantity=20)
+if copper_mining_fuel>0:
+    copper_drill=insert_item(
+        Prototype.Coal,
+        copper_drill,
+        quantity=copper_mining_fuel,
+    )
 copper_chest=place_entity_next_to(
     Prototype.WoodenChest,
     copper_drill.position,
@@ -1510,7 +1979,7 @@ print({{'copper_inventory': inspect_inventory(copper_chest)}})
     )
     if not step.accepted:
         journal.fail_stage(
-            6,
+            7,
             "Copper mining produced no validated output; transaction rolled back.",
         )
         journal.event("reject", "Copper expansion rejected and rolled back.")
@@ -1518,9 +1987,18 @@ print({{'copper_inventory': inspect_inventory(copper_chest)}})
 
     output = measured["copper_ore_output"]
     journal.state["metrics"]["copper_ore_output"] = output
+    journal.state["metrics"]["copper_mining_duration_s"] = float(settle_seconds)
+    journal.state["metrics"]["copper_ore_rate_per_s"] = rate_per_second(
+        output,
+        settle_seconds,
+    )
     journal.state["metrics"]["copper_mining_reward"] = step.reward
+    journal.state["metrics"]["copper_mining_internal_coal"] = measured.get(
+        "internal_fuel",
+        0.0,
+    )
     journal.complete_stage(
-        6,
+        7,
         f"Copper mining accepted with {output:.0f} copper ore produced.",
     )
     journal.event(
@@ -1558,15 +2036,16 @@ def stage_copper_smelting(
     settle_seconds: int,
 ) -> bool:
     namespace = env.unwrapped.instance.namespace
-    target = (center[0] + 4.5, center[1])
 
     journal.set_stage(
-        7,
+        8,
         status="validating",
-        detail="Testing a second copper cell that directly feeds a stone furnace.",
-        next_action="validate copper plate production",
+        detail=(
+            "Feeding a buffered copper furnace from the already validated "
+            "copper mine, using only endogenous coal."
+        ),
+        next_action="validate buffered copper plate production",
     )
-    fast_reposition(env, x=target[0], y=target[1])
     plate_before = production_output(namespace, "copper-plate")
     measured: dict[str, float] = {}
 
@@ -1574,35 +2053,84 @@ def stage_copper_smelting(
         plate_after = production_output(namespace, "copper-plate")
         delta = max(0.0, plate_after - plate_before)
         measured["copper_plate_output"] = delta
+        for key in (
+            "copper_ore_transfer",
+            "copper_smelting_fuel",
+            "copper_furnace_inventory",
+        ):
+            measured[key] = float(getattr(namespace, key, 0.0) or 0.0)
         return (
             not bool(result.info.get("error_occurred"))
             and result.candidate_game_state is not None
+            and measured["copper_ore_transfer"] > 0
+            and measured["copper_smelting_fuel"] > 0
             and delta > 0
         )
 
     code = f"""
-copper_smelt_drill=place_entity(
-    Prototype.BurnerMiningDrill,
-    position=Position(x={target[0]},y={target[1]}),
-    direction=Direction.DOWN,
+move_to(copper_chest.position)
+copper_ore_available=inspect_inventory(copper_chest)[Prototype.CopperOre]
+copper_ore_transfer=0
+if copper_ore_available>0:
+    copper_ore_transfer=extract_item(
+        Prototype.CopperOre,
+        copper_chest,
+        quantity=min(32,copper_ore_available),
+    )
+
+move_to(coal_chest.position)
+copper_smelting_fuel=0
+for _ in range(6):
+    available_internal=inspect_inventory(coal_chest)[Prototype.Coal]
+    spendable=max(0,available_internal-{COAL_SAFETY_STOCK})
+    if spendable>0:
+        break
+    sleep(6)
+available_internal=inspect_inventory(coal_chest)[Prototype.Coal]
+spendable=max(0,available_internal-{COAL_SAFETY_STOCK})
+if spendable>0:
+    copper_smelting_fuel=extract_item(
+        Prototype.Coal,
+        coal_chest,
+        quantity=min({COAL_COPPER_SMELTING_BUDGET},spendable),
+    )
+
+furnace_box=BuildingBox(
+    width=Prototype.StoneFurnace.WIDTH+6,
+    height=Prototype.StoneFurnace.HEIGHT+6,
 )
-copper_smelt_drill=insert_item(
-    Prototype.Coal,
-    copper_smelt_drill,
-    quantity=20,
-)
-copper_furnace=place_entity_next_to(
+furnace_area=nearest_buildable(
     Prototype.StoneFurnace,
-    copper_smelt_drill.position,
-    direction=Direction.DOWN,
+    furnace_box,
+    copper_chest.position,
 )
-copper_furnace=insert_item(
-    Prototype.Coal,
-    copper_furnace,
-    quantity=20,
+move_to(furnace_area.center)
+copper_furnace=place_entity(
+    Prototype.StoneFurnace,
+    position=furnace_area.center,
 )
+if copper_smelting_fuel>0:
+    copper_furnace=insert_item(
+        Prototype.Coal,
+        copper_furnace,
+        quantity=copper_smelting_fuel,
+    )
+if copper_ore_transfer>0:
+    copper_furnace=insert_item(
+        Prototype.CopperOre,
+        copper_furnace,
+        quantity=copper_ore_transfer,
+    )
+
 sleep({settle_seconds})
-print({{'copper_furnace': inspect_inventory(copper_furnace)}})
+copper_furnace_inventory=inspect_inventory(
+    copper_furnace,
+)[Prototype.CopperPlate]
+print({{
+    'copper_ore_transfer':copper_ore_transfer,
+    'copper_smelting_fuel':copper_smelting_fuel,
+    'copper_furnace_inventory':copper_furnace_inventory,
+}})
 """
     step = executor.execute(
         code,
@@ -1611,42 +2139,805 @@ print({{'copper_furnace': inspect_inventory(copper_furnace)}})
     )
     if not step.accepted:
         journal.fail_stage(
-            7,
-            "Copper smelting produced no validated copper plates; rolled back.",
+            8,
+            (
+                "Buffered copper smelting produced no validated copper plates; "
+                "transaction rolled back."
+            ),
         )
-        journal.event("reject", "Copper smelting rejected and rolled back.")
+        journal.event(
+            "reject",
+            "Copper smelting rejected and rolled back.",
+            measurements=measured,
+        )
         return False
 
     plates = measured["copper_plate_output"]
     journal.state["metrics"]["copper_plate_output"] = plates
+    journal.state["metrics"]["copper_smelting_duration_s"] = float(settle_seconds)
+    journal.state["metrics"]["copper_plate_rate_per_s"] = rate_per_second(
+        plates,
+        settle_seconds,
+    )
     journal.state["metrics"]["copper_smelting_reward"] = step.reward
+    journal.state["metrics"]["copper_smelting_internal_coal"] = measured.get(
+        "copper_smelting_fuel",
+        0.0,
+    )
+    journal.state["metrics"]["copper_smelting_buffered_ore"] = measured.get(
+        "copper_ore_transfer",
+        0.0,
+    )
     journal.complete_stage(
-        7,
-        f"Copper smelting accepted with {plates:.0f} copper plates produced.",
+        8,
+        f"Buffered copper smelting accepted with {plates:.0f} copper plates.",
     )
     journal.event(
         "accept",
-        "Persistent copper smelting cell accepted.",
+        "Buffered copper furnace accepted using endogenous coal.",
         copper_plate_output=plates,
+        copper_ore_transfer=measured.get("copper_ore_transfer", 0.0),
+        endogenous_coal=measured.get("copper_smelting_fuel", 0.0),
     )
     lesson = synthesize_lesson(
         stage="copper_smelting",
         facts={
             "accepted": True,
             "copper_plate_output": plates,
+            "buffered_copper_ore": measured.get("copper_ore_transfer", 0.0),
+            "endogenous_coal": measured.get("copper_smelting_fuel", 0.0),
             "engine_reward": step.reward,
         },
         fallback_lesson=(
-            "The factory now has validated copper-plate production in addition "
-            "to its iron logistics and smelting backbone."
+            "Copper smelting is more robust when the validated mine feeds a "
+            "buffer and a separate furnace consumes that buffer with endogenous coal."
         ),
         fallback_hypothesis=(
-            "Produce automation science packs from copper plates and iron gears, "
-            "then establish a lab and research Automation."
+            "Keep iron, coal and copper productive simultaneously, then promote "
+            "steam power only if the survival soak passes."
         ),
     )
     journal.event("knowledge", lesson["lesson"])
     return True
+
+
+def stage_capability_survival(
+    executor: TransactionalFLEExecutor,
+    env: Any,
+    journal: ResearchJournal,
+    *,
+    iron_center: tuple[float, float],
+    coal_center: tuple[float, float],
+    copper_center: tuple[float, float],
+    settle_seconds: int,
+) -> bool:
+    namespace = env.unwrapped.instance.namespace
+    journal.set_stage(
+        9,
+        status="validating",
+        detail=(
+            "Allocate endogenous coal under a safety-stock policy and require "
+            "iron, coal, copper mining and copper smelting to survive together."
+        ),
+        next_action="run simultaneous capability survival soak",
+    )
+
+    before = {
+        "iron_ore": production_output(namespace, "iron-ore"),
+        "iron_plate": production_output(namespace, "iron-plate"),
+        "coal": production_output(namespace, "coal"),
+        "copper_ore": production_output(namespace, "copper-ore"),
+        "copper_plate": production_output(namespace, "copper-plate"),
+    }
+    measured: dict[str, float] = {}
+
+    code = f"""
+move_to(coal_chest.position)
+survival_transfer=0
+survival_wait_seconds=0
+for _ in range(8):
+    available_internal=inspect_inventory(coal_chest)[Prototype.Coal]
+    if available_internal>={COAL_SURVIVAL_BUDGET}:
+        break
+    sleep(6)
+    survival_wait_seconds+=6
+available_internal=inspect_inventory(coal_chest)[Prototype.Coal]
+if available_internal>0:
+    survival_transfer=extract_item(
+        Prototype.Coal,
+        coal_chest,
+        quantity=min({COAL_SURVIVAL_BUDGET},available_internal),
+    )
+
+refueled_count=0
+for entity in (
+    drill,
+    scale_drill,
+    coal_drill,
+    copper_drill,
+    copper_furnace,
+):
+    if inspect_inventory()[Prototype.Coal]>=1:
+        entity=insert_item(
+            Prototype.Coal,
+            entity,
+            quantity=1,
+        )
+        refueled_count+=1
+
+sleep(8)
+survival_copper_feed=0
+move_to(copper_chest.position)
+fresh_copper=inspect_inventory(copper_chest)[Prototype.CopperOre]
+if fresh_copper>0:
+    survival_copper_feed=extract_item(
+        Prototype.CopperOre,
+        copper_chest,
+        quantity=min(8,fresh_copper),
+    )
+if survival_copper_feed>0:
+    move_to(copper_furnace.position)
+    copper_furnace=insert_item(
+        Prototype.CopperOre,
+        copper_furnace,
+        quantity=survival_copper_feed,
+    )
+
+sleep({settle_seconds})
+survival_coal_reserve=inspect_inventory(coal_chest)[Prototype.Coal]
+print({{
+    'survival_transfer':survival_transfer,
+    'survival_wait_seconds':survival_wait_seconds,
+    'refueled_count':refueled_count,
+    'survival_copper_feed':survival_copper_feed,
+    'survival_coal_reserve':survival_coal_reserve,
+}})
+"""
+
+    def validate(result: Any) -> bool:
+        after = {
+            "iron_ore": production_output(namespace, "iron-ore"),
+            "iron_plate": production_output(namespace, "iron-plate"),
+            "coal": production_output(namespace, "coal"),
+            "copper_ore": production_output(namespace, "copper-ore"),
+            "copper_plate": production_output(namespace, "copper-plate"),
+        }
+        measured["iron"] = max(
+            0.0,
+            after["iron_ore"] - before["iron_ore"],
+        ) + max(0.0, after["iron_plate"] - before["iron_plate"])
+        measured["coal"] = max(0.0, after["coal"] - before["coal"])
+        measured["copper_ore"] = max(
+            0.0,
+            after["copper_ore"] - before["copper_ore"],
+        )
+        measured["copper_plate"] = max(
+            0.0,
+            after["copper_plate"] - before["copper_plate"],
+        )
+        for key in (
+            "refueled_count",
+            "survival_transfer",
+            "survival_wait_seconds",
+            "survival_copper_feed",
+            "survival_coal_reserve",
+        ):
+            measured[key] = float(getattr(namespace, key, 0.0) or 0.0)
+        return (
+            not bool(result.info.get("error_occurred"))
+            and result.candidate_game_state is not None
+            and measured["survival_transfer"] >= 5
+            and measured["refueled_count"] >= 5
+            and measured["survival_copper_feed"] > 0
+            and measured["iron"] > 0
+            and measured["coal"] > 0
+            and measured["copper_ore"] > 0
+            and measured["copper_plate"] > 0
+        )
+
+    step = executor.execute(
+        code,
+        accept=validate,
+        use_checkpoint_for_action=False,
+    )
+    total_window = settle_seconds + 8
+    journal.state["metrics"].update(
+        {
+            "survival_iron_output": measured.get("iron", 0.0),
+            "survival_coal_output": measured.get("coal", 0.0),
+            "survival_copper_output": (
+                measured.get("copper_ore", 0.0)
+                + measured.get("copper_plate", 0.0)
+            ),
+            "survival_copper_ore_output": measured.get("copper_ore", 0.0),
+            "survival_copper_plate_output": measured.get("copper_plate", 0.0),
+            "survival_iron_rate_per_s": rate_per_second(
+                measured.get("iron", 0.0),
+                total_window,
+            ),
+            "survival_coal_rate_per_s": rate_per_second(
+                measured.get("coal", 0.0),
+                total_window,
+            ),
+            "survival_copper_rate_per_s": rate_per_second(
+                measured.get("copper_ore", 0.0)
+                + measured.get("copper_plate", 0.0),
+                total_window,
+            ),
+            "survival_refueled_entities": measured.get("refueled_count", 0.0),
+            "survival_internal_coal_transfer": measured.get(
+                "survival_transfer",
+                0.0,
+            ),
+            "survival_coal_reserve": measured.get(
+                "survival_coal_reserve",
+                0.0,
+            ),
+            "survival_wait_seconds": measured.get(
+                "survival_wait_seconds",
+                0.0,
+            ),
+        }
+    )
+    if not step.accepted:
+        journal.fail_stage(
+            9,
+            (
+                "Survival gate failed: iron, endogenous coal, copper mining and "
+                "copper smelting did not all remain productive together."
+            ),
+        )
+        journal.event(
+            "selection",
+            "Challenger failed capability-retention survival gate.",
+            measurements=measured,
+        )
+        return False
+
+    journal.complete_stage(
+        9,
+        (
+            "Survival gate passed: iron, coal, copper mining and copper "
+            "smelting remained productive simultaneously."
+        ),
+    )
+    journal.event(
+        "selection",
+        "Challenger passed simultaneous capability-retention gate.",
+        measurements=measured,
+    )
+    return True
+
+
+def stage_steam_power(
+    executor: TransactionalFLEExecutor,
+    env: Any,
+    journal: ResearchJournal,
+    *,
+    settle_seconds: int,
+) -> bool:
+    namespace = env.unwrapped.instance.namespace
+    journal.set_stage(
+        10,
+        status="running",
+        detail=(
+            "Build a real offshore-pump, boiler and steam-engine chain and "
+            "validate generated electrical energy."
+        ),
+        next_action="establish steam power",
+    )
+
+    measured: dict[str, float] = {}
+    code = f"""
+move_to(coal_chest.position)
+coal_for_power=0
+available=inspect_inventory(coal_chest)[Prototype.Coal]
+if available>0:
+    coal_for_power=extract_item(
+        Prototype.Coal,
+        coal_chest,
+        quantity=min(12,available),
+    )
+
+water_position=nearest(Resource.Water)
+move_to(water_position)
+offshore_pump=place_entity(
+    Prototype.OffshorePump,
+    position=water_position,
+    exact=False,
+)
+
+boiler_box=BuildingBox(
+    width=Prototype.Boiler.WIDTH+6,
+    height=Prototype.Boiler.HEIGHT+6,
+)
+boiler_area=nearest_buildable(
+    Prototype.Boiler,
+    boiler_box,
+    offshore_pump.position,
+)
+move_to(boiler_area.center)
+boiler=place_entity(
+    Prototype.Boiler,
+    position=boiler_area.center,
+    direction=Direction.LEFT,
+)
+if inspect_inventory()[Prototype.Coal]>0:
+    boiler=insert_item(
+        Prototype.Coal,
+        boiler,
+        quantity=min(8,inspect_inventory()[Prototype.Coal]),
+    )
+
+engine_box=BuildingBox(
+    width=Prototype.SteamEngine.WIDTH+6,
+    height=Prototype.SteamEngine.HEIGHT+6,
+)
+engine_area=nearest_buildable(
+    Prototype.SteamEngine,
+    engine_box,
+    boiler.position,
+)
+move_to(engine_area.center)
+steam_engine=place_entity(
+    Prototype.SteamEngine,
+    position=engine_area.center,
+    direction=Direction.LEFT,
+)
+water_pipes=connect_entities(
+    offshore_pump,
+    boiler,
+    Prototype.Pipe,
+)
+steam_pipes=connect_entities(
+    boiler,
+    steam_engine,
+    Prototype.Pipe,
+)
+sleep({settle_seconds})
+steam_engine=get_entity(
+    Prototype.SteamEngine,
+    steam_engine.position,
+)
+steam_energy=float(steam_engine.energy or 0)
+print({{
+    'steam_energy':steam_energy,
+    'coal_for_power':coal_for_power,
+}})
+"""
+
+    def validate(result: Any) -> bool:
+        measured["energy"] = float(
+            getattr(namespace, "steam_energy", 0.0) or 0.0
+        )
+        measured["coal"] = float(
+            getattr(namespace, "coal_for_power", 0.0) or 0.0
+        )
+        return (
+            not bool(result.info.get("error_occurred"))
+            and result.candidate_game_state is not None
+            and measured["coal"] > 0
+            and measured["energy"] > 0
+        )
+
+    step = executor.execute(
+        code,
+        accept=validate,
+        use_checkpoint_for_action=False,
+    )
+    journal.state["metrics"]["steam_energy"] = measured.get("energy", 0.0)
+    journal.state["metrics"]["steam_power_internal_coal"] = measured.get(
+        "coal",
+        0.0,
+    )
+    if not step.accepted:
+        journal.fail_stage(
+            10,
+            "Steam-power chain produced no validated electrical energy.",
+        )
+        journal.event(
+            "reject",
+            "Steam-power challenger rejected.",
+            measurements=measured,
+        )
+        return False
+
+    journal.complete_stage(
+        10,
+        f"Steam power accepted with {measured['energy']:.0f} J stored energy.",
+    )
+    journal.event(
+        "accept",
+        "Offshore pump, boiler and steam engine formed a working power system.",
+        measurements=measured,
+    )
+    return True
+
+
+def stage_powered_manufacturing(
+    executor: TransactionalFLEExecutor,
+    env: Any,
+    journal: ResearchJournal,
+    *,
+    settle_seconds: int,
+) -> bool:
+    namespace = env.unwrapped.instance.namespace
+    journal.set_stage(
+        11,
+        status="running",
+        detail=(
+            "Feed surviving iron plates into an electrically powered assembler "
+            "and validate iron-gear-wheel production."
+        ),
+        next_action="manufacture iron gears electrically",
+    )
+    before = production_output(namespace, "iron-gear-wheel")
+    measured: dict[str, float] = {}
+
+    code = f"""
+move_to(belt_furnace.position)
+iron_plate_transfer=0
+belt_plate_count=inspect_inventory(belt_furnace)[Prototype.IronPlate]
+if belt_plate_count>0:
+    iron_plate_transfer=extract_item(
+        Prototype.IronPlate,
+        belt_furnace,
+        quantity=min(48,belt_plate_count),
+    )
+if iron_plate_transfer<8:
+    move_to(smelt_furnace.position)
+    direct_plate_count=inspect_inventory(smelt_furnace)[Prototype.IronPlate]
+    if direct_plate_count>0:
+        iron_plate_transfer+=extract_item(
+            Prototype.IronPlate,
+            smelt_furnace,
+            quantity=min(48,direct_plate_count),
+        )
+
+assembler_box=BuildingBox(
+    width=Prototype.AssemblingMachine2.WIDTH+6,
+    height=Prototype.AssemblingMachine2.HEIGHT+6,
+)
+assembler_area=nearest_buildable(
+    Prototype.AssemblingMachine2,
+    assembler_box,
+    steam_engine.position,
+)
+move_to(assembler_area.center)
+gear_assembler=place_entity(
+    Prototype.AssemblingMachine2,
+    position=assembler_area.center,
+)
+gear_assembler=set_entity_recipe(
+    gear_assembler,
+    Prototype.IronGearWheel,
+)
+if iron_plate_transfer>0:
+    gear_assembler=insert_item(
+        Prototype.IronPlate,
+        gear_assembler,
+        quantity=iron_plate_transfer,
+    )
+gear_power=connect_entities(
+    steam_engine,
+    gear_assembler,
+    Prototype.MediumElectricPole,
+)
+sleep({settle_seconds})
+gear_inventory=inspect_inventory(gear_assembler)[Prototype.IronGearWheel]
+print({{
+    'iron_plate_transfer':iron_plate_transfer,
+    'gear_inventory':gear_inventory,
+}})
+"""
+
+    def validate(result: Any) -> bool:
+        delta = max(
+            0.0,
+            production_output(namespace, "iron-gear-wheel") - before,
+        )
+        measured["output"] = delta
+        measured["inventory"] = float(
+            getattr(namespace, "gear_inventory", 0.0) or 0.0
+        )
+        measured["plates"] = float(
+            getattr(namespace, "iron_plate_transfer", 0.0) or 0.0
+        )
+        return (
+            not bool(result.info.get("error_occurred"))
+            and result.candidate_game_state is not None
+            and measured["plates"] > 0
+            and (delta > 0 or measured["inventory"] > 0)
+        )
+
+    step = executor.execute(
+        code,
+        accept=validate,
+        use_checkpoint_for_action=False,
+    )
+    output = max(measured.get("output", 0.0), measured.get("inventory", 0.0))
+    journal.state["metrics"]["iron_gear_wheel_output"] = output
+    journal.state["metrics"]["iron_gear_wheel_rate_per_s"] = rate_per_second(
+        output,
+        settle_seconds,
+    )
+    if not step.accepted:
+        journal.fail_stage(
+            11,
+            "Powered assembler produced no validated iron gear wheels.",
+        )
+        journal.event(
+            "reject",
+            "Powered-manufacturing challenger rejected.",
+            measurements=measured,
+        )
+        return False
+
+    journal.complete_stage(
+        11,
+        f"Powered manufacturing accepted with {output:.0f} iron gears.",
+    )
+    journal.event(
+        "accept",
+        "Electric assembler manufactured iron gear wheels.",
+        measurements=measured,
+    )
+    return True
+
+
+def stage_automation_science(
+    executor: TransactionalFLEExecutor,
+    env: Any,
+    journal: ResearchJournal,
+    *,
+    settle_seconds: int,
+) -> bool:
+    namespace = env.unwrapped.instance.namespace
+    journal.set_stage(
+        12,
+        status="running",
+        detail=(
+            "Combine electrically manufactured iron gears with copper plates "
+            "in a powered assembler to produce automation science."
+        ),
+        next_action="produce automation science packs",
+    )
+    before = production_output(namespace, "automation-science-pack")
+    measured: dict[str, float] = {}
+
+    code = f"""
+move_to(gear_assembler.position)
+gear_transfer=0
+gear_count=inspect_inventory(gear_assembler)[Prototype.IronGearWheel]
+if gear_count>0:
+    gear_transfer=extract_item(
+        Prototype.IronGearWheel,
+        gear_assembler,
+        quantity=min(32,gear_count),
+    )
+move_to(copper_furnace.position)
+copper_plate_transfer=0
+copper_plate_count=inspect_inventory(copper_furnace)[Prototype.CopperPlate]
+if copper_plate_count>0:
+    copper_plate_transfer=extract_item(
+        Prototype.CopperPlate,
+        copper_furnace,
+        quantity=min(32,copper_plate_count),
+    )
+
+science_box=BuildingBox(
+    width=Prototype.AssemblingMachine2.WIDTH+6,
+    height=Prototype.AssemblingMachine2.HEIGHT+6,
+)
+science_area=nearest_buildable(
+    Prototype.AssemblingMachine2,
+    science_box,
+    gear_assembler.position,
+)
+move_to(science_area.center)
+science_assembler=place_entity(
+    Prototype.AssemblingMachine2,
+    position=science_area.center,
+)
+science_assembler=set_entity_recipe(
+    science_assembler,
+    Prototype.AutomationSciencePack,
+)
+if gear_transfer>0:
+    science_assembler=insert_item(
+        Prototype.IronGearWheel,
+        science_assembler,
+        quantity=gear_transfer,
+    )
+if copper_plate_transfer>0:
+    science_assembler=insert_item(
+        Prototype.CopperPlate,
+        science_assembler,
+        quantity=copper_plate_transfer,
+    )
+science_power=connect_entities(
+    steam_engine,
+    science_assembler,
+    Prototype.MediumElectricPole,
+)
+sleep({settle_seconds})
+science_inventory=inspect_inventory(
+    science_assembler,
+)[Prototype.AutomationSciencePack]
+print({{
+    'gear_transfer':gear_transfer,
+    'copper_plate_transfer':copper_plate_transfer,
+    'science_inventory':science_inventory,
+}})
+"""
+
+    def validate(result: Any) -> bool:
+        delta = max(
+            0.0,
+            production_output(namespace, "automation-science-pack") - before,
+        )
+        measured["output"] = delta
+        measured["inventory"] = float(
+            getattr(namespace, "science_inventory", 0.0) or 0.0
+        )
+        measured["gears"] = float(
+            getattr(namespace, "gear_transfer", 0.0) or 0.0
+        )
+        measured["copper"] = float(
+            getattr(namespace, "copper_plate_transfer", 0.0) or 0.0
+        )
+        return (
+            not bool(result.info.get("error_occurred"))
+            and result.candidate_game_state is not None
+            and measured["gears"] > 0
+            and measured["copper"] > 0
+            and (delta > 0 or measured["inventory"] > 0)
+        )
+
+    step = executor.execute(
+        code,
+        accept=validate,
+        use_checkpoint_for_action=False,
+    )
+    output = max(measured.get("output", 0.0), measured.get("inventory", 0.0))
+    journal.state["metrics"]["automation_science_output"] = output
+    journal.state["metrics"]["automation_science_rate_per_s"] = rate_per_second(
+        output,
+        settle_seconds,
+    )
+    if not step.accepted:
+        journal.fail_stage(
+            12,
+            "Powered assembler produced no validated automation science packs.",
+        )
+        journal.event(
+            "reject",
+            "Automation-science challenger rejected.",
+            measurements=measured,
+        )
+        return False
+
+    journal.complete_stage(
+        12,
+        f"Automation science accepted with {output:.0f} packs produced.",
+    )
+    journal.event(
+        "accept",
+        "Powered factory produced automation science packs.",
+        measurements=measured,
+    )
+    lesson = synthesize_lesson(
+        stage="automation_science",
+        facts={
+            "accepted": True,
+            "automation_science_output": output,
+            "iron_gears": measured.get("gears", 0.0),
+            "copper_plates": measured.get("copper", 0.0),
+        },
+        fallback_lesson=(
+            "The factory crossed from resource extraction into powered "
+            "manufacturing and automation-science production."
+        ),
+        fallback_hypothesis=(
+            "Move to an open-play tech-tree environment, feed a real lab and "
+            "research Automation before scaling green science."
+        ),
+    )
+    journal.event("knowledge", lesson["lesson"])
+    return True
+
+
+def finalize_evolution_selection(
+    journal: ResearchJournal,
+    *,
+    achieved: set[str],
+) -> dict[str, Any]:
+    failed_stages = sum(
+        1
+        for stage in journal.state.get("curriculum", [])
+        if isinstance(stage, dict) and stage.get("status") == "failed"
+    )
+    challenger = fitness_from_research(
+        metrics=journal.state.get("metrics", {}),
+        achieved=achieved,
+        resource_accounting=journal.state.get("resource_accounting", {}),
+        failed_stages=failed_stages,
+    )
+
+    incumbent = incumbent_champion()
+    incumbent_fitness: FitnessVector | None = None
+    if isinstance(incumbent.get("fitness"), dict):
+        incumbent_fitness = FitnessVector.from_dict(incumbent["fitness"])
+
+    evolution = journal.state.setdefault("evolution", {})
+    retention_ratio = float(evolution.get("retention_ratio", 0.80) or 0.80)
+    decision = compare_challenger(
+        incumbent_fitness,
+        challenger,
+        retention_ratio=retention_ratio,
+    )
+
+    metrics = journal.state.get("metrics", {})
+    configuration = {
+        "placement_best_arm": metrics.get("placement_best_arm"),
+        "placement_ucb_best_arm": metrics.get("placement_ucb_best_arm"),
+        "routing_turn_penalty": evolution.get("challenger", {})
+        .get("configuration", {})
+        .get("routing_turn_penalty"),
+        "placement_exploration": evolution.get("challenger", {})
+        .get("configuration", {})
+        .get("placement_exploration"),
+    }
+    generation = int(evolution.get("generation", 1) or 1)
+    candidate_record = {
+        "run_id": journal.run_id,
+        "generation": generation,
+        "selected_at": utc_now(),
+        "fitness": challenger.to_dict(),
+        "configuration": configuration,
+        "knowledge_count_at_selection": sum(
+            1
+            for _ in KNOWLEDGE_LOG.open(encoding="utf-8")
+        )
+        if KNOWLEDGE_LOG.exists()
+        else 0,
+    }
+
+    challenger_state = evolution.setdefault("challenger", {})
+    challenger_state.update(candidate_record)
+    challenger_state["status"] = (
+        "promoted" if decision.promoted else "rejected"
+    )
+    evolution["promotion"] = decision.to_dict()
+
+    if decision.promoted:
+        atomic_json(EVOLUTION_CHAMPION, candidate_record)
+        evolution["champion"] = candidate_record
+    else:
+        evolution["champion"] = incumbent or None
+
+    append_jsonl(
+        EVOLUTION_HISTORY,
+        {
+            "at": utc_now(),
+            "generation": generation,
+            "challenger": candidate_record,
+            "incumbent_run_id": incumbent.get("run_id") if incumbent else None,
+            "decision": decision.to_dict(),
+        },
+    )
+    journal.event(
+        "selection",
+        (
+            "Challenger promoted to champion."
+            if decision.promoted
+            else "Incumbent champion retained."
+        ),
+        generation=generation,
+        decision=decision.to_dict(),
+        fitness=challenger.to_dict(),
+    )
+    return decision.to_dict()
 
 
 def run_curriculum(
@@ -1659,6 +2950,7 @@ def run_curriculum(
     smelt_settle: int,
     logistics_settle: int,
     belt_smelt_settle: int,
+    coal_mine_settle: int,
     copper_mine_settle: int,
     copper_smelt_settle: int,
     exploration: float,
@@ -1670,6 +2962,32 @@ def run_curriculum(
     executor = TransactionalFLEExecutor(env)
     run_id = datetime.now(UTC).strftime("curriculum-%Y%m%dT%H%M%SZ")
     journal = ResearchJournal(run_id)
+    evolution = journal.state["evolution"]
+    champion = evolution.get("champion") or {}
+    champion_configuration = (
+        champion.get("configuration", {})
+        if isinstance(champion, dict)
+        else {}
+    )
+    genome = challenger_genome(
+        attempt=int(evolution.get("generation", 1) or 1),
+        champion_configuration=champion_configuration,
+        default_exploration=exploration,
+    )
+    effective_exploration = genome.placement_exploration
+    turn_penalty = genome.routing_turn_penalty
+    evolution["challenger"]["configuration"].update(
+        {
+            **genome.to_dict(),
+            "placement_episodes": placement_episodes,
+            "seed": seed,
+        }
+    )
+    journal.event(
+        "mutation",
+        "Evolutionary challenger genome selected.",
+        configuration=evolution["challenger"]["configuration"],
+    )
 
     try:
         executor.reset(seed=seed)
@@ -1692,7 +3010,7 @@ def run_curriculum(
             center=center,
             episodes=placement_episodes,
             settle_seconds=trial_settle,
-            exploration=exploration,
+            exploration=effective_exploration,
         )
         stage_scale_mining(
             executor,
@@ -1718,6 +3036,7 @@ def run_curriculum(
                 journal,
                 center=center,
                 settle_seconds=logistics_settle,
+                turn_penalty=turn_penalty,
             )
         if logistics is not None:
             belt_smelt_ok = stage_belt_smelting(
@@ -1729,13 +3048,29 @@ def run_curriculum(
             )
 
         achieved: set[str] = set()
+        coal_ok = False
         copper_ok = False
         copper_smelt_ok = False
+        survival_ok = False
+        power_ok = False
+        manufacturing_ok = False
+        science_ok = False
+        coal_center: tuple[float, float] | None = None
         copper_center: tuple[float, float] | None = None
 
         if belt_smelt_ok:
             achieved.add("iron_backbone")
             update_engineering_frontier(journal, achieved=achieved)
+            coal_ok, coal_center = stage_coal_mining(
+                executor,
+                env,
+                journal,
+                settle_seconds=coal_mine_settle,
+            )
+        if coal_ok:
+            achieved.add("coal_mining")
+            update_engineering_frontier(journal, achieved=achieved)
+        if belt_smelt_ok and coal_ok:
             copper_ok, copper_center = stage_copper_mining(
                 executor,
                 env,
@@ -1745,23 +3080,82 @@ def run_curriculum(
         if copper_ok and copper_center is not None:
             achieved.add("copper_mining")
             update_engineering_frontier(journal, achieved=achieved)
-            copper_smelt_ok = stage_copper_smelting(
+            if coal_ok:
+                copper_smelt_ok = stage_copper_smelting(
+                    executor,
+                    env,
+                    journal,
+                    center=copper_center,
+                    settle_seconds=copper_smelt_settle,
+                )
+        if copper_smelt_ok:
+            achieved.add("copper_smelting")
+            update_engineering_frontier(journal, achieved=achieved)
+
+        if (
+            belt_smelt_ok
+            and coal_ok
+            and copper_smelt_ok
+            and coal_center is not None
+            and copper_center is not None
+        ):
+            survival_ok = stage_capability_survival(
                 executor,
                 env,
                 journal,
-                center=copper_center,
-                settle_seconds=copper_smelt_settle,
+                iron_center=center,
+                coal_center=coal_center,
+                copper_center=copper_center,
+                settle_seconds=20,
             )
-        if copper_smelt_ok:
-            achieved.add("copper_smelting")
+
+        if survival_ok:
+            power_ok = stage_steam_power(
+                executor,
+                env,
+                journal,
+                settle_seconds=12,
+            )
+        if power_ok:
+            achieved.add("steam_power")
+            update_engineering_frontier(journal, achieved=achieved)
+            manufacturing_ok = stage_powered_manufacturing(
+                executor,
+                env,
+                journal,
+                settle_seconds=14,
+            )
+        if manufacturing_ok:
+            science_ok = stage_automation_science(
+                executor,
+                env,
+                journal,
+                settle_seconds=20,
+            )
+        if science_ok:
+            achieved.add("automation_science")
+
         progression = update_engineering_frontier(
             journal,
             achieved=achieved,
         )
 
+        selection = finalize_evolution_selection(
+            journal,
+            achieved=achieved,
+        )
         final_status = (
-            "completed"
-            if belt_smelt_ok and copper_ok and copper_smelt_ok
+            "generation_complete"
+            if (
+                belt_smelt_ok
+                and coal_ok
+                and copper_ok
+                and copper_smelt_ok
+                and survival_ok
+                and power_ok
+                and manufacturing_ok
+                and science_ok
+            )
             else "partial_success"
         )
         next_goal = progression.get("next_goal")
@@ -1777,6 +3171,10 @@ def run_curriculum(
             next_action = "repair A* logistics geometry from the rejected route"
         else:
             next_action = "run alternate smelting-geometry repair experiment"
+        if selection.get("promoted"):
+            next_action = "champion promoted · " + next_action
+        else:
+            next_action = "incumbent retained · " + next_action
         journal.finish(final_status, next_action)
         return journal.state
     except Exception as exc:
@@ -1806,6 +3204,7 @@ def main() -> None:
     parser.add_argument("--smelt-settle", type=int, default=24)
     parser.add_argument("--logistics-settle", type=int, default=30)
     parser.add_argument("--belt-smelt-settle", type=int, default=32)
+    parser.add_argument("--coal-mine-settle", type=int, default=24)
     parser.add_argument("--copper-mine-settle", type=int, default=16)
     parser.add_argument("--copper-smelt-settle", type=int, default=24)
     parser.add_argument("--exploration", type=float, default=2.0)
@@ -1820,6 +3219,7 @@ def main() -> None:
         smelt_settle=args.smelt_settle,
         logistics_settle=args.logistics_settle,
         belt_smelt_settle=args.belt_smelt_settle,
+        coal_mine_settle=args.coal_mine_settle,
         copper_mine_settle=args.copper_mine_settle,
         copper_smelt_settle=args.copper_smelt_settle,
         exploration=args.exploration,

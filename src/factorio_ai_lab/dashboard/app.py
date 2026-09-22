@@ -101,9 +101,19 @@ async def api_progression() -> dict[str, Any]:
     )
 
 
+@app.get("/api/resource-overview")
+async def api_resource_overview() -> dict[str, Any]:
+    return await asyncio.to_thread(state.factorio.resource_overview)
+
+
 @app.get("/api/knowledge")
 def api_knowledge() -> dict[str, Any]:
     return state.knowledge_data()
+
+
+@app.get("/api/evolution")
+def api_evolution() -> dict[str, Any]:
+    return state.evolution_data()
 
 
 @app.get("/api/datasets")
@@ -128,8 +138,8 @@ def api_official_icon(entity_name: str) -> FileResponse:
 
 @app.get("/api/world/frame.png")
 async def api_world_frame(mode: str = "game") -> Response:
-    if mode not in {"game", "tactical"}:
-        raise HTTPException(400, "mode must be game or tactical")
+    if mode not in {"game", "overview", "tactical"}:
+        raise HTTPException(400, "mode must be game, overview or tactical")
     try:
         png = await asyncio.to_thread(state.render_world_frame, mode)
     except Exception as exc:
