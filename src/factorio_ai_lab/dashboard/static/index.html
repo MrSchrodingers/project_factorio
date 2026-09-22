@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Factorio AI Lab</title>
   <link rel="stylesheet" href="/static/styles.css?v=0.10.1">
+  <link rel="stylesheet" href="/static/map/style.css?v=0.12.0">
 </head>
 <body>
   <header class="topbar">
@@ -318,43 +319,8 @@
           </div>
         </div>
 
-        <div class="world-stage" id="worldStage">
-          <div id="worldViewport" class="world-viewport">
-            <img id="worldFrame" alt="Live rendered Factorio world">
-            <canvas id="worldFallback" aria-label="Structured world fallback"></canvas>
-            <div id="worldAssetOverlay" class="world-asset-overlay"></div>
-          </div>
-          <aside id="worldInspector" class="world-inspector" hidden>
-            <button id="worldInspectorClose" type="button" aria-label="Close entity inspector">×</button>
-            <img id="worldInspectorIcon" alt="">
-            <div>
-              <span class="label">SELECTED ENTITY</span>
-              <strong id="worldInspectorName">--</strong>
-              <small id="worldInspectorMeta">--</small>
-            </div>
-          </aside>
-          <div id="worldEmpty" class="world-empty">
-            <strong>Waiting for live world snapshot</strong>
-            <span>Factorio runtime assets will render here when the world observer is ready.</span>
-          </div>
-          <div class="world-hud">
-            <span id="factorioStatus" class="hud-chip">Factorio --</span>
-          <span id="viewportStatus" class="hud-chip">viewport --</span>
-            <span id="frameSource" class="hud-chip">coordenadas reais · terreno e assets oficiais</span>
-          </div>
-          <div id="resourceLegend" class="resource-legend" aria-live="polite"></div>
-          <div class="world-provenance">
-            Entities/resources/terrain: live Factorio state · visual textures: local official game assets
-          </div>
-          <div class="world-navigation-hint">arraste para navegar no mundo · Ctrl/Cmd+roda para zoom · duplo clique recentraliza</div>
-          <div class="world-controls" aria-label="World map controls">
-            <button id="zoomOut" type="button" title="Zoom out">−</button>
-            <button id="zoomReset" type="button" title="Reset view">1×</button>
-            <button id="zoomIn" type="button" title="Zoom in">+</button>
-            <button id="worldFullscreen" type="button" title="Fullscreen map">⛶</button>
-          </div>
-        </div>
-
+        <div class="world-stage" id="worldStage" data-factory-map></div>
+        
         <div class="factory-footer">
           <div>
             <span class="label">ENTITY MIX</span>
@@ -704,5 +670,6 @@
   </main>
 
   <script src="/static/app.js?v=0.10.3"></script>
+  <script src="/static/map/factory-map.js?v=0.12.0"></script>
 </body>
 </html>

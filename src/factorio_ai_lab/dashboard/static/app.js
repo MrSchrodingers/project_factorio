@@ -285,7 +285,15 @@ function ensureManualWorldGeometry() {
   };
 }
 
+// The canvas map (static/map/factory-map.js) owns the world stage when it is
+// present. These legacy helpers drove the server-rendered PNG and its CSS
+// transform overlay; leaving them running would fight the new renderer for
+// the same DOM and throw on elements that no longer exist.
+const LEGACY_MAP_DISABLED = !!document.querySelector("[data-factory-map]");
+
 function renderWorldHotspots() {
+  if (LEGACY_MAP_DISABLED) return;
+
   const overlay = $("worldAssetOverlay");
   if (!overlay) return;
   overlay.innerHTML = "";
@@ -401,6 +409,8 @@ function renderResourceLegend() {
 
 
 function drawStructuredFallback() {
+  if (LEGACY_MAP_DISABLED) return;
+
   const canvas = $("worldFallback");
   const prepared = prepareCanvas(canvas);
   const ctx = prepared.ctx;
@@ -464,6 +474,8 @@ function drawStructuredFallback() {
 }
 
 function refreshWorldFrame(force = false) {
+  if (LEGACY_MAP_DISABLED) return;
+
   const render = (state.status && state.status.render) || {};
   const now = Date.now();
   if (!force && now - state.frameLastRequestedAt < 5000) return;
@@ -547,6 +559,8 @@ function refreshWorldFrame(force = false) {
 }
 
 function applyWorldView() {
+  if (LEGACY_MAP_DISABLED) return;
+
   const viewport = $("worldViewport");
   if (!viewport) return;
   viewport.style.transform =
@@ -573,6 +587,8 @@ function applyWorldView() {
 }
 
 function setWorldZoom(nextZoom, anchorX = null, anchorY = null) {
+  if (LEGACY_MAP_DISABLED) return;
+
   if (state.worldViewMode === "overview") return;
   const stage = $("worldStage");
   const rect = stage.getBoundingClientRect();
@@ -608,6 +624,8 @@ function setWorldZoom(nextZoom, anchorX = null, anchorY = null) {
 }
 
 function resetWorldView() {
+  if (LEGACY_MAP_DISABLED) return;
+
   state.worldZoom = 1;
   state.worldPanX = 0;
   state.worldPanY = 0;
@@ -623,6 +641,8 @@ function resetWorldView() {
 }
 
 function installWorldModeControls() {
+  if (LEGACY_MAP_DISABLED) return;
+
   for (const button of document.querySelectorAll("[data-world-mode]")) {
     button.addEventListener("click", () => {
       const mode = button.dataset.worldMode;
@@ -644,6 +664,8 @@ function installWorldModeControls() {
 }
 
 function installWorldControls() {
+  if (LEGACY_MAP_DISABLED) return;
+
   const stage = $("worldStage");
   const viewport = $("worldViewport");
   if (!stage || !viewport) return;
@@ -734,6 +756,8 @@ function installWorldControls() {
 }
 
 function updateFrameAge() {
+  if (LEGACY_MAP_DISABLED) return;
+
   if (!state.frameLoadedAt) {
     setText("frameAge", "frame --");
     return;
