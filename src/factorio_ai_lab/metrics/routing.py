@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import pairwise
 
 from factorio_ai_lab.domain.state import GridPoint
 from factorio_ai_lab.planning.astar import RouteResult
@@ -24,7 +25,7 @@ def count_turns(path: tuple[GridPoint, ...]) -> int:
         path[1].x - path[0].x,
         path[1].y - path[0].y,
     )
-    for left, right in zip(path[1:-1], path[2:]):
+    for left, right in pairwise(path[1:]):
         current = (right.x - left.x, right.y - left.y)
         if current != previous:
             turns += 1

@@ -1,0 +1,26 @@
+[Unit]
+Description=Factorio AI Lab continuous evolutionary research loop
+After=docker.service factorio-ai-dashboard.service factorio-ai-llm.service
+Wants=docker.service factorio-ai-dashboard.service factorio-ai-llm.service
+Conflicts=factorio-ai-curriculum.service
+
+[Service]
+Type=simple
+User=ti
+Group=devs
+WorkingDirectory=/srv/factorio-ai-lab
+Environment=HOME=/home/ti
+Environment=PYTHONUNBUFFERED=1
+Environment=OMP_NUM_THREADS=8
+Environment=MKL_NUM_THREADS=8
+ExecStart=/srv/factorio-ai-lab/scripts/run_evolution_loop.sh --generations 1 --continue-after-validated
+Restart=always
+RestartSec=20
+Nice=5
+CPUWeight=60
+TimeoutStopSec=45
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

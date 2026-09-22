@@ -9,6 +9,8 @@ const state = {
   datasets: {},
   research: {},
   progression: { achieved: [], frontier: [], next_goal: null },
+  productionPlan: {},
+  autonomy: {},
   resourceOverview: { cells: [], points: [], totals: {}, nearest: {} },
   evolution: {},
   knowledge: { count: 0, lessons: [] },
@@ -909,7 +911,12 @@ function renderCapabilityHealth() {
       );
       if (!machines.length) return "";
       const noFuel = machines.filter((e) => String(e.status) === "no_fuel").length;
-      const noPower = machines.filter((e) => String(e.status) === "no_power").length;
+      const noPower = machines.filter((e) => [
+        "no_power",
+        "low_power",
+        "not_plugged_in_electric_network",
+        "not_connected",
+      ].includes(String(e.status))).length;
       if (noFuel) return noFuel + "/" + machines.length + " drills no fuel";
       if (noPower) return noPower + "/" + machines.length + " drills no power";
       const blocked = machines.filter((e) => [
@@ -964,6 +971,7 @@ function renderCapabilityHealth() {
   const coalReserve = Number(
     metrics.survival_coal_reserve
       ?? metrics.coal_endogenous_stockpile
+      ?? metrics.open_play_coal_stockpile
       ?? coalAccounting.endogenous_stockpile
       ?? 0
   );
@@ -972,6 +980,23 @@ function renderCapabilityHealth() {
       ?? coalAccounting.safety_stock_target
       ?? 4
   );
+
+  const autonomy = state.autonomy || {};
+  const validationConfig = (
+    state.research
+    && state.research.evolution
+    && state.research.evolution.validation_configuration
+  ) || {};
+  setText(
+    "autonomyGenome",
+    "layout " + String(validationConfig.autonomy_layout_variant ?? "--")
+      + " · coal " + String(validationConfig.autonomy_commissioning_coal ?? "--")
+      + " · belt margin " + String(validationConfig.autonomy_belt_margin ?? "--")
+      + " · pole margin " + String(validationConfig.autonomy_pole_margin ?? "--")
+  );
+
+  const topology = autonomy.topology || {};
+  const closedLoop = !!autonomy.closed_loop;
 
   const capabilities = [
     {
@@ -985,6 +1010,9 @@ function renderCapabilityHealth() {
         || Number(metrics.belt_smelting_plate_rate_per_s || 0) > 0
         || Number(metrics.iron_plate_output || 0) > 0,
       unit: "/min",
+      autonomous: !!topology.iron_chain_live
+        && !!topology.smelting_distribution
+        && !!topology.zero_manual_logistics,
     },
     {
       key: "copper",
@@ -996,6 +1024,9 @@ function renderCapabilityHealth() {
       proven: achieved.has("copper_mining")
         || Number(metrics.copper_ore_output || 0) > 0,
       unit: "/min",
+      autonomous: !!topology.copper_chain_live
+        && !!topology.smelting_distribution
+        && !!topology.zero_manual_logistics,
     },
     {
       key: "coal",
@@ -1008,13 +1039,29 @@ function renderCapabilityHealth() {
       origin: coalOrigin,
       reserve: coalReserve,
       safetyStock: coalSafetyStock,
+      autonomous: !!topology.coal_chain_live
+        && !!topology.fuel_distribution
+        && !!topology.zero_manual_logistics,
     },
     {
       key: "power",
       label: "Steam power",
-      liveRate: Number(metrics.steam_energy || 0),
-      proven: achieved.has("steam_power") || Number(metrics.steam_energy || 0) > 0,
+      liveRate: Number(
+        metrics.open_play_steam_energy
+          ?? metrics.steam_energy
+          ?? 0
+      ),
+      proven: achieved.has("steam_power")
+        || Number(
+          metrics.open_play_steam_energy
+            ?? metrics.steam_energy
+            ?? 0
+        ) > 0,
       unit: " J",
+      autonomous: !!topology.electric_distribution
+        && !!topology.healthy_fuel
+        && !!topology.healthy_power
+        && !!topology.zero_manual_logistics,
     },
     {
       key: "science",
@@ -1023,6 +1070,7 @@ function renderCapabilityHealth() {
       proven: achieved.has("automation_science")
         || Number(metrics.automation_science_output || 0) > 0,
       unit: "/min",
+      autonomous: closedLoop && !!topology.producing_industry,
     },
   ];
 
@@ -1033,30 +1081,17 @@ function renderCapabilityHealth() {
       cls = "external";
       detail = compactFactorioNumber(coalConsumed) + "/min consumed · external bootstrap";
     } else if (item.liveRate > 0) {
-      cls = "live";
-      if (item.key === "coal" && item.origin === "self_sufficient") {
-        const reserveState = item.reserve >= item.safetyStock ? "reserve ok" : "reserve low";
-        detail = compactFactorioNumber(item.liveRate) + item.unit
-          + " · endogenous · " + reserveState + " "
-          + compactFactorioNumber(item.reserve) + "/" + compactFactorioNumber(item.safetyStock);
-        if (item.reserve < item.safetyStock) cls = "regressed";
-      } else {
-        detail = compactFactorioNumber(item.liveRate) + item.unit + " live";
-      }
+      cls = item.autonomous ? "live" : "dormant";
+      detail = compactFactorioNumber(item.liveRate) + item.unit
+        + (item.autonomous ? " · autonomous" : " · live · autonomy unverified");
     } else if (item.proven) {
       const fault = physicalFault(item.key);
       cls = fault && !fault.includes("present") && !fault.includes("ready")
         ? "regressed"
         : "dormant";
-      if (item.key === "coal" && item.origin === "self_sufficient") {
-        const reserveState = item.reserve >= item.safetyStock ? "reserve ok" : "reserve low";
-        detail = "proven · " + reserveState + " "
-          + compactFactorioNumber(item.reserve) + "/" + compactFactorioNumber(item.safetyStock)
-          + (fault ? " · " + fault : "");
-        if (item.reserve < item.safetyStock) cls = "regressed";
-      } else {
-        detail = fault ? "proven · " + fault : "proven · currently dormant/starved";
-      }
+      detail = "commissioned"
+        + (item.autonomous ? " · autonomous evidence retained" : " · not closed-loop")
+        + (fault ? " · " + fault : "");
     } else {
       const fault = physicalFault(item.key);
       if (fault && (
@@ -1080,9 +1115,17 @@ function fitnessSummary(fitness) {
   const caps = Array.isArray(fitness.capabilities) ? fitness.capabilities.length : 0;
   const total = Number(fitness.total_rate_per_s || 0);
   const dependencies = Number(fitness.external_dependencies || 0);
+  const autonomy = fitness.autonomy_score;
+  const manual = fitness.manual_logistics_calls;
   return caps + " capabilities · "
     + formatNumber(total, 3) + "/s aggregate · "
-    + dependencies + " external dep.";
+    + dependencies + " external dep."
+    + (autonomy !== null && autonomy !== undefined
+      ? " · autonomy " + formatNumber(Number(autonomy) * 100, 0) + "%"
+      : " · autonomy n/a")
+    + (manual !== null && manual !== undefined
+      ? " · manual " + String(manual)
+      : " · manual n/a");
 }
 
 function genomeSummary(configuration) {
@@ -1100,6 +1143,18 @@ function genomeSummary(configuration) {
   }
   if (configuration.placement_best_arm) {
     parts.push("placement " + String(configuration.placement_best_arm));
+  }
+  const layout = Number(configuration.autonomy_layout_variant);
+  if (Number.isFinite(layout)) parts.push("layout " + layout);
+  const coal = Number(configuration.autonomy_commissioning_coal);
+  if (Number.isFinite(coal)) parts.push("coal seed " + coal);
+  const beltMargin = Number(configuration.autonomy_belt_margin);
+  const poleMargin = Number(configuration.autonomy_pole_margin);
+  if (Number.isFinite(beltMargin) || Number.isFinite(poleMargin)) {
+    parts.push(
+      "margin B" + (Number.isFinite(beltMargin) ? beltMargin : "--")
+      + "/P" + (Number.isFinite(poleMargin) ? poleMargin : "--")
+    );
   }
   return parts.length ? parts.join(" · ") : "genome not recorded";
 }
@@ -1119,6 +1174,7 @@ function renderEvolution() {
     researchEvolution
   );
   const generation = Number(evolution.generation || 0);
+  const continuousLoop = evolution.continuous_loop || null;
   setClassText(
     "generationBadge",
     generation ? "generation " + generation : "generation --",
@@ -1160,6 +1216,15 @@ function renderEvolution() {
       + (champion && champion.run_id ? "G" + String(champion.generation || "?") : "--")
       + " · Challenger "
       + String(challenger.run_id || (state.run && state.run.run_id) || "--")
+      + (
+          continuousLoop
+            ? " · loop "
+              + String(continuousLoop.status || "unknown")
+              + " "
+              + Number(continuousLoop.completed_generations || 0)
+              + "/" + Number(continuousLoop.requested_generations || 0)
+            : ""
+        )
   );
 
   if (champion && typeof champion === "object") {
@@ -1184,9 +1249,14 @@ function renderEvolution() {
     "challengerFitness",
     challenger.fitness
       ? contenderSummary(challenger)
-      : "collecting live fitness evidence · " + genomeSummary(
-          challenger.configuration
-        )
+      : (
+          continuousLoop && continuousLoop.status === "running"
+            ? "continuous loop · "
+              + Number(continuousLoop.completed_generations || 0)
+              + "/" + Number(continuousLoop.requested_generations || 0)
+              + " generations closed · "
+            : "collecting live fitness evidence · "
+        ) + genomeSummary(challenger.configuration)
   );
 
   if (promotion && typeof promotion === "object") {
@@ -1300,6 +1370,8 @@ function renderEvolution() {
       const rate = Number(fitness.total_rate_per_s || 0);
       const deps = Number(fitness.external_dependencies || 0);
       const failures = Number(fitness.failures || 0);
+      const autonomy = fitness.autonomy_score;
+      const manual = fitness.manual_logistics_calls;
       const status = decision.promoted ? "promoted" : "rejected";
       const cls = decision.promoted ? "promoted" : "rejected";
       return '<article class="generation-node ' + cls + '">'
@@ -1307,7 +1379,14 @@ function renderEvolution() {
         + '<strong>' + status + '</strong>'
         + '<small>' + caps + ' caps · '
         + formatNumber(rate, 2) + '/s · '
-        + deps + ' ext · ' + failures + ' fail</small>'
+        + deps + ' ext · ' + failures + ' fail'
+        + (autonomy !== null && autonomy !== undefined
+          ? ' · A ' + formatNumber(Number(autonomy) * 100, 0) + '%'
+          : ' · A --')
+        + (manual !== null && manual !== undefined
+          ? ' · M ' + String(manual)
+          : ' · M --')
+        + '</small>'
         + '</article>';
     });
     if (
@@ -1328,6 +1407,803 @@ function renderEvolution() {
       ? historyRows.join("")
       : '<span class="generation-empty">No completed generations yet.</span>';
   }
+}
+
+
+function signedPercent(value) {
+  if (!Number.isFinite(value)) return "--";
+  const sign = value > 0 ? "+" : "";
+  return sign + formatNumber(value, 1) + "%";
+}
+
+function renderResearchCockpit() {
+  const research = state.research || {};
+  const evolution = Object.assign(
+    {},
+    state.evolution || {},
+    research.evolution || {}
+  );
+  const progression = state.progression || {};
+  const datasets = state.datasets || {};
+  const curriculum = Array.isArray(research.curriculum)
+    ? research.curriculum
+    : [];
+  const generation = Number(evolution.generation || 0);
+  const champion = evolution.champion || null;
+  const validated = evolution.validated_champion || null;
+  const promotion = evolution.promotion || null;
+
+  const completedStages = curriculum.filter((stage) =>
+    ["completed", "success"].includes(String(stage.status || ""))
+  ).length;
+  const activeIndex = curriculum.findIndex((stage) =>
+    ["running", "learning", "validating"].includes(String(stage.status || ""))
+  );
+  const failedStage = curriculum.find((stage) =>
+    String(stage.status || "") === "failed"
+  );
+  const activeStage = activeIndex >= 0 ? curriculum[activeIndex] : null;
+  const totalStages = curriculum.length;
+
+  setText(
+    "generationHealthTitle",
+    generation
+      ? "G" + generation + " · "
+        + (activeStage ? String(activeStage.name) : String(research.status || "idle"))
+      : "G-- · waiting"
+  );
+  const running = ["starting", "running", "learning", "validating"].includes(
+    String(research.status || "")
+  );
+  setClassText(
+    "generationHealthBadge",
+    running ? "live challenger" : promotion
+      ? (promotion.promoted ? "promoted" : "rejected")
+      : String(research.status || "--"),
+    running
+      ? "badge live"
+      : promotion && promotion.promoted
+        ? "badge good"
+        : promotion
+          ? "badge warn"
+          : "badge neutral"
+  );
+  setText(
+    "generationStageText",
+    activeStage
+      ? String(activeStage.name)
+      : failedStage
+        ? "failed · " + String(failedStage.name)
+        : "generation closed"
+  );
+  setText(
+    "generationStageProgress",
+    completedStages + " / " + totalStages
+  );
+  const progress = totalStages
+    ? Math.min(100, Math.max(0, (completedStages / totalStages) * 100))
+    : Number(research.progress || 0) * 100;
+  const stageBar = $("generationStageBar");
+  if (stageBar) stageBar.style.width = progress + "%";
+
+  setText(
+    "generationChampion",
+    champion ? "G" + String(champion.generation || "?") : "none"
+  );
+
+  const currentRoute = Number((research.metrics || {}).logistics_route_cost);
+  const championRoute = Number(
+    champion && champion.fitness && champion.fitness.route_cost
+  );
+  if (
+    Number.isFinite(currentRoute)
+    && Number.isFinite(championRoute)
+    && championRoute > 0
+  ) {
+    const delta = ((currentRoute - championRoute) / championRoute) * 100;
+    setClassText(
+      "generationRouteDelta",
+      signedPercent(delta),
+      delta < -0.05 ? "good" : delta > 0.05 ? "warn" : "muted"
+    );
+  } else {
+    setClassText("generationRouteDelta", "--", "muted");
+  }
+
+  const validatedCaps = Array.isArray(progression.validated_achieved)
+    ? progression.validated_achieved
+    : Array.isArray(progression.achieved)
+      ? progression.achieved
+      : [];
+  setText("generationCapabilities", String(validatedCaps.length));
+  setClassText(
+    "generationOpenPlay",
+    validated
+      ? "validated"
+      : champion
+        ? "pending"
+        : "no champion",
+    validated ? "good" : champion ? "warn" : "muted"
+  );
+
+  const healthDetail = running
+    ? "G" + String(generation || "?")
+      + " is collecting evidence · "
+      + (activeStage
+        ? "current gate: " + String(activeStage.name)
+        : "initializing")
+      + (champion
+        ? " · incumbent G" + String(champion.generation || "?")
+        : "")
+    : promotion
+      ? String(promotion.reason || "selection complete")
+      : "collecting generation evidence";
+  setText("generationHealthDetail", healthDetail);
+
+  const recurrent = datasets.recurrent_world_model || null;
+  const spatial = datasets.spatial_policy || null;
+  const knowledge = state.knowledge || {};
+
+  let acceptedModels = 0;
+  if (recurrent) {
+    const holdout = recurrent.generation_holdout || {};
+    const folds = Number(holdout.valid_folds || 0);
+    const wins = Number(holdout.wins || 0);
+    const winRate = Number(holdout.win_rate || 0);
+    const usable = !!recurrent.usable;
+    if (usable) acceptedModels += 1;
+    setText(
+      "worldModelArenaTitle",
+      (recurrent.active_model
+        ? String(recurrent.active_model)
+        : "GRU world model")
+    );
+    setText(
+      "worldModelArenaDetail",
+      Number(recurrent.sample_count || 0) + " temporal samples"
+        + (folds ? " · holdout " + wins + "/" + folds : "")
+        + (folds ? " · win " + formatNumber(winRate * 100, 0) + "%" : "")
+    );
+    setClassText(
+      "worldModelArenaStatus",
+      usable ? "accepted" : "advisory",
+      usable ? "good" : "warn"
+    );
+  } else {
+    setText("worldModelArenaDetail", "no trained recurrent model");
+    setClassText("worldModelArenaStatus", "collecting", "muted");
+  }
+
+  if (spatial) {
+    const controlEligible = !!spatial.control_eligible;
+    const usable = !!spatial.usable;
+    const attention = (
+      spatial.candidates
+      && spatial.candidates.attention
+    ) || null;
+    const active = String(spatial.active_model || "none");
+    const activeCost = Number(spatial.mean_cost_ratio_to_astar || 0);
+    const attentionCost = Number(
+      attention && attention.mean_cost_ratio_to_astar
+    );
+    if (controlEligible) acceptedModels += 1;
+    setText(
+      "spatialModelArenaTitle",
+      "Spatial " + active
+        + (attention ? " + attention challenger" : "")
+    );
+    setText(
+      "spatialModelArenaDetail",
+      "rollout " + formatNumber(
+        Number(spatial.rollout_success_rate || 0) * 100,
+        0
+      ) + "%"
+        + " · active cost " + formatNumber(activeCost, 3) + "× A*"
+        + (Number.isFinite(attentionCost) && attentionCost > 0
+          ? " · attention " + formatNumber(attentionCost, 3) + "×"
+          : "")
+    );
+    setClassText(
+      "spatialModelArenaStatus",
+      controlEligible
+        ? "control"
+        : usable
+          ? "proposal"
+          : "advisory",
+      controlEligible ? "good" : usable ? "warn" : "muted"
+    );
+  } else {
+    setText("spatialModelArenaDetail", "no trained spatial policy");
+    setClassText("spatialModelArenaStatus", "collecting", "muted");
+  }
+
+  const verified = Number(knowledge.verified_count || 0);
+  const fallback = Number(knowledge.fallback_count || 0);
+  const audited = verified + fallback;
+  const verifiedRatio = audited
+    ? verified / audited
+    : Number(knowledge.verified_ratio || 0);
+  if (verified > 0) acceptedModels += 1;
+  setText(
+    "knowledgeVerifierDetail",
+    audited
+      ? verified + " verified · " + fallback + " deterministic fallback"
+      : Number(knowledge.count || 0) + " legacy/unclassified lessons"
+  );
+  setClassText(
+    "knowledgeVerifierStatus",
+    audited
+      ? formatNumber(verifiedRatio * 100, 0) + "% verified"
+      : "legacy",
+    audited && verifiedRatio >= 0.70
+      ? "good"
+      : audited
+        ? "warn"
+        : "muted"
+  );
+  setClassText(
+    "modelArenaBadge",
+    acceptedModels + "/3 passed",
+    acceptedModels >= 2 ? "badge good" : "badge warn"
+  );
+
+  const history = Array.isArray(evolution.history)
+    ? evolution.history
+    : [];
+  const lastClosed = history.length ? history[history.length - 1] : null;
+  if (lastClosed) {
+    const decision = lastClosed.decision || {};
+    const closedGeneration = lastClosed.generation ?? "?";
+    const promoted = !!decision.promoted;
+    setText(
+      "lastGenerationDecision",
+      "G" + String(closedGeneration) + " · "
+        + (promoted ? "promoted" : "rejected")
+    );
+    setClassText(
+      "researchSummaryBadge",
+      promoted ? "last promoted" : "last rejected",
+      promoted ? "badge good" : "badge warn"
+    );
+    setText(
+      "researchSummaryTitle",
+      running
+        ? "G" + String(generation || "?") + " is challenging G"
+          + String(champion && champion.generation || "?")
+        : "Last selection: G" + String(closedGeneration)
+    );
+
+    const improvements = Array.isArray(decision.improvements)
+      ? decision.improvements
+      : [];
+    const regressions = Array.isArray(decision.regressions)
+      ? decision.regressions
+      : [];
+    const deltaList = $("generationDeltaList");
+    if (deltaList) {
+      const chips = [];
+      for (const item of improvements.slice(0, 3)) {
+        chips.push(
+          '<span class="delta-chip up">↑ '
+          + escapeHtml(item)
+          + '</span>'
+        );
+      }
+      for (const item of regressions.slice(0, 3)) {
+        chips.push(
+          '<span class="delta-chip down">↓ '
+          + escapeHtml(item)
+          + '</span>'
+        );
+      }
+      deltaList.innerHTML = chips.length
+        ? chips.join("")
+        : '<span class="delta-chip info">no comparable deltas</span>';
+    }
+    setText(
+      "researchSummaryDetail",
+      String(decision.reason || "selection complete")
+    );
+  } else {
+    setText("lastGenerationDecision", "none");
+    setClassText("researchSummaryBadge", "collecting", "badge neutral");
+    setText("researchSummaryTitle", "First selection not closed yet");
+    const deltaList = $("generationDeltaList");
+    if (deltaList) deltaList.innerHTML = "";
+  }
+
+  setText(
+    "currentBottleneck",
+    activeStage
+      ? String(activeStage.name)
+      : failedStage
+        ? String(failedStage.name)
+        : "no active failure"
+  );
+  const nextGoal = progression.next_goal;
+  setText(
+    "summaryNextFrontier",
+    nextGoal && nextGoal.label
+      ? String(nextGoal.label)
+      : String(research.next_action || "--")
+  );
+}
+
+
+function formatDuration(seconds) {
+  const value = Number(seconds);
+  if (!Number.isFinite(value) || value < 0) return "--";
+  if (value < 60) return formatNumber(value, 0) + " s";
+  const minutes = Math.floor(value / 60);
+  const remainder = Math.round(value % 60);
+  return minutes + "m " + remainder + "s";
+}
+
+function generationFitnessRows() {
+  const evolution = Object.assign(
+    {},
+    state.evolution || {},
+    (state.research && state.research.evolution) || {}
+  );
+  const history = Array.isArray(evolution.history) ? evolution.history : [];
+  return history
+    .map((row) => {
+      const fitness = (row.challenger && row.challenger.fitness) || {};
+      const autonomyRaw = fitness.autonomy_score;
+      const manualRaw = fitness.manual_logistics_calls;
+      return {
+        generation: Number(row.generation),
+        route: Number(fitness.route_cost),
+        capabilities: Array.isArray(fitness.capabilities)
+          ? fitness.capabilities.length
+          : 0,
+        autonomy: autonomyRaw === null || autonomyRaw === undefined
+          ? Number.NaN
+          : Number(autonomyRaw) * 100,
+        manual: manualRaw === null || manualRaw === undefined
+          ? Number.NaN
+          : Number(manualRaw),
+        failures: Number(fitness.failures || 0),
+        promoted: !!(row.decision && row.decision.promoted),
+      };
+    })
+    .filter((row) => Number.isFinite(row.generation));
+}
+
+function drawGenerationTrends() {
+  const canvas = $("generationTrendCanvas");
+  if (!canvas) return;
+  const { ctx, width, height } = prepareCanvas(canvas);
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "rgba(255,255,255,.015)";
+  ctx.fillRect(0, 0, width, height);
+
+  const rows = generationFitnessRows().slice(-12);
+  const evolution = state.evolution || {};
+  const report = evolution.latest_report || null;
+  setText(
+    "generationDuration",
+    report && Number.isFinite(Number(report.duration_s))
+      ? "G" + String(report.generation || "?") + " · "
+        + formatDuration(report.duration_s)
+      : "duration --"
+  );
+
+  if (rows.length < 2) {
+    ctx.fillStyle = "#78838d";
+    ctx.font = '10px "SFMono-Regular", Consolas, monospace';
+    ctx.fillText("Need at least two closed generations.", 14, 28);
+    return;
+  }
+
+  const left = 42;
+  const right = 12;
+  const top = 14;
+  const bottom = 22;
+  const plotWidth = Math.max(1, width - left - right);
+  const bandGap = 8;
+  const bandHeight = (height - top - bottom - bandGap * 3) / 4;
+  const bands = [
+    {
+      label: "route",
+      values: rows.map((row) => row.route),
+      color: "#f0a33a",
+      better: "lower",
+    },
+    {
+      label: "auton%",
+      values: rows.map((row) => row.autonomy),
+      color: "#5dd589",
+      better: "higher",
+    },
+    {
+      label: "manual",
+      values: rows.map((row) => row.manual),
+      color: "#6ab5f7",
+      better: "lower",
+    },
+    {
+      label: "fails",
+      values: rows.map((row) => row.failures),
+      color: "#ee6c68",
+      better: "lower",
+    },
+  ];
+
+  ctx.font = '8px "SFMono-Regular", Consolas, monospace';
+  bands.forEach((band, bandIndex) => {
+    const y0 = top + bandIndex * (bandHeight + bandGap);
+    const finite = band.values.filter(Number.isFinite);
+    if (!finite.length) {
+      ctx.fillStyle = "#78838d";
+      ctx.fillText(band.label, 8, y0 + 10);
+      ctx.fillText("n/a", 8, y0 + 22);
+      return;
+    }
+    const min = Math.min(...finite);
+    const max = Math.max(...finite);
+    const span = Math.max(1e-9, max - min);
+    ctx.strokeStyle = "rgba(255,255,255,.07)";
+    ctx.beginPath();
+    ctx.moveTo(left, y0 + bandHeight);
+    ctx.lineTo(width - right, y0 + bandHeight);
+    ctx.stroke();
+    ctx.fillStyle = "#78838d";
+    ctx.fillText(band.label, 8, y0 + 10);
+    ctx.fillText(formatNumber(max, 2), 8, y0 + 22);
+    ctx.fillText(formatNumber(min, 2), 8, y0 + bandHeight - 2);
+
+    ctx.strokeStyle = band.color;
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    band.values.forEach((value, index) => {
+      const x = left + (index / Math.max(1, rows.length - 1)) * plotWidth;
+      const normalized = Number.isFinite(value) ? (value - min) / span : 0;
+      const y = y0 + bandHeight - normalized * (bandHeight - 8) - 4;
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    rows.forEach((row, index) => {
+      if (!row.promoted) return;
+      const value = band.values[index];
+      const x = left + (index / Math.max(1, rows.length - 1)) * plotWidth;
+      const normalized = Number.isFinite(value) ? (value - min) / span : 0;
+      const y = y0 + bandHeight - normalized * (bandHeight - 8) - 4;
+      ctx.fillStyle = band.color;
+      ctx.beginPath();
+      ctx.arc(x, y, 2.8, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  });
+
+  ctx.fillStyle = "#78838d";
+  rows.forEach((row, index) => {
+    if (index % Math.max(1, Math.ceil(rows.length / 6)) !== 0
+        && index !== rows.length - 1) return;
+    const x = left + (index / Math.max(1, rows.length - 1)) * plotWidth;
+    ctx.fillText("G" + row.generation, x - 6, height - 6);
+  });
+}
+
+function renderProductionDag() {
+  const plan = state.productionPlan || {};
+  const dag = plan.dag || null;
+  if (!dag) {
+    setText(
+      "productionDagTarget",
+      plan.goal_id ? String(plan.goal_id) : "Waiting for frontier"
+    );
+    setText("productionDagSource", String(plan.source || "--"));
+    const nodes = $("productionDagNodes");
+    if (nodes) {
+      nodes.innerHTML = '<span class="placeholder-row">No craftable DAG for this frontier.</span>';
+    }
+    const raw = $("productionDagRaw");
+    if (raw) raw.innerHTML = "";
+    return;
+  }
+
+  setText(
+    "productionDagTarget",
+    String(plan.goal_label || dag.target_item || "production target")
+      + " · " + formatNumber(dag.target_rate_per_s, 3) + "/s"
+  );
+  setText(
+    "productionDagSource",
+    String(plan.source || "planner") + " · Factorio "
+      + String(plan.factorio_data_version || "")
+  );
+  const nodes = Array.isArray(dag.nodes) ? dag.nodes : [];
+  const container = $("productionDagNodes");
+  if (container) {
+    container.innerHTML = nodes.map((node) => {
+      const ingredients = Array.isArray(node.ingredients)
+        ? node.ingredients.map((item) =>
+            formatNumber(item.count, 2) + " " + item.item
+          ).join(" + ")
+        : "";
+      return '<article class="dag-node">'
+        + '<strong>' + escapeHtml(node.item) + '</strong>'
+        + '<small>' + formatNumber(node.target_rate_per_s, 3) + '/s'
+        + ' · min ' + formatNumber(node.minimum_machines_at_speed_1, 0)
+        + ' machine(s)</small>'
+        + '<small>' + escapeHtml(ingredients || "raw input") + '</small>'
+        + '</article>';
+    }).join("");
+  }
+  const rawRequirements = dag.raw_requirements_per_s || {};
+  const raw = $("productionDagRaw");
+  if (raw) {
+    raw.innerHTML = Object.entries(rawRequirements).map(([item, rate]) =>
+      '<span class="raw-requirement">'
+        + escapeHtml(item) + ' · ' + formatNumber(rate, 3) + '/s'
+        + '</span>'
+    ).join("");
+  }
+}
+
+function renderAutonomy() {
+  const autonomy = state.autonomy || {};
+  const level = String(autonomy.level || "unknown");
+  const closedLoop = !!autonomy.closed_loop;
+  const levelClass = closedLoop
+    ? "badge good"
+    : level === "semi_autonomous"
+      ? "badge warn"
+      : "badge bad";
+  setClassText(
+    "autonomyLevel",
+    level.replaceAll("_", " "),
+    levelClass
+  );
+
+  const score = Number(autonomy.score);
+  setText(
+    "autonomyScore",
+    Number.isFinite(score) ? formatNumber(score * 100, 0) + "%" : "--"
+  );
+  setText(
+    "autonomySoak",
+    formatDuration(Number(autonomy.soak_runtime_s || 0))
+  );
+
+  const instrumented = !!autonomy.intervention_instrumented;
+  const manual = autonomy.manual_logistics_calls;
+  setText(
+    "autonomyManual",
+    instrumented && manual !== null && manual !== undefined
+      ? String(manual)
+      : "unknown"
+  );
+  setText(
+    "autonomyManualDetail",
+    instrumented
+      ? "committed harvest + item-transfer calls"
+      : "legacy run · executor counters unavailable"
+  );
+
+  const noFuel = Number(autonomy.no_fuel_entities || 0);
+  const noPower = Number(autonomy.no_power_entities || 0);
+  setText("autonomyStarved", noFuel + " / " + noPower);
+  setText(
+    "autonomySource",
+    String(autonomy.measurement_source || "physical evidence unavailable")
+  );
+
+  const topology = autonomy.topology || {};
+  const gates = [
+    ["Fuel distribution", "fuel_distribution"],
+    ["Electric distribution", "electric_distribution"],
+    ["Smelting logistics", "smelting_distribution"],
+    ["Plate output buffers", "smelting_output_distribution"],
+    ["Material producing", "producing_material"],
+    ["Zero manual logistics", "zero_manual_logistics"],
+    ["Fuel healthy", "healthy_fuel"],
+    ["Power healthy", "healthy_power"],
+    ["60s+ soak", "soak_long_enough"],
+  ];
+  const container = $("autonomyGates");
+  if (container) {
+    container.innerHTML = gates.map(([label, key]) => {
+      let value = !!topology[key];
+      let status = value ? "pass" : "fail";
+      let text = value ? "pass" : "fail";
+      if (key === "zero_manual_logistics" && !instrumented) {
+        status = "unknown";
+        text = "unknown";
+      }
+      return '<div class="autonomy-gate ' + status + '">'
+        + '<span>' + escapeHtml(label) + '</span>'
+        + '<b>' + text + '</b>'
+        + '</div>';
+    }).join("");
+  }
+}
+
+function renderWipHealth() {
+  const metrics = (state.research && state.research.metrics) || {};
+  const entities = Array.isArray(state.world && state.world.entities)
+    ? state.world.entities
+    : [];
+  const statusCounts = {};
+  for (const entity of entities) {
+    const key = String(entity.status || "unknown");
+    statusCounts[key] = (statusCounts[key] || 0) + 1;
+  }
+  const coalReserve = Number(
+    metrics.survival_coal_reserve
+      ?? metrics.coal_endogenous_stockpile
+      ?? 0
+  );
+  const coalSafety = Number(metrics.coal_safety_stock_target ?? 0);
+  const ironRate = productionRate("iron-ore") + productionRate("iron-plate");
+  const copperRate = productionRate("copper-ore") + productionRate("copper-plate");
+  const circuitCounterexample = metrics.electronic_circuit_counterexample || {};
+  const ironBuffer = Number(
+    circuitCounterexample.circuit_iron_ore
+      ?? circuitCounterexample.circuit_iron
+      ?? 0
+  );
+  const copperBuffer = Number(
+    circuitCounterexample.circuit_copper_ore
+      ?? circuitCounterexample.circuit_copper_buffer_before
+      ?? 0
+  );
+  const noFuel = Number(statusCounts.no_fuel || 0);
+  const noPower = Number(statusCounts.no_power || 0)
+    + Number(statusCounts.low_power || 0)
+    + Number(statusCounts.not_plugged_in_electric_network || 0)
+    + Number(statusCounts.not_connected || 0);
+  const cells = [
+    {
+      label: "Coal reserve",
+      value: formatNumber(coalReserve, 0) + " / " + formatNumber(coalSafety, 0),
+      detail: "reserve / safety stock",
+      cls: coalSafety > 0 && coalReserve < coalSafety ? "bad" : coalReserve ? "good" : "warn",
+    },
+    {
+      label: "Iron flow",
+      value: formatNumber(ironRate, 1) + "/min",
+      detail: "ore + plate live flow",
+      cls: ironRate > 0 ? "good" : "warn",
+    },
+    {
+      label: "Copper flow",
+      value: formatNumber(copperRate, 1) + "/min",
+      detail: "ore + plate live flow",
+      cls: copperRate > 0 ? "good" : "warn",
+    },
+    {
+      label: "Circuit feed",
+      value: "Fe " + formatNumber(ironBuffer, 0)
+        + " · Cu " + formatNumber(copperBuffer, 0),
+      detail: "latest typed counterexample buffers",
+      cls: ironBuffer > 0 && copperBuffer > 0 ? "good" : "bad",
+    },
+    {
+      label: "No fuel",
+      value: String(noFuel),
+      detail: "entities physically starved",
+      cls: noFuel ? "bad" : "good",
+    },
+    {
+      label: "No power",
+      value: String(noPower),
+      detail: "entities without electric supply",
+      cls: noPower ? "bad" : "good",
+    },
+  ];
+  const container = $("wipGrid");
+  if (container) {
+    container.innerHTML = cells.map((cell) =>
+      '<div class="wip-cell ' + cell.cls + '">'
+        + '<strong>' + escapeHtml(cell.label) + '</strong>'
+        + '<span>' + escapeHtml(cell.value) + '</span>'
+        + '<small>' + escapeHtml(cell.detail) + '</small>'
+        + '</div>'
+    ).join("");
+  }
+  const unhealthy = cells.filter((cell) => cell.cls === "bad").length;
+  setClassText(
+    "wipStatus",
+    unhealthy ? unhealthy + " constraint" + (unhealthy === 1 ? "" : "s") : "healthy",
+    unhealthy ? "badge warn" : "badge good"
+  );
+}
+
+function renderModelMatrix() {
+  const datasets = state.datasets || {};
+  const recurrent = datasets.recurrent_world_model || {};
+  const spatial = datasets.spatial_policy || {};
+  const knowledge = state.knowledge || {};
+  const gru = (recurrent.candidates && recurrent.candidates.gru) || {};
+  const esn = (recurrent.baselines && recurrent.baselines.echo_state_network) || {};
+  const holdout = recurrent.generation_holdout || {};
+  const attention = (spatial.candidates && spatial.candidates.attention) || {};
+  const mlp = (spatial.baselines && spatial.baselines.mlp) || {};
+  const verified = Number(knowledge.verified_count || 0);
+  const fallback = Number(knowledge.fallback_count || 0);
+  const audited = verified + fallback;
+  const rows = [
+    {
+      model: "GRU world",
+      score: Number.isFinite(Number(holdout.mean_validation_mse))
+        ? formatNumber(holdout.mean_validation_mse, 3) + " MSE"
+        : "--",
+      baseline: Number.isFinite(Number(holdout.mean_persistence_mse))
+        ? formatNumber(holdout.mean_persistence_mse, 3) + " persistence"
+        : "--",
+      gate: recurrent.usable ? "control eligible" : "holdout rejected",
+      cls: recurrent.usable ? "good" : "warn",
+    },
+    {
+      model: "ESN world",
+      score: Number.isFinite(Number(esn.validation_mse))
+        ? formatNumber(esn.validation_mse, 3) + " MSE"
+        : "--",
+      baseline: Number.isFinite(Number(esn.persistence_baseline_mse))
+        ? formatNumber(esn.persistence_baseline_mse, 3) + " persistence"
+        : "--",
+      gate: esn.beats_persistence ? "baseline pass" : "baseline fail",
+      cls: esn.beats_persistence ? "good" : "bad",
+    },
+    {
+      model: "Spatial MLP",
+      score: Number.isFinite(Number(mlp.mean_cost_ratio_to_astar))
+        ? formatNumber(mlp.mean_cost_ratio_to_astar, 3) + "× A*"
+        : "--",
+      baseline: formatNumber(Number(mlp.rollout_success_rate || 0) * 100, 0)
+        + "% rollout",
+      gate: spatial.control_eligible
+        ? "control"
+        : spatial.usable ? "proposal" : "advisory",
+      cls: spatial.control_eligible ? "good" : spatial.usable ? "warn" : "bad",
+    },
+    {
+      model: "Attention",
+      score: Number.isFinite(Number(attention.mean_cost_ratio_to_astar))
+        ? formatNumber(attention.mean_cost_ratio_to_astar, 3) + "× A*"
+        : "--",
+      baseline: Number.isFinite(Number(attention.validation_accuracy))
+        ? formatNumber(attention.validation_accuracy * 100, 1) + "% accuracy"
+        : "--",
+      gate: attention.control_eligible ? "control" : "challenger",
+      cls: attention.control_eligible ? "good" : "warn",
+    },
+    {
+      model: "Qwen knowledge",
+      score: audited
+        ? formatNumber((verified / audited) * 100, 1) + "% verified"
+        : "--",
+      baseline: audited
+        ? verified + " verified / " + fallback + " fallback"
+        : Number(knowledge.count || 0) + " legacy",
+      gate: audited && verified / audited >= 0.70 ? "verified" : "grounding",
+      cls: audited && verified / audited >= 0.70 ? "good" : "warn",
+    },
+  ];
+  const container = $("modelMatrix");
+  if (!container) return;
+  container.innerHTML =
+    '<div class="model-matrix-row header"><span>model</span><span>score</span><span>baseline</span><span>gate</span></div>'
+    + rows.map((row) =>
+      '<div class="model-matrix-row">'
+        + '<strong>' + escapeHtml(row.model) + '</strong>'
+        + '<span>' + escapeHtml(row.score) + '</span>'
+        + '<span>' + escapeHtml(row.baseline) + '</span>'
+        + '<b class="model-gate ' + row.cls + '">' + escapeHtml(row.gate) + '</b>'
+        + '</div>'
+    ).join("");
+}
+
+function renderResearchAnalytics() {
+  drawGenerationTrends();
+  renderProductionDag();
+  renderAutonomy();
+  renderWipHealth();
+  renderModelMatrix();
 }
 
 
@@ -1459,19 +2335,53 @@ function renderTruthTable() {
   ) || {};
   const champion = evolution.champion || null;
   const challenger = evolution.challenger || null;
+  const validatedChampion = (
+    state.evolution && state.evolution.validated_champion
+  ) || null;
   setClassText(
     "truthEvolution",
-    champion
-      ? "G" + String(champion.generation || "?") + " champion"
-      : challenger
-        ? "G" + String(evolution.generation || "?") + " evaluating"
-        : "no champion",
-    champion ? "good" : challenger ? "warn" : "muted"
+    validatedChampion
+      ? "G" + String(validatedChampion.generation || "?")
+        + " open-play validated"
+      : champion
+        ? "G" + String(champion.generation || "?")
+          + " lab champion · autonomy unvalidated"
+        : challenger
+          ? "G" + String(evolution.generation || "?") + " evaluating"
+          : "no champion",
+    validatedChampion ? "good" : champion || challenger ? "warn" : "muted"
   );
+  const progression = state.progression || {};
+  const technologyMode = String(progression.technology_mode || "unknown");
+  const validatedCapabilities = Array.isArray(progression.validated_achieved)
+    ? progression.validated_achieved.length
+    : 0;
+  const planningAssumptions = Array.isArray(progression.planning_assumptions)
+    ? progression.planning_assumptions.length
+    : 0;
   setClassText(
     "truthTechTree",
-    "benchmark pre-unlocked",
-    "warn"
+    technologyMode === "factorio_2_real_triggers"
+      ? "open-play · real tech tree · " + validatedCapabilities + " validated"
+      : technologyMode === "pre_unlocked"
+        ? "lab · " + validatedCapabilities + " validated · "
+          + planningAssumptions + " planning assumptions"
+        : technologyMode,
+    technologyMode === "factorio_2_real_triggers" ? "good" : "warn"
+  );
+
+  const autonomyState = state.autonomy || {};
+  const autonomyLevel = String(autonomyState.level || "unknown");
+  const autonomyInstrumented = !!autonomyState.intervention_instrumented;
+  setClassText(
+    "truthAutonomy",
+    autonomyState.closed_loop
+      ? "closed-loop validated"
+      : autonomyLevel.replaceAll("_", " ")
+        + (autonomyInstrumented ? "" : " · legacy intervention unknown"),
+    autonomyState.closed_loop
+      ? "good"
+      : autonomyLevel === "semi_autonomous" ? "warn" : "bad"
   );
 
   setClassText(
@@ -1482,17 +2392,87 @@ function renderTruthTable() {
   );
 
   const neuralStatus = capabilities.neural_policy && capabilities.neural_policy.status;
-  const worldModelStatus = capabilities.world_model && capabilities.world_model.status;
-  setClassText(
-    "truthNeural",
-    neuralStatus || "not trained",
-    neuralStatus === "trained" ? "good" : "muted"
-  );
-  setClassText(
-    "truthWorldModel",
-    worldModelStatus || "explicit only",
-    worldModelStatus === "trained" ? "good" : "muted"
-  );
+  const spatialPolicy = datasets.spatial_policy || null;
+  const recurrentModel = datasets.recurrent_world_model || null;
+  const telemetrySamples = Number(datasets.telemetry_samples || 0);
+  if (spatialPolicy) {
+    const active = String(spatialPolicy.active_model || "none");
+    const usable = !!spatialPolicy.usable;
+    const controlEligible = !!spatialPolicy.control_eligible;
+    const attention = (
+      spatialPolicy.candidates
+      && spatialPolicy.candidates.attention
+    ) || null;
+    const cost = Number(
+      (attention && attention.mean_cost_ratio_to_astar)
+      ?? spatialPolicy.mean_cost_ratio_to_astar
+      ?? 0
+    );
+    const success = Number(
+      (attention && attention.rollout_success_rate)
+      ?? spatialPolicy.rollout_success_rate
+      ?? 0
+    );
+    setClassText(
+      "truthNeural",
+      (controlEligible
+        ? active + " · control eligible"
+        : usable
+          ? active + " · proposal eligible"
+          : "trained · advisory only")
+        + " · rollout " + formatNumber(success * 100, 0) + "%"
+        + " · cost " + formatNumber(cost, 3) + "× A*",
+      controlEligible ? "good" : usable ? "warn" : "muted"
+    );
+  } else {
+    setClassText(
+      "truthNeural",
+      neuralStatus || "not trained",
+      neuralStatus === "trained" ? "good" : "muted"
+    );
+  }
+
+  if (recurrentModel) {
+    const usable = !!recurrentModel.usable;
+    const active = String(recurrentModel.active_model || "none");
+    const holdout = recurrentModel.generation_holdout || {};
+    const gru = (
+      recurrentModel.candidates
+      && recurrentModel.candidates.gru
+    ) || {};
+    const wins = Number(holdout.wins || 0);
+    const folds = Number(holdout.valid_folds || 0);
+    const mse = Number(
+      holdout.mean_validation_mse
+      ?? gru.validation_mse
+      ?? 0
+    );
+    const baseline = Number(
+      holdout.mean_persistence_mse
+      ?? gru.persistence_baseline_mse
+      ?? 0
+    );
+    const samples = Number(recurrentModel.sample_count || telemetrySamples);
+    setClassText(
+      "truthWorldModel",
+      (usable
+        ? active + " · cross-generation accepted"
+        : gru.validation_mse !== undefined
+          ? "GRU · holdout rejected"
+          : "collecting")
+        + " · " + samples + " samples"
+        + (folds ? " · " + wins + "/" + folds + " generation wins" : "")
+        + (mse ? " · mse " + formatNumber(mse, 3)
+          + " vs " + formatNumber(baseline, 3) : ""),
+      usable ? "good" : "warn"
+    );
+  } else {
+    setClassText(
+      "truthWorldModel",
+      telemetrySamples + " temporal samples · collecting",
+      telemetrySamples >= 24 ? "warn" : "muted"
+    );
+  }
 }
 
 function updateMission() {
@@ -1647,7 +2627,9 @@ function updateKpis() {
     ? Math.max(0, (Date.now() - updatedAt) / 1000)
     : null;
   const researchStatus = String(research.status || "idle");
+  const runnerPhase = String(runner.phase || "");
   const runnerStalled = !!runner.active
+    && runnerPhase === "lab_generation"
     && ["running", "learning", "validating"].includes(researchStatus)
     && researchAgeS !== null
     && researchAgeS > 45;
@@ -1664,7 +2646,13 @@ function updateKpis() {
   const loopLabel = runnerStalled
     ? "stalled"
     : runner.active
-      ? "active"
+      ? runnerPhase === "model_training"
+        ? "model training"
+        : runnerPhase === "open_play_validation"
+          ? "open-play validation"
+          : runnerPhase === "selection_transition"
+            ? "selection / transition"
+            : "generation active"
       : generationRejected
         ? "generation rejected"
         : generationDone
@@ -1682,8 +2670,14 @@ function updateKpis() {
     runnerStalled
       ? "process active · no state update for " + formatNumber(researchAgeS, 0) + " s"
       : runner.active
-        ? (research.stage || "working") + " · updated "
-          + (researchAgeS === null ? "--" : formatNumber(researchAgeS, 0) + " s") + " ago"
+        ? runnerPhase === "model_training"
+          ? "generation closed · ESN/GRU holdout training and model selection"
+          : runnerPhase === "open_play_validation"
+            ? "champion transfer test · empty inventory + real technology tree"
+            : runnerPhase === "selection_transition"
+              ? "selection closed · preparing next arena/strategy"
+              : (research.stage || "working") + " · updated "
+                + (researchAgeS === null ? "--" : formatNumber(researchAgeS, 0) + " s") + " ago"
         : generationRejected
           ? "challenger failed survival gate · incumbent retained · next: "
             + String(research.next_action || "--")
@@ -1747,16 +2741,36 @@ function updateKpis() {
     .filter(Number.isFinite);
   const simulating = recentTicks.length >= 2
     && new Set(recentTicks).size > 1;
+  const execution = status.execution || {};
+  const activeAction = execution.action || {};
+  const actionKind = String(activeAction.action_kind || "action");
+  const actionStage = String(activeAction.stage || "");
   const factorioLabel = !factorio.connected
     ? "Factorio offline"
-    : simulating
-      ? "Factorio · simulating"
-      : "Factorio · paused between actions";
+    : execution.action_active
+      ? "Factorio · executing " + actionKind
+      : execution.writer_active
+        ? "Factorio · between actions"
+        : simulating
+          ? "Factorio · simulating"
+          : "Factorio · idle";
   setClassText(
     "factorioStatus",
     factorioLabel,
     factorio.connected ? "hud-chip good" : "hud-chip bad"
   );
+  const factorioStatusNode = $("factorioStatus");
+  if (factorioStatusNode) {
+    factorioStatusNode.title = execution.action_active
+      ? [
+          actionStage || "active stage",
+          activeAction.action_id || "",
+          formatNumber(activeAction.elapsed_s || 0, 1) + " s",
+        ].filter(Boolean).join(" · ")
+      : execution.writer_active
+        ? "experimental writer owns the Factorio world lease"
+        : "no experimental writer owns the Factorio world";
+  }
   setClassText("llmStatus", llm.connected ? "Qwen inference" : "offline", llm.connected ? "good" : "bad");
   setText(
     "llmDetail",
@@ -1796,6 +2810,8 @@ function applyPayload(payload) {
   if (payload.run) state.run = payload.run;
   if (payload.research) state.research = payload.research;
   if (payload.progression) state.progression = payload.progression;
+  if (payload.production_plan) state.productionPlan = payload.production_plan;
+  if (payload.autonomy) state.autonomy = payload.autonomy;
   if (payload.resource_overview) state.resourceOverview = payload.resource_overview;
   if (payload.evolution) state.evolution = payload.evolution;
   if (payload.knowledge) state.knowledge = payload.knowledge;
@@ -1808,6 +2824,8 @@ function applyPayload(payload) {
   renderResourceLegend();
   renderCapabilityHealth();
   renderEvolution();
+  renderResearchCockpit();
+  renderResearchAnalytics();
   renderCurriculum();
   renderTimeline();
   renderKnowledge();
@@ -1815,6 +2833,7 @@ function applyPayload(payload) {
   drawOfflineLearning();
   drawOnlineLearning();
   drawHistory();
+  drawGenerationTrends();
   refreshWorldFrame();
 }
 
@@ -1836,6 +2855,8 @@ async function loadInitialState() {
     "/api/run",
     "/api/research",
     "/api/progression",
+    "/api/production-plan",
+    "/api/autonomy",
     "/api/resource-overview",
     "/api/evolution",
     "/api/knowledge",
@@ -1851,10 +2872,12 @@ async function loadInitialState() {
     run: payloads[4],
     research: payloads[5],
     progression: payloads[6],
-    resource_overview: payloads[7],
-    evolution: payloads[8],
-    knowledge: payloads[9],
-    datasets: payloads[10],
+    production_plan: payloads[7],
+    autonomy: payloads[8],
+    resource_overview: payloads[9],
+    evolution: payloads[10],
+    knowledge: payloads[11],
+    datasets: payloads[12],
   });
 }
 

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Mapping
 
 
 class TileKind(StrEnum):
@@ -17,7 +17,7 @@ class GridPoint:
     x: int
     y: int
 
-    def manhattan(self, other: "GridPoint") -> int:
+    def manhattan(self, other: GridPoint) -> int:
         return abs(self.x - other.x) + abs(self.y - other.y)
 
 

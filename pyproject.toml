@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "factorio-ai-lab"
-version = "0.8.0"
+version = "0.9.0"
 description = "Laboratório híbrido de IA/ML para planejamento, aprendizado e otimização em Factorio."
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
@@ -16,7 +16,7 @@ dependencies = []
 fle = ["factorio-learning-environment==0.4.3", "a2a-sdk>=0.3.26,<1"]
 fle-cluster = ["factorio-learning-environment[cluster]==0.4.3", "a2a-sdk>=0.3.26,<1"]
 fle-env = ["factorio-learning-environment[env]==0.4.3", "a2a-sdk>=0.3.26,<1"]
-ml = ["numpy>=2.0", "torch>=2.5", "gymnasium>=1.0"]
+ml = ["numpy>=2.0", "scipy>=1.15", "scikit-learn>=1.7", "pandas>=2.2", "torch>=2.7", "keras>=3.10", "gymnasium>=1.0"]
 optim = ["networkx>=3.3", "highspy>=1.9"]
 observability = ["mlflow>=3.0", "prometheus-client>=0.21"]
 dashboard = ["fastapi>=0.115", "uvicorn[standard]>=0.34"]

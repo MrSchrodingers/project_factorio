@@ -37,11 +37,15 @@ class ScalarizationWeights:
     milestones: float = 0.25
 
 
+DEFAULT_REFERENCE_SCALE = ReferenceScale()
+DEFAULT_SCALARIZATION_WEIGHTS = ScalarizationWeights()
+
+
 def scalar_score(
     value: ObjectiveVector,
     *,
-    scale: ReferenceScale = ReferenceScale(),
-    weights: ScalarizationWeights = ScalarizationWeights(),
+    scale: ReferenceScale = DEFAULT_REFERENCE_SCALE,
+    weights: ScalarizationWeights = DEFAULT_SCALARIZATION_WEIGHTS,
 ) -> float:
     """Score auxiliar; a avaliação deve preservar também o vetor e a fronteira de Pareto."""
     if min(scale.throughput, scale.material_cost, scale.area, scale.energy, scale.route_length) <= 0:

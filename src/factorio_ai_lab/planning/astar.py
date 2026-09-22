@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from heapq import heappop, heappush
 from itertools import count
 from math import inf
-from typing import Callable, Iterable
 
 from factorio_ai_lab.domain.state import GridPoint
 
@@ -25,6 +25,7 @@ class RouteResult:
 
 Direction = tuple[int, int]
 CARDINAL: tuple[Direction, ...] = ((1, 0), (-1, 0), (0, 1), (0, -1))
+DEFAULT_ROUTING_WEIGHTS = RoutingWeights()
 
 
 def weighted_astar(
@@ -33,7 +34,7 @@ def weighted_astar(
     *,
     is_blocked: Callable[[GridPoint], bool],
     in_bounds: Callable[[GridPoint], bool],
-    weights: RoutingWeights = RoutingWeights(),
+    weights: RoutingWeights = DEFAULT_ROUTING_WEIGHTS,
     extra_cost: Callable[[GridPoint], float] | None = None,
 ) -> RouteResult | None:
     """A* em grade 4-conexa com penalidade de curvas e custos contextuais."""

@@ -204,3 +204,40 @@ A rota é acessível apenas dentro da tailnet. Para removê-la:
 - sweep A*: turn penalty versus custo da busca;
 - memória de conhecimento;
 - configuração de planner, learner e LLM.
+
+## v0.9 research analytics
+
+The dashboard separates operational state from scientific evidence.
+
+- Generation Health shows the active generation, incumbent, stage completion, route delta and
+  open-play status.
+- Research Summary keeps the previous closed generation visible while the next arena runs.
+- Generational Metrics plots route cost, capability count and failed-stage count separately.
+- Production DAG renders the rate-balanced recipe plan for the active frontier, falling back to
+  the latest lab generation while open-play is active.
+- WIP / Safety Stock shows material reserve, starvation and typed counterexample buffers.
+- Model Evaluation Matrix compares learned models against explicit baselines and shows advisory,
+  proposal or control eligibility.
+- Knowledge quality reports LLM-verified lessons versus deterministic fallbacks.
+
+The Research Loop KPI distinguishes lab generation, model training, selection transition and
+open-play validation; neural training after a closed curriculum must not appear idle.
+
+## Physical autonomy panel
+
+The AUTONOMY / SURVIVAL panel is grounded in live Factorio entities,
+LuaFlowStatistics, and the instrumented transactional executor.
+
+It displays:
+
+- autonomy level and score;
+- zero-intervention soak duration;
+- committed manual logistics calls after bootstrap;
+- entities without fuel or power;
+- physical gates for fuel distribution, electric distribution and smelting logistics;
+- whether coal, iron and copper chains are live;
+- whether intervention counters are instrumented or unavailable for a legacy run.
+
+CAPABILITY SURVIVAL uses commissioned for previously demonstrated capability and
+autonomous only when current physical evidence supports it. A lab champion is shown
+separately from an open-play validated champion.

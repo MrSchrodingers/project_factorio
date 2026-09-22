@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
 
@@ -17,15 +17,27 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 state = DashboardState()
 
 
+async def _telemetry_loop() -> None:
+    while True:
+        await asyncio.to_thread(state.record_telemetry)
+        await asyncio.sleep(2.0)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    yield
-    state.close()
+    telemetry_task = asyncio.create_task(_telemetry_loop())
+    try:
+        yield
+    finally:
+        telemetry_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await telemetry_task
+        state.close()
 
 
 app = FastAPI(
     title="Factorio AI Lab Dashboard",
-    version="0.6.1",
+    version="0.9.0",
     lifespan=lifespan,
 )
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -76,6 +88,20 @@ async def api_production(precision: str = "1m") -> dict[str, Any]:
         raise HTTPException(400, str(exc)) from exc
 
 
+@app.get("/api/autonomy")
+async def api_autonomy() -> dict[str, Any]:
+    world = await asyncio.to_thread(state.factorio.snapshot)
+    production = await asyncio.to_thread(
+        state.factorio.production_statistics,
+        "5s",
+    )
+    return state.autonomy_data(
+        world=world,
+        research=state.research_data(),
+        production=production,
+    )
+
+
 @app.get("/api/learning")
 def api_learning() -> dict[str, Any]:
     return state.learning_data()
@@ -99,6 +125,11 @@ async def api_progression() -> dict[str, Any]:
         world=world,
         research=research,
     )
+
+
+@app.get("/api/production-plan")
+async def production_plan() -> dict:
+    return state.production_plan_data()
 
 
 @app.get("/api/resource-overview")

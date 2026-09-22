@@ -14,14 +14,25 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from factorio_ai_lab.dashboard.rendering import WorldFrameRenderer
+from factorio_ai_lab.learning.autonomy import evaluate_factory_autonomy
+from factorio_ai_lab.learning.telemetry import (
+    append_jsonl as append_telemetry_jsonl,
+)
+from factorio_ai_lab.learning.telemetry import compact_telemetry_sample
+from factorio_ai_lab.planning.factorio_catalog import (
+    EARLY_GAME_PRODUCTION_PLANNER,
+    FACTORIO_DATA_VERSION,
+)
 from factorio_ai_lab.planning.progression import (
     DEFAULT_ENGINEERING_PLANNER,
     EngineeringState,
 )
+from factorio_ai_lab.runtime import runtime_status
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 RUNS_DIR = PROJECT_ROOT / "runs"
 RUNTIME_CONFIG = RUNS_DIR / "runtime_config.json"
+TELEMETRY_LOG = RUNS_DIR / "telemetry" / "world_samples.jsonl"
 
 
 DEFAULT_RUNTIME_CONFIG: dict[str, Any] = {
@@ -284,10 +295,37 @@ if not p then
   return
 end
 local s=p.surface
-local radius=42
+local min_x=p.position.x
+local max_x=p.position.x
+local min_y=p.position.y
+local max_y=p.position.y
+for _,e in pairs(s.find_entities_filtered{force=p.force}) do
+  if e.valid then
+    min_x=math.min(min_x,e.position.x)
+    max_x=math.max(max_x,e.position.x)
+    min_y=math.min(min_y,e.position.y)
+    max_y=math.max(max_y,e.position.y)
+  end
+end
+local margin=18
+local left=min_x-margin
+local right=max_x+margin
+local top=min_y-margin
+local bottom=max_y+margin
+local max_span=220
+if right-left>max_span then
+  local cx=(left+right)/2
+  left=cx-max_span/2
+  right=cx+max_span/2
+end
+if bottom-top>max_span then
+  local cy=(top+bottom)/2
+  top=cy-max_span/2
+  bottom=cy+max_span/2
+end
 local area={
-  left_top={x=p.position.x-radius,y=p.position.y-radius},
-  right_bottom={x=p.position.x+radius,y=p.position.y+radius}
+  left_top={x=left,y=top},
+  right_bottom={x=right,y=bottom}
 }
 local resources={}
 for _,e in pairs(s.find_entities_filtered{area=area,type="resource"}) do
@@ -312,24 +350,69 @@ for _,kind in pairs(natural_types) do
     end
   end
 end
-local water={}
-local water_names={
+local terrain_names={
   "water","deepwater","water-green","deepwater-green",
-  "water-shallow","water-mud"
+  "water-shallow","water-mud",
+  "stone-path","concrete","refined-concrete",
+  "hazard-concrete-left","hazard-concrete-right",
+  "refined-hazard-concrete-left","refined-hazard-concrete-right"
 }
-for _,tile in pairs(s.find_tiles_filtered{area=area,name=water_names}) do
-  table.insert(water,{x=tile.position.x,y=tile.position.y})
+local terrain_rows={}
+local terrain_tile_count=0
+local water_tile_count=0
+for _,tile in pairs(s.find_tiles_filtered{area=area,name=terrain_names}) do
+  terrain_tile_count=terrain_tile_count+1
+  if string.find(tile.name,"water",1,true) then
+    water_tile_count=water_tile_count+1
+  end
+  local y=tile.position.y
+  local key=tile.name..":"..tostring(y)
+  local row=terrain_rows[key]
+  if not row then
+    row={name=tile.name,y=y,xs={}}
+    terrain_rows[key]=row
+  end
+  row.xs[#row.xs+1]=tile.position.x
+end
+local terrain_runs={}
+for _,row in pairs(terrain_rows) do
+  table.sort(row.xs)
+  local first=nil
+  local previous=nil
+  for _,x in ipairs(row.xs) do
+    if first==nil then
+      first=x
+      previous=x
+    elseif x==previous+1 then
+      previous=x
+    else
+      terrain_runs[#terrain_runs+1]={
+        name=row.name,y=row.y,x1=first,x2=previous
+      }
+      first=x
+      previous=x
+    end
+  end
+  if first~=nil then
+    terrain_runs[#terrain_runs+1]={
+      name=row.name,y=row.y,x1=first,x2=previous
+    }
+  end
 end
 rcon.print(helpers.table_to_json({
   connected=true,
   center={x=p.position.x,y=p.position.y},
-  radius=radius,
+  bounds={
+    left_top={x=left,y=top},
+    right_bottom={x=right,y=bottom}
+  },
   resources=resources,
   natural=natural,
-  water_tiles=water
+  terrain_runs=terrain_runs,
+  terrain_tile_count=terrain_tile_count,
+  water_tile_count=water_tile_count
 }))
 """
-
     _RESOURCE_OVERVIEW_COMMAND = r"""
 /c local p=storage.agent_characters and storage.agent_characters[1]
 if not p then
@@ -503,7 +586,9 @@ rcon.print(helpers.table_to_json({
                     "connected": False,
                     "resources": [],
                     "natural": [],
-                    "water_tiles": [],
+                    "terrain_runs": [],
+                    "terrain_tile_count": 0,
+                    "water_tile_count": 0,
                     "error": f"{type(exc).__name__}: {exc}",
                 }
 
@@ -720,6 +805,9 @@ class DashboardState:
         self.renderer = WorldFrameRenderer()
         self.history: deque[dict[str, Any]] = deque(maxlen=600)
         self.history_lock = threading.Lock()
+        self._last_telemetry_write = 0.0
+        self._frame_cache: dict[str, tuple[float, bytes]] = {}
+        self._frame_cache_lock = threading.Lock()
 
     def close(self) -> None:
         self.factorio.close()
@@ -750,28 +838,108 @@ class DashboardState:
             }
 
     def _research_runner_status(self) -> dict[str, Any]:
+        execution = runtime_status()
+        if execution.get("writer_active"):
+            action = execution.get("action", {})
+            action = action if isinstance(action, dict) else {}
+            lease = execution.get("lease", {})
+            lease = lease if isinstance(lease, dict) else {}
+            arena = str(
+                action.get("arena")
+                or lease.get("arena")
+                or "factorio"
+            )
+            phase = (
+                "open_play_validation"
+                if arena == "open_play"
+                else "lab_generation"
+                if arena == "lab_play"
+                else "factorio_execution"
+            )
+            return {
+                "active": True,
+                "process": str(
+                    lease.get("owner")
+                    or action.get("owner")
+                    or "factorio_world_writer"
+                ),
+                "arena": arena,
+                "phase": phase,
+                "model_training": False,
+                "heartbeat": {
+                    "action_active": execution.get("action_active", False),
+                    "heartbeat_age_s": execution.get("heartbeat_age_s"),
+                    "action_id": action.get("action_id"),
+                    "action_kind": action.get("action_kind"),
+                    "stage": action.get("stage"),
+                    "elapsed_s": action.get("elapsed_s"),
+                },
+            }
+
+        evolution_loop_active = _process_running(
+            "factorio_ai_lab.experiments.evolution_loop"
+        )
         open_play_active = _process_running(
             "factorio_ai_lab.experiments.open_play_runner"
         )
         curriculum_active = _process_running(
             "factorio_ai_lab.experiments.curriculum_runner"
         )
+        model_training_active = (
+            _process_running(
+                "factorio_ai_lab.experiments.train_recurrent_world_model"
+            )
+            or _process_running(
+                "factorio_ai_lab.experiments.train_spatial_policy"
+            )
+        )
+
+        if evolution_loop_active:
+            if model_training_active:
+                phase = "model_training"
+            elif open_play_active:
+                phase = "open_play_validation"
+            else:
+                research = self.research_data()
+                research_status = str(research.get("status", ""))
+                if research_status in {
+                    "starting",
+                    "running",
+                    "learning",
+                    "validating",
+                }:
+                    phase = "lab_generation"
+                else:
+                    phase = "selection_transition"
+            return {
+                "active": True,
+                "process": "evolution_loop",
+                "arena": "continuous_evolution",
+                "phase": phase,
+                "model_training": model_training_active,
+            }
         if open_play_active:
             return {
                 "active": True,
                 "process": "open_play_runner",
                 "arena": "open_play",
+                "phase": "open_play_validation",
+                "model_training": False,
             }
         if curriculum_active:
             return {
                 "active": True,
                 "process": "curriculum_runner",
                 "arena": "lab_play",
+                "phase": "lab_generation",
+                "model_training": False,
             }
         return {
             "active": False,
             "process": None,
             "arena": None,
+            "phase": "idle",
+            "model_training": False,
         }
 
     def status(self) -> dict[str, Any]:
@@ -788,16 +956,55 @@ class DashboardState:
             "llm": self.llm_status(),
             "memory": _memory_status(),
             "runtime": self.config.read(),
+            "execution": runtime_status(),
             "render": self.renderer.status(),
             "research_runner": self._research_runner_status(),
         }
+
+    def record_telemetry(self) -> bool:
+        now = time.time()
+        if now - self._last_telemetry_write < 1.5:
+            return False
+        world = self.factorio.snapshot()
+        if not world.get("connected", False):
+            return False
+        research = self.research_data()
+        progression = self.engineering_progression_data(
+            world=world,
+            research=research,
+        )
+        production = self.factorio.production_statistics(
+            precision_key="5s",
+            max_age_s=2.5,
+        )
+        execution = runtime_status()
+        sample = compact_telemetry_sample(
+            timestamp=now,
+            world=world,
+            research=research,
+            progression=progression,
+            production=production,
+            action_context=execution.get("action", {}),
+        )
+        append_telemetry_jsonl(TELEMETRY_LOG, sample)
+        self._last_telemetry_write = now
+        return True
 
     def sample(self) -> dict[str, Any]:
         world = self.factorio.snapshot()
         research = self.research_data()
         resource_overview = self.factorio.resource_overview()
+        progression = self.engineering_progression_data(
+            world=world,
+            research=research,
+        )
+        production = self.factorio.production_statistics(
+            precision_key="5s",
+            max_age_s=2.5,
+        )
+        now = time.time()
         point = {
-            "timestamp": time.time(),
+            "timestamp": now,
             "tick": world.get("tick"),
             "entity_count": world.get("entity_count", 0),
             "probe_latency_ms": world.get("latency_ms", 0.0),
@@ -805,6 +1012,23 @@ class DashboardState:
         }
         with self.history_lock:
             self.history.append(point)
+
+        if (
+            world.get("connected", False)
+            and now - self._last_telemetry_write >= 1.5
+        ):
+            execution = runtime_status()
+            sample = compact_telemetry_sample(
+                timestamp=now,
+                world=world,
+                research=research,
+                progression=progression,
+                production=production,
+                action_context=execution.get("action", {}),
+            )
+            append_telemetry_jsonl(TELEMETRY_LOG, sample)
+            self._last_telemetry_write = now
+
         return {
             "timestamp": point["timestamp"],
             "status": self.status(),
@@ -813,15 +1037,110 @@ class DashboardState:
             "learning": self.learning_data(),
             "run": self.active_run_data(),
             "research": research,
-            "progression": self.engineering_progression_data(
+            "progression": progression,
+            "production_plan": self.production_plan_data(
+                research=research,
+                progression=progression,
+            ),
+            "autonomy": self.autonomy_data(
                 world=world,
                 research=research,
+                production=production,
             ),
             "resource_overview": resource_overview,
             "evolution": self.evolution_data(research=research),
             "knowledge": self.knowledge_data(),
             "datasets": self.dataset_data(),
         }
+
+    def autonomy_data(
+        self,
+        *,
+        world: dict[str, Any] | None = None,
+        research: dict[str, Any] | None = None,
+        production: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        world = world if world is not None else self.factorio.snapshot()
+        research = (
+            research
+            if research is not None
+            else self.research_data()
+        )
+        production = (
+            production
+            if production is not None
+            else self.factorio.production_statistics(
+                precision_key="5s",
+                max_age_s=2.5,
+            )
+        )
+
+        metrics = research.get("metrics", {})
+        if not isinstance(metrics, dict):
+            metrics = {}
+        intervention_state = metrics.get("interventions", {})
+        instrumented = isinstance(intervention_state, dict) and bool(
+            intervention_state
+        )
+
+        committed: dict[str, int] = {}
+        assisted_navigation = 0
+        soak_runtime = float(
+            metrics.get("autonomy_soak_runtime_s", 0.0) or 0.0
+        )
+        if instrumented:
+            candidate = (
+                intervention_state.get("autonomy_window_committed")
+                or intervention_state.get("post_bootstrap_committed")
+                or intervention_state.get("committed")
+                or {}
+            )
+            if isinstance(candidate, dict):
+                committed = {
+                    str(key): int(value or 0)
+                    for key, value in candidate.items()
+                    if isinstance(value, (int, float))
+                }
+            assisted_navigation = int(
+                intervention_state.get(
+                    "assisted_navigation_count",
+                    metrics.get(
+                        "assisted_navigation_count",
+                        0,
+                    ),
+                )
+                or 0
+            )
+
+        rates: dict[str, float] = {}
+        series = production.get("series", {})
+        if isinstance(series, dict):
+            for item, row in series.items():
+                if not isinstance(row, dict):
+                    continue
+                raw = row.get("produced_rate", 0.0)
+                if isinstance(raw, (int, float)) and float(raw) > 0:
+                    rates[str(item)] = float(raw) / 60.0
+
+        evidence = evaluate_factory_autonomy(
+            entities=world.get("entities", []),
+            interventions=committed,
+            production_rates_per_s=rates,
+            soak_runtime_s=soak_runtime,
+            assisted_navigation_count=assisted_navigation,
+        ).to_dict()
+        evidence["intervention_instrumented"] = instrumented
+        if not instrumented:
+            evidence["manual_harvest_calls"] = None
+            evidence["manual_transfer_calls"] = None
+            evidence["manual_logistics_calls"] = None
+            evidence["manual_craft_calls"] = None
+        evidence["measurement_source"] = (
+            "live Factorio entities + LuaFlowStatistics + instrumented executor"
+            if instrumented
+            else "live Factorio entities + LuaFlowStatistics; intervention history unavailable for legacy run"
+        )
+        return evidence
 
     def history_data(self) -> list[dict[str, Any]]:
         with self.history_lock:
@@ -873,6 +1192,24 @@ class DashboardState:
                 history = []
         history = history[-16:]
 
+        latest_report: dict[str, Any] | None = None
+        report_dir = RUNS_DIR / "generation_reports"
+        if report_dir.exists():
+            try:
+                report_candidates = sorted(
+                    report_dir.glob("generation-*.json"),
+                    key=lambda path: path.stat().st_mtime,
+                    reverse=True,
+                )
+                if report_candidates:
+                    loaded = json.loads(
+                        report_candidates[0].read_text(encoding="utf-8")
+                    )
+                    if isinstance(loaded, dict):
+                        latest_report = loaded
+            except (OSError, json.JSONDecodeError):
+                latest_report = None
+
         champion_path = RUNS_DIR / "evolution_champion.json"
         validated_path = RUNS_DIR / "open_play_validated_champion.json"
         champion: dict[str, Any] = {}
@@ -892,12 +1229,24 @@ class DashboardState:
             except (OSError, json.JSONDecodeError):
                 validated = {}
 
+        loop_state_path = RUNS_DIR / "evolution_loop_state.json"
+        loop_state: dict[str, Any] = {}
+        if loop_state_path.exists():
+            try:
+                loaded = json.loads(loop_state_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    loop_state = loaded
+            except (OSError, json.JSONDecodeError):
+                loop_state = {}
+
         if isinstance(current, dict) and current:
             payload = dict(current)
             if not payload.get("champion") and champion:
                 payload["champion"] = champion
             payload["validated_champion"] = validated or None
             payload["history"] = history
+            payload["continuous_loop"] = loop_state or None
+            payload["latest_report"] = latest_report
             return payload
 
         run = self.active_run_data()
@@ -909,6 +1258,8 @@ class DashboardState:
             "champion": champion or None,
             "validated_champion": validated or None,
             "history": history,
+            "continuous_loop": loop_state or None,
+            "latest_report": latest_report,
             "challenger": {
                 "run_id": run.get("run_id"),
                 "status": (
@@ -927,46 +1278,105 @@ class DashboardState:
         }
 
     def dataset_data(self) -> dict[str, Any]:
-        path = RUNS_DIR / "datasets" / "spatial_demonstrations.jsonl"
-        if not path.exists():
-            return {
-                "spatial_demonstrations": 0,
-                "training_ready": False,
-            }
-        try:
-            rows = [
-                json.loads(line)
-                for line in path.read_text().splitlines()
-                if line.strip()
-            ]
-        except (OSError, json.JSONDecodeError):
-            return {
-                "spatial_demonstrations": 0,
-                "training_ready": False,
-                "error": "invalid spatial demonstration dataset",
-            }
+        spatial_path = RUNS_DIR / "datasets" / "spatial_demonstrations.jsonl"
+        telemetry_path = RUNS_DIR / "telemetry" / "world_samples.jsonl"
+        model_metadata_path = RUNS_DIR / "models" / "recurrent_world_model.json"
+        spatial_model_path = RUNS_DIR / "models" / "spatial_policy.json"
+
+        rows: list[dict[str, Any]] = []
+        if spatial_path.exists():
+            try:
+                rows = [
+                    json.loads(line)
+                    for line in spatial_path.read_text().splitlines()
+                    if line.strip()
+                ]
+            except (OSError, json.JSONDecodeError):
+                rows = []
+
         accepted = sum(
             1
             for row in rows
             if isinstance(row, dict) and bool(row.get("accepted"))
         )
+
+        telemetry_samples = 0
+        if telemetry_path.exists():
+            try:
+                with telemetry_path.open(encoding="utf-8") as handle:
+                    telemetry_samples = sum(1 for line in handle if line.strip())
+            except OSError:
+                telemetry_samples = 0
+
+        recurrent_model: dict[str, Any] | None = None
+        spatial_policy: dict[str, Any] | None = None
+        if model_metadata_path.exists():
+            try:
+                loaded = json.loads(model_metadata_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    recurrent_model = loaded
+            except (OSError, json.JSONDecodeError):
+                recurrent_model = None
+        if spatial_model_path.exists():
+            try:
+                loaded = json.loads(spatial_model_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    spatial_policy = loaded
+            except (OSError, json.JSONDecodeError):
+                spatial_policy = None
+
         return {
             "spatial_demonstrations": len(rows),
             "accepted_demonstrations": accepted,
             "training_ready": len(rows) >= 250,
             "minimum_training_target": 250,
+            "telemetry_samples": telemetry_samples,
+            "recurrent_world_model": recurrent_model,
+            "spatial_policy": spatial_policy,
         }
 
     def knowledge_data(self, limit: int = 12) -> dict[str, Any]:
         path = RUNS_DIR / "knowledge.jsonl"
         if not path.exists():
-            return {"count": 0, "lessons": []}
+            return {
+                "count": 0,
+                "lessons": [],
+                "verified_count": 0,
+                "fallback_count": 0,
+                "verified_ratio": 0.0,
+            }
         try:
             lines = [line for line in path.read_text().splitlines() if line.strip()]
-            lessons = [json.loads(line) for line in lines[-limit:]]
+            records = [json.loads(line) for line in lines]
+            lessons = records[-limit:]
         except (OSError, json.JSONDecodeError):
             return {"count": 0, "lessons": [], "error": "invalid knowledge log"}
-        return {"count": len(lines), "lessons": lessons}
+
+        verified_count = sum(
+            1
+            for row in records
+            if isinstance(row, dict)
+            and row.get("source") == "llm_verified"
+            and bool((row.get("verification") or {}).get("verified", False))
+        )
+        fallback_count = sum(
+            1
+            for row in records
+            if isinstance(row, dict)
+            and row.get("source") == "deterministic_fallback"
+        )
+        auditable = verified_count + fallback_count
+        return {
+            "count": len(lines),
+            "lessons": lessons,
+            "verified_count": verified_count,
+            "fallback_count": fallback_count,
+            "verified_ratio": (
+                verified_count / auditable
+                if auditable
+                else 0.0
+            ),
+        }
 
     def engineering_progression_data(
         self,
@@ -984,11 +1394,31 @@ class DashboardState:
         if not isinstance(engineering, dict):
             engineering = {}
 
+        validated_source = engineering.get(
+            "validated_achieved",
+            engineering.get("achieved", []),
+        )
         achieved = {
             str(goal)
-            for goal in engineering.get("achieved", [])
+            for goal in validated_source
             if isinstance(goal, str)
         }
+        arena = research.get("arena", {})
+        arena = arena if isinstance(arena, dict) else {}
+        assumptions = {
+            str(goal)
+            for goal in engineering.get("planning_assumptions", [])
+            if isinstance(goal, str)
+        }
+        if (
+            arena.get("technology") == "pre_unlocked"
+            and not assumptions
+        ):
+            assumptions = {
+                "electronics_trigger",
+                "lab_bootstrap",
+                "lab_automation",
+            }
         production = world.get("production", {})
         outputs = (
             production.get("produced", production.get("output", {}))
@@ -1051,8 +1481,9 @@ class DashboardState:
             and float(value) > 0
         }
 
+        planning_achieved = achieved | assumptions
         state = EngineeringState(
-            achieved=frozenset(achieved),
+            achieved=frozenset(planning_achieved),
             item_rates=item_signals,
             entity_counts=entity_counts,
             researched=researched,
@@ -1083,6 +1514,10 @@ class DashboardState:
         ]
         return {
             "achieved": sorted(inferred),
+            "validated_achieved": sorted(achieved),
+            "planning_assumptions": sorted(assumptions),
+            "arena_mode": arena.get("mode"),
+            "technology_mode": arena.get("technology"),
             "next_goal": frontier[0] if frontier else None,
             "frontier": frontier,
             "dependency_debt": list(dependency_debt),
@@ -1090,18 +1525,112 @@ class DashboardState:
             "terminal": not frontier,
         }
 
+    def production_plan_data(
+        self,
+        *,
+        research: dict[str, Any] | None = None,
+        progression: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        research = research if research is not None else self.research_data()
+        progression = (
+            progression
+            if progression is not None
+            else self.engineering_progression_data(research=research)
+        )
+        plans = research.get("production_plans", {})
+        if isinstance(plans, dict) and plans:
+            key = next(reversed(plans))
+            plan = plans.get(key)
+            if isinstance(plan, dict):
+                return {
+                    "source": "validated_run_plan",
+                    "plan_id": key,
+                    **plan,
+                }
+
+        next_goal = progression.get("next_goal")
+        goal_id = (
+            str(next_goal.get("goal_id"))
+            if isinstance(next_goal, dict) and next_goal.get("goal_id")
+            else ""
+        )
+        targets = {
+            "assembler_gears": ("iron-gear-wheel", 0.20),
+            "automation_science": ("automation-science-pack", 0.10),
+            "electronic_circuits": ("electronic-circuit", 0.20),
+            "logistic_science": ("logistic-science-pack", 0.10),
+        }
+        target = targets.get(goal_id)
+        source = "frontier"
+        if target is None:
+            report_dir = RUNS_DIR / "generation_reports"
+            if report_dir.exists():
+                try:
+                    report_candidates = sorted(
+                        report_dir.glob("generation-*.json"),
+                        key=lambda path: path.stat().st_mtime,
+                        reverse=True,
+                    )
+                    if report_candidates:
+                        latest = json.loads(
+                            report_candidates[0].read_text(encoding="utf-8")
+                        )
+                        report_progression = latest.get(
+                            "engineering_progression",
+                            {},
+                        )
+                        report_goal = report_progression.get("next_goal")
+                        if isinstance(report_goal, dict):
+                            report_goal_id = str(
+                                report_goal.get("goal_id") or ""
+                            )
+                            report_target = targets.get(report_goal_id)
+                            if report_target is not None:
+                                goal_id = report_goal_id
+                                next_goal = report_goal
+                                target = report_target
+                                source = "latest_lab_generation"
+                except (OSError, json.JSONDecodeError):
+                    pass
+        if target is None:
+            return {
+                "source": source,
+                "goal_id": goal_id or None,
+                "factorio_data_version": FACTORIO_DATA_VERSION,
+                "dag": None,
+            }
+        item, target_rate = target
+        dag = EARLY_GAME_PRODUCTION_PLANNER.plan(item, target_rate)
+        return {
+            "source": source,
+            "goal_id": goal_id,
+            "goal_label": next_goal.get("label") if isinstance(next_goal, dict) else None,
+            "factorio_data_version": FACTORIO_DATA_VERSION,
+            "target_rate_per_s": target_rate,
+            "dag": dag.to_dict(),
+        }
+
     def render_world_frame(self, mode: str = "game") -> bytes:
+        now = time.monotonic()
+        with self._frame_cache_lock:
+            cached = self._frame_cache.get(mode)
+            if cached is not None and now - cached[0] <= 2.0:
+                return cached[1]
+
         world = self.factorio.snapshot()
         map_context = self.factorio.map_snapshot()
         resource_overview = self.factorio.resource_overview()
         run = self.active_run_data()
-        return self.renderer.render(
+        rendered = self.renderer.render(
             world,
             run,
             map_context,
             resource_overview=resource_overview,
             mode=mode,
         )
+        with self._frame_cache_lock:
+            self._frame_cache[mode] = (time.monotonic(), rendered)
+        return rendered
 
     def learning_data(self) -> dict[str, Any]:
         history_path = RUNS_DIR / "turn_penalty_learning.jsonl"

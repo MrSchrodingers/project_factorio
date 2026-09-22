@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Self
 from uuid import uuid4
 
 
@@ -145,7 +146,7 @@ class ExperimentStore:
     def close(self) -> None:
         self.connection.close()
 
-    def __enter__(self) -> "ExperimentStore":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:

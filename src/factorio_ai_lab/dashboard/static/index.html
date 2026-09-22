@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Factorio AI Lab</title>
-  <link rel="stylesheet" href="/static/styles.css?v=0.8.7">
+  <link rel="stylesheet" href="/static/styles.css?v=0.9.2">
 </head>
 <body>
   <header class="topbar">
@@ -129,6 +129,96 @@
       </div>
     </section>
 
+    <section class="research-cockpit">
+      <article class="card cockpit-card generation-health-card">
+        <div class="card-head compact">
+          <div>
+            <span class="label">GENERATION HEALTH</span>
+            <h2 id="generationHealthTitle">G-- · waiting</h2>
+          </div>
+          <span id="generationHealthBadge" class="badge neutral">--</span>
+        </div>
+        <div class="cockpit-body">
+          <div class="cockpit-progress-row">
+            <span id="generationStageText">stage --</span>
+            <strong id="generationStageProgress">0 / 0</strong>
+          </div>
+          <div class="progress-track cockpit-progress">
+            <div id="generationStageBar" class="progress-fill"></div>
+          </div>
+          <div class="metric-pair-grid">
+            <div><span>Champion</span><strong id="generationChampion">G--</strong></div>
+            <div><span>Route Δ</span><strong id="generationRouteDelta">--</strong></div>
+            <div><span>Capabilities</span><strong id="generationCapabilities">--</strong></div>
+            <div><span>Open play</span><strong id="generationOpenPlay">pending</strong></div>
+          </div>
+          <small id="generationHealthDetail" class="cockpit-note">collecting generation evidence</small>
+        </div>
+      </article>
+
+      <article class="card cockpit-card model-arena-card">
+        <div class="card-head compact">
+          <div>
+            <span class="label">MODEL ARENA</span>
+            <h2>Neural eligibility</h2>
+          </div>
+          <span id="modelArenaBadge" class="badge neutral">gated</span>
+        </div>
+        <div class="model-arena-list">
+          <div class="model-arena-row">
+            <span class="model-dot world"></span>
+            <div>
+              <strong id="worldModelArenaTitle">GRU world model</strong>
+              <small id="worldModelArenaDetail">collecting telemetry</small>
+            </div>
+            <b id="worldModelArenaStatus" class="muted">--</b>
+          </div>
+          <div class="model-arena-row">
+            <span class="model-dot spatial"></span>
+            <div>
+              <strong id="spatialModelArenaTitle">Spatial policy</strong>
+              <small id="spatialModelArenaDetail">A* teacher baseline</small>
+            </div>
+            <b id="spatialModelArenaStatus" class="muted">--</b>
+          </div>
+          <div class="model-arena-row">
+            <span class="model-dot llm"></span>
+            <div>
+              <strong>Generative knowledge</strong>
+              <small id="knowledgeVerifierDetail">waiting for verified lessons</small>
+            </div>
+            <b id="knowledgeVerifierStatus" class="muted">--</b>
+          </div>
+        </div>
+      </article>
+
+      <article class="card cockpit-card generation-report-card">
+        <div class="card-head compact">
+          <div>
+            <span class="label">RESEARCH SUMMARY</span>
+            <h2 id="researchSummaryTitle">Waiting for evidence</h2>
+          </div>
+          <span id="researchSummaryBadge" class="badge neutral">--</span>
+        </div>
+        <div class="research-summary-body">
+          <div class="summary-line">
+            <span>Last closed generation</span>
+            <strong id="lastGenerationDecision">--</strong>
+          </div>
+          <div class="summary-line">
+            <span>Current bottleneck</span>
+            <strong id="currentBottleneck">--</strong>
+          </div>
+          <div class="summary-line">
+            <span>Next frontier</span>
+            <strong id="summaryNextFrontier">--</strong>
+          </div>
+          <div id="generationDeltaList" class="generation-delta-list"></div>
+          <small id="researchSummaryDetail" class="cockpit-note">No completed selection evidence yet.</small>
+        </div>
+      </article>
+    </section>
+
     <section class="workspace-grid">
       <article class="card factory-card">
         <div class="card-head world-card-head">
@@ -170,11 +260,11 @@
           </div>
           <div class="world-hud">
             <span id="factorioStatus" class="hud-chip">Factorio --</span>
-            <span id="frameSource" class="hud-chip">live coordinates · reconstructed terrain</span>
+            <span id="frameSource" class="hud-chip">live coordinates · live Factorio terrain + official assets</span>
           </div>
           <div id="resourceLegend" class="resource-legend" aria-live="polite"></div>
           <div class="world-provenance">
-            Entities/resources: live Factorio coordinates · Terrain texture: reconstructed from game assets
+            Entities/resources/terrain: live Factorio state · visual textures: local official game assets
           </div>
           <div class="world-navigation-hint">scroll page normally · Ctrl/Cmd+wheel to zoom · drag only when zoomed · double-click to fit</div>
           <div class="world-controls" aria-label="World map controls">
@@ -272,6 +362,97 @@
       </div>
     </section>
 
+    <section class="research-analytics">
+      <article class="card analytics-card autonomy-card">
+        <div class="card-head compact">
+          <div>
+            <span class="label">AUTONOMY / SURVIVAL</span>
+            <h2>Physical closed-loop evidence</h2>
+          </div>
+          <span id="autonomyLevel" class="badge neutral">unknown</span>
+        </div>
+        <div class="autonomy-hero">
+          <div>
+            <span class="label">AUTONOMY SCORE</span>
+            <strong id="autonomyScore">--</strong>
+            <small id="autonomySource">waiting for physical evidence</small>
+          </div>
+          <div>
+            <span class="label">SOAK</span>
+            <strong id="autonomySoak">--</strong>
+            <small>zero-intervention validation window</small>
+          </div>
+          <div>
+            <span class="label">MANUAL LOGISTICS</span>
+            <strong id="autonomyManual">--</strong>
+            <small id="autonomyManualDetail">instrumentation pending</small>
+          </div>
+          <div>
+            <span class="label">STARVATION</span>
+            <strong id="autonomyStarved">--</strong>
+            <small>no fuel / no power</small>
+          </div>
+        </div>
+        <div id="autonomyGates" class="autonomy-gates"></div>
+        <div class="autonomy-strategy">
+          <span class="label">PHYSICAL GENOME</span>
+          <span id="autonomyGenome" class="mono">layout -- · coal -- · belt margin -- · pole margin --</span>
+        </div>
+      </article>
+      <article class="card analytics-card generation-trends-card">
+        <div class="card-head compact">
+          <div>
+            <span class="label">GENERATIONAL METRICS</span>
+            <h2>Evolution across generations</h2>
+          </div>
+          <span id="generationDuration" class="mono">duration --</span>
+        </div>
+        <canvas id="generationTrendCanvas" aria-label="Generation metrics"></canvas>
+        <div class="analytics-legend">
+          <span><i class="legend-route"></i> route cost</span>
+          <span><i class="legend-capability"></i> autonomy score</span>
+          <span><i class="legend-manual"></i> manual logistics debt</span>
+          <span><i class="legend-failure"></i> failed stages</span>
+        </div>
+      </article>
+
+      <article class="card analytics-card dag-card">
+        <div class="card-head compact">
+          <div>
+            <span class="label">PRODUCTION DAG</span>
+            <h2 id="productionDagTarget">Waiting for frontier</h2>
+          </div>
+          <span id="productionDagSource" class="mono">--</span>
+        </div>
+        <div id="productionDagNodes" class="production-dag-nodes">
+          <span class="placeholder-row">No production plan yet.</span>
+        </div>
+        <div id="productionDagRaw" class="production-dag-raw"></div>
+      </article>
+
+      <article class="card analytics-card wip-card">
+        <div class="card-head compact">
+          <div>
+            <span class="label">WIP / SAFETY STOCK</span>
+            <h2>Material health</h2>
+          </div>
+          <span id="wipStatus" class="badge neutral">observing</span>
+        </div>
+        <div id="wipGrid" class="wip-grid"></div>
+      </article>
+
+      <article class="card analytics-card model-matrix-card">
+        <div class="card-head compact">
+          <div>
+            <span class="label">MODEL EVALUATION MATRIX</span>
+            <h2>Baseline vs challenger</h2>
+          </div>
+          <span class="mono">lower loss / lower cost is better</span>
+        </div>
+        <div id="modelMatrix" class="model-matrix"></div>
+      </article>
+    </section>
+
     <section class="evidence-grid">
       <article class="card chart-card">
         <div class="card-head compact">
@@ -350,15 +531,19 @@
             <b id="truthTechTree" class="warn">benchmark pre-unlocked</b>
           </div>
           <div class="truth-row">
+            <span>Physical factory autonomy</span>
+            <b id="truthAutonomy" class="warn">not validated</b>
+          </div>
+          <div class="truth-row">
             <span>Spatial demonstration dataset</span>
             <b id="truthDataset" class="muted">0 demos</b>
           </div>
           <div class="truth-row">
-            <span>Neural CNN/RNN policy weights</span>
+            <span>Neural spatial policy</span>
             <b id="truthNeural" class="muted">not trained</b>
           </div>
           <div class="truth-row">
-            <span>Residual neural world model</span>
+            <span>Recurrent world model</span>
             <b id="truthWorldModel" class="muted">not trained</b>
           </div>
         </div>
@@ -408,6 +593,6 @@
     </details>
   </main>
 
-  <script src="/static/app.js?v=0.8.7"></script>
+  <script src="/static/app.js?v=0.9.3"></script>
 </body>
 </html>
