@@ -163,6 +163,9 @@ No v0.6 foi detectada e corrigida uma lesson que comparava raw counts de janelas
 32 s. A comparação válida normaliza por duração: direct-feed 1.5 plates/s, belt-fed
 2.3125 plates/s, razão 1.5417x. A correction lesson supersede a conclusão anterior de 2.06x.
 
+O patch v0.6.1 inclui o módulo de normalização e seu teste no próprio repositório, de modo
+que um clone limpo possui todas as dependências internas usadas pelo curriculum runner.
+
 ## Serviço local
 
 O Uvicorn permanece limitado ao loopback:

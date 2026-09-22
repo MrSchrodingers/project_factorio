@@ -9,10 +9,14 @@ from typing import Any
 
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
 
-ASSET_ROOT = Path(
+FULL_ASSET_ROOT = Path(
+    "/home/ti/.local/share/factorio-ai/assets/full-graphics/graphics"
+)
+DEMO_ASSET_ROOT = Path(
     "/home/ti/.local/share/factorio-ai/assets/demo-2.0.73/"
     "factorio/data/base/graphics"
 )
+ASSET_ROOT = FULL_ASSET_ROOT if FULL_ASSET_ROOT.is_dir() else DEMO_ASSET_ROOT
 ICON_DIR = ASSET_ROOT / "icons"
 ENTITY_DIR = ASSET_ROOT / "entity"
 TERRAIN_GRASS = ASSET_ROOT / "terrain/grass-2.png"
@@ -106,7 +110,11 @@ def official_asset_status() -> dict[str, Any]:
         "icon_count": icon_count,
         "runtime_icon_count": runtime_png_count,
         "icon_dir": str(ICON_DIR),
-        "source": "Factorio 2.0.73 official Linux demo (runtime only)",
+        "source": (
+            "user-provided full Factorio graphics archive (runtime only)"
+            if ASSET_ROOT == FULL_ASSET_ROOT
+            else "Factorio 2.0.73 official Linux demo (runtime only)"
+        ),
         "version": "2.0.73",
         "redistributed": False,
     }
@@ -152,7 +160,7 @@ class WorldFrameRenderer:
         assets = official_asset_status()
         return {
             "ready": bool(assets["ready"]),
-            "renderer": "official-asset-world-map-v2",
+            "renderer": "full-factorio-world-map-v8",
             "asset_count": self._asset_count_now(),
             "sprite_count": self._asset_count_now(),
             "viewport_radius": round(self._last_radius, 2),
@@ -165,6 +173,7 @@ class WorldFrameRenderer:
         world: dict[str, Any],
         run: dict[str, Any],
         map_context: dict[str, Any],
+        resource_overview: dict[str, Any],
         mode: str,
     ) -> tuple[Any, ...]:
         entities = tuple(
@@ -177,12 +186,24 @@ class WorldFrameRenderer:
             for item in world.get("entities", [])
             if isinstance(item, dict)
         )
+        overview_cells = tuple(
+            (
+                item.get("name"),
+                item.get("count"),
+                item.get("center", {}).get("x"),
+                item.get("center", {}).get("y"),
+            )
+            for item in resource_overview.get("cells", [])
+            if isinstance(item, dict)
+        )
         return (
             mode,
             world.get("tick"),
             entities,
             len(map_context.get("resources", [])),
             len(map_context.get("water_tiles", [])),
+            overview_cells if mode == "overview" else (),
+            len(resource_overview.get("points", [])) if mode == "overview" else 0,
             repr(run.get("stage")) if isinstance(run, dict) else None,
         )
 
@@ -211,7 +232,9 @@ class WorldFrameRenderer:
         y: float,
         tile_pixels: float,
     ) -> Image.Image | None:
-        path = FLE_RESOURCE_DIR / name / f"{name}.png"
+        full_path = ENTITY_DIR / name / f"{name}.png"
+        fallback_path = FLE_RESOURCE_DIR / name / f"{name}.png"
+        path = full_path if full_path.is_file() else fallback_path
         if not path.is_file():
             return None
 
@@ -472,17 +495,31 @@ class WorldFrameRenderer:
         run: dict[str, Any],
         map_context: dict[str, Any] | None = None,
         *,
+        resource_overview: dict[str, Any] | None = None,
         mode: str = "game",
     ) -> bytes:
-        if mode not in {"game", "tactical"}:
+        if mode not in {"game", "overview", "tactical"}:
             raise ValueError(f"unsupported renderer mode: {mode}")
         map_context = map_context or {}
-        key = self._key(world, run, map_context, mode)
+        resource_overview = resource_overview or {}
+        key = self._key(
+            world,
+            run,
+            map_context,
+            resource_overview,
+            mode,
+        )
         with self._lock:
             if key == self._cache_key and self._cache_png is not None:
                 return self._cache_png
             try:
-                png = self._render_uncached(world, run, map_context, mode=mode)
+                png = self._render_uncached(
+                    world,
+                    run,
+                    map_context,
+                    resource_overview,
+                    mode=mode,
+                )
                 self._cache_key = key
                 self._cache_png = png
                 self._last_error = None
@@ -491,14 +528,245 @@ class WorldFrameRenderer:
                 self._last_error = f"{type(exc).__name__}: {exc}"
                 raise
 
+    def _render_resource_overview(
+        self,
+        world: dict[str, Any],
+        overview: dict[str, Any],
+    ) -> bytes:
+        width = 1024
+        height = 1024
+        canvas = self._background(width, height)
+        # Resource overview intentionally keeps the original terrain visible.
+        # No global tint/heatmap is applied: only real resource sprites and
+        # compact labels are added on top.
+        draw = ImageDraw.Draw(canvas, "RGBA")
+
+        center_raw = overview.get("center", {})
+        try:
+            center = (
+                float(center_raw.get("x", 0.0)),
+                float(center_raw.get("y", 0.0)),
+            )
+        except (AttributeError, TypeError, ValueError):
+            center = (0.0, 0.0)
+
+        scan_radius = float(overview.get("radius", 192.0) or 192.0)
+        nearest = overview.get("nearest", {})
+        important = ("iron-ore", "copper-ore", "coal", "stone", "crude-oil")
+        distances: list[float] = []
+        if isinstance(nearest, dict):
+            for name in important:
+                row = nearest.get(name)
+                if not isinstance(row, dict):
+                    continue
+                try:
+                    distances.append(float(row.get("distance", 0.0)))
+                except (TypeError, ValueError):
+                    continue
+
+        # Show the closest relevant raw-material frontier with some context.
+        radius = min(
+            scan_radius,
+            max(52.0, (max(distances) + 26.0) if distances else 72.0),
+        )
+        self._last_radius = radius
+        scale = width / (2.0 * radius)
+        tile_pixels = scale
+
+        def project(x: float, y: float) -> tuple[int, int]:
+            return (
+                round((x - center[0] + radius) * scale),
+                round((y - center[1] + radius) * scale),
+            )
+
+        # Exact resource coordinates from Factorio. This replaces the old
+        # 16x16 aggregate rectangles which looked like grey stains.
+        raw_points = overview.get("points", [])
+        points = raw_points if isinstance(raw_points, list) else []
+        if points:
+            # Resource sprites are rendered directly without analytical patch tint.
+            patch_layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            patch_draw = ImageDraw.Draw(patch_layer, "RGBA")
+            halo = max(2, round(tile_pixels * 0.57))
+            for point in points:
+                if not isinstance(point, dict):
+                    continue
+                try:
+                    x = float(point["x"])
+                    y = float(point["y"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if abs(x - center[0]) > radius or abs(y - center[1]) > radius:
+                    continue
+                name = str(point.get("name", "resource"))
+                rgb = RESOURCE_COLORS.get(name, (137, 122, 80))
+                px, py = project(x, y)
+                patch_draw.ellipse(
+                    (px - halo, py - halo, px + halo, py + halo),
+                    fill=(*rgb, 0),
+                )
+            patch_layer = patch_layer.filter(
+                ImageFilter.GaussianBlur(radius=max(0.8, tile_pixels * 0.18))
+            )
+            canvas = Image.alpha_composite(canvas, patch_layer)
+
+            # Rebind draw after alpha-compositing.
+            draw = ImageDraw.Draw(canvas, "RGBA")
+            for point in points:
+                if not isinstance(point, dict):
+                    continue
+                try:
+                    x = float(point["x"])
+                    y = float(point["y"])
+                    amount = float(point.get("amount", 1.0))
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if abs(x - center[0]) > radius or abs(y - center[1]) > radius:
+                    continue
+                name = str(point.get("name", "resource"))
+                sprite = self._resource_sprite(
+                    name,
+                    amount,
+                    x,
+                    y,
+                    tile_pixels,
+                )
+                if sprite is None:
+                    continue
+                px, py = project(x, y)
+                self._paste_center(canvas, sprite, px, py)
+        else:
+            # Fallback for old cached payloads: draw thin patch outlines only.
+            cells = overview.get("cells", [])
+            if isinstance(cells, list):
+                for cell in cells:
+                    if not isinstance(cell, dict):
+                        continue
+                    name = str(cell.get("name", "resource"))
+                    bounds = cell.get("bounds", {})
+                    try:
+                        left = float(bounds["left_top"]["x"])
+                        top = float(bounds["left_top"]["y"])
+                        right = float(bounds["right_bottom"]["x"])
+                        bottom = float(bounds["right_bottom"]["y"])
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    x1, y1 = project(left - 0.5, top - 0.5)
+                    x2, y2 = project(right + 0.5, bottom + 0.5)
+                    rgb = RESOURCE_COLORS.get(name, (137, 122, 80))
+                    draw.rectangle(
+                        (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)),
+                        outline=(*rgb, 175),
+                        width=2,
+                    )
+
+        entities = [
+            item
+            for item in world.get("entities", [])
+            if isinstance(item, dict) and _position(item) is not None
+        ]
+        for entity in entities:
+            pos = _position(entity)
+            if pos is None:
+                continue
+            if abs(pos[0] - center[0]) > radius or abs(pos[1] - center[1]) > radius:
+                continue
+            px, py = project(*pos)
+            name = str(entity.get("name", "entity"))
+            if name == "character":
+                rr = max(5, round(scale * 0.9))
+                draw.ellipse(
+                    (px - rr, py - rr, px + rr, py + rr),
+                    fill=(245, 173, 65, 235),
+                    outline=(255, 230, 165, 255),
+                    width=2,
+                )
+                continue
+            icon = self._load_icon(name, max(16, min(38, round(scale * 3.5))))
+            if icon is not None:
+                self._paste_center(canvas, icon, px, py)
+
+        # True nearest-resource distances, not inferred from the picture.
+        if isinstance(nearest, dict):
+            occupied_labels: list[tuple[int, int, int, int]] = []
+            for name in important:
+                row = nearest.get(name)
+                if not isinstance(row, dict):
+                    continue
+                try:
+                    x = float(row["x"])
+                    y = float(row["y"])
+                    distance = float(row["distance"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if distance > radius:
+                    continue
+                px, py = project(x, y)
+                rgb = RESOURCE_COLORS.get(name, (180, 180, 180))
+                rr = 5
+                draw.ellipse(
+                    (px - rr, py - rr, px + rr, py + rr),
+                    fill=(*rgb, 255),
+                    outline=(255, 255, 255, 220),
+                    width=1,
+                )
+                label = f"{name} · {distance:.0f} tiles"
+                box = draw.textbbox((0, 0), label)
+                tw = box[2] - box[0]
+                th = box[3] - box[1]
+                candidates = [
+                    (px + 10, py - th - 7),
+                    (px + 10, py + 8),
+                    (px - tw - 14, py - th - 7),
+                    (px - tw - 14, py + 8),
+                ]
+                lx, ly = candidates[0]
+                for tx, ty in candidates:
+                    tx = min(width - tw - 10, max(8, tx))
+                    ty = min(height - th - 10, max(8, ty))
+                    rect = (tx - 4, ty - 3, tx + tw + 4, ty + th + 3)
+                    if not any(
+                        not (
+                            rect[2] < old[0]
+                            or rect[0] > old[2]
+                            or rect[3] < old[1]
+                            or rect[1] > old[3]
+                        )
+                        for old in occupied_labels
+                    ):
+                        lx, ly = tx, ty
+                        occupied_labels.append(rect)
+                        break
+                draw.rounded_rectangle(
+                    (lx - 4, ly - 3, lx + tw + 4, ly + th + 3),
+                    radius=3,
+                    fill=(5, 8, 10, 222),
+                    outline=(*rgb, 150),
+                    width=1,
+                )
+                draw.text((lx, ly), label, fill=(235, 239, 241, 255))
+
+        # Agent origin crosshair.
+        cx, cy = project(*center)
+        draw.line((cx - 10, cy, cx + 10, cy), fill=(255, 197, 90, 220), width=2)
+        draw.line((cx, cy - 10, cx, cy + 10), fill=(255, 197, 90, 220), width=2)
+
+        output = BytesIO()
+        canvas.convert("RGB").save(output, format="PNG", optimize=False)
+        return output.getvalue()
+
     def _render_uncached(
         self,
         world: dict[str, Any],
         run: dict[str, Any],
         map_context: dict[str, Any],
+        resource_overview: dict[str, Any],
         *,
         mode: str,
     ) -> bytes:
+        if mode == "overview":
+            return self._render_resource_overview(world, resource_overview)
+
         width = 1024
         height = 1024
         tick = int(world.get("tick") or 0)
@@ -787,6 +1055,48 @@ class WorldFrameRenderer:
                     radius=max(3, half // 4),
                     fill=(57, 73, 83, 230),
                     outline=(190, 205, 214, 150),
+                )
+
+            # Operational state is part of the factory view, not a separate
+            # debug table. Small status beacons make dead/starved machinery
+            # visible at a glance without obscuring the Factorio sprite.
+            status = str(entity.get("status") or "")
+            status_colors = {
+                "working": (91, 211, 135, 235),
+                "no_fuel": (238, 91, 74, 245),
+                "no_power": (238, 91, 74, 245),
+                "low_power": (242, 173, 61, 240),
+                "no_ingredients": (242, 173, 61, 235),
+                "waiting_for_source_items": (242, 173, 61, 225),
+                "full_output": (103, 184, 255, 225),
+                "waiting_for_space_in_destination": (103, 184, 255, 215),
+                "disabled": (224, 88, 88, 240),
+            }
+            color = status_colors.get(status)
+            if color is not None:
+                marker_radius = max(3, round(tile_pixels * 0.11))
+                offset = max(8, round(tile_pixels * 0.72))
+                mx = px + offset
+                my = py - offset
+                draw.ellipse(
+                    (
+                        mx - marker_radius - 2,
+                        my - marker_radius - 2,
+                        mx + marker_radius + 2,
+                        my + marker_radius + 2,
+                    ),
+                    fill=(5, 8, 9, 210),
+                )
+                draw.ellipse(
+                    (
+                        mx - marker_radius,
+                        my - marker_radius,
+                        mx + marker_radius,
+                        my + marker_radius,
+                    ),
+                    fill=color,
+                    outline=(245, 248, 249, 190),
+                    width=1,
                 )
 
         # Gentle vignette gives hierarchy without a debug grid.

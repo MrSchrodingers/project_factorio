@@ -8,6 +8,9 @@ const state = {
   run: {},
   datasets: {},
   research: {},
+  progression: { achieved: [], frontier: [], next_goal: null },
+  resourceOverview: { cells: [], points: [], totals: {}, nearest: {} },
+  evolution: {},
   knowledge: { count: 0, lessons: [] },
   socket: null,
   frameTick: null,
@@ -113,7 +116,7 @@ function updateEntityMix() {
   const pills = types
     .map(([name, count]) => "<span>" + escapeHtml(name) + " × " + count + "</span>");
   if (beltCount === 0) {
-    pills.push('<span class="next-stage-pill">0 belts · next: A* logistics</span>');
+    pills.push('<span class="next-stage-pill">0 belts</span>');
   }
   $("entityTypes").innerHTML = pills.join("");
 
@@ -134,6 +137,7 @@ function renderWorldHotspots() {
   const overlay = $("worldAssetOverlay");
   if (!overlay) return;
   overlay.innerHTML = "";
+  if (state.worldViewMode === "overview") return;
 
   const entities = Array.isArray(state.world && state.world.entities)
     ? state.world.entities
@@ -205,6 +209,46 @@ function renderWorldHotspots() {
   }
 }
 
+
+
+function renderResourceLegend() {
+  const container = $("resourceLegend");
+  if (!container) return;
+  const overview = state.resourceOverview || {};
+  const nearest = overview.nearest || {};
+  const totals = overview.totals || {};
+  const colors = {
+    "iron-ore": "#6ab5f7",
+    "copper-ore": "#d67a4e",
+    coal: "#8c949b",
+    stone: "#c6b28a",
+    "crude-oil": "#594a42",
+    "uranium-ore": "#72c957",
+  };
+  const important = ["iron-ore", "copper-ore", "coal", "stone", "crude-oil"];
+  const radius = Number(overview.radius || 0);
+
+  container.innerHTML = important.map((name) => {
+    const row = nearest[name];
+    const total = totals[name];
+    const color = colors[name] || "#aaa";
+    if (!row) {
+      return '<span class="resource-chip missing">'
+        + '<i class="swatch" style="--resource-color:' + color + '"></i>'
+        + escapeHtml(humanizePrototype(name))
+        + ' · not observed' + (radius ? ' ≤ ' + formatNumber(radius, 0) + ' tiles' : '')
+        + '</span>';
+    }
+    const distance = Number(row.distance || 0);
+    const count = total && Number(total.count || 0);
+    return '<span class="resource-chip">'
+      + '<i class="swatch" style="--resource-color:' + color + '"></i>'
+      + escapeHtml(humanizePrototype(name))
+      + ' · ' + formatNumber(distance, 0) + ' tiles'
+      + (count ? ' · ' + formatNumber(count, 0) + ' nodes' : '')
+      + '</span>';
+  }).join("");
+}
 
 
 function drawStructuredFallback() {
@@ -301,14 +345,17 @@ function refreshWorldFrame(force = false) {
     state.frameLoading = false;
     setClassText("renderBadge", "live world", "badge live");
     const official = render.official_assets || {};
+    const sourceLabel = state.worldViewMode === "overview"
+      ? "live resource coordinates · survey overview"
+      : state.worldViewMode === "tactical"
+        ? "live coordinates · tactical overlay"
+        : "live coordinates · reconstructed terrain";
     setText(
       "frameSource",
-      official.ready
-        ? "Factorio 2.0.73 · live world sprites"
-        : "structured map · local assets pending"
+      official.ready ? sourceLabel : "structured map · local assets pending"
     );
     const rendererName = render.renderer || "";
-    if (rendererName.startsWith("official-asset-world-map")) {
+    if ((rendererName.startsWith("official-asset-world-map") || rendererName.startsWith("full-factorio-world-map"))) {
       renderWorldHotspots();
     } else {
       renderWorldHotspots();
@@ -335,6 +382,10 @@ function applyWorldView() {
   if (!viewport) return;
   viewport.style.transform =
     "translate(" + state.worldPanX + "px, " + state.worldPanY + "px) scale(" + state.worldZoom + ")";
+  viewport.classList.toggle(
+    "can-pan",
+    state.worldZoom > 1.001 || document.fullscreenElement === $("worldStage")
+  );
   setText("zoomReset", state.worldZoom.toFixed(state.worldZoom < 2 ? 1 : 0) + "×");
 }
 
@@ -342,7 +393,7 @@ function setWorldZoom(nextZoom, anchorX = null, anchorY = null) {
   const stage = $("worldStage");
   const rect = stage.getBoundingClientRect();
   const oldZoom = state.worldZoom;
-  const next = Math.max(0.75, Math.min(5, nextZoom));
+  const next = Math.max(1, Math.min(5, nextZoom));
   if (anchorX !== null && anchorY !== null && oldZoom > 0) {
     const localX = anchorX - rect.left - rect.width / 2;
     const localY = anchorY - rect.top - rect.height / 2;
@@ -371,11 +422,15 @@ function installWorldModeControls() {
         option.classList.toggle("active", option.dataset.worldMode === mode);
       }
       $("worldStage").dataset.mode = mode;
+      resetWorldView();
+      renderResourceLegend();
+      renderWorldHotspots();
       state.frameTick = null;
       refreshWorldFrame(true);
     });
   }
   $("worldStage").dataset.mode = state.worldViewMode;
+  renderResourceLegend();
 }
 
 function installWorldControls() {
@@ -409,12 +464,19 @@ function installWorldControls() {
   });
 
   stage.addEventListener("wheel", (event) => {
+    const zoomGesture = event.ctrlKey || event.metaKey || document.fullscreenElement === stage;
+    if (!zoomGesture) return;
     event.preventDefault();
     const factor = event.deltaY < 0 ? 1.14 : 1 / 1.14;
     setWorldZoom(state.worldZoom * factor, event.clientX, event.clientY);
   }, { passive: false });
 
   viewport.addEventListener("pointerdown", (event) => {
+    const middleMouse = event.pointerType === "mouse" && event.button === 1;
+    const canPan = state.worldZoom > 1.001 || document.fullscreenElement === stage;
+    if (!middleMouse && !canPan) return;
+    if (event.pointerType === "mouse" && event.button !== 0 && !middleMouse) return;
+    event.preventDefault();
     state.worldDragging = true;
     state.worldDragStart = {
       x: event.clientX,
@@ -600,12 +662,20 @@ function renderNativeProductionBars(containerId, mode) {
       rate: Math.max(0, Number(value[rateField] || 0)),
       count: Math.max(0, Number(value[countField] || 0)),
     }))
+    .filter((item) => item.rate > 0 || item.count > 0)
     .sort((a, b) => b.rate - a.rate);
   const maxRate = Math.max(0, ...entries.map((item) => item.rate));
   setText(
     mode === "produced" ? "producedPeak" : "consumedPeak",
     "avg " + compactFactorioNumber(maxRate) + "/min"
   );
+
+  if (!entries.length) {
+    container.innerHTML = '<div class="placeholder-row">No '
+      + (mode === "produced" ? "production" : "consumption")
+      + ' in this window.</div>';
+    return;
+  }
 
   container.innerHTML = entries.map((item) => {
     const color = oreSeriesColors[item.name] || "#b993f6";
@@ -637,6 +707,8 @@ function renderProductionStatistics() {
     productionDurationLabel(duration) + " · " + samples + " native samples · "
       + compactFactorioNumber(period) + " s/sample"
   );
+
+  renderCapabilityHealth();
 
   for (const button of document.querySelectorAll("[data-production-precision]")) {
     button.classList.toggle(
@@ -786,6 +858,479 @@ function drawHistory() {
   ], "waiting for live telemetry");
 }
 
+function productionRate(name, mode = "produced") {
+  const row = ((state.production && state.production.series) || {})[name] || {};
+  const key = mode === "produced" ? "produced_rate" : "consumed_rate";
+  return Math.max(0, Number(row[key] || 0));
+}
+
+function renderCapabilityHealth() {
+  const container = $("capabilityHealth");
+  if (!container) return;
+
+  const metrics = (state.research && state.research.metrics) || {};
+  const entities = Array.isArray(state.world && state.world.entities)
+    ? state.world.entities
+    : [];
+  const researchWorld = (state.research && state.research.world) || {};
+
+  function centerForCapability(key) {
+    const raw = key === "iron"
+      ? researchWorld.patch_center
+      : key === "coal"
+        ? (researchWorld.coal_patch || {}).center
+        : key === "copper"
+          ? (researchWorld.copper_patch || {}).center
+          : null;
+    if (!raw) return null;
+    const x = Number(raw.x);
+    const y = Number(raw.y);
+    return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+  }
+
+  function entitiesNear(center, names, radius = 24) {
+    if (!center) return [];
+    const allowed = new Set(names);
+    return entities.filter((entity) => {
+      if (!allowed.has(String(entity.name || ""))) return false;
+      const pos = getPosition(entity);
+      if (!pos) return false;
+      const dx = pos.x - center.x;
+      const dy = pos.y - center.y;
+      return Math.hypot(dx, dy) <= radius;
+    });
+  }
+
+  function physicalFault(key) {
+    if (["iron", "coal", "copper"].includes(key)) {
+      const machines = entitiesNear(
+        centerForCapability(key),
+        ["burner-mining-drill", "electric-mining-drill"]
+      );
+      if (!machines.length) return "";
+      const noFuel = machines.filter((e) => String(e.status) === "no_fuel").length;
+      const noPower = machines.filter((e) => String(e.status) === "no_power").length;
+      if (noFuel) return noFuel + "/" + machines.length + " drills no fuel";
+      if (noPower) return noPower + "/" + machines.length + " drills no power";
+      const blocked = machines.filter((e) => [
+        "full_output",
+        "no_minable_resources",
+        "waiting_for_space_in_destination",
+      ].includes(String(e.status))).length;
+      if (blocked) return blocked + "/" + machines.length + " drills blocked";
+      return machines.length + " drills present";
+    }
+
+    if (key === "power") {
+      const engines = entities.filter((e) => String(e.name) === "steam-engine");
+      if (!engines.length) return "no steam engine";
+      const powered = engines.filter((e) => Number(e.energy || 0) > 0).length;
+      return powered
+        ? powered + "/" + engines.length + " engines energized"
+        : engines.length + " steam engine(s) unenergized";
+    }
+
+    if (key === "science") {
+      const scienceMachines = entities.filter((e) =>
+        String(e.recipe || "") === "automation-science-pack"
+        || String(e.name || "") === "lab"
+      );
+      if (!scienceMachines.length) return "no science machine";
+      const faults = scienceMachines
+        .map((e) => String(e.status || "unknown"))
+        .filter((value) => value && value !== "working");
+      return faults.length ? faults.slice(0, 2).join(" · ") : "science machines ready";
+    }
+
+    return "";
+  }
+  const achieved = new Set(
+    Array.isArray(state.progression && state.progression.achieved)
+      ? state.progression.achieved
+      : []
+  );
+  const coalProduced = productionRate("coal");
+  const coalConsumed = productionRate("coal", "consumed");
+  const accounting = (
+    state.research
+    && state.research.resource_accounting
+    && state.research.resource_accounting.exogenous_inputs
+  ) || {};
+  const coalAccounting = accounting.coal || {};
+  const coalOrigin = String(coalAccounting.status || "external");
+  const coalExternal = !["retired", "internal", "self_sufficient"].includes(
+    coalOrigin
+  );
+  const coalReserve = Number(
+    metrics.survival_coal_reserve
+      ?? metrics.coal_endogenous_stockpile
+      ?? coalAccounting.endogenous_stockpile
+      ?? 0
+  );
+  const coalSafetyStock = Number(
+    metrics.coal_safety_stock_target
+      ?? coalAccounting.safety_stock_target
+      ?? 4
+  );
+
+  const capabilities = [
+    {
+      key: "iron",
+      label: "Iron backbone",
+      liveRate: Math.max(
+        productionRate("iron-ore"),
+        productionRate("iron-plate")
+      ),
+      proven: achieved.has("iron_backbone")
+        || Number(metrics.belt_smelting_plate_rate_per_s || 0) > 0
+        || Number(metrics.iron_plate_output || 0) > 0,
+      unit: "/min",
+    },
+    {
+      key: "copper",
+      label: "Copper chain",
+      liveRate: Math.max(
+        productionRate("copper-ore"),
+        productionRate("copper-plate")
+      ),
+      proven: achieved.has("copper_mining")
+        || Number(metrics.copper_ore_output || 0) > 0,
+      unit: "/min",
+    },
+    {
+      key: "coal",
+      label: "Coal supply",
+      liveRate: coalProduced,
+      proven: achieved.has("coal_mining")
+        || Number(metrics.coal_output || 0) > 0,
+      unit: "/min",
+      external: coalExternal && coalConsumed > 0,
+      origin: coalOrigin,
+      reserve: coalReserve,
+      safetyStock: coalSafetyStock,
+    },
+    {
+      key: "power",
+      label: "Steam power",
+      liveRate: Number(metrics.steam_energy || 0),
+      proven: achieved.has("steam_power") || Number(metrics.steam_energy || 0) > 0,
+      unit: " J",
+    },
+    {
+      key: "science",
+      label: "Automation science",
+      liveRate: productionRate("automation-science-pack"),
+      proven: achieved.has("automation_science")
+        || Number(metrics.automation_science_output || 0) > 0,
+      unit: "/min",
+    },
+  ];
+
+  container.innerHTML = capabilities.map((item) => {
+    let cls = "unproven";
+    let detail = "not validated";
+    if (item.external) {
+      cls = "external";
+      detail = compactFactorioNumber(coalConsumed) + "/min consumed · external bootstrap";
+    } else if (item.liveRate > 0) {
+      cls = "live";
+      if (item.key === "coal" && item.origin === "self_sufficient") {
+        const reserveState = item.reserve >= item.safetyStock ? "reserve ok" : "reserve low";
+        detail = compactFactorioNumber(item.liveRate) + item.unit
+          + " · endogenous · " + reserveState + " "
+          + compactFactorioNumber(item.reserve) + "/" + compactFactorioNumber(item.safetyStock);
+        if (item.reserve < item.safetyStock) cls = "regressed";
+      } else {
+        detail = compactFactorioNumber(item.liveRate) + item.unit + " live";
+      }
+    } else if (item.proven) {
+      const fault = physicalFault(item.key);
+      cls = fault && !fault.includes("present") && !fault.includes("ready")
+        ? "regressed"
+        : "dormant";
+      if (item.key === "coal" && item.origin === "self_sufficient") {
+        const reserveState = item.reserve >= item.safetyStock ? "reserve ok" : "reserve low";
+        detail = "proven · " + reserveState + " "
+          + compactFactorioNumber(item.reserve) + "/" + compactFactorioNumber(item.safetyStock)
+          + (fault ? " · " + fault : "");
+        if (item.reserve < item.safetyStock) cls = "regressed";
+      } else {
+        detail = fault ? "proven · " + fault : "proven · currently dormant/starved";
+      }
+    } else {
+      const fault = physicalFault(item.key);
+      if (fault && (
+        fault.includes("no fuel")
+        || fault.includes("no power")
+        || fault.includes("unenergized")
+      )) {
+        cls = "regressed";
+        detail = fault;
+      }
+    }
+    return '<span class="capability-chip ' + cls + '">'
+      + '<strong>' + escapeHtml(item.label) + '</strong>'
+      + '<small>' + escapeHtml(detail) + '</small>'
+      + '</span>';
+  }).join("");
+}
+
+function fitnessSummary(fitness) {
+  if (!fitness || typeof fitness !== "object") return "no fitness baseline";
+  const caps = Array.isArray(fitness.capabilities) ? fitness.capabilities.length : 0;
+  const total = Number(fitness.total_rate_per_s || 0);
+  const dependencies = Number(fitness.external_dependencies || 0);
+  return caps + " capabilities · "
+    + formatNumber(total, 3) + "/s aggregate · "
+    + dependencies + " external dep.";
+}
+
+function genomeSummary(configuration) {
+  if (!configuration || typeof configuration !== "object") {
+    return "genome not recorded";
+  }
+  const turn = Number(configuration.routing_turn_penalty);
+  const exploration = Number(
+    configuration.placement_exploration ?? configuration.ucb_exploration
+  );
+  const parts = [];
+  if (Number.isFinite(turn)) parts.push("A* turn " + formatNumber(turn, 3));
+  if (Number.isFinite(exploration)) {
+    parts.push("UCB explore " + formatNumber(exploration, 2));
+  }
+  if (configuration.placement_best_arm) {
+    parts.push("placement " + String(configuration.placement_best_arm));
+  }
+  return parts.length ? parts.join(" · ") : "genome not recorded";
+}
+
+function contenderSummary(record, fallbackFitness) {
+  const fitness = record && record.fitness ? record.fitness : fallbackFitness;
+  return fitnessSummary(fitness) + " · " + genomeSummary(
+    record && record.configuration
+  );
+}
+
+function renderEvolution() {
+  const researchEvolution = (state.research && state.research.evolution) || {};
+  const evolution = Object.assign(
+    {},
+    state.evolution || {},
+    researchEvolution
+  );
+  const generation = Number(evolution.generation || 0);
+  setClassText(
+    "generationBadge",
+    generation ? "generation " + generation : "generation --",
+    generation ? "badge live" : "badge neutral"
+  );
+
+  const champion = evolution.champion;
+  const validatedChampion = evolution.validated_champion || null;
+  const challenger = evolution.challenger || {};
+  const promotion = evolution.promotion;
+
+  const validationMatches = !!(
+    validatedChampion
+    && champion
+    && validatedChampion.run_id
+    && champion.run_id
+    && validatedChampion.run_id === champion.run_id
+  );
+  setClassText(
+    "validationBadge",
+    validationMatches
+      ? "OPEN PLAY · validated"
+      : champion
+        ? "OPEN PLAY · pending"
+        : "OPEN PLAY · no champion",
+    validationMatches ? "badge good" : "badge neutral"
+  );
+
+  const selectionLabel = promotion
+    ? (promotion.promoted ? "promoted" : "incumbent retained")
+    : String(challenger.status || "evaluating");
+  setText(
+    "evolutionKpi",
+    (generation ? "G" + generation : "G--") + " · " + selectionLabel
+  );
+  setText(
+    "evolutionKpiDetail",
+    "Champion "
+      + (champion && champion.run_id ? "G" + String(champion.generation || "?") : "--")
+      + " · Challenger "
+      + String(challenger.run_id || (state.run && state.run.run_id) || "--")
+  );
+
+  if (champion && typeof champion === "object") {
+    setText(
+      "championLabel",
+      "G" + String(champion.generation ?? "?") + " · "
+        + String(champion.run_id || "champion")
+    );
+    setText("championFitness", contenderSummary(champion));
+  } else {
+    setText("championLabel", "not selected");
+    setText("championFitness", "first surviving generation becomes baseline");
+  }
+
+  setText(
+    "challengerLabel",
+    challenger.run_id
+      ? "G" + String(generation || "?") + " · " + String(challenger.run_id)
+      : ((state.run && state.run.run_id) || "current run")
+  );
+  setText(
+    "challengerFitness",
+    challenger.fitness
+      ? contenderSummary(challenger)
+      : "collecting live fitness evidence · " + genomeSummary(
+          challenger.configuration
+        )
+  );
+
+  if (promotion && typeof promotion === "object") {
+    const promoted = !!promotion.promoted;
+    setClassText(
+      "promotionLabel",
+      promoted ? "promoted" : "incumbent retained",
+      promoted ? "good" : "warn"
+    );
+    const regressions = Array.isArray(promotion.regressions)
+      ? promotion.regressions
+      : [];
+    const improvements = Array.isArray(promotion.improvements)
+      ? promotion.improvements
+      : [];
+    setText(
+      "promotionDetail",
+      regressions.length
+        ? regressions.join(" · ")
+        : improvements.length
+          ? improvements.join(" · ")
+          : String(promotion.reason || "selection complete")
+    );
+  } else {
+    setClassText("promotionLabel", "evaluating", "warn");
+    setText(
+      "promotionDetail",
+      "challenger must preserve incumbent capabilities before promotion"
+    );
+  }
+
+  const achieved = new Set(
+    Array.isArray(state.progression && state.progression.achieved)
+      ? state.progression.achieved
+      : []
+  );
+  const debt = Array.isArray(state.progression && state.progression.dependency_debt)
+    ? state.progression.dependency_debt
+    : [];
+  const accounting = (
+    state.research
+    && state.research.resource_accounting
+    && state.research.resource_accounting.exogenous_inputs
+  ) || {};
+  const coalOrigin = String(((accounting.coal || {}).status) || "external");
+  const coalExternal = !["retired", "internal", "self_sufficient"].includes(
+    coalOrigin
+  );
+
+  const gates = [
+    {
+      label: "iron retention",
+      cls: productionRate("iron-ore") > 0 || productionRate("iron-plate") > 0
+        ? "live"
+        : achieved.has("iron_backbone") ? "warn" : "",
+    },
+    {
+      label: "coal independence",
+      cls: achieved.has("coal_mining") && !coalExternal
+        ? "pass"
+        : coalExternal ? "fail" : "",
+    },
+    {
+      label: "copper retention",
+      cls: productionRate("copper-ore") > 0
+        || productionRate("copper-plate") > 0
+        ? "live"
+        : achieved.has("copper_mining") ? "warn" : "",
+    },
+    {
+      label: "power frontier",
+      cls: achieved.has("steam_power") ? "pass" : "",
+    },
+    {
+      label: "science frontier",
+      cls: achieved.has("automation_science") ? "pass" : "",
+    },
+    {
+      label: "dependency debt " + debt.length,
+      cls: debt.length ? "fail" : "pass",
+    },
+    {
+      label: "retention ≥ "
+        + formatNumber(Number(evolution.retention_ratio || 0.80) * 100, 0)
+        + "%",
+      cls: "proven",
+    },
+  ];
+  const gateContainer = $("survivalGates");
+  if (gateContainer) {
+    gateContainer.innerHTML = gates.map((gate) =>
+      '<span class="survival-gate ' + gate.cls + '">'
+        + escapeHtml(gate.label)
+        + '</span>'
+    ).join("");
+  }
+
+  const historyContainer = $("generationHistory");
+  if (historyContainer) {
+    const history = Array.isArray(evolution.history)
+      ? evolution.history.slice(-10)
+      : [];
+    const currentRunId = challenger.run_id || null;
+    const historyRows = history.map((row) => {
+      const candidate = row.challenger || {};
+      const decision = row.decision || {};
+      const fitness = candidate.fitness || {};
+      const caps = Array.isArray(fitness.capabilities)
+        ? fitness.capabilities.length
+        : 0;
+      const rate = Number(fitness.total_rate_per_s || 0);
+      const deps = Number(fitness.external_dependencies || 0);
+      const failures = Number(fitness.failures || 0);
+      const status = decision.promoted ? "promoted" : "rejected";
+      const cls = decision.promoted ? "promoted" : "rejected";
+      return '<article class="generation-node ' + cls + '">'
+        + '<span>G' + escapeHtml(String(row.generation ?? "?")) + '</span>'
+        + '<strong>' + status + '</strong>'
+        + '<small>' + caps + ' caps · '
+        + formatNumber(rate, 2) + '/s · '
+        + deps + ' ext · ' + failures + ' fail</small>'
+        + '</article>';
+    });
+    if (
+      currentRunId
+      && !history.some((row) =>
+        row.challenger && row.challenger.run_id === currentRunId
+      )
+    ) {
+      historyRows.push(
+        '<article class="generation-node evaluating">'
+          + '<span>G' + escapeHtml(String(generation || "?")) + '</span>'
+          + '<strong>evaluating</strong>'
+          + '<small>' + escapeHtml(genomeSummary(challenger.configuration)) + '</small>'
+          + '</article>'
+      );
+    }
+    historyContainer.innerHTML = historyRows.length
+      ? historyRows.join("")
+      : '<span class="generation-empty">No completed generations yet.</span>';
+  }
+}
+
+
 function renderCurriculum() {
   const list = $("curriculumList");
   const curriculum = Array.isArray(state.research && state.research.curriculum)
@@ -819,11 +1364,21 @@ function eventTime(event) {
 
 function renderTimeline() {
   const events = [];
+  const seen = new Set();
+  const appendUnique = (event, source) => {
+    const when = String(eventTime(event));
+    const type = String(event.type || "event");
+    const message = String(event.message || event.observation || event.lesson || type);
+    const key = when + "|" + type + "|" + message;
+    if (seen.has(key)) return;
+    seen.add(key);
+    events.push(Object.assign({}, event, { source }));
+  };
   for (const event of ((state.research && state.research.events) || [])) {
-    events.push(Object.assign({}, event, { source: "research" }));
+    appendUnique(event, "research");
   }
   for (const event of ((state.run && state.run.events) || [])) {
-    events.push(Object.assign({}, event, { source: "run" }));
+    appendUnique(event, "run");
   }
   events.sort((a, b) => String(eventTime(a)).localeCompare(String(eventTime(b))));
   const recent = events.slice(-40).reverse();
@@ -897,6 +1452,28 @@ function renderTruthTable() {
     knowledgeCount ? "good" : "warn"
   );
 
+  const evolution = (
+    state.research && state.research.evolution
+      ? state.research.evolution
+      : state.evolution
+  ) || {};
+  const champion = evolution.champion || null;
+  const challenger = evolution.challenger || null;
+  setClassText(
+    "truthEvolution",
+    champion
+      ? "G" + String(champion.generation || "?") + " champion"
+      : challenger
+        ? "G" + String(evolution.generation || "?") + " evaluating"
+        : "no champion",
+    champion ? "good" : challenger ? "warn" : "muted"
+  );
+  setClassText(
+    "truthTechTree",
+    "benchmark pre-unlocked",
+    "warn"
+  );
+
   setClassText(
     "truthDataset",
     spatialDemos + " demo" + (spatialDemos === 1 ? "" : "s")
@@ -942,14 +1519,31 @@ function updateMission() {
   setText("stageProgressText", formatNumber(progress, 0) + "%");
 
   const status = String(research.status || "idle");
-  const badgeClass = ["running", "learning", "validating"].includes(status)
+  const frontierOpen = !!(state.progression && state.progression.next_goal);
+  const promotion = (research.evolution && research.evolution.promotion) || null;
+  const semanticStatus = status === "completed" && frontierOpen
+    ? "generation_complete"
+    : status === "partial_success" && promotion && !promotion.promoted
+      ? "generation_rejected"
+      : status;
+  const badgeClass = ["running", "learning", "validating"].includes(semanticStatus)
     ? "badge live"
-    : status === "completed"
+    : ["completed", "generation_complete"].includes(semanticStatus)
       ? "badge good"
-      : status === "error" || status === "failed"
-        ? "badge dead"
-        : "badge neutral";
-  setClassText("researchBadge", "research " + status, badgeClass);
+      : semanticStatus === "generation_rejected"
+        ? "badge warn"
+        : semanticStatus === "error" || semanticStatus === "failed"
+          ? "badge dead"
+          : "badge neutral";
+  setClassText(
+    "researchBadge",
+    semanticStatus === "generation_complete"
+      ? "generation complete"
+      : semanticStatus === "generation_rejected"
+        ? "generation rejected"
+        : "research " + semanticStatus,
+    badgeClass
+  );
 }
 
 function updateKpis() {
@@ -959,8 +1553,8 @@ function updateKpis() {
   const llm = status.llm || {};
   const render = status.render || {};
   const production = world.production || {};
-  const outputs = production.output || {};
-  const inputs = production.input || {};
+  const produced = production.produced || production.output || {};
+  const consumed = production.consumed || production.input || {};
   const online = (state.research && state.research.online_learning) || {};
   const onlineRows = online.history || [];
 
@@ -972,15 +1566,58 @@ function updateKpis() {
   setText("worldTick", tickText);
   setText("probeLatency", formatNumber(world.latency_ms, 1) + " ms");
 
-  const primaryOutput = Object.entries(outputs).sort((a, b) => Number(b[1]) - Number(a[1]))[0];
+  const health = {};
+  for (const entity of (world.entities || [])) {
+    const statusName = String(entity.status || "");
+    if (!statusName || ["normal", "working"].includes(statusName)) {
+      if (statusName === "working") health.working = (health.working || 0) + 1;
+      continue;
+    }
+    health[statusName] = (health[statusName] || 0) + 1;
+  }
+  const healthContainer = $("entityHealth");
+  if (healthContainer) {
+    const rows = Object.entries(health).sort((a, b) => {
+      if (a[0] === "working") return -1;
+      if (b[0] === "working") return 1;
+      return Number(b[1]) - Number(a[1]);
+    });
+    healthContainer.innerHTML = rows.length
+      ? rows.map(([name, count]) => {
+          const bad = ["no_fuel", "no_power", "disabled"].includes(name);
+          const warn = ["no_ingredients", "full_output", "low_power"].includes(name);
+          return '<span class="entity-health-pill '
+            + (bad ? "bad" : warn ? "warn" : "good") + '">'
+            + escapeHtml(name.replaceAll("_", " ")) + " × " + count
+            + '</span>';
+        }).join("")
+      : '<span class="entity-health-pill muted">no operational status</span>';
+  }
+
+  const primaryOutput = Object.entries(produced).sort((a, b) => Number(b[1]) - Number(a[1]))[0];
   if (primaryOutput) {
     setText("productionPrimary", formatNumber(primaryOutput[1], 0) + " " + primaryOutput[0]);
-    const primaryInput = Object.entries(inputs).sort((a, b) => Number(b[1]) - Number(a[1]))[0];
+    const primaryInput = Object.entries(consumed).sort((a, b) => Number(b[1]) - Number(a[1]))[0];
+    const coalConsumed = Number(consumed.coal || 0);
+    const coalProduced = Number(produced.coal || 0);
+    const consumptionLabel = primaryInput
+      ? formatNumber(primaryInput[1], 0) + " " + primaryInput[0] + " consumed"
+      : "no measured consumption";
+    const resourceAccounting = (
+      state.research
+      && state.research.resource_accounting
+      && state.research.resource_accounting.exogenous_inputs
+    ) || {};
+    const coalOrigin = String(((resourceAccounting.coal || {}).status) || "external");
     setText(
       "productionSecondary",
-      primaryInput
-        ? formatNumber(primaryInput[1], 0) + " " + primaryInput[0] + " consumed"
-        : "measured game production"
+      coalConsumed > 0 && coalProduced <= 0
+        ? consumptionLabel + " · coal source: " + (
+            ["retired", "internal", "self_sufficient"].includes(coalOrigin)
+              ? "internal buffer"
+              : "bootstrap inventory"
+          )
+        : consumptionLabel
     );
   } else {
     setText("productionPrimary", "--");
@@ -989,6 +1626,22 @@ function updateKpis() {
 
   const runner = status.research_runner || {};
   const research = state.research || {};
+  const arena = research.arena || {};
+  const arenaMode = String(arena.mode || "unknown");
+  const arenaLabel = arenaMode === "open_play"
+    ? "OPEN PLAY · tech tree real"
+    : arenaMode === "lab_play"
+      ? "LAB ARENA · accelerated"
+      : "arena --";
+  setClassText(
+    "arenaBadge",
+    arenaLabel,
+    arenaMode === "open_play"
+      ? "badge live"
+      : arenaMode === "lab_play"
+        ? "badge neutral"
+        : "badge neutral"
+  );
   const updatedAt = Date.parse(research.updated_at || "");
   const researchAgeS = Number.isFinite(updatedAt)
     ? Math.max(0, (Date.now() - updatedAt) / 1000)
@@ -998,13 +1651,27 @@ function updateKpis() {
     && ["running", "learning", "validating"].includes(researchStatus)
     && researchAgeS !== null
     && researchAgeS > 45;
+  const frontierOpen = !!(state.progression && state.progression.next_goal);
+  const generationDone = ["completed", "generation_complete"].includes(researchStatus)
+    && frontierOpen;
+  const researchPromotion = (
+    research.evolution
+    && research.evolution.promotion
+  ) || null;
+  const generationRejected = researchStatus === "partial_success"
+    && researchPromotion
+    && !researchPromotion.promoted;
   const loopLabel = runnerStalled
     ? "stalled"
     : runner.active
       ? "active"
-      : researchStatus === "completed"
-        ? "completed · idle"
-        : "idle";
+      : generationRejected
+        ? "generation rejected"
+        : generationDone
+          ? "generation complete"
+          : researchStatus === "completed"
+            ? "research complete"
+            : "idle";
   setClassText(
     "researchLoop",
     loopLabel,
@@ -1017,10 +1684,53 @@ function updateKpis() {
       : runner.active
         ? (research.stage || "working") + " · updated "
           + (researchAgeS === null ? "--" : formatNumber(researchAgeS, 0) + " s") + " ago"
-        : researchStatus === "completed"
-          ? "last run completed · next: " + String(research.next_action || "--")
-          : "no active agent process"
+        : generationRejected
+          ? "challenger failed survival gate · incumbent retained · next: "
+            + String(research.next_action || "--")
+          : generationDone
+            ? "champion/challenger generation closed · next frontier: "
+              + String(research.next_action || "--")
+            : researchStatus === "completed"
+              ? "finite research objective complete"
+              : "no active agent process"
   );
+
+  const progression = state.progression || {};
+  const nextGoal = progression.next_goal || null;
+  const frontier = Array.isArray(progression.frontier) ? progression.frontier : [];
+  const achievedGoals = Array.isArray(progression.achieved) ? progression.achieved : [];
+  if (nextGoal) {
+    setText("engineeringGoal", nextGoal.label || nextGoal.goal_id || "next capability");
+    const alternatives = frontier
+      .slice(1, 3)
+      .map((candidate) => candidate.label || candidate.goal_id)
+      .filter(Boolean);
+    const debt = Array.isArray(progression.dependency_debt)
+      ? progression.dependency_debt
+      : [];
+    const debtLabel = debt.length
+      ? " · dependency debt: "
+        + debt.map((item) => {
+          const missing = Array.isArray(item.missing_prerequisites)
+            ? item.missing_prerequisites.join("+")
+            : "?";
+          return (item.goal_id || "goal") + " needs " + missing;
+        }).join(" / ")
+      : "";
+    setText(
+      "engineeringGoalDetail",
+      String(nextGoal.kind || "engineering")
+        + " · " + achievedGoals.length + " capabilities achieved"
+        + debtLabel
+        + (alternatives.length ? " · alternatives: " + alternatives.join(" / ") : "")
+    );
+  } else {
+    setText("engineeringGoal", "frontier complete");
+    setText(
+      "engineeringGoalDetail",
+      achievedGoals.length + " capabilities achieved · expand goal catalog"
+    );
+  }
 
   const onlineStatus = online.status || (onlineRows.length ? "learning" : "idle");
   setText("onlineLearner", online.algorithm ? online.algorithm + " · " + onlineStatus : onlineStatus);
@@ -1067,7 +1777,7 @@ function updateKpis() {
   setClassText(
     "runStatus",
     runStatus,
-    ["success", "completed"].includes(runStatus) ? "badge good"
+    ["success", "completed", "generation_complete"].includes(runStatus) ? "badge good"
       : ["running", "starting", "learning", "validating"].includes(runStatus) ? "badge live"
       : runStatus === "--" ? "badge neutral" : "badge warn"
   );
@@ -1085,6 +1795,9 @@ function applyPayload(payload) {
   if (payload.history) state.history = payload.history;
   if (payload.run) state.run = payload.run;
   if (payload.research) state.research = payload.research;
+  if (payload.progression) state.progression = payload.progression;
+  if (payload.resource_overview) state.resourceOverview = payload.resource_overview;
+  if (payload.evolution) state.evolution = payload.evolution;
   if (payload.knowledge) state.knowledge = payload.knowledge;
   if (payload.datasets) state.datasets = payload.datasets;
 
@@ -1092,6 +1805,9 @@ function applyPayload(payload) {
   updateMission();
   updateEntityMix();
   renderWorldHotspots();
+  renderResourceLegend();
+  renderCapabilityHealth();
+  renderEvolution();
   renderCurriculum();
   renderTimeline();
   renderKnowledge();
@@ -1119,6 +1835,9 @@ async function loadInitialState() {
     "/api/learning",
     "/api/run",
     "/api/research",
+    "/api/progression",
+    "/api/resource-overview",
+    "/api/evolution",
     "/api/knowledge",
     "/api/datasets",
   ];
@@ -1131,8 +1850,11 @@ async function loadInitialState() {
     learning: payloads[3],
     run: payloads[4],
     research: payloads[5],
-    knowledge: payloads[6],
-    datasets: payloads[7],
+    progression: payloads[6],
+    resource_overview: payloads[7],
+    evolution: payloads[8],
+    knowledge: payloads[9],
+    datasets: payloads[10],
   });
 }
 
