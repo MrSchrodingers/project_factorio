@@ -65,6 +65,13 @@ from factorio_ai_lab.planning.progression import (
     DEFAULT_ENGINEERING_PLANNER,
     EngineeringState,
 )
+from factorio_ai_lab.planning.resupply import (
+    ContainerSalvage,
+    FuelSource,
+    SupplyPlan,
+    container_roles,
+    plan_supply,
+)
 from factorio_ai_lab.runtime import FactorioWorldLease
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -227,6 +234,12 @@ NO_MEASURED_ARM = "no_measured_arm"
 #: No arm had free tiles within reach, so no arm could be trialled at all.
 #: Distinct from NO_MEASURED_ARM: there the trials ran and measured nothing.
 NO_BUILDABLE_ARM = "no_buildable_arm"
+
+#: The world holds neither the fuel nor a spare container, so no trial cell
+#: could be assembled at all. Distinct from both of the above: the tiles were
+#: free and the bandit had arms to pull. Said here because the engine's own
+#: message names inventories and nothing about where supply was looked for.
+NO_TRIAL_SUPPLY = "no_trial_supply_in_world"
 
 #: What a placement trial's output number is. The world production counter
 #: is not it: a rejected step rewinds that counter, so every trial reads the
@@ -1000,6 +1013,31 @@ BASELINE_DRILL_NAME = BURNER_MINING_DRILL.name
 #: The container a mining cell drops its ore into.
 BASELINE_CHEST_NAME = "wooden-chest"
 
+#: The same container under the name an FLE script builds it by. Stated next
+#: to its entity name because the two are read in different places -- the
+#: survey matches entities by name, the script asks for a prototype -- and a
+#: pair that drifts apart surveys one container and places another.
+BASELINE_CHEST_PROTOTYPE = "WoodenChest"
+
+#: What a burner mining cell burns, under both names, for the same reason.
+MINING_CELL_FUEL_ITEM = "coal"
+MINING_CELL_FUEL_PROTOTYPE = "Coal"
+
+#: How the journal records the state of a stage's supply plan. A world that
+#: could not be read is not a world that holds nothing: the first leaves the
+#: stage on the path it took before any of this existed, the second is a
+#: measurement, and only the second justifies refusing.
+SUPPLY_PLANNED = "planned"
+SUPPLY_REFUSED = "refused"
+SUPPLY_WORLD_UNREAD = "world_not_surveyed"
+
+#: Coal the curriculum has always put into a trial cell and into the promoted
+#: cell. Kept as the floor of a sized charge, never as the charge itself: a
+#: dose that stops covering the window turns a throughput reading into a fuel
+#: reading, which is what `planning.fuel` exists to prevent.
+TRIAL_COAL_FLOOR = 12
+SCALE_COAL_FLOOR = 20
+
 
 def survey_world(env: Any) -> WorldSurvey | None:
     """Everything standing in the world, with its footprints resolved.
@@ -1158,6 +1196,157 @@ def inherited_mining_cell(
     """
     plan = plan_mining_cell(survey_world(env), center)
     return plan.position if plan.outcome == OUTCOME_ADOPT else None
+
+
+def survey_stage_supply(
+    env: Any,
+    *,
+    anchor: tuple[float, float],
+    fuel_needed: int,
+    container_needed: bool,
+    container_name: str = BASELINE_CHEST_NAME,
+    fuel_item: str = MINING_CELL_FUEL_ITEM,
+) -> SupplyPlan | None:
+    """What the standing world can give this stage, read off the world.
+
+    An heir carries whatever its ancestor happened to be holding when it was
+    promoted, which for generation 38 was ``coal: 8`` and no container at
+    all. The kit a mining cell is assembled from therefore has to be found
+    rather than assumed, and the only honest place to find it is the world as
+    it stands: the containers that hold fuel, and the containers no material
+    edge touches.
+
+    Answers None when the world, or the agent's own inventory, could not be
+    read. That is not a world measured to be empty: it leaves the caller on
+    the path it took before any of this existed, and the caller records the
+    unsurveyed step as what it is.
+    """
+    survey = survey_world(env)
+    if survey is None:
+        return None
+    unwrapped = getattr(env, "unwrapped", env)
+    instance = getattr(unwrapped, "instance", None)
+    fuel_carried = _carried_item_count(instance, fuel_item)
+    containers_carried = _carried_item_count(instance, container_name)
+    if fuel_carried is None or containers_carried is None:
+        return None
+
+    graph = build_factory_graph(list(survey.entities))
+    sources: list[FuelSource] = []
+    spares: list[ContainerSalvage] = []
+    for role in container_roles(graph):
+        available = _chest_item_count(
+            instance,
+            x=role.position[0],
+            y=role.position[1],
+            item=fuel_item,
+            container=role.name,
+        )
+        if available > 0:
+            sources.append(
+                FuelSource(
+                    position=role.position,
+                    available=available,
+                    supplies_chain=role.supplies_chain,
+                )
+            )
+        if role.unattached and role.name == container_name:
+            spares.append(
+                ContainerSalvage(
+                    position=role.position,
+                    name=role.name,
+                    holding=_chest_item_count(
+                        instance,
+                        x=role.position[0],
+                        y=role.position[1],
+                        item=None,
+                        container=role.name,
+                    ),
+                )
+            )
+    return plan_supply(
+        anchor=anchor,
+        fuel_needed=fuel_needed,
+        fuel_carried=fuel_carried,
+        fuel_sources=tuple(sources),
+        container_needed=container_needed,
+        containers_carried=containers_carried,
+        spare_containers=tuple(spares),
+    )
+
+
+def supply_report(plan: SupplyPlan | None) -> dict[str, Any]:
+    """The supply plan as the journal records it, its absence included."""
+    if plan is None:
+        return {"status": SUPPLY_WORLD_UNREAD}
+    return {
+        "status": SUPPLY_REFUSED if plan.refused else SUPPLY_PLANNED,
+        **plan.to_dict(),
+    }
+
+
+def mining_cell_supply_script(
+    plan: SupplyPlan | None,
+    *,
+    fuel_needed: int,
+) -> str:
+    """FLE script that draws a mining cell's kit out of the standing world.
+
+    Belongs after the cell's drill is placed, so a placement the engine
+    refuses costs the world nothing: the step aborts before any container is
+    touched, and a trial that never ran cannot be charged with a withdrawal.
+
+    Each draw is clamped twice, by what the container was measured to hold
+    and by what the agent is still missing, because the second clamp is the
+    one that survives a container an earlier step already emptied. Each call
+    is wrapped on its own: one container that will not answer must not take
+    down the draws that would have worked.
+
+    Whatever the engine says about a refused call is neutralised before it
+    travels in the payload. FLE marks a step failed on the substring ``error``
+    anywhere in what the script printed (fle/env/gym_env/environment.py:451),
+    so a message quoted verbatim would fail a step that had already done its
+    work. The counters are always declared, including for a world that could
+    not be surveyed, so the payload never reads a name the script never bound.
+    """
+    lines = [
+        "supply_fuel_drawn=0",
+        "supply_fuel_log=[]",
+        "supply_container_recovered=0",
+        "supply_note=''",
+    ]
+    if plan is None:
+        return "\n".join(lines)
+    note = (
+        "    supply_note=(supply_note+' '+str(supply_exc)[:80])[:240]"
+        ".replace('rror','rr0r').replace('xception','xcepti0n')"
+    )
+    for draw in plan.fuel_draws:
+        x, y = draw.position
+        lines.append(
+            "try:\n"
+            f"    supply_short=max(0,{int(fuel_needed)}"
+            f"-inspect_inventory()[Prototype.{MINING_CELL_FUEL_PROTOTYPE}])\n"
+            "    if supply_short>0:\n"
+            f"        supply_taken=extract_item(Prototype.{MINING_CELL_FUEL_PROTOTYPE},"
+            f"Position(x={x},y={y}),quantity=min(supply_short,{int(draw.quantity)}))\n"
+            "        supply_fuel_drawn+=supply_taken\n"
+            f"        supply_fuel_log.append(({x},{y},supply_taken))\n"
+            "except Exception as supply_exc:\n"
+            f"    supply_fuel_log.append(({x},{y},0))\n" + note
+        )
+    salvage = plan.salvage
+    if salvage is not None:
+        x, y = salvage.position
+        lines.append(
+            "try:\n"
+            f"    if inspect_inventory()[Prototype.{BASELINE_CHEST_PROTOTYPE}]<1:\n"
+            f"        pickup_entity(Prototype.{BASELINE_CHEST_PROTOTYPE},"
+            f"Position(x={x},y={y}))\n"
+            "        supply_container_recovered=1\n"
+            "except Exception as supply_exc:\n" + note
+        )
+    return "\n".join(lines)
 
 
 def stage_baseline(
@@ -1439,6 +1628,46 @@ def stage_online_learning(
         journal.flush()
         raise PlacementNotMeasured(NO_BUILDABLE_ARM)
 
+    # A trial that runs dry mid-window measures fuel, not mining speed, so
+    # the charge is sized from the window the step really spends in the world
+    # and the curriculum's dose is kept as its floor. The kit that charge is
+    # spent on is not in the inventory an heir starts with, so it is looked
+    # for in the world. Planned once, against the reading the placements were
+    # planned against: every trial is rolled back, so the world the next one
+    # meets is the world this one was planned against.
+    trial_dose = max(
+        TRIAL_COAL_FLOOR,
+        BURNER_MINING_DRILL.coal_for_seconds(
+            float(settle_seconds) + STAGE_OVERHEAD_SECONDS
+        ),
+    )
+    supply = survey_stage_supply(
+        env,
+        anchor=center,
+        fuel_needed=trial_dose,
+        container_needed=True,
+    )
+    online["supply"] = supply_report(supply)
+    journal.state["metrics"]["placement_trial_supply"] = online["supply"]
+    journal.state["metrics"]["placement_trial_coal_dose"] = trial_dose
+    if supply is not None and supply.refused:
+        # Neither the fuel nor a spare container is out there. That is a
+        # reading about the world, and it is said here: running the episodes
+        # anyway spends the whole stage to arrive at an engine message about
+        # inventories that names nothing about where supply was looked for.
+        journal.state.setdefault("metrics", {})[
+            "placement_selection_outcome"
+        ] = NO_TRIAL_SUPPLY
+        online["status"] = NO_TRIAL_SUPPLY
+        journal.flush()
+        journal.event(
+            "refusal",
+            "Placement trials refused: the standing world supplies no trial cell.",
+            supply=online["supply"],
+        )
+        raise PlacementNotMeasured(NO_TRIAL_SUPPLY)
+    supply_prelude = mining_cell_supply_script(supply, fuel_needed=trial_dose)
+
     bandit = UCB1Bandit(tuple(buildable), exploration=exploration)
 
     for episode in range(episodes):
@@ -1453,6 +1682,11 @@ def stage_online_learning(
             "cell_yield": None,
             "world_output_before": world_output_before,
             "world_output_after": world_output_before,
+            "trial_fuel": None,
+            "supply_fuel_drawn": None,
+            "supply_container_recovered": None,
+            "supply_log": None,
+            "supply_note": None,
             "valid": False,
         }
 
@@ -1473,10 +1707,34 @@ def stage_online_learning(
                 namespace,
                 "iron-ore",
             )
+            measured_state["trial_fuel"] = _namespace_measure(
+                namespace,
+                "trial_fuel",
+            )
+            measured_state["supply_fuel_drawn"] = _namespace_measure(
+                namespace,
+                "supply_fuel_drawn",
+            )
+            measured_state["supply_container_recovered"] = _namespace_measure(
+                namespace,
+                "supply_container_recovered",
+            )
+            measured_state["supply_log"] = _supply_log_rows(
+                getattr(namespace, "supply_fuel_log", None)
+            )
+            note = getattr(namespace, "supply_note", None)
+            measured_state["supply_note"] = (
+                (str(note)[:240] or None) if note is not None else None
+            )
+            # A cell that was never fuelled measured nothing about its
+            # placement: its chest is empty because the drill never turned,
+            # not because the tiles are poor. A dose nobody measured decides
+            # nothing either way and is left to the conditions above.
             measured_state["valid"] = (
                 not bool(result.info.get("error_occurred"))
                 and result.candidate_game_state is not None
                 and measured_state["cell_yield"] is not None
+                and measured_state["trial_fuel"] != 0.0
             )
             return False
 
@@ -1486,14 +1744,22 @@ trial_drill = place_entity(
     position=Position(x={target[0]}, y={target[1]}),
     direction=Direction.DOWN,
 )
-trial_drill = insert_item(Prototype.Coal, trial_drill, quantity=12)
+{supply_prelude}
+trial_fuel = min({trial_dose}, inspect_inventory()[Prototype.Coal])
+if trial_fuel > 0:
+    trial_drill = insert_item(Prototype.Coal, trial_drill, quantity=trial_fuel)
 trial_chest = place_entity_next_to(
     Prototype.WoodenChest,
     trial_drill.position,
     direction=Direction.DOWN,
 )
 sleep({settle_seconds})
-print({{'trial_inventory': inspect_inventory(trial_chest)}})
+print({{
+    'trial_inventory': inspect_inventory(trial_chest),
+    'trial_fuel': trial_fuel,
+    'supply_fuel_drawn': supply_fuel_drawn,
+    'supply_container_recovered': supply_container_recovered,
+}})
 """
         step = executor.execute(
             code,
@@ -1526,6 +1792,17 @@ print({{'trial_inventory': inspect_inventory(trial_chest)}})
             "failure_text": _step_error_text(step.info),
             "distance": distance,
             "engine_reward": float(step.reward),
+            # What this trial took out of the standing world, and what it put
+            # into its own drill. None, never 0.0, when the step never got
+            # that far: a withdrawal nobody measured is not a withdrawal of
+            # nothing, and the ledger is what tells a generation that produced
+            # from one that spent its inheritance.
+            "coal_dose_target": trial_dose,
+            "coal_inserted": measured["trial_fuel"],
+            "supply_fuel_drawn": measured["supply_fuel_drawn"],
+            "supply_container_recovered": measured["supply_container_recovered"],
+            "supply_draws": measured["supply_log"],
+            "supply_note": measured["supply_note"],
             "at": utc_now(),
         }
         online["history"].append(row)
@@ -1661,6 +1938,31 @@ def stage_scale_mining(
         )
     target = plan.position
 
+    # The promoted cell is built out of the same kit the trials measured on,
+    # and an heir carries none of it. Unlike a trial, this step commits, so
+    # what it draws leaves the world for good and the ledger below is the
+    # only record that it did.
+    scale_dose = max(
+        SCALE_COAL_FLOOR,
+        BURNER_MINING_DRILL.coal_for_seconds(
+            float(settle_seconds) + STAGE_OVERHEAD_SECONDS
+        ),
+    )
+    supply = survey_stage_supply(
+        env,
+        anchor=center,
+        fuel_needed=scale_dose,
+        container_needed=True,
+    )
+    journal.state["metrics"]["scaled_supply"] = supply_report(supply)
+    journal.state["metrics"]["scaled_coal_dose"] = scale_dose
+    if supply is not None and supply.refused:
+        raise RuntimeError(
+            "learned placement cannot be supplied by the standing world: "
+            + ", ".join(supply.refusals)
+        )
+    supply_prelude = mining_cell_supply_script(supply, fuel_needed=scale_dose)
+
     journal.set_stage(
         2,
         status="running",
@@ -1671,6 +1973,15 @@ def stage_scale_mining(
     output_before = production_output(namespace, "iron-ore")
     clock = _StageClock(env)
     measured: dict[str, float] = {}
+    # None until the committed step reports it. An absent reading is not a
+    # withdrawal of zero, and only the ledger separates what this generation
+    # built from what it spent of its inheritance.
+    drawn: dict[str, Any] = {
+        "coal_inserted": None,
+        "supply_fuel_drawn": None,
+        "supply_container_recovered": None,
+        "supply_draws": None,
+    }
 
     def accept_scale(result: Any) -> bool:
         clock.stop()
@@ -1679,6 +1990,18 @@ def stage_scale_mining(
         measured["iron_output"] = iron_output
         measured["output_before"] = output_before
         measured["output_after"] = output_after
+        drawn["coal_inserted"] = _namespace_measure(namespace, "scale_fuel")
+        drawn["supply_fuel_drawn"] = _namespace_measure(
+            namespace,
+            "supply_fuel_drawn",
+        )
+        drawn["supply_container_recovered"] = _namespace_measure(
+            namespace,
+            "supply_container_recovered",
+        )
+        drawn["supply_draws"] = _supply_log_rows(
+            getattr(namespace, "supply_fuel_log", None)
+        )
         return (
             not bool(result.info.get("error_occurred"))
             and result.candidate_game_state is not None
@@ -1691,14 +2014,22 @@ scale_drill = place_entity(
     position=Position(x={target[0]}, y={target[1]}),
     direction=Direction.DOWN,
 )
-scale_drill = insert_item(Prototype.Coal, scale_drill, quantity=20)
+{supply_prelude}
+scale_fuel = min({scale_dose}, inspect_inventory()[Prototype.Coal])
+if scale_fuel > 0:
+    scale_drill = insert_item(Prototype.Coal, scale_drill, quantity=scale_fuel)
 scale_chest = place_entity_next_to(
     Prototype.WoodenChest,
     scale_drill.position,
     direction=Direction.DOWN,
 )
 sleep({settle_seconds})
-print({{'scale_inventory': inspect_inventory(scale_chest)}})
+print({{
+    'scale_inventory': inspect_inventory(scale_chest),
+    'scale_fuel': scale_fuel,
+    'supply_fuel_drawn': supply_fuel_drawn,
+    'supply_container_recovered': supply_container_recovered,
+}})
 """
     step = executor.execute(
         code,
@@ -1720,6 +2051,7 @@ print({{'scale_inventory': inspect_inventory(scale_chest)}})
         window,
     )
     journal.state["metrics"]["scaled_reward"] = step.reward
+    journal.state["metrics"]["scaled_supply_drawn"] = dict(drawn)
     journal.complete_stage(
         2,
         f"Second mining cell committed at {best_arm}; live factory now contains both cells.",
@@ -1899,22 +2231,86 @@ def _chest_item_count(
     *,
     x: float,
     y: float,
-    item: str,
+    item: str | None,
+    container: str = BASELINE_CHEST_NAME,
 ) -> int:
+    """How much of `item` one standing container holds.
+
+    ``item=None`` counts everything in it, which is what carrying a container
+    off hands to the agent: picking a chest up takes its contents with it, so
+    a salvage that reported only the fuel would hide an inherited stock
+    arriving as this generation's inventory.
+    """
+    selector = "" if item is None else f"'{item}'"
     command = (
         "/c "
         "local p=storage.agent_characters and storage.agent_characters[1]; "
         "if not p then rcon.print('0') return end; "
-        f"local e=p.surface.find_entity('wooden-chest',{{x={x},y={y}}}); "
+        f"local e=p.surface.find_entity('{container}',{{x={x},y={y}}}); "
         "if not e then rcon.print('0') return end; "
         "local inv=e.get_inventory(defines.inventory.chest); "
-        f"rcon.print(inv and inv.get_item_count('{item}') or 0)"
+        f"rcon.print(inv and inv.get_item_count({selector}) or 0)"
     )
     raw = instance.rcon_client.send_command(command)
     try:
         return int(float(str(raw).strip()))
     except (TypeError, ValueError):
         return 0
+
+
+def _carried_item_count(instance: Any, item: str) -> int | None:
+    """How much of `item` the agent carries, or None when nothing answered.
+
+    None is not zero. A stage that refused to run because an unread inventory
+    looked empty would report a supply failure the world never had, which is
+    the same substitution that once turned "not executed" into "measured
+    zero" and cost eleven generations of misdirected diagnosis.
+    """
+    command = (
+        "/c "
+        "local p=storage.agent_characters and storage.agent_characters[1]; "
+        "if not p then rcon.print('') return end; "
+        "local inv=p.get_main_inventory(); "
+        "if not inv then rcon.print('') return end; "
+        f"rcon.print(inv.get_item_count('{item}'))"
+    )
+    try:
+        raw = instance.rcon_client.send_command(command)
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+        return None
+    try:
+        return int(float(str(raw).strip()))
+    except (TypeError, ValueError):
+        return None
+
+
+def _supply_log_rows(raw: Any) -> list[dict[str, Any]] | None:
+    """Per-container draw rows for the journal, or None when nothing was read.
+
+    The remote script appends one triple per container it tried. A missing
+    attribute means the step never reached the draw, and that is reported as
+    None: an empty list would read as a step that drew from nowhere, which is
+    precisely the question the ledger exists to answer. A log whose shape does
+    not match is discarded whole, because a partially parsed list reads as a
+    complete census of what was taken.
+    """
+    if not isinstance(raw, (list, tuple)):
+        return None
+    rows: list[dict[str, Any]] = []
+    for entry in raw:
+        if not isinstance(entry, (list, tuple)) or len(entry) != 3:
+            return None
+        x, y, quantity = entry
+        try:
+            rows.append(
+                {
+                    "position": {"x": float(x), "y": float(y)},
+                    "quantity": float(quantity),
+                }
+            )
+        except (TypeError, ValueError):
+            return None
+    return rows
 
 
 def _runtime_entity_footprints(instance: Any) -> dict[str, tuple[int, int]]:
