@@ -37,6 +37,51 @@ def _atomic_text(path: Path, content: str) -> None:
     temporary.replace(path)
 
 
+
+def _repair_inventories(raw: str, game_state: Any) -> str:
+    """Restore inventory contents that ``GameState.to_raw()`` drops.
+
+    ``to_raw`` serialises each inventory with ``inventory.__dict__``, but
+    ``fle.env.entities.Inventory`` is a pydantic v2 model declared with
+    ``extra="allow"``: the items live in ``__pydantic_extra__`` and
+    ``__dict__`` is empty. A checkpoint written naively therefore persists
+    ``"inventories": [{}]`` and silently loses everything the agent was
+    carrying - restoring from it would hand the heir an empty pocket while
+    reporting success.
+
+    Measured on this machine:
+
+        Inventory(**{iron-plate: 3, coal: 5})
+          __dict__            -> {}
+          __pydantic_extra__  -> {iron-plate: 3, coal: 5}
+
+    The live objects still hold the truth, so the field is rebuilt from them
+    before the payload is committed.
+    """
+    parsed = json.loads(raw)
+    serialised = parsed.get("inventories")
+    live = getattr(game_state, "inventories", None)
+    if not isinstance(serialised, list) or not isinstance(live, list):
+        return raw
+    if len(serialised) != len(live):
+        return raw
+
+    # Imported late: lifelong imports this module.
+    from factorio_ai_lab.learning.lifelong import inventory_items
+
+    repaired = False
+    for index, inventory in enumerate(live):
+        items = inventory_items(inventory)
+        if not items or serialised[index]:
+            continue
+        serialised[index] = dict(items)
+        repaired = True
+    if not repaired:
+        return raw
+    parsed["inventories"] = serialised
+    return json.dumps(parsed)
+
+
 def save_game_state(
     path: Path,
     game_state: Any,
@@ -59,6 +104,7 @@ def save_game_state(
     if "entities" not in parsed or "inventories" not in parsed:
         raise ValueError("serialized GameState lacks entities/inventories")
 
+    raw = _repair_inventories(raw, game_state)
     payload = raw if raw.endswith("\n") else raw + "\n"
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
     saved_at = datetime.now(UTC).isoformat()

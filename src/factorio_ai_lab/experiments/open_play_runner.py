@@ -171,6 +171,36 @@ def _production_counter(namespace: Any, item: str) -> float:
     return float(output.get(item, 0.0) or 0.0)
 
 
+
+def _observed_world_signature(env: Any) -> str | None:
+    """Terrain identity of the world this run actually played on.
+
+    The robustness gate used to qualify a champion on three distinct seeds.
+    Seeds do not make worlds here: with `default_lab_scenario` the map is a
+    prebuilt `level.dat` inside the scenario, identical on every boot, so the
+    three runs would happen on the same terrain and prove nothing about
+    generalisation. Passing the observed signature lets the gate count worlds
+    it verified instead of seeds it was told about, and say so when it cannot.
+
+    Read-only: samples resource entities over RCON and never writes.
+    """
+    try:
+        from factorio_ai_lab.learning.map_suite import (
+            world_signature,
+            world_signature_command,
+        )
+
+        instance = env.unwrapped.instance
+        raw = instance.rcon_client.send_command(world_signature_command())
+        if not raw:
+            return None
+        return world_signature(json.loads(raw))
+    except (AttributeError, ImportError, OSError, TypeError, ValueError):
+        # No signature is honest; a wrong one would qualify a champion on
+        # evidence that was never collected.
+        return None
+
+
 def _autonomy_entity_snapshot(instance: Any) -> list[dict[str, Any]]:
     command = r"""
 /c local p=storage.agent_characters and storage.agent_characters[1]
@@ -5574,6 +5604,7 @@ def run_open_play_validation(
             )
             if isinstance(metrics, dict)
             else 0.0,
+            world_signature=_observed_world_signature(env),
         )
         record["robustness"] = robustness
         append_jsonl(OPEN_PLAY_HISTORY, record)
