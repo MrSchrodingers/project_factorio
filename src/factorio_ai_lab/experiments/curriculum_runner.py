@@ -518,6 +518,34 @@ def synthesize_lesson(
 # for; the denominator itself is always the observed window, never this.
 STAGE_OVERHEAD_SECONDS = 90.0
 
+# How long the world keeps running across a whole generation, in game seconds.
+# Generation 27 was measured live at roughly 4134 game seconds while still
+# mid-run at tick 4682161, and the arena runs at game speed 10
+# (fle/env/gym_env/registry.py:143), which is what turns the 415-443 s of
+# wall-clock duration recorded in runs/generation_reports into that figure.
+# Fuel that has to outlast the stage placing it is sized against this horizon
+# and never against a settle literal: 20 coal, the largest dose in the
+# curriculum, keep a burner drill alive for 533 s, an eighth of a generation.
+LAB_GENERATION_HORIZON_SECONDS = 4200.0
+
+#: Burner machines that must keep burning for the rest of the generation once
+#: they exist, paired with the label the journal reports them under. The left
+#: element is the variable the FLE namespace carries across stages, which is
+#: how stage_capability_survival already reaches these same machines. Order is
+#: the fuel priority when the released stock cannot cover every machine: the
+#: coal drill first, because it is the only one that turns the stock back into
+#: a flow, then the boiler, whose outage also stops every electric assembler,
+#: then the ore drills the measured iron and copper stages read from.
+FUEL_FED_MACHINES: tuple[tuple[str, str], ...] = (
+    ("coal_drill", "coal_drill"),
+    ("boiler", "boiler"),
+    ("copper_drill", "copper_drill"),
+    ("drill", "iron_baseline_drill"),
+    ("scale_drill", "iron_scale_drill"),
+    ("smelt_drill", "iron_smelt_drill"),
+    ("logistics_drill", "iron_logistics_drill"),
+)
+
 
 def _game_ticks(env: Any) -> int | None:
     """Elapsed game ticks, or None when the counter is unavailable."""
@@ -3524,6 +3552,268 @@ print({{
     return True
 
 
+def _bootstrap_vault_release_script() -> str:
+    """FLE script that reopens the quarantined bootstrap coal.
+
+    stage_coal_mining locks every bootstrap coal but one into a wooden chest so
+    that the coal capability has to prove itself on coal it mined. Nothing ever
+    reopened that chest: 359 coal were still sitting in it when generation 27
+    stalled with every burner machine at coal=0. The stock is released only
+    after the coal and survival gates have already been decided, so the
+    endogenous-fuel evidence those stages produced stays intact.
+    """
+    return """
+fuel_vault_stock=0
+fuel_vault_released=0
+fuel_vault_note=''
+try:
+    move_to(bootstrap_vault.position)
+    fuel_vault_stock=inspect_inventory(bootstrap_vault)[Prototype.Coal]
+    if fuel_vault_stock>0:
+        fuel_vault_released=extract_item(
+            Prototype.Coal,
+            bootstrap_vault,
+            quantity=fuel_vault_stock,
+        )
+except Exception as fuel_vault_exc:
+    fuel_vault_note=str(fuel_vault_exc)[:120].replace('rror','rr0r').replace('xception','xcepti0n')
+"""
+
+
+def _fuel_feed_script(
+    *,
+    machines: tuple[tuple[str, str], ...],
+    coal_per_machine: int,
+) -> str:
+    """FLE script giving each listed burner machine a chest and an inserter.
+
+    A burner machine runs only while something keeps putting coal into it. This
+    arena had no such thing: every unit of fuel arrived as a discrete
+    insert_item dose, and the two burner inserters that existed moved ore. The
+    feed built here is the standing version of that dose -- a wooden chest on
+    the tile behind a burner inserter that drops into the machine. A burner
+    inserter handling coal refuels itself from what it carries, so one primer
+    unit is enough to start it.
+
+    Four placement sides are tried per machine because pipes, belts and fluid
+    connections make any fixed side unbuildable somewhere in this arena; a side
+    that fails leaves nothing behind before the next one is tried. A machine
+    that cannot be fed is recorded and skipped, never raised, so one crowded
+    machine cannot roll back the feeds that did get built. Each machine is also
+    resolved on its own, because naming them all in one tuple would let a
+    single variable that an earlier rollback left undefined take every feed
+    down with it.
+    """
+    resolution = "".join(
+        f"""
+try:
+    fuel_machines.append(({variable},'{label}'))
+except Exception:
+    fuel_feed_log.append(('{label}',None,None,'machine variable is undefined'))
+"""
+        for variable, label in machines
+    )
+    machine_count = max(1, len(machines))
+    return f"""
+fuel_feed_log=[]
+fuel_machines=[]
+fuel_fed_count=0
+fuel_coal_loaded_total=0
+fuel_stock=inspect_inventory()[Prototype.Coal]
+# Split what is carried evenly and hold one unit per machine back to prime its
+# inserter. The per-machine target is the horizon charge; the split is what
+# the released stock can actually cover.
+fuel_share=max(0,(fuel_stock//{machine_count})-1)
+fuel_dose=min({int(coal_per_machine)},fuel_share)
+{resolution}
+for fuel_machine,fuel_label in fuel_machines:
+    fuel_inserter=None
+    fuel_chest=None
+    fuel_note=''
+    for fuel_side,fuel_back in (
+        (Direction.UP,Direction.DOWN),
+        (Direction.DOWN,Direction.UP),
+        (Direction.LEFT,Direction.RIGHT),
+        (Direction.RIGHT,Direction.LEFT),
+    ):
+        if fuel_chest is None:
+            try:
+                move_to(fuel_machine.position)
+                fuel_inserter=place_entity_next_to(
+                    Prototype.BurnerInserter,
+                    fuel_machine.position,
+                    direction=fuel_side,
+                    spacing=0,
+                )
+                fuel_inserter=rotate_entity(fuel_inserter,fuel_back)
+                fuel_chest=place_entity_next_to(
+                    Prototype.WoodenChest,
+                    fuel_inserter.position,
+                    direction=fuel_side,
+                    spacing=0,
+                )
+            except Exception as fuel_exc:
+                fuel_note=str(fuel_exc)[:120].replace('rror','rr0r').replace('xception','xcepti0n')
+                if fuel_inserter is not None:
+                    try:
+                        pickup_entity(fuel_inserter)
+                    except Exception:
+                        fuel_note=fuel_note+' | pickup refused'
+                fuel_inserter=None
+                fuel_chest=None
+    fuel_loaded=0
+    fuel_primer=0
+    if fuel_chest is not None:
+        fuel_loaded=min(fuel_dose,inspect_inventory()[Prototype.Coal])
+        if fuel_loaded>0:
+            fuel_chest=insert_item(
+                Prototype.Coal,
+                fuel_chest,
+                quantity=fuel_loaded,
+            )
+        if inspect_inventory()[Prototype.Coal]>0:
+            fuel_inserter=insert_item(
+                Prototype.Coal,
+                fuel_inserter,
+                quantity=1,
+            )
+            fuel_primer=1
+        fuel_fed_count+=1
+        fuel_coal_loaded_total+=fuel_loaded
+    fuel_feed_log.append((fuel_label,fuel_loaded,fuel_primer,fuel_note))
+"""
+
+
+def _fuel_feed_rows(raw: Any) -> list[dict[str, Any]] | None:
+    """Per-machine feed rows for the journal, or None when nothing was measured.
+
+    The remote script appends one tuple per machine. A missing attribute means
+    the script never reached the feed, and that is reported as None: defaulting
+    it to 0.0 makes an aborted stage indistinguishable from a feed that loaded
+    nothing, which is the substitution that cost eleven generations of
+    misdirected diagnosis. A log whose shape does not match is discarded whole
+    for the same reason -- a partially parsed list reads as a complete census
+    of the feeds that were built.
+    """
+    if not isinstance(raw, (list, tuple)):
+        return None
+    rows: list[dict[str, Any]] = []
+    for entry in raw:
+        if not isinstance(entry, (list, tuple)) or len(entry) != 4:
+            return None
+        label, loaded, primer, note = entry
+        text = str(note).strip() if note is not None else ""
+        rows.append(
+            {
+                "machine": str(label),
+                "coal_loaded": None if loaded is None else float(loaded),
+                "inserter_primer_coal": None if primer is None else float(primer),
+                "placement_note": text[:200] if text else None,
+            }
+        )
+    return rows
+
+
+def _install_fuel_feeds(
+    executor: TransactionalFLEExecutor,
+    namespace: Any,
+    journal: ResearchJournal,
+    *,
+    machines: tuple[tuple[str, str], ...] = FUEL_FED_MACHINES,
+) -> dict[str, Any]:
+    """Convert the quarantined coal stock into standing fuel capacity.
+
+    Runs as its own transaction after the stage that owns it has already been
+    validated, so a feed that cannot be built rolls back only itself. The
+    charge is sized from the generation horizon with the drill figures read
+    from the runtime; the boiler burns at whatever the electric network draws,
+    a rate not measured here, so the time its charge covers is reported as
+    unknown instead of being derived from a nominal number.
+    """
+    coal_per_machine = BURNER_MINING_DRILL.coal_for_seconds(
+        LAB_GENERATION_HORIZON_SECONDS
+    )
+    fuel_code = (
+        _bootstrap_vault_release_script()
+        + _fuel_feed_script(
+            machines=machines,
+            coal_per_machine=coal_per_machine,
+        )
+        + """
+print({
+    'fuel_vault_released':fuel_vault_released,
+    'fuel_fed_count':fuel_fed_count,
+    'fuel_coal_loaded_total':fuel_coal_loaded_total,
+    'fuel_dose':fuel_dose,
+})
+"""
+    )
+    step = executor.execute(
+        fuel_code,
+        accept=lambda result: (
+            not bool(result.info.get("error_occurred"))
+            and result.candidate_game_state is not None
+        ),
+        use_checkpoint_for_action=False,
+        # Building the feed is an investment that removes future carrying, not
+        # carrying. Counting it as manual logistics would score installing
+        # automation as a regression.
+        purpose="infrastructure",
+    )
+
+    measured: dict[str, float | None] = {}
+    for key in (
+        "fuel_stock",
+        "fuel_dose",
+        "fuel_fed_count",
+        "fuel_coal_loaded_total",
+        "fuel_vault_stock",
+        "fuel_vault_released",
+    ):
+        value = getattr(namespace, key, None)
+        measured[key] = None if value is None else float(value)
+    dose = measured["fuel_dose"]
+    vault_note = getattr(namespace, "fuel_vault_note", None)
+    payload: dict[str, Any] = {
+        "committed": bool(step.accepted),
+        "horizon_s": LAB_GENERATION_HORIZON_SECONDS,
+        "coal_target_per_machine": float(coal_per_machine),
+        "coal_per_machine_effective": dose,
+        "drill_covered_seconds": (
+            None
+            if dose is None
+            else dose * BURNER_MINING_DRILL.seconds_per_coal()
+        ),
+        "boiler_covered_seconds": None,
+        "machines_planned": [label for _, label in machines],
+        "machines_fed": measured["fuel_fed_count"],
+        "coal_loaded_total": measured["fuel_coal_loaded_total"],
+        "coal_carried_before": measured["fuel_stock"],
+        "vault_stock": measured["fuel_vault_stock"],
+        "vault_released": measured["fuel_vault_released"],
+        "vault_note": (
+            str(vault_note)[:200] or None if vault_note is not None else None
+        ),
+        "feeds": _fuel_feed_rows(getattr(namespace, "fuel_feed_log", None)),
+        "step_result": _step_error_text(step.info),
+    }
+    # Keyed by stage so a second installation point cannot silently overwrite
+    # the record of the first one.
+    stage_key = str(journal.state.get("stage") or "unknown")
+    journal.state["metrics"].setdefault("fuel_feeds", {})[stage_key] = payload
+    journal.event(
+        "fuel_feed",
+        (
+            "Coal chests and burner inserters installed on the arena's burner "
+            "machines."
+            if step.accepted
+            else "Fuel-feed transaction rejected; dose-based fuelling remains."
+        ),
+        fuel_feeds=payload,
+    )
+    return payload
+
+
 def stage_steam_power(
     executor: TransactionalFLEExecutor,
     env: Any,
@@ -3657,6 +3947,13 @@ print({{
         )
         return False
 
+    # The boiler exists from here on, and both the coal gate and the survival
+    # soak have already been decided, so this is the first point where the
+    # quarantined bootstrap stock can be reopened without touching the
+    # endogenous-fuel evidence those stages produced. Every burner machine in
+    # the arena gets its standing feed in the same transaction.
+    feeds = _install_fuel_feeds(executor, namespace, journal)
+
     journal.complete_stage(
         10,
         f"Steam power accepted with {measured['energy']:.0f} J stored energy.",
@@ -3665,6 +3962,7 @@ print({{
         "accept",
         "Offshore pump, boiler and steam engine formed a working power system.",
         measurements=measured,
+        fuel_feeds=feeds,
     )
     return True
 

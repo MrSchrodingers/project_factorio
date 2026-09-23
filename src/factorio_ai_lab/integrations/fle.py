@@ -167,6 +167,9 @@ class TransactionalFLEExecutor:
         self.game_state: Any | None = None
         self._attempted_interventions: dict[str, int] = {}
         self._committed_interventions: dict[str, int] = {}
+        # Counted apart from the above: see execute(purpose=...).
+        self._attempted_infrastructure: dict[str, int] = {}
+        self._committed_infrastructure: dict[str, int] = {}
         self._action_runtime = (
             ActionRuntimeRecorder(context_provider=runtime_context)
             if runtime_context is not None
@@ -177,6 +180,8 @@ class TransactionalFLEExecutor:
         self.game_state = game_state
         self._attempted_interventions = {}
         self._committed_interventions = {}
+        self._attempted_infrastructure = {}
+        self._committed_infrastructure = {}
         return self.environment.reset(
             options={'game_state': game_state},
             seed=seed,
@@ -194,6 +199,8 @@ class TransactionalFLEExecutor:
         return {
             "attempted": dict(self._attempted_interventions),
             "committed": dict(self._committed_interventions),
+            "attempted_infrastructure": dict(self._attempted_infrastructure),
+            "committed_infrastructure": dict(self._committed_infrastructure),
         }
 
     def execute(
@@ -202,10 +209,29 @@ class TransactionalFLEExecutor:
         *,
         accept: AcceptancePredicate,
         use_checkpoint_for_action: bool = True,
+        purpose: str = "operation",
     ) -> FLEStep:
+        """Run one transactional step.
+
+        `purpose` separates operating the factory from building it. The
+        intervention counters exist to measure how much the agent has to carry
+        by hand because the factory cannot carry it itself. Loading the chest
+        that feeds an automatic inserter is the opposite of that: it is the
+        investment that removes future carrying. Counting it as manual
+        logistics would make building automation look like a regression, so
+        infrastructure steps are counted separately and reported separately -
+        reclassified, never hidden.
+        """
+        if purpose not in {"operation", "infrastructure"}:
+            raise ValueError(
+                f"purpose must be operation or infrastructure, got {purpose!r}"
+            )
         checkpoint = self.game_state
         counts = intervention_counts_from_code(code)
-        self._accumulate(self._attempted_interventions, counts)
+        if purpose == "infrastructure":
+            self._accumulate(self._attempted_infrastructure, counts)
+        else:
+            self._accumulate(self._attempted_interventions, counts)
         action_state = checkpoint if use_checkpoint_for_action else None
         action = self.action_factory(self.agent_idx, code, action_state)
         runtime_token = (
@@ -255,7 +281,10 @@ class TransactionalFLEExecutor:
         )
 
         if accepted:
-            self._accumulate(self._committed_interventions, counts)
+            if purpose == "infrastructure":
+                self._accumulate(self._committed_infrastructure, counts)
+            else:
+                self._accumulate(self._committed_interventions, counts)
             self.game_state = candidate_state
         else:
             # Restore the exact pre-action checkpoint. Passing None restores
