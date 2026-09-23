@@ -8,12 +8,18 @@ from typing import Any
 from factorio_ai_lab.learning.factory_graph import (
     FUEL_STARVED_STATUSES,
     POWER_STARVED_STATUSES,
+    TRANSPORT_NAMES,
     UNKNOWN_STATUS,
     normalize_status,
 )
 
 _INSERTERS = {"burner-inserter", "inserter", "fast-inserter", "long-handed-inserter"}
-_BELTS = {"transport-belt", "fast-transport-belt", "express-transport-belt"}
+#: Taken from factory_graph rather than restated. A second private copy of
+#: this list is how the two modules came to disagree about what a conveyor is:
+#: the graph learned that a splitter and an underground belt carry material
+#: while this module still counted three plain tiers, so a factory
+#: distributing through a bus would read here as having no distribution.
+_BELTS = TRANSPORT_NAMES
 
 #: The conditions that must hold at the same time for the factory to keep
 #: producing while the agent does nothing. `score` counts them and
