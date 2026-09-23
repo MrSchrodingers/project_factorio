@@ -116,6 +116,15 @@ PRELUDE_BUILDERS = {
         machines=curriculum_runner.FUEL_FED_MACHINES,
         coal_per_machine=0,
     ),
+    # The whole fuel-feed step. `_install_fuel_feeds` splices this one
+    # fragment and nothing else, so without it the sweep would read that
+    # stage as running no script at all and pass by covering nothing.
+    "_fuel_feed_code": lambda: curriculum_runner._fuel_feed_code(
+        None,
+        machines=curriculum_runner.FUEL_FED_MACHINES,
+        coal_per_machine=0,
+        fuel_needed=0,
+    ),
 }
 
 #: A line that binds a name, for fragments too small to be valid Python on

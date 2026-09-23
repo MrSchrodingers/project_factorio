@@ -18,11 +18,15 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import re
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 from factorio_ai_lab.experiments import curriculum_runner
 from factorio_ai_lab.planning.fuel import BURNER_MINING_DRILL
+from factorio_ai_lab.planning.resupply import ContainerRole, FuelSource, plan_supply
 
 RUNNER = (
     pathlib.Path(__file__).resolve().parents[1]
@@ -331,10 +335,73 @@ def test_the_steam_stage_installs_the_feeds() -> None:
 
 
 def test_the_installer_builds_the_feed_and_reopens_the_vault() -> None:
-    called = _called_function_names("_install_fuel_feeds")
+    called = _called_function_names("_fuel_feed_code")
     assert "_fuel_feed_script" in called
     assert "_bootstrap_vault_release_script" in called, (
         "the 359 coal quarantined in the bootstrap vault stay unreachable"
+    )
+    assert "_fuel_feed_code" in _called_function_names("_install_fuel_feeds")
+
+
+def _fuel_code_parts() -> list[str]:
+    """What `_fuel_feed_code` concatenates, in the order the engine gets it."""
+    function = next(
+        candidate
+        for candidate in ast.walk(RUNNER_TREE)
+        if isinstance(candidate, ast.FunctionDef)
+        and candidate.name == "_fuel_feed_code"
+    )
+    returned = next(
+        node.value
+        for node in ast.walk(function)
+        if isinstance(node, ast.Return) and node.value is not None
+    )
+
+    def flatten(node: ast.AST) -> list[ast.AST]:
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            return flatten(node.left) + flatten(node.right)
+        return [node]
+
+    names: list[str] = []
+    for part in flatten(returned):
+        if isinstance(part, ast.Call) and isinstance(part.func, ast.Name):
+            names.append(part.func.id)
+        elif isinstance(part, ast.Constant) and isinstance(part.value, str):
+            names.append("<report>")
+        else:  # pragma: no cover - a shape this probe cannot read
+            names.append(type(part).__name__)
+    return names
+
+
+def test_the_step_draws_from_the_world_before_it_splits_the_charge() -> None:
+    """The order is the contract, not an accident of concatenation.
+
+    ``_fuel_feed_script`` reads the coal the agent carries on its first line
+    and splits that across the machines. A draw spliced after it divides an
+    inventory the coal has not reached yet, which is indistinguishable in the
+    journal from the empty feed generations 44 and 46 installed.
+    """
+    assert getattr(curriculum_runner, "_fuel_feed_code", None) is not None, (
+        "curriculum_runner has no _fuel_feed_code: the fuel feed is still "
+        "assembled out of the vault release and the split alone"
+    )
+    parts = _fuel_code_parts()
+    assert parts[:3] == [
+        "_bootstrap_vault_release_script",
+        "mining_cell_supply_script",
+        "_fuel_feed_script",
+    ], f"the fuel-feed step runs its fragments in the wrong order: {parts}"
+
+
+def test_the_installer_plans_the_draw_against_the_standing_world() -> None:
+    called = _called_function_names("_install_fuel_feeds")
+    assert "survey_stage_supply" in called, (
+        "the fuel feed still sizes its charge from the inventory the heir "
+        "happened to inherit and never looks at the standing containers"
+    )
+    assert "_fuel_feed_anchor" in called, (
+        "a draw planned from no anchor is a draw planned around tiles nobody "
+        "read"
     )
 
 
@@ -428,6 +495,10 @@ class _Prototype:
     Coal = _Proto("coal")
     BurnerInserter = _Proto("burner-inserter")
     WoodenChest = _Proto("wooden-chest")
+    IronChest = _Proto("iron-chest")
+    StoneFurnace = _Proto("stone-furnace")
+    IronOre = _Proto("iron-ore")
+    IronPlate = _Proto("iron-plate")
 
 
 class _Direction:
@@ -519,12 +590,27 @@ class _World:
         )
         return entity
 
+    def _resolve(self, target: _Entity | tuple[float, float]) -> _Entity:
+        """An entity, whether it was named or addressed by position.
+
+        The supply prelude draws with ``extract_item(Prototype.Coal,
+        Position(x=..., y=...), ...)``, which is how every stage that takes
+        fuel out of the standing world already addresses a container.
+        """
+        if isinstance(target, _Entity):
+            return target
+        entity = self.entities.get(tuple(target))
+        if entity is None:
+            raise ValueError(f"nothing stands at {target}")
+        return entity
+
     def extract_item(
         self,
         prototype: _Proto,
-        entity: _Entity,
+        entity: _Entity | tuple[float, float],
         quantity: int,
     ) -> int:
+        entity = self._resolve(entity)
         available = entity.inventory.get(prototype.name, 0)
         moved = min(quantity, available)
         entity.inventory[prototype.name] = available - moved
@@ -544,6 +630,7 @@ class _World:
             "pickup_entity": self.pickup_entity,
             "insert_item": self.insert_item,
             "extract_item": self.extract_item,
+            "Position": lambda x, y: (float(x), float(y)),
         }
 
 
@@ -719,3 +806,261 @@ def test_a_feed_that_cannot_finish_leaves_no_orphan_inserter() -> None:
         f"{[(e.name, e.position) for e in around_the_boiler]}"
     )
     assert world.picked_up, "no orphan inserter was ever removed"
+
+
+# --------------------------------------------------------------------------
+# The heir's world, as generations 44 and 46 measured it: four to six coal in
+# the inventory, no quarantine of its own to reopen, and containers standing
+# in the factory it inherited with hundreds of coal in them.
+# --------------------------------------------------------------------------
+
+#: Containers of the standing world and what each holds, in the shape the
+#: supply survey reports them. The figures are the ones read off the live
+#: world during generation 46.
+WORLD_COAL: dict[tuple[float, float], int] = {
+    (27.5, 10.5): 279,
+    (27.5, 70.5): 350,
+}
+
+#: What generation 46 arrived carrying. `fuel_share` is
+#: ``max(0, carried // 7 - 1)``, which is zero for anything under fourteen.
+HEIR_CARRIED_COAL = 6
+
+
+def _machine_charge() -> int:
+    return len(curriculum_runner.FUEL_FED_MACHINES) * (
+        197 + curriculum_runner.FUEL_FEED_PRIMER_COAL
+    )
+
+
+def _world_plan(*, chain: frozenset[tuple[float, float]] = frozenset()) -> Any:
+    """What the survey would hand the installer for the world above."""
+    return plan_supply(
+        anchor=(0.0, 0.0),
+        fuel_needed=_machine_charge(),
+        fuel_carried=HEIR_CARRIED_COAL,
+        fuel_sources=tuple(
+            FuelSource(
+                position=position,
+                available=amount,
+                supplies_chain=position in chain,
+            )
+            for position, amount in WORLD_COAL.items()
+        ),
+    )
+
+
+def _run_step(
+    *,
+    supply: Any,
+    carried: int = HEIR_CARRIED_COAL,
+) -> tuple[_World, dict[str, object], dict[str, object]]:
+    """The whole installer step, against the stand-in world.
+
+    ``bootstrap_vault`` is None and the quarantine is zero, which is the
+    inherited world exactly: an heir that adopted its ancestor's cell parked
+    nothing of its own, and generation 46's journal carries the resulting
+    ``'NoneType' object has no attribute 'position'`` in ``vault_note``.
+    """
+    world = _World()
+    scope = world.namespace()
+    for variable, position in MACHINE_POSITIONS.items():
+        scope[variable] = world.spawn(variable, position)
+    for position, amount in WORLD_COAL.items():
+        world.spawn("iron-chest", position).inventory["coal"] = amount
+    scope["bootstrap_vault"] = None
+    scope["bootstrap_quarantine"] = 0
+    world.player.inventory["coal"] = carried
+    report: dict[str, object] = {}
+    scope["print"] = report.update
+    script = curriculum_runner._fuel_feed_code(
+        supply,
+        machines=curriculum_runner.FUEL_FED_MACHINES,
+        coal_per_machine=197,
+        fuel_needed=_machine_charge(),
+    )
+    exec(compile(script, "<fuel-feed>", "exec"), scope)  # noqa: S102
+    return world, scope, report
+
+
+def test_the_whole_step_does_not_trip_the_failure_heuristic() -> None:
+    assert (
+        _trigger_offenders(
+            curriculum_runner._fuel_feed_code(
+                _world_plan(),
+                machines=curriculum_runner.FUEL_FED_MACHINES,
+                coal_per_machine=197,
+                fuel_needed=_machine_charge(),
+            )
+        )
+        == []
+    )
+
+
+def test_an_heir_fills_its_feed_out_of_the_world_it_inherited() -> None:
+    """The regression of generations 44 and 46, as a measurement.
+
+    Six inherited coal split seven ways is a dose of zero: both generations
+    built fourteen entities, loaded ``coal_loaded_total: 0.0`` into them and
+    then lost the electronic-circuits capability they had inherited.
+    """
+    world, scope, report = _run_step(supply=_world_plan())
+    assert scope["fuel_dose"] > 0, "the feed is still installed empty"
+    assert scope["fuel_coal_loaded_total"] > 0
+    assert report["fuel_supply_drawn"] > 0
+    rows = curriculum_runner._fuel_feed_rows(scope["fuel_feed_log"])
+    assert rows is not None
+    starved = [row["machine"] for row in rows if not row["coal_loaded"]]
+    assert starved == [], f"machines fed nothing: {starved}"
+    # The chests hold what the ledger says was loaded, and nothing was
+    # invented: the draw cannot exceed what the containers held.
+    chests = [entity for entity in world.placed if entity.name == "wooden-chest"]
+    assert sum(chest.inventory.get("coal", 0) for chest in chests) == scope[
+        "fuel_coal_loaded_total"
+    ]
+    assert report["fuel_supply_drawn"] <= sum(WORLD_COAL.values())
+
+
+def test_the_containers_the_draw_took_from_are_still_standing() -> None:
+    """Drawing fuel is not dismantling. Every container keeps its place."""
+    world, _, _ = _run_step(supply=_world_plan())
+    for position in WORLD_COAL:
+        assert position in world.entities, f"the draw removed the chest at {position}"
+    assert [entity.name for entity in world.picked_up] == []
+
+
+def test_a_feed_with_no_draw_is_installed_empty() -> None:
+    """The defect itself, kept as the thing the draw has to prevent.
+
+    A step assembled without a plan -- which is what an unsurveyed world
+    gives -- divides the six coal the heir inherited and gives every machine
+    zero. This is the reading generation 46 reported.
+    """
+    _, scope, _ = _run_step(supply=None)
+    assert scope["fuel_dose"] == 0
+    assert scope["fuel_coal_loaded_total"] == 0
+
+
+def test_the_anchor_is_a_machine_that_is_standing() -> None:
+    namespace = SimpleNamespace(boiler=SimpleNamespace(position=SimpleNamespace(x=40.0, y=2.0)))
+    assert curriculum_runner._fuel_feed_anchor(
+        namespace,
+        curriculum_runner.FUEL_FED_MACHINES,
+    ) == (40.0, 2.0)
+
+
+def test_an_arena_with_no_machine_has_no_anchor() -> None:
+    # None is not the origin. A draw planned around (0, 0) would order the
+    # containers by their distance to a point no machine stands on.
+    assert (
+        curriculum_runner._fuel_feed_anchor(
+            SimpleNamespace(),
+            curriculum_runner.FUEL_FED_MACHINES,
+        )
+        is None
+    )
+
+
+# --------------------------------------------------------------------------
+# The reserve: a container that feeds a chain keeps what that chain burns.
+# --------------------------------------------------------------------------
+
+
+class _SupplyRcon:
+    """RCON stand-in answering the reads a supply survey makes."""
+
+    def __init__(self, chests: dict[tuple[float, float], int], carried: int) -> None:
+        self._chests = dict(chests)
+        self._carried = carried
+
+    def send_command(self, command: str) -> str:
+        if "get_main_inventory" in command:
+            return str(self._carried)
+        match = re.search(r"\{x=(-?[\d.]+),y=(-?[\d.]+)\}", command)
+        if match is None:
+            return ""
+        key = (float(match.group(1)), float(match.group(2)))
+        return str(self._chests.get(key, 0))
+
+
+def _supply_env(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    roles: tuple[ContainerRole, ...],
+    chests: dict[tuple[float, float], int],
+    carried: int = 0,
+) -> Any:
+    instance = SimpleNamespace(
+        rcon_client=_SupplyRcon(chests, carried),
+        namespace=SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        curriculum_runner,
+        "survey_world",
+        lambda env: SimpleNamespace(entities=(), footprints={}),
+    )
+    monkeypatch.setattr(curriculum_runner, "build_factory_graph", lambda entities: {})
+    monkeypatch.setattr(curriculum_runner, "container_roles", lambda graph: roles)
+    return SimpleNamespace(unwrapped=SimpleNamespace(instance=instance))
+
+
+SPARE_CHEST = ContainerRole(
+    node_id="spare",
+    name="iron-chest",
+    position=(27.5, 10.5),
+)
+FEEDING_CHEST = ContainerRole(
+    node_id="feeding",
+    name="iron-chest",
+    position=(27.5, 70.5),
+    supplies_chain=True,
+)
+
+
+def test_a_container_that_feeds_a_chain_keeps_what_its_chain_burns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Emptying the chest an inserter pulls from stops the machine behind it.
+
+    The chest that feeds nothing is drawn dry; the one that is feeding a
+    machine gives up only what it holds above a burner machine's charge for
+    the rest of the generation.
+    """
+    env = _supply_env(
+        monkeypatch,
+        roles=(SPARE_CHEST, FEEDING_CHEST),
+        chests={SPARE_CHEST.position: 279, FEEDING_CHEST.position: 350},
+    )
+    plan = curriculum_runner.survey_stage_supply(
+        env,
+        anchor=(27.5, 40.0),
+        fuel_needed=2000,
+        container_needed=False,
+        chain_reserve=197,
+    )
+    assert plan is not None
+    drawn = {draw.position: draw.quantity for draw in plan.fuel_draws}
+    assert drawn[SPARE_CHEST.position] == 279
+    assert drawn[FEEDING_CHEST.position] == 350 - 197, (
+        "the draw emptied a container a machine is waiting on"
+    )
+
+
+def test_a_stage_that_asks_for_no_reserve_draws_as_it_always_did(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Stages 1 to 7 pass no reserve, and their draw must be the one they have
+    # always made: the default cannot change what they take.
+    env = _supply_env(
+        monkeypatch,
+        roles=(FEEDING_CHEST,),
+        chests={FEEDING_CHEST.position: 350},
+    )
+    plan = curriculum_runner.survey_stage_supply(
+        env,
+        anchor=(27.5, 40.0),
+        fuel_needed=40,
+        container_needed=False,
+    )
+    assert plan is not None
+    assert [draw.quantity for draw in plan.fuel_draws] == [40]

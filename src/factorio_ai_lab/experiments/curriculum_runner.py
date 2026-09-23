@@ -934,6 +934,22 @@ FUEL_FED_MACHINES: tuple[tuple[str, str], ...] = (
     ("logistics_drill", "iron_logistics_drill"),
 )
 
+#: Coal one burner inserter is primed with. It refuels itself from the fuel it
+#: goes on to move, so one unit is the whole primer and the rest of a
+#: machine's charge belongs in the chest behind it.
+FUEL_FEED_PRIMER_COAL = 1
+
+#: Coal left standing in a container that already feeds a chain. Taking fuel
+#: out of a container is not dismantling it -- stages 1, 2, 6 and 7 already do
+#: it and the container keeps standing -- but emptying the one an inserter
+#: pulls from stops the machine on the far end, and that outage would be read
+#: as this generation's regression. The reserve is one burner machine's charge
+#: for the rest of the generation, so only the surplus above what the standing
+#: chain still has to burn is offered to a draw.
+FUEL_CHAIN_RESERVE_COAL = BURNER_MINING_DRILL.coal_for_seconds(
+    LAB_GENERATION_HORIZON_SECONDS
+)
+
 
 def _game_ticks(env: Any) -> int | None:
     """Elapsed game ticks, or None when the counter is unavailable."""
@@ -1630,6 +1646,7 @@ def survey_stage_supply(
     container_needed: bool,
     container_name: str = BASELINE_CHEST_NAME,
     fuel_item: str = MINING_CELL_FUEL_ITEM,
+    chain_reserve: int = 0,
 ) -> SupplyPlan | None:
     """What the standing world can give this stage, read off the world.
 
@@ -1645,6 +1662,13 @@ def survey_stage_supply(
     :func:`plan_supply` turns into a container this generation smelted. That
     case is not hypothetical -- the single unattached chest is committed by
     stage 2, so the generation after the next promotion finds none.
+
+    ``chain_reserve`` is how much fuel a container that feeds a chain keeps
+    for itself. A draw is not a dismantling -- the container stays standing,
+    and every stage here already draws from one -- but a draw that empties the
+    container an inserter pulls from stops the machine behind it, and a caller
+    asking for more than the world holds would do exactly that. Zero, the
+    default, is the draw every stage has always made.
 
     Answers None when the world, or the agent's own inventory, could not be
     read. That is not a world measured to be empty: it leaves the caller on
@@ -1672,11 +1696,17 @@ def survey_stage_supply(
             item=fuel_item,
             container=role.name,
         )
-        if available > 0:
+        # Only the surplus above the reserve is a source. A container that
+        # feeds nothing offers everything it holds; one an inserter pulls from
+        # keeps what the chain behind it still has to burn.
+        spare = available
+        if role.supplies_chain:
+            spare = max(0, available - max(0, int(chain_reserve)))
+        if spare > 0:
             sources.append(
                 FuelSource(
                     position=role.position,
-                    available=available,
+                    available=spare,
                     supplies_chain=role.supplies_chain,
                 )
             )
@@ -6258,8 +6288,80 @@ def _fuel_feed_rows(raw: Any) -> list[dict[str, Any]] | None:
     return rows
 
 
+def _fuel_feed_anchor(
+    namespace: Any,
+    machines: tuple[tuple[str, str], ...],
+) -> tuple[float, float] | None:
+    """Where the fuel draw is planned from: the first machine that is there.
+
+    The order of ``machines`` is the fuel priority, so the anchor is the
+    machine whose outage costs the most, and the containers nearest it are the
+    ones the draw spends first. A machine variable no earlier stage bound is
+    skipped rather than defaulted to the origin: a draw planned around tiles
+    nobody read is the substitution this lab keeps paying for. When no machine
+    answers at all the anchor is None, and the caller records an unsurveyed
+    supply instead of inventing one.
+    """
+    for variable, _ in machines:
+        position = getattr(getattr(namespace, variable, None), "position", None)
+        if position is None:
+            continue
+        x = getattr(position, "x", None)
+        y = getattr(position, "y", None)
+        if x is None or y is None:
+            try:
+                x, y = position[0], position[1]
+            except (IndexError, KeyError, TypeError):
+                continue
+        try:
+            return (float(x), float(y))
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _fuel_feed_code(
+    supply: SupplyPlan | None,
+    *,
+    machines: tuple[tuple[str, str], ...],
+    coal_per_machine: int,
+    fuel_needed: int,
+) -> str:
+    """The whole fuel-feed step: reopen, draw, build, report.
+
+    The order is the contract. The vault gives back the coal this generation
+    parked, the standing world covers the rest of the charge, and only then
+    does the feed read the stock it divides across the machines. Generations
+    44 and 46 ran the third part alone against the four to six coal an heir
+    happened to inherit: ``max(0, 6 // 7 - 1)`` is zero, seven chests and
+    seven burner inserters went up empty, ``coal_loaded_total`` was 0.0 and
+    twelve entities were starving by the end of the generation. A draw
+    spliced after the split would divide an inventory the coal has not
+    reached yet, which reads the same in the journal and starves the same
+    machines.
+    """
+    return (
+        _bootstrap_vault_release_script()
+        + mining_cell_supply_script(supply, fuel_needed=fuel_needed)
+        + _fuel_feed_script(
+            machines=machines,
+            coal_per_machine=coal_per_machine,
+        )
+        + """
+print({
+    'fuel_vault_released':fuel_vault_released,
+    'fuel_supply_drawn':supply_fuel_drawn,
+    'fuel_fed_count':fuel_fed_count,
+    'fuel_coal_loaded_total':fuel_coal_loaded_total,
+    'fuel_dose':fuel_dose,
+})
+"""
+    )
+
+
 def _install_fuel_feeds(
     executor: TransactionalFLEExecutor,
+    env: Any,
     namespace: Any,
     journal: ResearchJournal,
     *,
@@ -6273,24 +6375,36 @@ def _install_fuel_feeds(
     from the runtime; the boiler burns at whatever the electric network draws,
     a rate not measured here, so the time its charge covers is reported as
     unknown instead of being derived from a nominal number.
+
+    The stock that charge is split from is the world's, not the inventory's.
+    An heir arrives carrying whatever its ancestor happened to hold and
+    quarantines nothing, so the vault release returns nothing and the split
+    has nothing to divide. The draw that fills the chests is the one stages 1,
+    2, 6 and 7 already make: the same plan, the same ordering, and a reserve
+    left in every container that is feeding something.
     """
     coal_per_machine = BURNER_MINING_DRILL.coal_for_seconds(
         LAB_GENERATION_HORIZON_SECONDS
     )
-    fuel_code = (
-        _bootstrap_vault_release_script()
-        + _fuel_feed_script(
-            machines=machines,
-            coal_per_machine=coal_per_machine,
+    # Every machine's horizon charge plus the unit that starts its inserter.
+    fuel_needed = len(machines) * (int(coal_per_machine) + FUEL_FEED_PRIMER_COAL)
+    anchor = _fuel_feed_anchor(namespace, machines)
+    supply = (
+        None
+        if anchor is None
+        else survey_stage_supply(
+            env,
+            anchor=anchor,
+            fuel_needed=fuel_needed,
+            container_needed=False,
+            chain_reserve=int(FUEL_CHAIN_RESERVE_COAL),
         )
-        + """
-print({
-    'fuel_vault_released':fuel_vault_released,
-    'fuel_fed_count':fuel_fed_count,
-    'fuel_coal_loaded_total':fuel_coal_loaded_total,
-    'fuel_dose':fuel_dose,
-})
-"""
+    )
+    fuel_code = _fuel_feed_code(
+        supply,
+        machines=machines,
+        coal_per_machine=coal_per_machine,
+        fuel_needed=fuel_needed,
     )
     step = executor.execute(
         fuel_code,
@@ -6314,6 +6428,7 @@ print({
         "fuel_vault_stock",
         "fuel_vault_claim",
         "fuel_vault_released",
+        "supply_fuel_drawn",
     ):
         value = getattr(namespace, key, None)
         measured[key] = None if value is None else float(value)
@@ -6334,6 +6449,18 @@ print({
         "machines_fed": measured["fuel_fed_count"],
         "coal_loaded_total": measured["fuel_coal_loaded_total"],
         "coal_carried_before": measured["fuel_stock"],
+        "coal_needed_total": float(fuel_needed),
+        # What the standing world contributed, kept apart from the vault: a
+        # generation that drew its fuel from containers it found is not the
+        # same reading as one that reopened its own quarantine.
+        "coal_drawn_from_world": measured["supply_fuel_drawn"],
+        "world_draws": _supply_log_rows(
+            getattr(namespace, "supply_fuel_log", None)
+        ),
+        "supply": supply_report(supply),
+        "supply_anchor": (
+            None if anchor is None else {"x": anchor[0], "y": anchor[1]}
+        ),
         "vault_stock": measured["fuel_vault_stock"],
         # What the release was allowed to take: the coal this generation
         # quarantined, never the whole stock of a container the world was
@@ -6501,7 +6628,7 @@ print({{
     # quarantined bootstrap stock can be reopened without touching the
     # endogenous-fuel evidence those stages produced. Every burner machine in
     # the arena gets its standing feed in the same transaction.
-    feeds = _install_fuel_feeds(executor, namespace, journal)
+    feeds = _install_fuel_feeds(executor, env, namespace, journal)
 
     journal.complete_stage(
         10,
