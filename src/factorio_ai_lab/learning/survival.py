@@ -106,6 +106,13 @@ class FitnessVector:
     #: it adds the stage windows that recorded output and ignores everything
     #: that was never timed. None means no window was measured at all, 0.0
     #: would mean windows were measured and none of them produced.
+    #: Capabilities the generation started with, when it inherited a factory
+    #: from a promoted ancestor. Absolute counts stop being evidence the moment
+    #: a generation begins on top of someone else's work, so a capability that
+    #: arrived with the inheritance must not be credited as an achievement of
+    #: this genome. `None` means no inheritance was in play, which is not the
+    #: same as an empty inheritance.
+    inherited_capabilities: frozenset[str] | None = None
     productive_runtime_s: float | None = None
     #: Which protocol produced productive_runtime_s; None when it was not
     #: measured. Two runtimes from different protocols are not comparable, the
@@ -169,6 +176,11 @@ class FitnessVector:
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["capabilities"] = sorted(self.capabilities)
+        payload["inherited_capabilities"] = (
+            None
+            if self.inherited_capabilities is None
+            else sorted(self.inherited_capabilities)
+        )
         payload["rates_per_s"] = {
             key: round(float(value), 8)
             for key, value in sorted(self.rates_per_s.items())
@@ -200,6 +212,14 @@ class FitnessVector:
             }
             if isinstance(rates_raw, Mapping)
             else {}
+        )
+        inherited_raw = payload.get("inherited_capabilities")
+        inherited_capabilities = (
+            None
+            if inherited_raw is None
+            else frozenset(
+                str(value) for value in inherited_raw if isinstance(value, str)
+            )
         )
         capabilities_raw = payload.get("capabilities", [])
         capabilities = frozenset(
@@ -239,6 +259,7 @@ class FitnessVector:
         )
         return cls(
             measurement_protocol=protocol,
+            inherited_capabilities=inherited_capabilities,
             rate_sources=rate_sources,
             productive_runtime_s=(
                 float(productive_runtime_raw)
@@ -529,7 +550,25 @@ def compare_challenger(
             f"failed stages reduced {champion.failures}→{challenger.failures}"
         )
 
+    # A capability that arrived with an inherited factory is not an
+    # achievement of this genome. Crediting it would make every heir look like
+    # a breakthrough on its first generation, which is the failure mode that
+    # persistence introduces: the system would report learning where it only
+    # reported inheritance. Losing a capability still counts as a regression
+    # above, inherited or not, because an heir that destroys what it received
+    # is genuinely worse.
     new_capabilities = sorted(challenger.capabilities - champion.capabilities)
+    inherited = challenger.inherited_capabilities
+    if inherited is not None:
+        credited = [name for name in new_capabilities if name not in inherited]
+        withheld = [name for name in new_capabilities if name in inherited]
+        if withheld:
+            _mark_incommensurable(
+                "inherited_capabilities",
+                "not credited as achievements of this genome: "
+                + ", ".join(withheld),
+            )
+        new_capabilities = credited
     if new_capabilities:
         improvements.append("new capabilities: " + ", ".join(new_capabilities))
 

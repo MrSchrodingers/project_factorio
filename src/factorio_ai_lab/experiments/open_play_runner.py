@@ -5286,9 +5286,12 @@ def _autonomy_soak(
     entities = _autonomy_entity_snapshot(instance)
     report = evaluate_factory_autonomy(
         entities=entities,
+        # None, not {}: an empty dict reads as "instrumented and nothing
+        # carried by hand", which scores as perfect autonomy. Absence of the
+        # intervention window means it was never measured.
         interventions=autonomy_window
         if isinstance(autonomy_window, dict)
-        else {},
+        else None,
         production_rates_per_s=rates,
         soak_runtime_s=runtime,
         assisted_navigation_count=int(

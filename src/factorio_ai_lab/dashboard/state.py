@@ -1606,7 +1606,10 @@ class DashboardState:
 
         evidence = evaluate_factory_autonomy(
             entities=world.get("entities", []),
-            interventions=committed,
+            # `{}` would read as 'instrumented and nothing carried by
+            # hand', which scores as perfect autonomy. When the run
+            # carries no intervention history the honest value is None.
+            interventions=committed if instrumented else None,
             production_rates_per_s=rates,
             soak_runtime_s=soak_runtime,
             assisted_navigation_count=assisted_navigation,

@@ -53,7 +53,6 @@ const FAULT_STATUS = new Set([
   "no_power",
   "low_power",
   "not_plugged_in_electric_network",
-  "not_connected",
   "disabled",
   "no_minable_resources",
 ]);
@@ -93,7 +92,6 @@ export const STATUS_LABELS: Record<string, string> = {
   no_power: "sem energia",
   low_power: "energia baixa",
   not_plugged_in_electric_network: "fora da rede elétrica",
-  not_connected: "não conectado",
   no_ingredients: "sem insumo",
   item_ingredient_shortage: "falta insumo",
   fluid_ingredient_shortage: "falta fluido",
