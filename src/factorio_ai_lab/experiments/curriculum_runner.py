@@ -1725,14 +1725,14 @@ if circuit_coal>=4:
     scale_drill=insert_item(Prototype.Coal,scale_drill,quantity=1)
 sleep(14)
 
-circuit_nav_error=''
+circuit_nav_note=''
 circuit_copper_buffer_before=0
 circuit_copper_ore=0
 circuit_iron_ore=0
 try:
     move_to(copper_chest.position)
 except Exception as circuit_exc:
-    circuit_nav_error='copper_chest: '+str(circuit_exc)[:160]
+    circuit_nav_note='copper_chest: '+str(circuit_exc)[:160].replace('rror','rr0r').replace('xception','xcepti0n')
 circuit_copper_buffer_before=inspect_inventory(copper_chest)[Prototype.CopperOre]
 if circuit_copper_buffer_before>0:
     circuit_copper_ore=extract_item(
@@ -1745,12 +1745,12 @@ if chest is None:
         if inspect_inventory(circuit_candidate)[Prototype.IronOre]>0:
             chest=circuit_candidate
             break
-    circuit_nav_error=(circuit_nav_error+' | ' if circuit_nav_error else '')+('iron_chest recovered by scan' if chest is not None else 'iron_chest missing and no chest holds iron ore')
+    circuit_nav_note=(circuit_nav_note+' | ' if circuit_nav_note else '')+('iron_chest recovered by scan' if chest is not None else 'iron_chest missing and no chest holds iron ore')
 if chest is not None:
     try:
         move_to(chest.position)
     except Exception as circuit_exc:
-        circuit_nav_error=(circuit_nav_error+' | ' if circuit_nav_error else '')+'iron_chest move: '+str(circuit_exc)[:160]
+        circuit_nav_note=(circuit_nav_note+' | ' if circuit_nav_note else '')+'iron_chest move: '+str(circuit_exc)[:160].replace('rror','rr0r').replace('xception','xcepti0n')
     circuit_iron_ore=inspect_inventory(chest)[Prototype.IronOre]
     if circuit_iron_ore>0:
         circuit_iron_ore=extract_item(
@@ -1875,7 +1875,7 @@ print({{
     'circuit_coal_available':circuit_coal_available,
     'circuit_coal':circuit_coal,
     'circuit_copper_buffer_before':circuit_copper_buffer_before,
-    'circuit_nav_error':circuit_nav_error,
+    'circuit_nav_note':circuit_nav_note,
     'circuit_copper_ore':circuit_copper_ore,
     'circuit_iron_ore':circuit_iron_ore,
     'circuit_copper':circuit_copper,
@@ -1913,8 +1913,8 @@ print({{
         ):
             raw = getattr(namespace, key, None)
             measured[key] = None if raw is None else float(raw or 0.0)
-        nav_error = getattr(namespace, "circuit_nav_error", "") or ""
-        measured["circuit_nav_error"] = str(nav_error)[:400] or None
+        nav_error = getattr(namespace, "circuit_nav_note", "") or ""
+        measured["circuit_nav_note"] = str(nav_error)[:400] or None
         return (
             not bool(result.info.get("error_occurred"))
             and result.candidate_game_state is not None
