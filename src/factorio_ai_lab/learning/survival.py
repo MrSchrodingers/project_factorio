@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -69,6 +69,23 @@ _PRODUCTIVE_WINDOW_METRICS: tuple[tuple[str, str], ...] = (
 )
 
 
+
+def _optional_name_set(raw: Any) -> frozenset[str] | None:
+    """Read a recorded name list, keeping absence distinct from emptiness.
+
+    A fitness vector written before stages were recorded stores nothing for
+    them, and that is not the same fact as a generation that was measured and
+    completed none. Returning an empty set for both would let the comparison
+    draw a verdict from an absence.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, (str, bytes)):
+        return None
+    if isinstance(raw, Iterable):
+        return frozenset(str(item) for item in raw)
+    return None
+
 @dataclass(frozen=True)
 class FitnessVector:
     """Multi-objective evidence used for incumbent/challenger selection."""
@@ -123,6 +140,22 @@ class FitnessVector:
     #: paired with productive_runtime_s it separates a factory that ran and
     #: died from one that was born dead. None means no status was observed.
     halt_cause: str | None = None
+    #: Names of the curriculum stages this generation completed, and of the
+    #: ones it attempted and failed. Counting failures as an absolute number
+    #: compares two generations that did not face the same curriculum: the
+    #: generation-6 champion records zero failures because the curriculum
+    #: stopped before the hard stage, so every later challenger that reached
+    #: stage 13 of 16 and missed the next one read as a regression against a
+    #: rule the incumbent was never measured by. Twelve of the thirty-seven
+    #: recorded generations were rejected with that as their only regression,
+    #: among them every generation that had acquired electronic_circuits and
+    #: was not kept. Names
+    #: make the comparison commensurate: failing a stage the incumbent
+    #: completed is a lost capability, failing one it never completed is the
+    #: cost of exploring. `None` means stages were never recorded, which is
+    #: not the same as an empty set.
+    completed_stages: frozenset[str] | None = None
+    failed_stages: frozenset[str] | None = None
 
     @property
     def total_rate_per_s(self) -> float:
@@ -180,6 +213,12 @@ class FitnessVector:
             None
             if self.inherited_capabilities is None
             else sorted(self.inherited_capabilities)
+        )
+        payload["completed_stages"] = (
+            None if self.completed_stages is None else sorted(self.completed_stages)
+        )
+        payload["failed_stages"] = (
+            None if self.failed_stages is None else sorted(self.failed_stages)
         )
         payload["rates_per_s"] = {
             key: round(float(value), 8)
@@ -280,6 +319,8 @@ class FitnessVector:
             rates_per_s=rates,
             external_dependencies=int(payload.get("external_dependencies", 0) or 0),
             failures=int(payload.get("failures", 0) or 0),
+            completed_stages=_optional_name_set(payload.get("completed_stages")),
+            failed_stages=_optional_name_set(payload.get("failed_stages")),
             route_cost=(
                 float(route_cost_raw)
                 if isinstance(route_cost_raw, (int, float))
@@ -496,7 +537,11 @@ def compare_challenger(
     if rate_protocols_match:
         _mark_compared("rates_per_s")
     _mark_compared("external_dependencies")
-    _mark_compared("failures")
+    # `failures` is deliberately not marked here. The raw count no longer
+    # carries any verdict -- the named-stage comparison below does -- and
+    # compared_metrics is read back from evolution_history.jsonl as the record
+    # of what decided the promotion. Naming a metric that decided nothing
+    # makes the record lie about its own reasoning.
 
     lost_capabilities = sorted(champion.capabilities - challenger.capabilities)
     if lost_capabilities:
@@ -541,13 +586,50 @@ def compare_challenger(
             f"{champion.external_dependencies}→{challenger.external_dependencies}"
         )
 
-    if challenger.failures > champion.failures:
-        regressions.append(
-            f"failed stages increased {champion.failures}→{challenger.failures}"
+    # A failed stage is a regression only when the incumbent demonstrated that
+    # the stage was reachable. Comparing the raw counts punishes advancing:
+    # the incumbent completed a shorter curriculum, so it carries zero
+    # failures, and any challenger that goes further and misses the next stage
+    # reads as worse than one that attempts nothing new. Twelve of the
+    # thirty-seven recorded generations were rejected on that count alone.
+    champion_completed = champion.completed_stages
+    challenger_completed = challenger.completed_stages
+    challenger_failed = challenger.failed_stages
+    if (
+        champion_completed is not None
+        and challenger_completed is not None
+        and challenger_failed is not None
+    ):
+        _mark_compared("stages")
+        lost_stages = sorted(challenger_failed & champion_completed)
+        if lost_stages:
+            regressions.append(
+                "stages the incumbent completed now fail: "
+                + ", ".join(lost_stages)
+            )
+        missing_stages = sorted(
+            champion_completed - challenger_completed - challenger_failed
         )
-    elif challenger.failures < champion.failures:
-        improvements.append(
-            f"failed stages reduced {champion.failures}→{challenger.failures}"
+        if missing_stages:
+            regressions.append(
+                "stages the incumbent completed were not reached: "
+                + ", ".join(missing_stages)
+            )
+        advanced_stages = sorted(challenger_completed - champion_completed)
+        if advanced_stages:
+            improvements.append(
+                "frontier stages completed: " + ", ".join(advanced_stages)
+            )
+    else:
+        # Counting alone cannot carry the comparison, and this is exactly the
+        # axis where substituting a count for the missing names produced the
+        # false verdict. The absence is reported instead of guessed; the floor
+        # is established by the first challenger promoted on named evidence,
+        # whose fitness vector is stored whole and carries the names forward.
+        _mark_incommensurable(
+            "stages",
+            "stage names were not recorded on both sides; failure counts from "
+            "different curricula are not comparable",
         )
 
     # A capability that arrived with an inherited factory is not an
@@ -815,6 +897,8 @@ def fitness_from_research(
     resource_accounting: Mapping[str, Any] | None = None,
     physical_graph: Mapping[str, Any] | None = None,
     failed_stages: int = 0,
+    completed_stage_names: Iterable[str] | None = None,
+    failed_stage_names: Iterable[str] | None = None,
 ) -> FitnessVector:
     rates: dict[str, float] = {}
     rate_sources: dict[str, str] = {}
@@ -947,6 +1031,16 @@ def fitness_from_research(
         ),
         external_dependencies=external_dependencies,
         failures=max(0, int(failed_stages)),
+        completed_stages=(
+            None
+            if completed_stage_names is None
+            else frozenset(str(name) for name in completed_stage_names)
+        ),
+        failed_stages=(
+            None
+            if failed_stage_names is None
+            else frozenset(str(name) for name in failed_stage_names)
+        ),
         route_cost=(
             float(route_cost_raw)
             if isinstance(route_cost_raw, (int, float))

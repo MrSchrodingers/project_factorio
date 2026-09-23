@@ -4466,17 +4466,33 @@ def finalize_evolution_selection(
     achieved: set[str],
     physical_graph: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    failed_stages = sum(
-        1
+    stages = [
+        stage
         for stage in journal.state.get("curriculum", [])
-        if isinstance(stage, dict) and stage.get("status") == "failed"
-    )
+        if isinstance(stage, dict)
+    ]
+    failed_stage_names = [
+        str(stage.get("name"))
+        for stage in stages
+        if stage.get("status") == "failed"
+    ]
+    completed_stage_names = [
+        str(stage.get("name"))
+        for stage in stages
+        if stage.get("status") == "completed"
+    ]
+    failed_stages = len(failed_stage_names)
+    # The names travel with the fitness so the next comparison can tell a lost
+    # capability from an unreached frontier. Passing only the count is what
+    # rejected twelve generations for going further than the incumbent.
     challenger = fitness_from_research(
         metrics=journal.state.get("metrics", {}),
         achieved=achieved,
         resource_accounting=journal.state.get("resource_accounting", {}),
         physical_graph=physical_graph,
         failed_stages=failed_stages,
+        completed_stage_names=completed_stage_names,
+        failed_stage_names=failed_stage_names,
     )
 
     incumbent = incumbent_champion()
@@ -4530,16 +4546,6 @@ def finalize_evolution_selection(
     else:
         evolution["champion"] = incumbent or None
 
-    failed_stage_names = [
-        str(stage.get("name"))
-        for stage in journal.state.get("curriculum", [])
-        if isinstance(stage, dict) and stage.get("status") == "failed"
-    ]
-    completed_stage_names = [
-        str(stage.get("name"))
-        for stage in journal.state.get("curriculum", [])
-        if isinstance(stage, dict) and stage.get("status") == "completed"
-    ]
     selected_at = str(candidate_record["selected_at"])
     started_at = journal.state.get("started_at")
     duration_s: float | None = None
