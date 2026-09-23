@@ -10,6 +10,78 @@ export interface Bounds {
   right_bottom: Point;
 }
 
+/**
+ * How one live reading turned out. `absent` is an answer -- the entity has
+ * no such inventory, burner or network. `unprobed` is not an answer: nobody
+ * asked, and an unread chest must never render as an empty chest.
+ */
+export type ReadingStatus = "measured" | "absent" | "probe_failed" | "unprobed";
+
+export interface ItemStack {
+  name: string;
+  count: number;
+}
+
+export interface ContentsReading {
+  status: ReadingStatus;
+  items: ItemStack[] | null;
+  total: number | null;
+}
+
+export interface FuelReading {
+  status: ReadingStatus;
+  items: ItemStack[] | null;
+  total: number | null;
+  burning: string | null;
+  burning_status: ReadingStatus;
+  remaining_joules: number | null;
+  remaining_status: ReadingStatus;
+}
+
+export interface FluidBox {
+  index: number;
+  name: string;
+  amount: number;
+  temperature: number | null;
+}
+
+export interface FluidsReading {
+  status: ReadingStatus;
+  boxes: FluidBox[] | null;
+}
+
+export interface IngredientReading {
+  name: string;
+  required: number;
+  /** Null when the machine's stock was not read, never a stand-in zero. */
+  available: number | null;
+  satisfied: boolean | null;
+}
+
+export interface MissingIngredient {
+  name: string;
+  required: number;
+  available: number;
+  shortfall: number;
+}
+
+export interface CraftingReading {
+  status: ReadingStatus;
+  input: ItemStack[] | null;
+  input_status: ReadingStatus;
+  output: ItemStack[] | null;
+  output_status: ReadingStatus;
+  ingredients: IngredientReading[] | null;
+  ingredients_status: ReadingStatus;
+  /** Null means "not established"; an empty list means nothing is missing. */
+  missing: MissingIngredient[] | null;
+}
+
+export interface PowerReading {
+  status: ReadingStatus;
+  network_id: number | null;
+}
+
 export interface SceneEntity {
   name: string;
   type: string | null;
@@ -20,6 +92,16 @@ export interface SceneEntity {
   recipe: string | null;
   energy: number | null;
   coal_fuel: number | null;
+  /**
+   * Live readings, additive to the original contract. A group is missing
+   * when the sweep asked and the entity had none of it, so `undefined` here
+   * means "nothing to show", not "nothing was read".
+   */
+  contents?: ContentsReading;
+  fuel?: FuelReading;
+  crafting?: CraftingReading;
+  fluids?: FluidsReading;
+  power?: PowerReading;
 }
 
 export interface SceneResource {

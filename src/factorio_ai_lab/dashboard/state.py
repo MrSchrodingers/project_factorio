@@ -64,6 +64,21 @@ EVOLUTION_HISTORY_PATH = RUNS_DIR / "evolution_history.jsonl"
 #: truncated view is never mistaken for the whole record.
 DISCOVERY_PAYLOAD_LIMIT = 200
 
+#: Reading groups the world sweep takes on every entity. The sweep declares
+#: them in its payload, so an entity row that arrives without the declaration
+#: is reported as unread rather than as an entity that holds nothing. A chest
+#: nobody asked and an empty chest look identical once the distinction is
+#: dropped, and this project already paid eleven generations for that.
+ENTITY_READING_GROUPS = ("contents", "fuel", "crafting", "fluids", "power")
+
+#: How an individual reading turned out. ``absent`` is an answer -- the
+#: entity has no such inventory, burner or network; ``unprobed`` means the
+#: question was never asked.
+READING_MEASURED = "measured"
+READING_ABSENT = "absent"
+READING_FAILED = "probe_failed"
+READING_UNPROBED = "unprobed"
+
 
 DEFAULT_RUNTIME_CONFIG: dict[str, Any] = {
     "poll_interval_s": 1.5,
@@ -536,6 +551,285 @@ def _input_readings(raw: Any) -> dict[str, float | None]:
     return {str(key): _reading(value) for key, value in sorted(raw.items())}
 
 
+def _stack_rows(raw: Any) -> list[dict[str, Any]]:
+    """Item stacks the game reported, one row per item name.
+
+    ``LuaInventory.get_contents`` answers with ``{name, quality, count}``
+    rows in Factorio 2.0 and with a ``name -> count`` map in older versions,
+    and an empty inventory arrives as ``{}`` either way because Lua has a
+    single empty table. Entries without both a name and a number are dropped
+    rather than counted as zero.
+    """
+    totals: dict[str, float] = {}
+    order: list[str] = []
+    if isinstance(raw, dict) and all(
+        not isinstance(value, dict) for value in raw.values()
+    ):
+        entries: list[tuple[Any, Any]] = list(raw.items())
+    else:
+        entries = [
+            (row.get("name"), row.get("count"))
+            for row in _as_list(raw)
+            if isinstance(row, dict)
+        ]
+    for name, count in entries:
+        amount = _reading(count)
+        if not isinstance(name, str) or amount is None:
+            continue
+        if name not in totals:
+            totals[name] = 0.0
+            order.append(name)
+        totals[name] += amount
+    return [{"name": name, "count": totals[name]} for name in sorted(order)]
+
+
+def _stack_total(items: list[dict[str, Any]] | None) -> float | None:
+    """How much a measured inventory holds, or None when it was not read."""
+    if items is None:
+        return None
+    return float(sum(item["count"] for item in items))
+
+
+def _entity_reading(
+    row: dict[str, Any],
+    probed: bool,
+    key: str,
+) -> tuple[str, Any]:
+    """How one reading on one entity row turned out, and what it read.
+
+    The world sweep sends a measured reading as the value, a failed probe as
+    a ``<key>_status`` and an absence as nothing at all. Nothing at all only
+    means absence when the sweep declared it asked: a row from a producer
+    that never took the reading reports ``unprobed`` instead, because an
+    unread chest rendered as an empty chest is a fabricated measurement.
+    """
+    if not probed:
+        return READING_UNPROBED, None
+    status = row.get(f"{key}_status")
+    if isinstance(status, str) and status != READING_MEASURED:
+        return status, None
+    value = row.get(key)
+    if value is None:
+        return READING_ABSENT, None
+    return READING_MEASURED, value
+
+
+def _contents_payload(
+    row: dict[str, Any],
+    probed: bool,
+) -> dict[str, Any] | None:
+    """What a container holds, or None when it holds no inventory at all."""
+    status, raw = _entity_reading(row, probed, "contents")
+    if status == READING_ABSENT:
+        return None
+    items = _stack_rows(raw) if status == READING_MEASURED else None
+    return {"status": status, "items": items, "total": _stack_total(items)}
+
+
+def _fuel_payload(
+    row: dict[str, Any],
+    probed: bool,
+) -> dict[str, Any] | None:
+    """What sustains a burner: its fuel, what it burns and what is left.
+
+    ``working`` on its own says nothing about how long it keeps working. The
+    remaining energy is the reading behind the claim, and a burner that was
+    not read reports that instead of an empty tank.
+    """
+    status, raw = _entity_reading(row, probed, "fuel")
+    burning_status, burning = _entity_reading(row, probed, "burning")
+    remaining_status, remaining = _entity_reading(row, probed, "fuel_remaining")
+    statuses = (status, burning_status, remaining_status)
+    if all(item == READING_ABSENT for item in statuses):
+        return None
+    items = _stack_rows(raw) if status == READING_MEASURED else None
+    return {
+        "status": status,
+        "items": items,
+        "total": _stack_total(items),
+        "burning": (
+            _reading_text(burning) if burning_status == READING_MEASURED else None
+        ),
+        "burning_status": burning_status,
+        "remaining_joules": (
+            _reading(remaining) if remaining_status == READING_MEASURED else None
+        ),
+        "remaining_status": remaining_status,
+    }
+
+
+def _fluids_payload(
+    row: dict[str, Any],
+    probed: bool,
+) -> dict[str, Any] | None:
+    """The fluid boxes an entity carries, or None when it has none."""
+    status, raw = _entity_reading(row, probed, "fluids")
+    if status == READING_ABSENT:
+        return None
+    boxes: list[dict[str, Any]] | None = None
+    if status == READING_MEASURED:
+        boxes = []
+        for index, box in enumerate(_as_list(raw), start=1):
+            if not isinstance(box, dict):
+                continue
+            name = _reading_text(box.get("name"))
+            amount = _reading(box.get("amount"))
+            if name is None or amount is None:
+                continue
+            position = _reading(box.get("index"))
+            boxes.append(
+                {
+                    "index": int(position) if position is not None else index,
+                    "name": name,
+                    "amount": amount,
+                    "temperature": _reading(box.get("temperature")),
+                }
+            )
+    return {"status": status, "boxes": boxes}
+
+
+def _ingredient_rows(
+    raw: Any,
+    items: dict[str, float] | None,
+    fluids: dict[str, float] | None,
+) -> list[dict[str, Any]]:
+    """What the recipe asks for, next to what the machine actually holds.
+
+    An ingredient whose availability was not read keeps ``available`` null.
+    Reading it as zero would name an ingredient as missing on the strength of
+    a measurement nobody took.
+    """
+    rows: list[dict[str, Any]] = []
+    for entry in _as_list(raw):
+        if not isinstance(entry, dict):
+            continue
+        name = _reading_text(entry.get("name"))
+        required = _reading(entry.get("amount"))
+        if name is None or required is None:
+            continue
+        kind = _reading_text(entry.get("type")) or "item"
+        pool = fluids if kind == "fluid" else items
+        available = None if pool is None else float(pool.get(name, 0.0))
+        rows.append(
+            {
+                "name": name,
+                "required": required,
+                "available": available,
+                "satisfied": None if available is None else available >= required,
+            }
+        )
+    return rows
+
+
+def _crafting_payload(
+    row: dict[str, Any],
+    probed: bool,
+    fluids: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """A crafting machine's input, output and what it still lacks.
+
+    ``missing`` stays null unless every ingredient's availability was read.
+    An empty list means the machine holds everything the recipe asks for, and
+    that claim is only true when the inventory answered.
+    """
+    input_status, input_raw = _entity_reading(row, probed, "craft_input")
+    output_status, output_raw = _entity_reading(row, probed, "craft_output")
+    recipe_status, recipe_raw = _entity_reading(row, probed, "ingredients")
+    statuses = (input_status, output_status, recipe_status)
+    if all(item == READING_ABSENT for item in statuses):
+        return None
+
+    inputs = _stack_rows(input_raw) if input_status == READING_MEASURED else None
+    outputs = _stack_rows(output_raw) if output_status == READING_MEASURED else None
+    held = (
+        {item["name"]: item["count"] for item in inputs}
+        if inputs is not None
+        else None
+    )
+    in_fluid_boxes = None
+    if fluids is not None and fluids.get("boxes") is not None:
+        in_fluid_boxes = {}
+        for box in fluids["boxes"]:
+            name = box["name"]
+            in_fluid_boxes[name] = in_fluid_boxes.get(name, 0.0) + box["amount"]
+
+    ingredients: list[dict[str, Any]] | None = None
+    missing: list[dict[str, Any]] | None = None
+    if recipe_status == READING_MEASURED:
+        ingredients = _ingredient_rows(recipe_raw, held, in_fluid_boxes)
+        if all(entry["available"] is not None for entry in ingredients):
+            missing = [
+                {
+                    "name": entry["name"],
+                    "required": entry["required"],
+                    "available": entry["available"],
+                    "shortfall": entry["required"] - entry["available"],
+                }
+                for entry in ingredients
+                if not entry["satisfied"]
+            ]
+
+    if READING_MEASURED in statuses:
+        status = READING_MEASURED
+    elif READING_FAILED in statuses:
+        status = READING_FAILED
+    elif READING_UNPROBED in statuses:
+        status = READING_UNPROBED
+    else:
+        status = READING_ABSENT
+    return {
+        "status": status,
+        "input": inputs,
+        "input_status": input_status,
+        "output": outputs,
+        "output_status": output_status,
+        "ingredients": ingredients,
+        "ingredients_status": recipe_status,
+        "missing": missing,
+    }
+
+
+def _network_payload(
+    row: dict[str, Any],
+    probed: bool,
+) -> dict[str, Any] | None:
+    """Which electric network an entity answers with, if it answers at all.
+
+    ``-1`` is an answer: the entity says it belongs to no network. That exact
+    reading, next to a pole reporting a live network, is what identified a
+    machine wired to nothing on the live box.
+    """
+    status, raw = _entity_reading(row, probed, "network_id")
+    if status == READING_ABSENT:
+        return None
+    value = _reading(raw) if status == READING_MEASURED else None
+    return {
+        "status": status,
+        "network_id": int(value) if value is not None else None,
+    }
+
+
+def _entity_readings(
+    row: dict[str, Any],
+    probed_groups: set[str],
+) -> dict[str, Any]:
+    """Every live reading for one entity, with absent groups left out.
+
+    A group that is left out is a group the sweep asked about and the entity
+    had none of: a belt has no inventory and no burner. A group that was
+    never asked is present and says ``unprobed``.
+    """
+    fluids = _fluids_payload(row, "fluids" in probed_groups)
+    groups = {
+        "contents": _contents_payload(row, "contents" in probed_groups),
+        "fuel": _fuel_payload(row, "fuel" in probed_groups),
+        "crafting": _crafting_payload(row, "crafting" in probed_groups, fluids),
+        "fluids": fluids,
+        "power": _network_payload(row, "power" in probed_groups),
+    }
+    return {key: value for key, value in groups.items() if value is not None}
+
+
 def _machine_probe_payload(name: str, raw: dict[str, Any]) -> dict[str, Any]:
     """One machine's own readings, with every absence kept absent."""
     return {
@@ -944,11 +1238,84 @@ class RuntimeConfigStore:
 class FactorioObserver:
     """Strictly read-only RCON observer; never constructs FactorioInstance."""
 
+    #: Readings the world sweep takes for every entity, declared in the
+    #: payload so a row that never went through this command is reported as
+    #: unread instead of as an entity that has nothing.
     _SNAPSHOT_COMMAND = r"""
 /c local p=storage.agent_characters and storage.agent_characters[1]
 if not p then
   rcon.print(helpers.table_to_json({connected=false,error="agent character unavailable"}))
   return
+end
+local reading_groups={"contents","fuel","crafting","fluids","power"}
+local container_types={
+  ["container"]=true,["logistic-container"]=true,["infinity-container"]=true,
+  ["linked-container"]=true,["proxy-container"]=true,
+  ["temporary-container"]=true,["cargo-wagon"]=true,["car"]=true,
+  ["spider-vehicle"]=true
+}
+local crafter_types={
+  ["assembling-machine"]=true,["furnace"]=true,["rocket-silo"]=true
+}
+-- A failed read and a field the entity does not have both produce no value,
+-- so only the status separates them. Nothing below may turn a read that was
+-- never taken into a zero.
+local function probe(read)
+  local ok,value=pcall(read)
+  if not ok then return nil,"probe_failed" end
+  if value==nil then return nil,"absent" end
+  return value,"measured"
+end
+-- Measured readings travel as the value; a failed probe travels as a status.
+-- Absence travels as nothing at all, which the declared reading groups make
+-- readable: the sweep asked, and the entity had none.
+local function put(row,key,value,status)
+  if status=="measured" then
+    row[key]=value
+  elseif status~="absent" then
+    row[key.."_status"]=status
+  end
+end
+-- get_contents answers with {name,quality,count} rows in 2.0 and with a
+-- name->count map in older versions; both collapse to one row per name.
+local function stack_rows(contents)
+  local totals={}
+  local order={}
+  for key,entry in pairs(contents) do
+    local name,count
+    if type(entry)=="table" then
+      name=entry.name
+      count=entry.count
+    else
+      name=key
+      count=entry
+    end
+    if type(name)=="string" then
+      if totals[name]==nil then
+        totals[name]=0
+        order[#order+1]=name
+      end
+      totals[name]=totals[name]+(tonumber(count) or 0)
+    end
+  end
+  table.sort(order)
+  local rows={}
+  for _,name in ipairs(order) do
+    rows[#rows+1]={name=name,count=totals[name]}
+  end
+  return rows
+end
+local function inventory_rows(read)
+  local inventory,status=probe(read)
+  if status~="measured" then return nil,status end
+  local valid,valid_status=probe(function() return inventory.valid end)
+  if valid_status~="measured" then return nil,valid_status end
+  if not valid then return nil,"absent" end
+  local contents,contents_status=probe(function()
+    return inventory.get_contents()
+  end)
+  if contents_status~="measured" then return nil,contents_status end
+  return stack_rows(contents),"measured"
 end
 local entities={}
 for _,e in pairs(p.surface.find_entities_filtered{force=p.force}) do
@@ -972,16 +1339,50 @@ for _,e in pairs(p.surface.find_entities_filtered{force=p.force}) do
       end
     end
 
-    local ok_fuel,fuel_inventory=pcall(function()
+    local fuel,fuel_status=inventory_rows(function()
       return e.get_fuel_inventory()
     end)
-    if ok_fuel and fuel_inventory and fuel_inventory.valid then
-      local ok_count,count=pcall(function()
-        return fuel_inventory.get_item_count("coal")
-      end)
-      if ok_count then
-        row.coal_fuel=count
+    put(row,"fuel",fuel,fuel_status)
+    if fuel_status=="measured" then
+      local coal=0
+      for _,stack in ipairs(fuel) do
+        if stack.name=="coal" then coal=stack.count end
       end
+      row.coal_fuel=coal
+    end
+
+    local burner,burner_status=probe(function() return e.burner end)
+    if burner_status=="measured" then
+      local remaining,remaining_status=probe(function()
+        return burner.remaining_burning_fuel
+      end)
+      put(row,"fuel_remaining",remaining,remaining_status)
+      local burning,burning_status=probe(function()
+        return burner.currently_burning
+      end)
+      if burning_status=="measured" then
+        -- 2.0 answers with an item-and-quality pair whose name field is a
+        -- prototype, so the readable name is one level deeper than in 1.1.
+        local name,name_status=probe(function()
+          local id=burning.name
+          if type(id)=="string" then return id end
+          return id and id.name or nil
+        end)
+        put(row,"burning",name,name_status)
+      else
+        put(row,"burning",nil,burning_status)
+      end
+    else
+      put(row,"fuel_remaining",nil,burner_status)
+      put(row,"burning",nil,burner_status)
+    end
+
+    if container_types[e.type] then
+      local contents,contents_status=inventory_rows(function()
+        return e.get_inventory(defines.inventory.chest)
+          or e.get_output_inventory()
+      end)
+      put(row,"contents",contents,contents_status)
     end
 
     local ok_recipe,recipe=pcall(function()
@@ -989,7 +1390,65 @@ for _,e in pairs(p.surface.find_entities_filtered{force=p.force}) do
     end)
     if ok_recipe and recipe then
       row.recipe=recipe.name
+      local ingredients,ingredients_status=probe(function()
+        return recipe.ingredients
+      end)
+      if ingredients_status=="measured" then
+        local rows={}
+        for _,ingredient in pairs(ingredients) do
+          rows[#rows+1]={
+            name=ingredient.name,
+            amount=ingredient.amount,
+            type=ingredient.type
+          }
+        end
+        table.sort(rows,function(a,b)
+          return tostring(a.name)<tostring(b.name)
+        end)
+        row.ingredients=rows
+      else
+        put(row,"ingredients",nil,ingredients_status)
+      end
     end
+
+    if crafter_types[e.type] then
+      local input_index=defines.inventory.assembling_machine_input
+      if e.type=="furnace" then
+        input_index=defines.inventory.furnace_source
+      end
+      local input,input_status=inventory_rows(function()
+        return e.get_inventory(input_index)
+      end)
+      put(row,"craft_input",input,input_status)
+      local output,output_status=inventory_rows(function()
+        return e.get_output_inventory()
+      end)
+      put(row,"craft_output",output,output_status)
+    end
+
+    local boxes,boxes_status=probe(function() return #e.fluidbox end)
+    if boxes_status=="measured" and boxes>0 then
+      local rows={}
+      for index=1,boxes do
+        local box=probe(function() return e.fluidbox[index] end)
+        if box then
+          rows[#rows+1]={
+            index=index,
+            name=box.name,
+            amount=box.amount,
+            temperature=box.temperature
+          }
+        end
+      end
+      row.fluids=rows
+    elseif boxes_status~="measured" then
+      row.fluids_status=boxes_status
+    end
+
+    local network,network_status=probe(function()
+      return e.electric_network_id
+    end)
+    put(row,"network_id",network,network_status)
 
     local ok_energy,energy=pcall(function()
       return e.energy
@@ -1033,6 +1492,7 @@ rcon.print(helpers.table_to_json({
   connected=true,
   tick=game.tick,
   experiment_tick=storage.elapsed_ticks or 0,
+  entity_readings=reading_groups,
   entities=entities,
   production=production
 }))
@@ -1958,6 +2418,7 @@ rcon.print(helpers.table_to_json({connected=true,count=#rows,prototypes=rows}))
                 "connected": False,
                 "entities": [],
                 "entity_count": 0,
+                "entity_readings": [],
                 "error": "RCON unavailable",
                 "latency_ms": 0.0,
             }
@@ -1978,6 +2439,11 @@ rcon.print(helpers.table_to_json({connected=true,count=#rows,prototypes=rows}))
                     "tick": payload.get("tick"),
                     "entities": entities,
                     "entity_count": len(entities),
+                    # Which readings this sweep took, so a consumer can tell
+                    # an entity with nothing from a reading never taken.
+                    "entity_readings": _as_list(
+                        payload.get("entity_readings")
+                    ),
                     "production": payload.get(
                         "production",
                         {"produced": {}, "consumed": {}, "input": {}, "output": {}},
@@ -2000,6 +2466,7 @@ rcon.print(helpers.table_to_json({connected=true,count=#rows,prototypes=rows}))
                     "connected": False,
                     "entities": [],
                     "entity_count": 0,
+                    "entity_readings": [],
                     "latency_ms": round(
                         (time.perf_counter() - started) * 1000.0,
                         2,
@@ -3176,6 +3643,9 @@ class DashboardState:
         )
         prototypes = self.factorio.entity_prototypes()
 
+        probed_groups = {
+            str(group) for group in _as_list(world.get("entity_readings"))
+        }
         entities: list[dict[str, Any]] = []
         character: dict[str, Any] | None = None
         for entity in world.get("entities", []):
@@ -3196,6 +3666,7 @@ class DashboardState:
                 "energy": entity.get("energy"),
                 "coal_fuel": entity.get("coal_fuel"),
             }
+            row.update(_entity_readings(entity, probed_groups))
             if name == "character":
                 character = row
             else:

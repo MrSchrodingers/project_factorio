@@ -29,9 +29,12 @@ import {
   statusClass,
 } from "./palette";
 import type {
+  CraftingReading,
   FactoryGraph,
+  ItemStack,
   MapOptions,
   OverlayKey,
+  ReadingStatus,
   Scene,
   SceneEntity,
 } from "./types";
@@ -680,16 +683,16 @@ export class FactoryMap {
         <div><dt>Estado</dt><dd class="fmap-${cls}">${escapeHtml(statusText)}</dd></div>
         <div><dt>Posicao</dt><dd>x ${entity.x.toFixed(1)} y ${entity.y.toFixed(1)}</dd></div>
         ${entity.recipe ? `<div><dt>Receita</dt><dd>${escapeHtml(humanize(entity.recipe))}</dd></div>` : ""}
-        ${
-          entity.coal_fuel !== null && entity.coal_fuel !== undefined
-            ? `<div><dt>Carvao</dt><dd>${entity.coal_fuel}</dd></div>`
-            : ""
-        }
+        ${craftingRows(entity)}
+        ${contentsRow(entity)}
+        ${fuelRows(entity)}
+        ${fluidsRow(entity)}
         ${
           entity.energy !== null && entity.energy !== undefined
             ? `<div><dt>Energia</dt><dd>${Math.round(entity.energy)} J</dd></div>`
             : ""
         }
+        ${powerRow(entity)}
       </dl>
     `;
     inspector.querySelector(".fmap-close")?.addEventListener("click", () => {
@@ -758,6 +761,177 @@ const EXPAND_ICON =
 
 function overlayButton(key: OverlayKey, label: string): string {
   return `<button type="button" data-overlay="${key}">${label}</button>`;
+}
+
+// ------------------------------------------------------- reading readout
+//
+// The card used to state a status and nothing behind it: a boiler said
+// "working" with no fuel reading, and a machine said "no ingredients"
+// without naming one. Every row below prints a reading the game answered,
+// and prints why there is no reading when there is none. An unread field is
+// never drawn as an empty one.
+
+const READING_REASONS: Record<string, string> = {
+  unprobed: "nao lido",
+  probe_failed: "leitura falhou",
+  absent: "sem leitura",
+};
+
+function reasonText(status: ReadingStatus): string {
+  return READING_REASONS[status] ?? status;
+}
+
+function formatCount(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+function energyText(joules: number): string {
+  const magnitude = Math.abs(joules);
+  if (magnitude >= 1e6) return `${(joules / 1e6).toFixed(1)} MJ`;
+  if (magnitude >= 1e3) return `${(joules / 1e3).toFixed(1)} kJ`;
+  return `${Math.round(joules)} J`;
+}
+
+function detailRow(label: string, value: string, cls = ""): string {
+  const attr = cls ? ` class="${cls}"` : "";
+  return `<div><dt>${label}</dt><dd${attr}>${value}</dd></div>`;
+}
+
+function stackList(items: ItemStack[]): string {
+  return items
+    .map((item) => `${escapeHtml(humanize(item.name))} ${formatCount(item.count)}`)
+    .join(" | ");
+}
+
+function inventoryRow(
+  label: string,
+  items: ItemStack[] | null,
+  status: ReadingStatus,
+): string {
+  if (status !== "measured" || items === null) {
+    return detailRow(label, escapeHtml(reasonText(status)), "fmap-neutral");
+  }
+  if (!items.length) return detailRow(label, "vazio", "fmap-neutral");
+  return detailRow(label, stackList(items));
+}
+
+function contentsRow(entity: SceneEntity): string {
+  const reading = entity.contents;
+  if (!reading) return "";
+  return inventoryRow("Conteudo", reading.items, reading.status);
+}
+
+function fuelRows(entity: SceneEntity): string {
+  const reading = entity.fuel;
+  if (!reading) return "";
+  const rows = [inventoryRow("Combustivel", reading.items, reading.status)];
+  if (reading.burning_status === "measured" && reading.burning) {
+    rows.push(detailRow("Queimando", escapeHtml(humanize(reading.burning))));
+  } else if (reading.burning_status === "absent") {
+    rows.push(detailRow("Queimando", "nada", "fmap-neutral"));
+  } else {
+    rows.push(
+      detailRow(
+        "Queimando",
+        escapeHtml(reasonText(reading.burning_status)),
+        "fmap-neutral",
+      ),
+    );
+  }
+  if (reading.remaining_status === "measured" && reading.remaining_joules !== null) {
+    rows.push(
+      detailRow(
+        "Restante",
+        escapeHtml(energyText(reading.remaining_joules)),
+        reading.remaining_joules > 0 ? "" : "fmap-fault",
+      ),
+    );
+  } else if (reading.remaining_status !== "absent") {
+    rows.push(
+      detailRow(
+        "Restante",
+        escapeHtml(reasonText(reading.remaining_status)),
+        "fmap-neutral",
+      ),
+    );
+  }
+  return rows.join("");
+}
+
+function missingText(reading: CraftingReading): string {
+  if (reading.ingredients_status === "absent") return "sem receita";
+  if (reading.ingredients_status !== "measured") {
+    return reasonText(reading.ingredients_status);
+  }
+  return `entrada ${reasonText(reading.input_status)}`;
+}
+
+function craftingRows(entity: SceneEntity): string {
+  const reading = entity.crafting;
+  if (!reading) return "";
+  const rows = [
+    inventoryRow("Entrada", reading.input, reading.input_status),
+    inventoryRow("Saida", reading.output, reading.output_status),
+  ];
+  if (reading.missing === null) {
+    rows.push(
+      detailRow("Falta", escapeHtml(missingText(reading)), "fmap-neutral"),
+    );
+  } else if (!reading.missing.length) {
+    rows.push(detailRow("Falta", "nada", "fmap-working"));
+  } else {
+    rows.push(
+      detailRow(
+        "Falta",
+        reading.missing
+          .map(
+            (item) =>
+              `${escapeHtml(humanize(item.name))} ${formatCount(item.shortfall)} ` +
+              `(tem ${formatCount(item.available)} de ${formatCount(item.required)})`,
+          )
+          .join(" | "),
+        "fmap-fault",
+      ),
+    );
+  }
+  return rows.join("");
+}
+
+function fluidsRow(entity: SceneEntity): string {
+  const reading = entity.fluids;
+  if (!reading) return "";
+  if (reading.status !== "measured" || reading.boxes === null) {
+    return detailRow(
+      "Fluidos",
+      escapeHtml(reasonText(reading.status)),
+      "fmap-neutral",
+    );
+  }
+  if (!reading.boxes.length) return detailRow("Fluidos", "vazio", "fmap-neutral");
+  return detailRow(
+    "Fluidos",
+    reading.boxes
+      .map((box) => {
+        const temperature =
+          box.temperature === null ? "" : ` a ${formatCount(box.temperature)}C`;
+        return `${escapeHtml(humanize(box.name))} ${formatCount(box.amount)}${temperature}`;
+      })
+      .join(" | "),
+  );
+}
+
+function powerRow(entity: SceneEntity): string {
+  const reading = entity.power;
+  if (!reading) return "";
+  if (reading.status !== "measured" || reading.network_id === null) {
+    return detailRow("Rede", escapeHtml(reasonText(reading.status)), "fmap-neutral");
+  }
+  // -1 is the game answering "no network at all", which is the reading that
+  // explained a machine standing dead next to a live pole.
+  if (reading.network_id < 0) {
+    return detailRow("Rede", `${reading.network_id} (fora de rede)`, "fmap-fault");
+  }
+  return detailRow("Rede", String(reading.network_id));
 }
 
 function niceTiles(raw: number): number {
