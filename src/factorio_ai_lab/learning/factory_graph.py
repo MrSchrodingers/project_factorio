@@ -16,7 +16,44 @@ DIRECTION_VECTORS = {
     8: (0.0, 1.0),
     12: (-1.0, 0.0),
 }
-_BELTS = {"transport-belt", "fast-transport-belt", "express-transport-belt"}
+#: Conveyor prototype names, grouped by the shape of the flow they carry.
+#: Public because every module that reasons about belts has to classify them
+#: from the same list: a second private copy drifts, and the drift is silent -
+#: this one keeps reporting a chain the other one can no longer see.
+#: Read on 2026-09-23 from the running Factorio 2.0.73 prototype table, base
+#: game with no mods, by filtering `prototypes.entity` on the belt types.
+BELT_NAMES = frozenset(
+    {"transport-belt", "fast-transport-belt", "express-transport-belt"}
+)
+SPLITTER_NAMES = frozenset({"splitter", "fast-splitter", "express-splitter"})
+UNDERGROUND_BELT_NAMES = frozenset(
+    {
+        "underground-belt",
+        "fast-underground-belt",
+        "express-underground-belt",
+    }
+)
+TRANSPORT_NAMES = BELT_NAMES | SPLITTER_NAMES | UNDERGROUND_BELT_NAMES
+
+#: `prototypes.entity[name].max_underground_distance`, from the same runtime
+#: read. The loaders and the linked belt are deliberately absent from both
+#: tables: the same read lists them as prototypes, no technology in this game
+#: unlocks their recipe, and a name this module has never seen in a snapshot
+#: is a guess rather than a measurement.
+#:
+#: This module applies the number as the largest separation, in tiles, between
+#: the two ends of a pair. The number is measured; that reading of it is not,
+#: because confirming it would mean placing belts in a world another run holds
+#: under lease. A pair further apart than this is left unlinked.
+UNDERGROUND_MAX_DISTANCE = {
+    "underground-belt": 5,
+    "fast-underground-belt": 7,
+    "express-underground-belt": 9,
+}
+
+#: Tile centres sit at .5, so an offset that should be zero arrives as float
+#: noise from the Lua serializer.
+_AXIS_EPSILON = 1e-6
 _INSERTERS = {
     "burner-inserter",
     "inserter",
@@ -217,7 +254,7 @@ def _cardinal_direction(raw: Any) -> int:
 def _category(name: str) -> str:
     if name in _DRILLS:
         return "extraction"
-    if name in _BELTS:
+    if name in TRANSPORT_NAMES:
         return "transport"
     if name in _INSERTERS:
         return "transfer"
@@ -265,6 +302,75 @@ def _nearest(
     )
 
 
+def _underground_partners(
+    nodes: Sequence[GraphNode],
+    directions: Mapping[str, int],
+) -> dict[str, str]:
+    """Match each underground entrance with the exit it reaches underground.
+
+    The pairing is inferred from geometry because no snapshot path this module
+    reads reports `belt_to_ground_type`: two ends are a pair when they share a
+    tier and a facing, sit on the same axis, and are no further apart than
+    :data:`UNDERGROUND_MAX_DISTANCE` allows. Nearest pairs are matched first
+    and every end takes part in at most one, which is what the game guarantees.
+
+    Known limit, in the direction of over-reporting: two entrances in a row
+    pair here and do not pair in the game. The snapshot carries nothing that
+    tells an entrance from an exit, so the alternative is to report no
+    underground chain at all.
+    """
+    candidates: list[tuple[float, str, str]] = []
+    for source in nodes:
+        reach = UNDERGROUND_MAX_DISTANCE.get(source.name)
+        if reach is None:
+            continue
+        direction = directions[source.node_id]
+        dx, dy = DIRECTION_VECTORS[direction]
+        for target in nodes:
+            if target.node_id == source.node_id or target.name != source.name:
+                continue
+            if directions[target.node_id] != direction:
+                continue
+            offset_x = target.x - source.x
+            offset_y = target.y - source.y
+            along = offset_x * dx + offset_y * dy
+            across = abs(offset_x * dy - offset_y * dx)
+            if across > _AXIS_EPSILON:
+                continue
+            if along <= _AXIS_EPSILON or along > reach + _AXIS_EPSILON:
+                continue
+            candidates.append((along, source.node_id, target.node_id))
+
+    partners: dict[str, str] = {}
+    paired: set[str] = set()
+    for _, source_id, target_id in sorted(candidates):
+        if source_id in paired or target_id in paired:
+            continue
+        partners[source_id] = target_id
+        paired.add(source_id)
+        paired.add(target_id)
+    return partners
+
+
+def _flow_outputs(
+    node: GraphNode,
+    direction: int,
+) -> tuple[tuple[float, float], ...]:
+    """Tile centres this conveyor hands items to, one per output lane.
+
+    A belt has one. A splitter is two tiles wide across its facing and drives
+    one lane per half, so it has two, half a tile either side of its axis;
+    collapsing them to the midpoint is what loses a branch.
+    """
+    dx, dy = DIRECTION_VECTORS[direction]
+    if node.name in SPLITTER_NAMES:
+        return (
+            (node.x + dx - dy * 0.5, node.y + dy + dx * 0.5),
+            (node.x + dx + dy * 0.5, node.y + dy - dx * 0.5),
+        )
+    return ((node.x + dx, node.y + dy),)
+
+
 def _reachable(
     adjacency: Mapping[str, set[str]],
     source: str,
@@ -310,20 +416,51 @@ def build_factory_graph(
         raw_by_id[identifier] = entity
 
     edges: set[GraphEdge] = set()
-    # Directional conveyor adjacency.
+    # Directional conveyor adjacency. A splitter and an underground pair carry
+    # items exactly like a belt tile does, so they carry the same relation: a
+    # separate one would leave every consumer of `MATERIAL_RELATIONS` counting
+    # a bus as a factory that connects to nothing.
     belt_nodes = [node for node in nodes if node.category == "transport"]
+    belt_directions = {
+        node.node_id: _cardinal_direction(raw_by_id[node.node_id].get("direction"))
+        for node in belt_nodes
+    }
+    underground_partners = _underground_partners(belt_nodes, belt_directions)
+    underground_exits = set(underground_partners.values())
     for source in belt_nodes:
-        raw = raw_by_id[source.node_id]
-        direction = _cardinal_direction(raw.get("direction"))
-        dx, dy = DIRECTION_VECTORS[direction]
-        target = _nearest(
-            belt_nodes,
-            source.x + dx,
-            source.y + dy,
-            exclude=source.node_id,
-            radius=0.8,
-        )
-        if target is not None:
+        direction = belt_directions[source.node_id]
+        partner = underground_partners.get(source.node_id)
+        if partner is not None:
+            # Entrance of a pair: what it takes in leaves through the ground,
+            # so the jump is the whole of its outgoing flow.
+            edges.add(GraphEdge(source.node_id, partner, "belt_flow"))
+            continue
+        if (
+            source.name in UNDERGROUND_BELT_NAMES
+            and source.node_id not in underground_exits
+        ):
+            # An end with no partner is not a belt tile: an unpaired entrance
+            # swallows the line, an unpaired exit is fed by nothing. Either
+            # way it hands items to no one, and saying otherwise would report
+            # a chain that produces nothing as a chain that works.
+            continue
+        for probe_x, probe_y in _flow_outputs(source, direction):
+            target = _nearest(
+                belt_nodes,
+                probe_x,
+                probe_y,
+                exclude=source.node_id,
+                radius=0.8,
+            )
+            if target is None:
+                continue
+            if (
+                target.name in SPLITTER_NAMES
+                and belt_directions[target.node_id] != direction
+            ):
+                # A splitter takes items at its two rear tiles only. A belt
+                # aimed at its flank or its face hands over nothing.
+                continue
             edges.add(GraphEdge(source.node_id, target.node_id, "belt_flow"))
 
     # Inserters define explicit pickup -> transfer -> drop relationships.

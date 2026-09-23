@@ -47,6 +47,15 @@ from ``belts_removed - belts_placed``, which then has to be strictly positive.
 Both components are bounded below. With ``saved_tile_value`` at zero the second
 disjunct disappears and the first still holds.
 
+That argument counts belt tiles, and it holds only while every conveyor a round
+removes is a tile the repair can put back. A splitter is a fork and an
+underground pair is a jump: replacing either with ``policy.belt_name`` tiles
+deletes a branch while the ledger books a tile saved, which is a wrong number
+and not merely a worse factory. So a neighbourhood that holds one is refused by
+name - ``REJECT_UNREPLACEABLE_TRANSPORT`` - and :func:`_belt_runs` ends a run at
+the first node with more than one successor instead of guessing which branch
+continues.
+
 The tabu list - every entity ruined or placed during the session - is a guard,
 not the termination argument: it keeps a later round from undoing an earlier
 one, which would be legal under the rules above whenever the two layouts have
@@ -80,8 +89,11 @@ from typing import Any
 
 from factorio_ai_lab.domain.state import GridPoint
 from factorio_ai_lab.learning.factory_graph import (
+    BELT_NAMES,
     DIRECTION_VECTORS,
     MATERIAL_RELATIONS,
+    SPLITTER_NAMES,
+    UNDERGROUND_BELT_NAMES,
     build_factory_graph,
     node_id,
 )
@@ -108,6 +120,12 @@ PROTECTED_CATEGORIES = frozenset(
 #: planning decision and nothing else.
 DEMOLISHABLE_CATEGORIES = frozenset({"transport", "transfer"})
 
+#: Conveyors inside that category whose job a straight run of
+#: ``policy.belt_name`` cannot do: a splitter feeds two lanes and an
+#: underground pair crosses tiles the repair would have to leave clear. Both
+#: are demolishable in the physical sense and neither is replaceable here.
+UNREPLACEABLE_TRANSPORT_NAMES = SPLITTER_NAMES | UNDERGROUND_BELT_NAMES
+
 #: Destroy operators.
 #: A producer whose output reaches neither a processing entity nor a buffer.
 #: Strictly broader than the `isolated_producers` metric, which only counts
@@ -125,6 +143,10 @@ REASON_ORPHAN_ENTITY = "orphan_entity"
 REJECT_GAIN_BELOW_COST = "gain_below_cost"
 REJECT_CAPACITY_REGRESSION = "capacity_regression"
 REJECT_ROUTE_UNAVAILABLE = "route_unavailable"
+#: The neighbourhood holds a conveyor this module cannot rebuild. Refusing it
+#: by name is the only honest answer: pricing it would mean calling a splitter
+#: one belt tile, and applying it would mean deleting a fork for free.
+REJECT_UNREPLACEABLE_TRANSPORT = "unreplaceable_transport"
 
 #: Why the loop stopped. See the module docstring.
 STOP_ROUND_BUDGET = "round_budget_exhausted"
@@ -626,6 +648,12 @@ def plan_rebuild(
 
     scored: list[RebuildProposal] = []
     for neighborhood in neighborhoods[: policy.max_neighborhoods_per_round]:
+        if any(
+            row.name in UNREPLACEABLE_TRANSPORT_NAMES
+            for row in neighborhood.removals
+        ):
+            scored.append(_refused_proposal(neighborhood, baseline, len(nodes)))
+            continue
         proposal = _evaluate(
             entities,
             by_id,
@@ -1082,6 +1110,34 @@ def _barren_proposal(
     )
 
 
+def _refused_proposal(
+    neighborhood: RuinNeighborhood,
+    baseline: FactoryCapacity,
+    node_count: int,
+) -> RebuildProposal:
+    """Something was worth ruining and this module cannot put it back.
+
+    Carries no removal on purpose: a caller that applies every proposal it
+    receives must not be able to demolish a fork on the strength of a refusal.
+    """
+    return RebuildProposal(
+        reason=neighborhood.reason,
+        removals=(),
+        placements=(),
+        routes=(),
+        baseline=baseline,
+        projected=baseline,
+        estimated_gain=0.0,
+        estimated_cost=0.0,
+        downtime_s=0.0,
+        regressions=(),
+        accepted=False,
+        rejection=REJECT_UNREPLACEABLE_TRANSPORT,
+        expected_node_count=node_count,
+        restoration=(),
+    )
+
+
 def _candidates(
     nodes: Mapping[str, Mapping[str, Any]],
     identifiers: Iterable[str],
@@ -1141,29 +1197,49 @@ def _belt_runs(
     graph: Mapping[str, Any],
     nodes: Mapping[str, Mapping[str, Any]],
 ) -> list[tuple[str, ...]]:
-    successor: dict[str, str] = {}
-    has_predecessor: set[str] = set()
+    """Linear chains of plain belt tiles, as the detour operator can rebuild them.
+
+    Two limits are deliberate, and both exist so the tile count a run reports
+    is a count some physical layout actually has:
+
+    * flow forks. A node with more than one successor ends the walk, because
+      following one branch would report the length of a line that nobody
+      built. Storing a single successor per node did exactly that silently;
+    * only plain belts are members. The repair routes ``policy.belt_name``
+      tiles, so a splitter or an underground end inside a run would be priced
+      as a tile and rebuilt as something else.
+
+    A belt fed by a splitter or by an underground exit still heads a run: what
+    disqualifies a head is a plain-belt predecessor, not any predecessor.
+    """
+    successors: dict[str, set[str]] = {}
+    predecessors: dict[str, set[str]] = {}
     for edge in _edges_of(graph):
         if edge.get("relation") != "belt_flow":
             continue
         source = str(edge.get("source"))
         target = str(edge.get("target"))
-        successor[source] = target
-        has_predecessor.add(target)
+        successors.setdefault(source, set()).add(target)
+        predecessors.setdefault(target, set()).add(source)
+
+    def plain_belt(identifier: str) -> bool:
+        row = nodes.get(identifier)
+        return row is not None and str(row.get("name")) in BELT_NAMES
 
     runs: list[tuple[str, ...]] = []
     for identifier in sorted(nodes):
-        if nodes[identifier]["category"] != "transport":
+        if not plain_belt(identifier):
             continue
-        if identifier in has_predecessor:
+        if any(plain_belt(row) for row in predecessors.get(identifier, ())):
             continue
         chain: list[str] = []
         seen: set[str] = set()
         cursor: str | None = identifier
-        while cursor is not None and cursor not in seen:
+        while cursor is not None and cursor not in seen and plain_belt(cursor):
             seen.add(cursor)
             chain.append(cursor)
-            cursor = successor.get(cursor)
+            forward = successors.get(cursor, frozenset())
+            cursor = next(iter(forward)) if len(forward) == 1 else None
         runs.append(tuple(chain))
     return runs
 
