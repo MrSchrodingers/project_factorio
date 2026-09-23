@@ -1107,6 +1107,20 @@ def _assembler_probe(
     probe: dict[str, Any] = {
         "machine_stock": _namespace_measure(namespace, f"{prefix}_machine_stock"),
         "pole_stock": _namespace_measure(namespace, f"{prefix}_pole_stock"),
+        "pole_stock_after": _namespace_measure(
+            namespace,
+            f"{prefix}_pole_stock_after",
+        ),
+        # -1 is a reading, not an absence: the machine was asked and answered
+        # that it belongs to no electric network. None still means the script
+        # never asked.
+        "network_id": _namespace_measure(namespace, f"{prefix}_network_id"),
+        "pole_gap": _namespace_measure(namespace, f"{prefix}_pole_gap"),
+        # A pole placed beside this machine because the pole line stopped
+        # outside its supply area. Zero is the reading for a machine the line
+        # already covered; None is a reading never taken.
+        "tap_placed": _namespace_measure(namespace, f"{prefix}_tap_placed"),
+        "tap_gap": _namespace_measure(namespace, f"{prefix}_tap_gap"),
         "engine_distance": _namespace_measure(
             namespace,
             f"{prefix}_engine_distance",
@@ -3350,6 +3364,54 @@ def _runtime_crafting_speed(instance: Any, machine: str) -> float | None:
 
 
 
+def _runtime_pole_reach(
+    instance: Any,
+    pole: str = "medium-electric-pole",
+) -> dict[str, float]:
+    """Supply area and wire reach of `pole`, as the live prototypes report them.
+
+    The two are far apart -- 3.5 against 9 on a medium pole in Factorio 2.0.73
+    -- and only the first decides whether a machine draws power, while
+    `connect_entities` decides where to stop laying poles from the second
+    (fle/env/tools/agent/connect_entities/server.lua:61-91). A stage that reads
+    one of them cannot tell a machine that is wired from a machine that is
+    supplied, which is the difference generation 0056 measured as
+    `network_id: -1` beside a pole on the live network.
+
+    Factorio 2.0 moved both behind accessors that take a quality; the
+    properties they replaced raise `doesn't contain key`. Whatever the runtime
+    does not answer is simply absent from the mapping, and the caller has to
+    record that absence rather than substitute a literal.
+    """
+    command = (
+        "/silent-command "
+        f"local p=prototypes.entity['{pole}'] "
+        "local out={} "
+        "if p then "
+        "local ok,supply=pcall(function() "
+        "return p.get_supply_area_distance() end) "
+        "if ok then out.supply_area_distance=supply end "
+        "local ok2,wire=pcall(function() "
+        "return p.get_max_wire_distance() end) "
+        "if ok2 then out.max_wire_distance=wire end end "
+        "rcon.print(helpers.table_to_json(out))"
+    )
+    try:
+        raw = instance.rcon_client.send_command(command)
+        payload = json.loads(str(raw)) if raw else None
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    reach: dict[str, float] = {}
+    for key in ("supply_area_distance", "max_wire_distance"):
+        value = payload.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        reach[key] = float(value)
+    return reach
+
+
 def _runtime_fuel_feed_figures(instance: Any) -> dict[str, float]:
     """Prototype figures the fuel feed has to size itself from.
 
@@ -4144,7 +4206,11 @@ def stage_electronic_circuits(
     *,
     settle_seconds: int,
 ) -> bool:
-    namespace = env.unwrapped.instance.namespace
+    instance = env.unwrapped.instance
+    namespace = instance.namespace
+    # Read before the step so the reading cannot displace production inside
+    # the window it would otherwise interrupt.
+    pole_reach = _runtime_pole_reach(instance)
     journal.set_stage(
         13,
         status="running",
@@ -4292,6 +4358,7 @@ cable_power=connect_entities(
     cable_assembler,
     Prototype.MediumElectricPole,
 )
+cable_pole_stock_after=inspect_inventory()[Prototype.MediumElectricPole]
 circuit_boiler_status_before=''
 circuit_engine_status_before=''
 circuit_engine_energy_before=None
@@ -4305,6 +4372,29 @@ try:
 except Exception as circuit_power_exc:
     circuit_power_note='power probe: '+str(circuit_power_exc)[:160].replace('rror','rr0r').replace('xception','xcepti0n')
 cable_assembler=get_entity(Prototype.AssemblingMachine2,cable_assembler.position)
+cable_network_id=int(getattr(cable_assembler,'electrical_id',None) or -1)
+cable_tap_placed=0
+cable_tap_gap=None
+if cable_network_id<0:
+    # connect_entities stops laying poles once a position is inside the wire
+    # reach of the network it is extending, which is far wider than the supply
+    # area a machine draws from, so the line can end short of the machine and
+    # still report success. One pole beside the machine closes that gap, and
+    # a pole placed within wire reach joins the network on its own.
+    for cable_tap_side in (Direction.LEFT,Direction.UP,Direction.RIGHT,Direction.DOWN):
+        try:
+            cable_tap=place_entity_next_to(
+                Prototype.MediumElectricPole,
+                cable_assembler.position,
+                direction=cable_tap_side,
+            )
+            cable_tap_placed=1
+            cable_tap_gap=((cable_tap.position.x-cable_assembler.position.x)**2+(cable_tap.position.y-cable_assembler.position.y)**2)**0.5
+            cable_assembler=get_entity(Prototype.AssemblingMachine2,cable_assembler.position)
+            cable_network_id=int(getattr(cable_assembler,'electrical_id',None) or -1)
+            break
+        except Exception as circuit_power_exc:
+            circuit_power_note=(circuit_power_note+' | ' if circuit_power_note else '')+'cable tap: '+str(circuit_power_exc)[:160].replace('rror','rr0r').replace('xception','xcepti0n')
 cable_engine_distance=((cable_assembler.position.x-steam_engine.position.x)**2+(cable_assembler.position.y-steam_engine.position.y)**2)**0.5
 cable_status_before=str(getattr(cable_assembler.status,'value',cable_assembler.status))
 cable_energy_before=float(cable_assembler.energy or 0)
@@ -4358,7 +4448,31 @@ circuit_power=connect_entities(
     circuit_assembler,
     Prototype.MediumElectricPole,
 )
+circuit_pole_stock_after=inspect_inventory()[Prototype.MediumElectricPole]
 circuit_assembler=get_entity(Prototype.AssemblingMachine2,circuit_assembler.position)
+circuit_network_id=int(getattr(circuit_assembler,'electrical_id',None) or -1)
+circuit_tap_placed=0
+circuit_tap_gap=None
+if circuit_network_id<0:
+    # connect_entities stops laying poles once a position is inside the wire
+    # reach of the network it is extending, which is far wider than the supply
+    # area a machine draws from, so the line can end short of the machine and
+    # still report success. One pole beside the machine closes that gap, and
+    # a pole placed within wire reach joins the network on its own.
+    for circuit_tap_side in (Direction.LEFT,Direction.UP,Direction.RIGHT,Direction.DOWN):
+        try:
+            circuit_tap=place_entity_next_to(
+                Prototype.MediumElectricPole,
+                circuit_assembler.position,
+                direction=circuit_tap_side,
+            )
+            circuit_tap_placed=1
+            circuit_tap_gap=((circuit_tap.position.x-circuit_assembler.position.x)**2+(circuit_tap.position.y-circuit_assembler.position.y)**2)**0.5
+            circuit_assembler=get_entity(Prototype.AssemblingMachine2,circuit_assembler.position)
+            circuit_network_id=int(getattr(circuit_assembler,'electrical_id',None) or -1)
+            break
+        except Exception as circuit_power_exc:
+            circuit_power_note=(circuit_power_note+' | ' if circuit_power_note else '')+'circuit tap: '+str(circuit_power_exc)[:160].replace('rror','rr0r').replace('xception','xcepti0n')
 circuit_engine_distance=((circuit_assembler.position.x-steam_engine.position.x)**2+(circuit_assembler.position.y-steam_engine.position.y)**2)**0.5
 circuit_status_before=str(getattr(circuit_assembler.status,'value',circuit_assembler.status))
 circuit_energy_before=float(circuit_assembler.energy or 0)
@@ -4386,6 +4500,20 @@ except Exception as circuit_power_exc:
 circuit_inventory=inspect_inventory(
     circuit_assembler,
 )[Prototype.ElectronicCircuit]
+cable_pole_gap=-1.0
+circuit_pole_gap=-1.0
+circuit_pole_network_id=-1
+try:
+    for circuit_pole in get_entities({{Prototype.MediumElectricPole}}):
+        circuit_cable_gap=((circuit_pole.position.x-cable_assembler.position.x)**2+(circuit_pole.position.y-cable_assembler.position.y)**2)**0.5
+        if cable_pole_gap<0 or circuit_cable_gap<cable_pole_gap:
+            cable_pole_gap=circuit_cable_gap
+        circuit_own_gap=((circuit_pole.position.x-circuit_assembler.position.x)**2+(circuit_pole.position.y-circuit_assembler.position.y)**2)**0.5
+        if circuit_pole_gap<0 or circuit_own_gap<circuit_pole_gap:
+            circuit_pole_gap=circuit_own_gap
+            circuit_pole_network_id=int(getattr(circuit_pole,'electrical_id',None) or -1)
+except Exception as circuit_power_exc:
+    circuit_power_note=(circuit_power_note+' | ' if circuit_power_note else '')+'pole scan: '+str(circuit_power_exc)[:160].replace('rror','rr0r').replace('xception','xcepti0n')
 print({{
     'circuit_coal_available':circuit_coal_available,
     'circuit_coal':circuit_coal,
@@ -4399,6 +4527,11 @@ print({{
     'circuit_inventory':circuit_inventory,
     'cable_machine_stock':cable_machine_stock,
     'cable_pole_stock':cable_pole_stock,
+    'cable_pole_stock_after':cable_pole_stock_after,
+    'cable_network_id':cable_network_id,
+    'cable_pole_gap':cable_pole_gap,
+    'cable_tap_placed':cable_tap_placed,
+    'cable_tap_gap':cable_tap_gap,
     'cable_engine_distance':cable_engine_distance,
     'cable_status_before':cable_status_before,
     'cable_status_after':cable_status_after,
@@ -4410,6 +4543,12 @@ print({{
     'cable_output_before':cable_output_before,
     'circuit_machine_stock':circuit_machine_stock,
     'circuit_pole_stock':circuit_pole_stock,
+    'circuit_pole_stock_after':circuit_pole_stock_after,
+    'circuit_network_id':circuit_network_id,
+    'circuit_pole_gap':circuit_pole_gap,
+    'circuit_tap_placed':circuit_tap_placed,
+    'circuit_tap_gap':circuit_tap_gap,
+    'circuit_pole_network_id':circuit_pole_network_id,
     'circuit_engine_distance':circuit_engine_distance,
     'circuit_status_before':circuit_status_before,
     'circuit_status_after':circuit_status_after,
@@ -4502,6 +4641,14 @@ print({{
                 namespace,
                 "circuit_engine_energy_after",
             ),
+            # Network the pole nearest the circuit assembler belongs to. A
+            # machine reading no_power next to a pole on the engine network
+            # and a machine whose nearest pole is on no network are different
+            # defects, and the status alone cannot tell them apart.
+            "circuit_pole_network_id": _namespace_measure(
+                namespace,
+                "circuit_pole_network_id",
+            ),
             # Only a probe that raised leaves text here, so an empty note and
             # an unread one carry the same information: nothing to report.
             "note": power_note[:400] if power_note else None,
@@ -4540,6 +4687,10 @@ print({{
         "cable_assembler": measured.get("cable_assembler"),
         "circuit_assembler": measured.get("circuit_assembler"),
         "power": measured.get("power"),
+        # What the prototypes answer, so `pole_gap` can be read against the
+        # distance that actually supplies a machine instead of against the
+        # wire reach that only connects poles to each other.
+        "pole_reach": pole_reach or None,
     }
     if not step.accepted:
         journal.state["metrics"]["electronic_circuit_counterexample"] = {

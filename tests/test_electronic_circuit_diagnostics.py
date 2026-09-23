@@ -124,6 +124,9 @@ UNPOWERED_RUN: dict[str, Any] = {
     "circuit_nav_note": "",
     "cable_machine_stock": 2,
     "cable_pole_stock": 9,
+    "cable_pole_stock_after": 8,
+    "cable_network_id": 12,
+    "cable_pole_gap": 2.5,
     "cable_engine_distance": 46.5,
     "cable_status_before": "no_power",
     "cable_status_after": "no_power",
@@ -137,6 +140,10 @@ UNPOWERED_RUN: dict[str, Any] = {
     "cable_transfer": 0,
     "circuit_machine_stock": 1,
     "circuit_pole_stock": 4,
+    "circuit_pole_stock_after": 4,
+    "circuit_network_id": -1,
+    "circuit_pole_gap": 11.0,
+    "circuit_pole_network_id": -1,
     "circuit_engine_distance": 52.0,
     "circuit_status_before": "no_power",
     "circuit_status_after": "no_power",
@@ -199,6 +206,9 @@ REQUIRED_READINGS = (
     "cable_output_before",
     "cable_machine_stock",
     "cable_pole_stock",
+    "cable_pole_stock_after",
+    "cable_network_id",
+    "cable_pole_gap",
     "circuit_status_before",
     "circuit_status_after",
     "circuit_energy_before",
@@ -211,6 +221,10 @@ REQUIRED_READINGS = (
     "circuit_output_before",
     "circuit_machine_stock",
     "circuit_pole_stock",
+    "circuit_pole_stock_after",
+    "circuit_network_id",
+    "circuit_pole_gap",
+    "circuit_pole_network_id",
 )
 
 
@@ -225,17 +239,35 @@ def test_the_stage_script_takes_every_assembler_reading(reading: str) -> None:
     )
 
 
-def test_the_stage_reads_the_machines_back_before_and_after_the_window() -> None:
+@pytest.mark.parametrize("machine", ["cable_assembler", "circuit_assembler"])
+def test_the_stage_reads_the_machines_back_before_and_after_the_window(
+    machine: str,
+) -> None:
     # A status read off the entity `place_entity` returned is the status it had
     # at placement, not after the window. Only a fresh `get_entity` measures
-    # what the machine did while the stage slept.
-    script = _stage_script()
-    assert script.count(
-        "get_entity(Prototype.AssemblingMachine2,cable_assembler.position)"
-    ) == 2
-    assert script.count(
-        "get_entity(Prototype.AssemblingMachine2,circuit_assembler.position)"
-    ) == 2
+    # what the machine did while the stage slept, so one has to stand between
+    # the sleep and the reading that closes the window. Counting the reads
+    # instead would forbid the stage from ever reading a machine again, which
+    # is what a supply pole placed beside it has to do.
+    lines = _stage_script().splitlines()
+    read_back = f"{machine}=get_entity(Prototype.AssemblingMachine2,{machine}.position)"
+    prefix = machine.split("_")[0]
+    closing = next(
+        index
+        for index, line in enumerate(lines)
+        if line.startswith(f"{prefix}_status_after=")
+    )
+    window = max(
+        index
+        for index, line in enumerate(lines[:closing])
+        if line.startswith("sleep(")
+    )
+    assert any(
+        line == read_back for line in lines[window + 1 : closing]
+    ), f"{machine} nao e relido entre o fim da janela e a leitura final"
+    assert any(
+        line == read_back for line in lines[:window]
+    ), f"{machine} nao e relido antes da janela abrir"
 
 
 def test_diagnostics_are_recorded_even_when_the_stage_is_rejected() -> None:
@@ -427,3 +459,38 @@ def test_a_quoted_status_is_the_same_status() -> None:
         )
         == STALL_CAUSE_POWER
     )
+
+
+def test_the_electric_topology_of_both_assemblers_is_recorded() -> None:
+    """Which network each machine ended up on, and how many poles it took.
+
+    ``no_power`` alone cannot separate a machine wired to a dead grid from a
+    machine wired to nothing. Generations 53 and 54 read the circuit assembler
+    at 0 J with the boiler and the engine both ``working``, which is only
+    decidable once the two machines report their network.
+    """
+    _, journal, _ = _run(UNPOWERED_RUN)
+    diagnostics = journal.state["metrics"]["electronic_circuit_diagnostics"]
+    cable = diagnostics["cable_assembler"]
+    circuit = diagnostics["circuit_assembler"]
+    assert cable["network_id"] == 12.0
+    assert cable["pole_stock_after"] == 8.0
+    assert cable["pole_gap"] == pytest.approx(2.5)
+    assert circuit["network_id"] == -1.0
+    assert circuit["pole_stock_after"] == 4.0
+    assert circuit["pole_gap"] == pytest.approx(11.0)
+    assert diagnostics["power"]["circuit_pole_network_id"] == -1.0
+
+
+def test_an_unread_topology_is_none_and_never_zero() -> None:
+    # Network id zero would read as a real network, and pole gap zero as a
+    # pole sitting on the machine. Neither may stand in for a reading the
+    # script never took.
+    _, journal, _ = _run({})
+    diagnostics = journal.state["metrics"]["electronic_circuit_diagnostics"]
+    for machine in ("cable_assembler", "circuit_assembler"):
+        probe = diagnostics[machine]
+        assert probe["network_id"] is None
+        assert probe["pole_stock_after"] is None
+        assert probe["pole_gap"] is None
+    assert diagnostics["power"]["circuit_pole_network_id"] is None
