@@ -7,6 +7,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from itertools import pairwise
 from pathlib import Path
+from random import Random
 from typing import Any
 
 from factorio_ai_lab.agents.evolution_advisor import propose_evolution_advice
@@ -17,6 +18,7 @@ from factorio_ai_lab.integrations.fle import (
     fast_reposition,
     list_environments,
 )
+from factorio_ai_lab.learning.archive import ArchiveSchemaError, NicheArchive
 from factorio_ai_lab.learning.bandit import UCB1Bandit
 from factorio_ai_lab.learning.evolution import apply_advice, challenger_genome
 from factorio_ai_lab.learning.factory_graph import build_factory_graph
@@ -55,6 +57,22 @@ SPATIAL_DEMOS = RUNS_DIR / "datasets" / "spatial_demonstrations.jsonl"
 EVOLUTION_CHAMPION = RUNS_DIR / "evolution_champion.json"
 EVOLUTION_HISTORY = RUNS_DIR / "evolution_history.jsonl"
 GENERATION_REPORTS = RUNS_DIR / "generation_reports"
+NICHE_ARCHIVE = RUNS_DIR / "niche_archive.json"
+
+#: Where the parent of a mutation came from, as written in the report.
+PARENT_SOURCE_ARCHIVE = "niche_archive"
+PARENT_SOURCE_CHAMPION = "global_champion"
+
+#: Why the archive did not supply the parent, when it did not. Kept
+#: explicit so a generation bred from the champion can be told from one
+#: bred from an elite without rereading the archive as it stands later.
+PARENT_FALLBACK_NO_ARCHIVE = "archive_unavailable"
+PARENT_FALLBACK_EMPTY_ARCHIVE = "archive_empty"
+PARENT_FALLBACK_NO_CONFIGURATION = "sampled_elite_has_no_configuration"
+
+#: Mixed into the parent-sampling stream so that stream stays independent
+#: of every other draw made from the same run seed.
+PARENT_SAMPLING_LABEL = "niche_archive_parent_v1"
 
 THROUGHPUT_EQUIVALENCE_TOLERANCE = 1.0
 
@@ -102,6 +120,103 @@ def read_json_object(path: Path) -> dict[str, Any]:
 
 def incumbent_champion() -> dict[str, Any]:
     return read_json_object(EVOLUTION_CHAMPION)
+
+
+def load_niche_archive() -> tuple[NicheArchive | None, dict[str, Any]]:
+    """
+    Read the niche archive, answering None when the file cannot be read.
+
+    A missing file is a first run and answers an empty archive. A file that
+    exists and does not parse answers None and the reason: the generation
+    still runs, bred from the global champion, and nothing is written over
+    that file, because overwriting it would replace elites that are still on
+    disk with an archive starting from nothing.
+    """
+    try:
+        archive = NicheArchive.load(NICHE_ARCHIVE)
+    except ArchiveSchemaError as exc:
+        return None, {
+            "archive_path": str(NICHE_ARCHIVE),
+            "archive_status": "unreadable",
+            "archive_detail": str(exc),
+        }
+    return archive, {
+        "archive_path": str(NICHE_ARCHIVE),
+        "archive_status": "loaded",
+    }
+
+
+def parent_sampling_rng(*, generation: int, seed: int) -> Random:
+    """
+    The stream the parent draw consumes, fixed by the run seed and generation.
+
+    Seeded from a string so label, seed and generation are mixed by SHA-512
+    instead of added: neighbouring generations of one run must not draw
+    correlated parents. Drawing from the global rng instead would make the
+    parent depend on how many numbers the rest of the process happened to
+    consume, and a run whose parent cannot be replayed from its seed cannot
+    be replayed at all.
+    """
+    return Random(f"{PARENT_SAMPLING_LABEL}:{seed}:{generation}")
+
+
+def select_mutation_parent(
+    *,
+    champion_configuration: dict[str, Any],
+    archive: NicheArchive | None,
+    rng: Random,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """
+    Choose the configuration the next mutation departs from.
+
+    The archive answers first: a uniform draw over occupied niches spends the
+    generation on a behaviour that is under-explored instead of always on the
+    lineage holding the global record, which is what keeps the search moving
+    when the champion installs a floor no challenger clears.
+
+    The global champion stays the fallback for the cases the archive cannot
+    serve -- no archive, an empty one, or an elite whose record carries no
+    configuration to breed from -- so the loop behaves exactly as before until
+    the archive has something to offer.
+
+    Answers the configuration and where it came from. The caller records the
+    provenance, because a result that cannot be attributed to its parent says
+    nothing about that parent.
+    """
+    fallback = dict(champion_configuration or {})
+    if archive is None:
+        return fallback, {
+            "source": PARENT_SOURCE_CHAMPION,
+            "reason": PARENT_FALLBACK_NO_ARCHIVE,
+            "niche_count": 0,
+            "descriptor": None,
+        }
+    niche_count = len(archive)
+    elite = archive.sample_parent(rng)
+    if elite is None:
+        return fallback, {
+            "source": PARENT_SOURCE_CHAMPION,
+            "reason": PARENT_FALLBACK_EMPTY_ARCHIVE,
+            "niche_count": niche_count,
+            "descriptor": None,
+        }
+    descriptor = elite.descriptor.to_dict()
+    configuration = elite.record.get("configuration")
+    if not isinstance(configuration, dict) or not configuration:
+        return fallback, {
+            "source": PARENT_SOURCE_CHAMPION,
+            "reason": PARENT_FALLBACK_NO_CONFIGURATION,
+            "niche_count": niche_count,
+            "descriptor": descriptor,
+        }
+    return dict(configuration), {
+        "source": PARENT_SOURCE_ARCHIVE,
+        "reason": None,
+        "niche_count": niche_count,
+        "descriptor": descriptor,
+        "run_id": elite.record.get("run_id"),
+        "generation": elite.record.get("generation"),
+    }
 
 
 def patch_center(patch: Any) -> tuple[float, float]:
@@ -4546,6 +4661,25 @@ def finalize_evolution_selection(
     else:
         evolution["champion"] = incumbent or None
 
+    # The archive is offered the challenger only after the champion file is
+    # written: the incumbent comparison above stays the reference, and this
+    # adds the lineages that comparison discards without changing it. A
+    # refusal is kept as a refusal, counted and reported, because a candidate
+    # whose behaviour could not be computed has no niche to be filed under.
+    archive, archive_status = load_niche_archive()
+    archive_report: dict[str, Any] = dict(archive_status)
+    if archive is not None:
+        insertion = archive.insert(challenger, record=candidate_record)
+        archive.save(NICHE_ARCHIVE)
+        archive_report = {
+            **archive_status,
+            **insertion.to_dict(),
+            "niche_count": len(archive),
+            "refusal_count": len(archive.refusals()),
+            "refusal_counts": archive.refusal_counts(),
+        }
+    evolution["archive"] = archive_report
+
     selected_at = str(candidate_record["selected_at"])
     started_at = journal.state.get("started_at")
     duration_s: float | None = None
@@ -4569,6 +4703,8 @@ def finalize_evolution_selection(
         "incumbent_run_id": incumbent.get("run_id") if incumbent else None,
         "incumbent_generation": incumbent.get("generation") if incumbent else None,
         "decision": decision.to_dict(),
+        "archive": evolution.get("archive"),
+        "parent": evolution.get("parent"),
         "bottleneck": failed_stage_names[0] if failed_stage_names else None,
         "failed_stages": failed_stage_names,
         "completed_stages": completed_stage_names,
@@ -4655,9 +4791,21 @@ def run_curriculum(
         if isinstance(champion, dict)
         else {}
     )
-    base_genome = challenger_genome(
-        attempt=int(evolution.get("generation", 1) or 1),
+    generation = int(evolution.get("generation", 1) or 1)
+    # The mutation departs from an archived elite when there is one, and from
+    # the global champion otherwise. The advisor below still reads the global
+    # champion: it is the reference of the promotion decision, which this does
+    # not change.
+    archive, archive_status = load_niche_archive()
+    parent_configuration, parent_provenance = select_mutation_parent(
         champion_configuration=champion_configuration,
+        archive=archive,
+        rng=parent_sampling_rng(generation=generation, seed=seed),
+    )
+    evolution["parent"] = {**archive_status, **parent_provenance}
+    base_genome = challenger_genome(
+        attempt=generation,
+        champion_configuration=parent_configuration,
         default_exploration=exploration,
         seed=seed,
     )
