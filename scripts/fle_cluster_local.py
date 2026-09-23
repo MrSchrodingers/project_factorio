@@ -2,13 +2,12 @@
 from __future__ import annotations
 
 import argparse
-import importlib.resources as resources
 import re
 import subprocess
+from importlib import resources
 from pathlib import Path
 
 import yaml
-
 from fle.cluster.run_envs import ComposeGenerator
 
 # Measured on this host (docker logs of fle-local-factorio_0-1, two boots):
