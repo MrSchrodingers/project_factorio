@@ -4,8 +4,8 @@ import argparse
 import json
 import math
 import subprocess
-from collections.abc import Mapping
-from dataclasses import asdict
+from collections.abc import Mapping, Sequence
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from itertools import pairwise
 from pathlib import Path
@@ -202,6 +202,85 @@ def code_revision(*, root: Path | None = None) -> dict[str, Any]:
         "dirty": None if status is None else bool(status),
         "reason": None,
     }
+
+
+#: No placement episode was marked valid, so no arm carries a measurement.
+NO_MEASURED_ARM = "no_measured_arm"
+
+
+class PlacementNotMeasured(RuntimeError):
+    """No placement arm produced a valid episode.
+
+    A distinct type so the caller can tell "the bandit learned nothing this
+    run" from a genuine failure of the stage. The message names the cause;
+    the previous behaviour raised ValueError from max() on an empty dict,
+    whose text said nothing about placement.
+    """
+
+
+@dataclass(frozen=True)
+class ArmSelection:
+    """Which arm won, why none did, and the evidence behind the choice.
+
+    The intermediate sets are part of the result, not scratch values: the
+    journal publishes them so a later reader can tell an arm that won on
+    throughput from one that won on compactness among equals.
+    """
+
+    arm: str | None
+    reason: str | None = None
+    mean_output_by_arm: Mapping[str, float] = field(default_factory=dict)
+    equivalent_throughput_arms: tuple[str, ...] = ()
+    compact_candidates: tuple[str, ...] = ()
+
+
+def best_compact_arm(
+    *,
+    arms: Mapping[str, tuple[float, float]],
+    history: Sequence[Mapping[str, Any]],
+) -> ArmSelection:
+    """Pick the nearest arm among those with equivalent measured throughput.
+
+    Only episodes marked valid carry a measurement. When none of them does,
+    the answer is that no arm was measured -- not a crash, and not a default
+    arm, which would hand the next generation a placement nothing supports.
+    """
+    output_by_arm: dict[str, list[float]] = {arm: [] for arm in arms}
+    for row in history:
+        if not row.get("valid"):
+            continue
+        arm = str(row.get("arm", ""))
+        if arm in output_by_arm:
+            output_by_arm[arm].append(float(row.get("output", 0.0)))
+
+    mean_output_by_arm = {
+        arm: sum(values) / len(values)
+        for arm, values in output_by_arm.items()
+        if values
+    }
+    if not mean_output_by_arm:
+        return ArmSelection(arm=None, reason=NO_MEASURED_ARM)
+
+    max_mean_output = max(mean_output_by_arm.values())
+    equivalent = [
+        arm
+        for arm, mean_output in mean_output_by_arm.items()
+        if max_mean_output - mean_output <= THROUGHPUT_EQUIVALENCE_TOLERANCE
+    ]
+    min_distance = min(math.hypot(*arms[arm]) for arm in equivalent)
+    compact = [
+        arm
+        for arm in equivalent
+        if math.isclose(
+            math.hypot(*arms[arm]), min_distance, rel_tol=1e-9, abs_tol=1e-9
+        )
+    ]
+    return ArmSelection(
+        arm=next(arm for arm in arms if arm in compact),
+        mean_output_by_arm=dict(mean_output_by_arm),
+        equivalent_throughput_arms=tuple(equivalent),
+        compact_candidates=tuple(compact),
+    )
 
 
 def incumbent_champion() -> dict[str, Any]:
@@ -1266,36 +1345,23 @@ print({{'trial_inventory': inspect_inventory(trial_chest)}})
     for row in online["history"]:
         if row["valid"]:
             output_by_arm[row["arm"]].append(float(row["output"]))
-    mean_output_by_arm = {
-        arm: sum(values) / len(values)
-        for arm, values in output_by_arm.items()
-        if values
-    }
-    max_mean_output = max(mean_output_by_arm.values())
-    equivalent_throughput_arms = [
-        arm
-        for arm, mean_output in mean_output_by_arm.items()
-        if max_mean_output - mean_output <= THROUGHPUT_EQUIVALENCE_TOLERANCE
-    ]
-    min_distance = min(
-        math.hypot(*scaled_arms[arm])
-        for arm in equivalent_throughput_arms
-    )
-    compact_candidates = [
-        arm
-        for arm in equivalent_throughput_arms
-        if math.isclose(
-            math.hypot(*scaled_arms[arm]),
-            min_distance,
-            rel_tol=1e-9,
-            abs_tol=1e-9,
-        )
-    ]
-    best = next(
-        arm
-        for arm in scaled_arms
-        if arm in compact_candidates
-    )
+    outcome = best_compact_arm(arms=scaled_arms, history=online["history"])
+    mean_output_by_arm = dict(outcome.mean_output_by_arm)
+    equivalent_throughput_arms = list(outcome.equivalent_throughput_arms)
+    compact_candidates = list(outcome.compact_candidates)
+    if outcome.arm is None:
+        # Every episode was invalid. That is a reading about the run -- no arm
+        # was measured -- and it has to be said, not turned into an exception
+        # whose text mentions nothing about placement. An inherited world
+        # produces exactly this: each arm tries to place a drill on tiles the
+        # ancestor already occupies, so none of them measures anything.
+        journal.state.setdefault("metrics", {})[
+            "placement_selection_outcome"
+        ] = outcome.reason
+        online["status"] = outcome.reason
+        journal.flush()
+        raise PlacementNotMeasured(outcome.reason)
+    best = outcome.arm
 
     online["status"] = "learned"
     online["ucb_best_arm"] = ucb_best
