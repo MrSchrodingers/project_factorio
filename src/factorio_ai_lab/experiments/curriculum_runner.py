@@ -4,7 +4,7 @@ import argparse
 import json
 import math
 import subprocess
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from itertools import pairwise
@@ -46,13 +46,20 @@ from factorio_ai_lab.planning.factorio_catalog import (
 from factorio_ai_lab.planning.footprints import (
     blocked_tiles,
     entity_name,
-    entity_tiles,
     prototype_footprints,
 )
 from factorio_ai_lab.planning.fuel import (
     BURNER_MINING_DRILL,
     STONE_FURNACE,
     observed_window_seconds,
+)
+from factorio_ai_lab.planning.placement import (
+    OUTCOME_ADOPT,
+    OUTCOME_BUILD,
+    PlacementPlan,
+    WorldSurvey,
+    entity_position,
+    plan_cell_placement,
 )
 from factorio_ai_lab.planning.progression import (
     DEFAULT_ENGINEERING_PLANNER,
@@ -118,6 +125,16 @@ PLACEMENT_ARMS: dict[str, tuple[float, float]] = {
     "northwest_edge": (-9.5, -8.5),
     "southeast_edge": (9.5, 8.5),
 }
+
+#: How far a blocked placement may be moved, in tiles, before the stage
+#: refuses it. Six tiles clears a 2x2 drill plus the belt lane the earlier
+#: stages leave beside it, and stays inside the measured iron patch.
+PLACEMENT_SCAN_REACH = 6
+
+#: A placement trial builds its own cell or it measures nothing: adopting the
+#: drill an ancestor left on the arm would hand this genome the ancestor's
+#: flow as if it were its own reading.
+TRIAL_ADOPTS_NOTHING: frozenset[str] = frozenset()
 
 
 def utc_now() -> str:
@@ -206,6 +223,16 @@ def code_revision(*, root: Path | None = None) -> dict[str, Any]:
 
 #: No placement episode was marked valid, so no arm carries a measurement.
 NO_MEASURED_ARM = "no_measured_arm"
+
+#: No arm had free tiles within reach, so no arm could be trialled at all.
+#: Distinct from NO_MEASURED_ARM: there the trials ran and measured nothing.
+NO_BUILDABLE_ARM = "no_buildable_arm"
+
+#: What a placement trial's output number is. The world production counter
+#: is not it: a rejected step rewinds that counter, so every trial reads the
+#: flow of the inherited factory over the step window, identically for every
+#: arm, whether or not its own placement succeeded.
+TRIAL_OUTPUT_BASIS = "trial_cell_chest_contents"
 
 
 class PlacementNotMeasured(RuntimeError):
@@ -390,6 +417,30 @@ def patch_center(patch: Any) -> tuple[float, float]:
         (float(box.left_top.x) + float(box.right_bottom.x)) / 2.0,
         (float(box.left_top.y) + float(box.right_bottom.y)) / 2.0,
     )
+
+
+def patch_bounds(patch: Any) -> tuple[float, float, float, float] | None:
+    """Resource patch bounding box, as ``(left, top, right, bottom)``.
+
+    A mining cell moved off the patch places and mines nothing, so the box
+    bounds how far a blocked placement may be moved. Answers None when the
+    patch cannot be read: a search must not be narrowed to a box nobody
+    measured.
+
+    On the lab map this box is exact rather than approximate. All 624 tiles
+    of (15.5, 70.5)-(38.5, 95.5) carry iron ore, measured over RCON with zero
+    holes, so "inside the box" and "on the ore" are the same statement here.
+    """
+    try:
+        box = patch.bounding_box
+        return (
+            float(box.left_top.x),
+            float(box.left_top.y),
+            float(box.right_bottom.x),
+            float(box.right_bottom.y),
+        )
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return None
 
 
 class ResearchJournal:
@@ -946,26 +997,18 @@ def production_output(namespace: Any, item: str) -> float:
 #: below and the construction script cannot drift apart.
 BASELINE_DRILL_NAME = BURNER_MINING_DRILL.name
 
+#: The container a mining cell drops its ore into.
+BASELINE_CHEST_NAME = "wooden-chest"
 
-def inherited_mining_cell(
-    env: Any,
-    center: tuple[float, float],
-) -> tuple[float, float] | None:
-    """Centre of the drill an ancestor already left on the baseline tiles.
 
-    Lifelong inheritance restores the promoted factory before the curriculum
-    runs, and ``patch_center`` is deterministic for a fixed map, so an heir
-    computes the same tiles its ancestor already built on. ``place_entity``
-    answers "entity already exists at the target position" there, FLE marks
-    the step failed on that text, and stage 0 raises for every heir until the
-    checkpoint changes.
+def survey_world(env: Any) -> WorldSurvey | None:
+    """Everything standing in the world, with its footprints resolved.
 
-    Occupancy is read as tiles, never as a radius or a centre comparison: a
-    2x2 drill one tile off shares half the baseline footprint and still
-    blocks the placement, while a guessed radius over-blocks small entities
-    and leaves large ones open. Any failure to read the live world answers
-    None, which leaves the caller on the construction path it took before
-    inheritance existed.
+    One read serves every placement a stage plans, so all the arms of a stage
+    are decided against the same world, and the same seed replays the same
+    placements. Answers None when the world cannot be read: planning on a
+    world nobody surveyed is not evidence that the tiles were free, and the
+    caller has to record it as the blind build it is.
     """
     unwrapped = getattr(env, "unwrapped", env)
     instance = getattr(unwrapped, "instance", None)
@@ -980,33 +1023,141 @@ def inherited_mining_cell(
         )
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
         return None
-
-    footprints = _runtime_entity_footprints(instance)
-    wanted = entity_tiles(
-        {
-            "name": BASELINE_DRILL_NAME,
-            "position": {"x": center[0], "y": center[1]},
-        },
-        footprints,
+    return WorldSurvey(
+        entities=tuple(
+            entity for entity in (entities or ()) if isinstance(entity, Mapping)
+        ),
+        footprints=_runtime_entity_footprints(instance),
     )
-    if not wanted:
-        return None
 
-    for entity in entities or ():
-        if not isinstance(entity, Mapping):
+
+def mining_cell_reserve(tiles: frozenset[GridPoint]) -> tuple[GridPoint, ...]:
+    """The tile a mining cell needs besides the drill footprint itself.
+
+    ``place_entity_next_to(Prototype.WoodenChest, drill.position,
+    Direction.DOWN)`` lands on the tile under the right column of the drill:
+    the inherited world holds drill (27, 83) with its chest at (27.5, 84.5)
+    and drill (32, 83) with its chest at (32.5, 84.5). Planning the drill
+    alone would accept tiles whose output side is the belt lane, and the
+    chest placement would then fail the whole step.
+    """
+    if not tiles:
+        return ()
+    return (
+        GridPoint(
+            max(tile.x for tile in tiles),
+            max(tile.y for tile in tiles) + 1,
+        ),
+    )
+
+
+def plan_mining_cell(
+    survey: WorldSurvey | None,
+    anchor: tuple[float, float],
+    *,
+    adopt_names: Collection[str] | None = None,
+    reach: int = 0,
+    region: tuple[float, float, float, float] | None = None,
+) -> PlacementPlan:
+    """Where the next mining cell goes, given the world as it stands."""
+    return plan_cell_placement(
+        survey,
+        anchor,
+        entity=BASELINE_DRILL_NAME,
+        adopt_names=adopt_names,
+        reach=reach,
+        region=region,
+        extra_tiles=mining_cell_reserve,
+    )
+
+
+def container_positions(
+    survey: WorldSurvey | None,
+) -> frozenset[tuple[float, float]]:
+    """Where the containers stood before a stage placed anything.
+
+    What a trial built has to stay distinguishable from what it inherited:
+    the ancestor's chests hold ore this generation did not mine, and summing
+    them into a trial reading would credit the arm with the ancestor's
+    factory.
+    """
+    if survey is None:
+        return frozenset()
+    found: set[tuple[float, float]] = set()
+    for entity in survey.entities:
+        if entity_name(entity) != BASELINE_CHEST_NAME:
             continue
-        if entity_name(entity) != BASELINE_DRILL_NAME:
+        position = entity_position(entity)
+        if position is not None:
+            found.add(position)
+    return frozenset(found)
+
+
+def cell_yield(
+    env: Any,
+    *,
+    inherited_containers: Collection[tuple[float, float]],
+    item: str,
+) -> float | None:
+    """How much ``item`` sits in containers that were not standing before.
+
+    The cell a trial built is the only thing that trial may be credited with.
+    The world production counter is not that: the rollback of a rejected step
+    rewinds it, so every trial of generation 37 read the same 0 -> 95 from
+    the ancestor's drills, including the trials whose placement the engine
+    refused.
+
+    Answers None when the world cannot be read or no new container stands.
+    An unmeasured trial is not a trial that measured zero.
+    """
+    survey = survey_world(env)
+    if survey is None:
+        return None
+    unwrapped = getattr(env, "unwrapped", env)
+    instance = getattr(unwrapped, "instance", None)
+    total = 0.0
+    measured = False
+    for entity in survey.entities:
+        if entity_name(entity) != BASELINE_CHEST_NAME:
             continue
-        if not entity_tiles(entity, footprints) & wanted:
+        position = entity_position(entity)
+        if position is None or position in inherited_containers:
             continue
-        position = entity.get("position")
-        if not isinstance(position, Mapping):
-            continue
-        try:
-            return (float(position["x"]), float(position["y"]))
-        except (KeyError, TypeError, ValueError):
-            return None
-    return None
+        measured = True
+        total += float(
+            _chest_item_count(
+                instance,
+                x=position[0],
+                y=position[1],
+                item=item,
+            )
+        )
+    return total if measured else None
+
+
+def inherited_mining_cell(
+    env: Any,
+    center: tuple[float, float],
+) -> tuple[float, float] | None:
+    """Centre of the drill an ancestor already left on the baseline tiles.
+
+    Lifelong inheritance restores the promoted factory before the curriculum
+    runs, and ``patch_center`` is deterministic for a fixed map, so an heir
+    computes the same tiles its ancestor already built on. ``place_entity``
+    answers "entity already exists at the target position" there, FLE marks
+    the step failed on that text, and stage 0 raises for every heir until the
+    checkpoint changes.
+
+    The decision is the placement layer's: occupancy is read as tiles, never
+    as a radius or a centre comparison, because a 2x2 drill one tile off
+    shares half the baseline footprint and still blocks the placement. Only
+    the ``adopt`` outcome is an inherited cell; a plan to build, or a refusal,
+    both mean there is nothing standing here to commission. Any failure to
+    read the live world answers None, which leaves the caller on the
+    construction path it took before inheritance existed.
+    """
+    plan = plan_mining_cell(survey_world(env), center)
+    return plan.position if plan.outcome == OUTCOME_ADOPT else None
 
 
 def stage_baseline(
@@ -1208,6 +1359,7 @@ def stage_online_learning(
     settle_seconds: int,
     exploration: float,
     radius_scale: float,
+    region: tuple[float, float, float, float] | None = None,
 ) -> str:
     namespace = env.unwrapped.instance.namespace
     champion = journal.state.get("evolution", {}).get("champion") or {}
@@ -1225,7 +1377,6 @@ def stage_online_learning(
     if incumbent_arm in PLACEMENT_ARMS:
         arm_order.remove(incumbent_arm)
         arm_order.insert(0, incumbent_arm)
-    bandit = UCB1Bandit(tuple(arm_order), exploration=exploration)
     online = journal.state["online_learning"]
     online["incumbent_arm"] = (
         incumbent_arm if incumbent_arm in PLACEMENT_ARMS else None
@@ -1239,45 +1390,94 @@ def stage_online_learning(
         detail="Testing candidate second-miner positions against the same checkpoint.",
         next_action="run transactional placement trials",
     )
+
+    # One survey decides every arm. Each trial is rolled back, so the world
+    # the next arm is planned against is the world this one was planned
+    # against; planning them from a single reading is what makes the whole
+    # stage replayable from the run seed.
+    survey = survey_world(env)
+    inherited_containers = container_positions(survey)
+    plans = {
+        arm: plan_mining_cell(
+            survey,
+            (center[0] + dx, center[1] + dy),
+            adopt_names=TRIAL_ADOPTS_NOTHING,
+            reach=PLACEMENT_SCAN_REACH,
+            region=region,
+        )
+        for arm, (dx, dy) in scaled_arms.items()
+    }
+    online["placement_plans"] = {
+        arm: plan.to_dict() for arm, plan in plans.items()
+    }
+    online["trial_output_basis"] = TRIAL_OUTPUT_BASIS
+    buildable = [arm for arm in arm_order if plans[arm].outcome == OUTCOME_BUILD]
+    withheld = {
+        arm: plans[arm].reason
+        for arm in arm_order
+        if plans[arm].outcome != OUTCOME_BUILD
+    }
+    online["withheld_arms"] = withheld
+
     journal.event(
         "learning",
         "Online UCB1 placement learning started on the live Factorio engine.",
         episodes=episodes,
         arms=scaled_arms,
         radius_scale=radius_scale,
+        buildable_arms=buildable,
+        withheld_arms=withheld,
     )
+    if not buildable:
+        # Every arm is boxed in by what is already standing. That is a
+        # reading about the world, said here rather than left for UCB1 to
+        # raise over an empty arm set.
+        journal.state.setdefault("metrics", {})[
+            "placement_selection_outcome"
+        ] = NO_BUILDABLE_ARM
+        online["status"] = NO_BUILDABLE_ARM
+        journal.flush()
+        raise PlacementNotMeasured(NO_BUILDABLE_ARM)
+
+    bandit = UCB1Bandit(tuple(buildable), exploration=exploration)
 
     for episode in range(episodes):
         arm = bandit.select()
+        plan = plans[arm]
         dx, dy = scaled_arms[arm]
-        target = (center[0] + dx, center[1] + dy)
+        target = plan.position or (center[0] + dx, center[1] + dy)
         fast_reposition(env, x=target[0], y=target[1])
 
-        output_before = production_output(namespace, "iron-ore")
-        measured: dict[str, float | bool] = {
-            "iron_output": 0.0,
-            "iron_output_before": output_before,
-            "iron_output_after": output_before,
+        world_output_before = production_output(namespace, "iron-ore")
+        measured: dict[str, Any] = {
+            "cell_yield": None,
+            "world_output_before": world_output_before,
+            "world_output_after": world_output_before,
             "valid": False,
         }
 
         def reject_trial(
             result: Any,
-            measured_state: dict[str, float | bool] = measured,
+            measured_state: dict[str, Any] = measured,
         ) -> bool:
-            output_after = production_output(namespace, "iron-ore")
-            iron_delta = max(
-                0.0,
-                output_after - float(measured_state["iron_output_before"]),
+            # Read before the rollback restores the checkpoint, and read off
+            # the chest this trial placed. The world counter over the same
+            # window also carries whatever the inherited factory produced,
+            # which is the same number for every arm.
+            measured_state["cell_yield"] = cell_yield(
+                env,
+                inherited_containers=inherited_containers,
+                item="iron-ore",
             )
-            valid = (
+            measured_state["world_output_after"] = production_output(
+                namespace,
+                "iron-ore",
+            )
+            measured_state["valid"] = (
                 not bool(result.info.get("error_occurred"))
                 and result.candidate_game_state is not None
-                and iron_delta > 0
+                and measured_state["cell_yield"] is not None
             )
-            measured_state["iron_output"] = iron_delta
-            measured_state["iron_output_after"] = output_after
-            measured_state["valid"] = valid
             return False
 
         code = f"""
@@ -1302,21 +1502,28 @@ print({{'trial_inventory': inspect_inventory(trial_chest)}})
         )
 
         distance = math.hypot(dx, dy)
-        if measured["valid"]:
-            reward = float(measured["iron_output"])
-        else:
-            reward = -50.0
+        valid = bool(measured["valid"])
+        trial_output = measured["cell_yield"] if valid else None
+        reward = -50.0 if trial_output is None else float(trial_output)
 
         bandit.update(arm, reward)
         row = {
             "episode": episode,
             "arm": arm,
             "offset": {"x": dx, "y": dy},
+            "placement": plan.to_dict(),
             "reward": reward,
-            "output": float(measured["iron_output"]),
-            "output_before": float(measured["iron_output_before"]),
-            "output_after": float(measured["iron_output_after"]),
-            "valid": bool(measured["valid"]),
+            # None, never 0.0: a trial that could not be measured did not
+            # measure an empty chest.
+            "output": None if trial_output is None else float(trial_output),
+            "world_output_before": float(measured["world_output_before"]),
+            "world_output_after": float(measured["world_output_after"]),
+            "valid": valid,
+            # Why the trial carries no measurement, in the engine's own
+            # words. Without it an unmeasured arm reads the same whether the
+            # tiles were taken, the script had nothing to place with, or the
+            # drill simply produced nothing.
+            "failure_text": _step_error_text(step.info),
             "distance": distance,
             "engine_reward": float(step.reward),
             "at": utc_now(),
@@ -1333,18 +1540,13 @@ print({{'trial_inventory': inspect_inventory(trial_chest)}})
             "learning",
             f"Placement trial {episode + 1}/{episodes}: {arm}",
             reward=reward,
-            output=measured["iron_output"],
-            valid=measured["valid"],
+            output=row["output"],
+            valid=valid,
+            placement=row["placement"],
+            failure_text=row["failure_text"],
         )
 
     ucb_best = bandit.best_observed()
-    output_by_arm: dict[str, list[float]] = {
-        arm: []
-        for arm in scaled_arms
-    }
-    for row in online["history"]:
-        if row["valid"]:
-            output_by_arm[row["arm"]].append(float(row["output"]))
     outcome = best_compact_arm(arms=scaled_arms, history=online["history"])
     mean_output_by_arm = dict(outcome.mean_output_by_arm)
     equivalent_throughput_arms = list(outcome.equivalent_throughput_arms)
@@ -1352,9 +1554,7 @@ print({{'trial_inventory': inspect_inventory(trial_chest)}})
     if outcome.arm is None:
         # Every episode was invalid. That is a reading about the run -- no arm
         # was measured -- and it has to be said, not turned into an exception
-        # whose text mentions nothing about placement. An inherited world
-        # produces exactly this: each arm tries to place a drill on tiles the
-        # ancestor already occupies, so none of them measures anything.
+        # whose text mentions nothing about placement.
         journal.state.setdefault("metrics", {})[
             "placement_selection_outcome"
         ] = outcome.reason
@@ -1378,12 +1578,15 @@ print({{'trial_inventory': inspect_inventory(trial_chest)}})
     journal.state["metrics"]["placement_compact_candidates"] = compact_candidates
     journal.state["metrics"]["placement_trials"] = episodes
     journal.state["metrics"]["placement_radius_scale"] = radius_scale
+    journal.state["metrics"]["placement_withheld_arms"] = withheld
+    journal.state["metrics"]["placement_trial_output_basis"] = TRIAL_OUTPUT_BASIS
     journal.complete_stage(
         1,
         (
             f"Real trials found throughput-equivalent placements within "
             f"±{THROUGHPUT_EQUIVALENCE_TOLERANCE:.0f} item; "
-            f"{best} selected by minimum placement distance."
+            f"{best} selected by minimum placement distance "
+            f"({len(buildable)} of {len(scaled_arms)} arms had free tiles)."
         ),
     )
     lesson = synthesize_lesson(
@@ -1396,6 +1599,8 @@ print({{'trial_inventory': inspect_inventory(trial_chest)}})
             "compact_candidates": compact_candidates,
             "mean_output_by_arm": mean_output_by_arm,
             "throughput_equivalence_tolerance": THROUGHPUT_EQUIVALENCE_TOLERANCE,
+            "withheld_arms": withheld,
+            "output_basis": TRIAL_OUTPUT_BASIS,
             "arms": online["arms"],
             "trial_reward_range": {
                 "min": min(
@@ -1431,11 +1636,30 @@ def stage_scale_mining(
     best_arm: str,
     settle_seconds: int,
     radius_scale: float,
+    region: tuple[float, float, float, float] | None = None,
 ) -> None:
     namespace = env.unwrapped.instance.namespace
     base_dx, base_dy = PLACEMENT_ARMS[best_arm]
     dx, dy = base_dx * radius_scale, base_dy * radius_scale
-    target = (center[0] + dx, center[1] + dy)
+    # Planned again, from the same anchor and against the same world the
+    # trials were planned against: the rollback of every trial leaves the
+    # world untouched, so this answers the tiles the promoted arm was
+    # actually measured on. The cell is this generation's, so nothing here
+    # is adopted -- an inherited drill would be credited as scaled_iron,
+    # which survival.fitness_from_research reads as endogenous output.
+    plan = plan_mining_cell(
+        survey_world(env),
+        (center[0] + dx, center[1] + dy),
+        adopt_names=TRIAL_ADOPTS_NOTHING,
+        reach=PLACEMENT_SCAN_REACH,
+        region=region,
+    )
+    journal.state["metrics"]["scaled_placement"] = plan.to_dict()
+    if plan.position is None:
+        raise RuntimeError(
+            f"learned placement {best_arm} has no free tiles: {plan.reason}"
+        )
+    target = plan.position
 
     journal.set_stage(
         2,
@@ -5269,12 +5493,16 @@ def run_curriculum(
             seed=seed,
         )
 
-        _, center = stage_baseline(
+        patch, center = stage_baseline(
             executor,
             env,
             journal,
             settle_seconds=baseline_settle,
         )
+        # The placement stages may move a blocked cell, and a cell moved off
+        # the ore places and mines nothing, so the measured patch bounds how
+        # far they may move it.
+        placement_region = patch_bounds(patch)
         best_arm = stage_online_learning(
             executor,
             env,
@@ -5284,6 +5512,7 @@ def run_curriculum(
             settle_seconds=trial_settle,
             exploration=effective_exploration,
             radius_scale=genome.placement_radius_scale,
+            region=placement_region,
         )
         stage_scale_mining(
             executor,
@@ -5293,6 +5522,7 @@ def run_curriculum(
             best_arm=best_arm,
             settle_seconds=scale_settle,
             radius_scale=genome.placement_radius_scale,
+            region=placement_region,
         )
         smelting_ok = stage_smelting_probe(
             executor,
