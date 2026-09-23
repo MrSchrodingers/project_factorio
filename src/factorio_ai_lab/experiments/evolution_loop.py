@@ -16,6 +16,7 @@ from factorio_ai_lab.agents.evolution_advisor import (
 )
 from factorio_ai_lab.experiments.curriculum_runner import (
     EVOLUTION_CHAMPION,
+    EVOLUTION_HISTORY,
     read_json_object,
     run_curriculum,
 )
@@ -38,6 +39,7 @@ from factorio_ai_lab.learning.lifelong import (
     summarize_state,
 )
 from factorio_ai_lab.learning.robustness import OpenPlayRobustnessGate
+from factorio_ai_lab.learning.survival import InheritedCapabilities
 from factorio_ai_lab.planning.factorio_catalog import (
     EARLY_GAME_PRODUCTION_PLANNER,
 )
@@ -887,6 +889,119 @@ def _load_lifelong_inheritance(
     return inheritance, inheritance.to_record()
 
 
+def _checkpoint_meta(checkpoint: Path) -> dict[str, Any]:
+    """The sidecar ``save_game_state`` writes beside a checkpoint."""
+    return read_json_object(
+        checkpoint.with_suffix(checkpoint.suffix + ".meta.json")
+    )
+
+
+def _recorded_capabilities(fitness: Any) -> frozenset[str] | None:
+    """Capability names of a recorded fitness, None when it recorded none.
+
+    Absence is not emptiness: a record whose fitness never listed
+    capabilities cannot say what was inherited, and answering an empty set
+    there would read as "inherited nothing" and credit the heir with the
+    ancestor's whole factory.
+    """
+    if not isinstance(fitness, dict):
+        return None
+    names = fitness.get("capabilities")
+    if not isinstance(names, list):
+        return None
+    return frozenset(str(name) for name in names if isinstance(name, str))
+
+
+def _history_rows(path: Path) -> list[dict[str, Any]]:
+    """Every readable generation report, oldest first."""
+    if not path.exists():
+        return []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    rows: list[dict[str, Any]] = []
+    for raw in lines:
+        if not raw.strip():
+            continue
+        try:
+            row = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(row, dict):
+            rows.append(row)
+    return rows
+
+
+def resolve_inherited_capabilities(
+    *,
+    checkpoint: Path | None = None,
+    champion_path: Path | None = None,
+    history_path: Path | None = None,
+) -> InheritedCapabilities:
+    """Which capabilities came with the factory the generation starts on.
+
+    The checkpoint carries entities, inventories and research, never
+    capabilities, so deriving them from entity counts would be inventing the
+    measurement. What it does carry is the run_id of the generation that
+    wrote it, and the fitness of that run -- the only place the capability
+    names were ever recorded -- is on disk in the champion record and in the
+    generation history. The run_id is the join.
+
+    Every path that cannot find the names answers unresolved with the reason,
+    never an empty set and never None: both would tell the comparison that
+    nothing was inherited, which is how an heir gets credited for the factory
+    it was handed.
+    """
+    checkpoint = LIFELONG_CHECKPOINT if checkpoint is None else checkpoint
+    champion_path = EVOLUTION_CHAMPION if champion_path is None else champion_path
+    history_path = EVOLUTION_HISTORY if history_path is None else history_path
+
+    run_id = _checkpoint_meta(checkpoint).get("run_id")
+    if not isinstance(run_id, str) or not run_id.strip():
+        return InheritedCapabilities.unresolved(
+            f"the sidecar of {checkpoint.name} is missing or carries no "
+            "run_id, so the inherited capabilities cannot be read; no "
+            "capability is credited to this genome"
+        )
+
+    champion = read_json_object(champion_path)
+    if champion.get("run_id") == run_id:
+        names = _recorded_capabilities(champion.get("fitness"))
+        if names is not None:
+            return InheritedCapabilities.resolved_as(
+                names,
+                detail=(
+                    f"capabilities of run {run_id}, "
+                    f"read from {champion_path.name}"
+                ),
+            )
+
+    for row in reversed(_history_rows(history_path)):
+        challenger = row.get("challenger")
+        challenger = challenger if isinstance(challenger, dict) else {}
+        # The run_id was lifted to the top level of the report only later: 12
+        # of the 38 reports on disk name the run solely inside the challenger
+        # record, and matching on the top level alone would answer unresolved
+        # for every checkpoint written by those generations.
+        if run_id not in (row.get("run_id"), challenger.get("run_id")):
+            continue
+        names = _recorded_capabilities(challenger.get("fitness"))
+        if names is not None:
+            return InheritedCapabilities.resolved_as(
+                names,
+                detail=(
+                    f"capabilities of run {run_id}, "
+                    f"read from {history_path.name}"
+                ),
+            )
+
+    return InheritedCapabilities.unresolved(
+        f"run {run_id} wrote the inherited checkpoint and no fitness on disk "
+        "lists its capabilities; no capability is credited to this genome"
+    )
+
+
 def _lifelong_attribution(
     inheritance: Any | None,
     warm_start: Any | None,
@@ -1021,6 +1136,19 @@ def run_loop(
             inheritance, inheritance_record = _load_lifelong_inheritance(
                 lifelong_inheritance
             )
+            # Only a generation that starts on an inherited factory holds
+            # capabilities it did not build. A cold start has none in play,
+            # which is a different fact from inheriting none, and both are
+            # different from inheriting a factory nobody can describe.
+            inherited_capabilities = (
+                resolve_inherited_capabilities()
+                if inheritance is not None
+                else None
+            )
+            if inherited_capabilities is not None:
+                inheritance_record["capabilities"] = (
+                    inherited_capabilities.to_dict()
+                )
             state["lifelong"] = {"inheritance": inheritance_record}
             warm_start: Any | None = None
 
@@ -1051,6 +1179,7 @@ def run_loop(
                 ) as warm_start:
                     lab = run_curriculum(
                         seed=iteration_seed,
+                        inherited_capabilities=inherited_capabilities,
                         placement_episodes=8,
                         baseline_settle=16,
                         trial_settle=8,

@@ -33,6 +33,7 @@ from factorio_ai_lab.learning.knowledge import (
 from factorio_ai_lab.learning.spatial_policy import SpatialPolicy, route_cost
 from factorio_ai_lab.learning.survival import (
     FitnessVector,
+    InheritedCapabilities,
     compare_challenger,
     fitness_from_research,
 )
@@ -4911,6 +4912,7 @@ def finalize_evolution_selection(
     *,
     achieved: set[str],
     physical_graph: dict[str, Any] | None = None,
+    inherited_capabilities: InheritedCapabilities | None = None,
 ) -> dict[str, Any]:
     stages = [
         stage
@@ -4931,6 +4933,11 @@ def finalize_evolution_selection(
     # The names travel with the fitness so the next comparison can tell a lost
     # capability from an unreached frontier. Passing only the count is what
     # rejected twelve generations for going further than the incumbent.
+    # What the generation started holding travels with the fitness, so the
+    # comparison can tell what this genome built from what an ancestor handed
+    # it. None means no inheritance was in play; an inheritance that could not
+    # be resolved is stated as such and withholds credit rather than granting
+    # it silently.
     challenger = fitness_from_research(
         metrics=journal.state.get("metrics", {}),
         achieved=achieved,
@@ -4939,6 +4946,7 @@ def finalize_evolution_selection(
         failed_stages=failed_stages,
         completed_stage_names=completed_stage_names,
         failed_stage_names=failed_stage_names,
+        inherited_capabilities=inherited_capabilities,
     )
 
     incumbent = incumbent_champion()
@@ -4947,6 +4955,11 @@ def finalize_evolution_selection(
         incumbent_fitness = FitnessVector.from_dict(incumbent["fitness"])
 
     evolution = journal.state.setdefault("evolution", {})
+    evolution["inherited_capabilities"] = (
+        {"in_play": False}
+        if inherited_capabilities is None
+        else {"in_play": True, **inherited_capabilities.to_dict()}
+    )
     retention_ratio = float(evolution.get("retention_ratio", 0.80) or 0.80)
     decision = compare_challenger(
         incumbent_fitness,
@@ -5037,6 +5050,7 @@ def finalize_evolution_selection(
         "decision": decision.to_dict(),
         "archive": evolution.get("archive"),
         "parent": evolution.get("parent"),
+        "inherited_capabilities": evolution.get("inherited_capabilities"),
         "knowledge_recall": recalled_knowledge_report(evolution),
         "bottleneck": failed_stage_names[0] if failed_stage_names else None,
         "failed_stages": failed_stage_names,
@@ -5094,7 +5108,15 @@ def run_curriculum(
     copper_mine_settle: int,
     copper_smelt_settle: int,
     exploration: float,
+    inherited_capabilities: InheritedCapabilities | None = None,
 ) -> dict[str, Any]:
+    """Run one lab generation.
+
+    ``inherited_capabilities`` describes what the world already held when the
+    generation started, for the caller that warm-started it from a promoted
+    ancestor. None is the cold start: nothing was inherited, so every
+    capability reached is this genome's.
+    """
     import gym
 
     list_environments()
@@ -5394,6 +5416,7 @@ def run_curriculum(
             journal,
             achieved=achieved,
             physical_graph=physical_graph,
+            inherited_capabilities=inherited_capabilities,
         )
         final_status = (
             "generation_complete"

@@ -87,6 +87,55 @@ def _optional_name_set(raw: Any) -> frozenset[str] | None:
     return None
 
 @dataclass(frozen=True)
+class InheritedCapabilities:
+    """What a generation was handed, and how well that is known.
+
+    Two states would not be enough. Passing ``None`` in place of this object
+    means no inheritance was in play, and ``capabilities`` empty means a
+    factory was inherited that carried none. The third state is an
+    inheritance that was applied and whose capabilities could not be read
+    back -- an unreadable checkpoint sidecar, a run_id no record knows.
+    Reporting that as either of the other two would credit the genome with
+    what it merely received, which is the whole failure
+    ``FitnessVector.inherited_capabilities`` exists to prevent, so it is
+    carried as ``resolved=False`` plus the reason and the caller withholds
+    credit instead of granting it.
+    """
+
+    capabilities: frozenset[str] | None
+    resolved: bool
+    detail: str
+
+    @classmethod
+    def resolved_as(
+        cls,
+        capabilities: Iterable[str],
+        *,
+        detail: str,
+    ) -> InheritedCapabilities:
+        """Capabilities read off the record of the run that was inherited."""
+        return cls(
+            capabilities=frozenset(str(name) for name in capabilities),
+            resolved=True,
+            detail=detail,
+        )
+
+    @classmethod
+    def unresolved(cls, detail: str) -> InheritedCapabilities:
+        """An inheritance that was applied and could not be read back."""
+        return cls(capabilities=None, resolved=False, detail=detail)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "resolved": self.resolved,
+            "detail": self.detail,
+            "capabilities": (
+                None if self.capabilities is None else sorted(self.capabilities)
+            ),
+        }
+
+
+@dataclass(frozen=True)
 class FitnessVector:
     """Multi-objective evidence used for incumbent/challenger selection."""
 
@@ -119,10 +168,6 @@ class FitnessVector:
     #: this field existed, which is why the sums below answer None instead of
     #: crediting an old vector with automation it never demonstrated.
     rate_sources: Mapping[str, str] = field(default_factory=dict)
-    #: Seconds of measured production. A lower bound, not the factory lifetime:
-    #: it adds the stage windows that recorded output and ignores everything
-    #: that was never timed. None means no window was measured at all, 0.0
-    #: would mean windows were measured and none of them produced.
     #: Capabilities the generation started with, when it inherited a factory
     #: from a promoted ancestor. Absolute counts stop being evidence the moment
     #: a generation begins on top of someone else's work, so a capability that
@@ -130,6 +175,17 @@ class FitnessVector:
     #: this genome. `None` means no inheritance was in play, which is not the
     #: same as an empty inheritance.
     inherited_capabilities: frozenset[str] | None = None
+    #: How inherited_capabilities was obtained, in readable text: which record
+    #: answered it, or why it could not be answered. `None` means no
+    #: inheritance was in play. When an inheritance was applied and could not
+    #: be resolved, this states the reason and inherited_capabilities holds
+    #: every capability the generation reported, so no capability is credited
+    #: to the genome on evidence nobody could read.
+    inherited_capabilities_source: str | None = None
+    #: Seconds of measured production. A lower bound, not the factory lifetime:
+    #: it adds the stage windows that recorded output and ignores everything
+    #: that was never timed. None means no window was measured at all, 0.0
+    #: would mean windows were measured and none of them produced.
     productive_runtime_s: float | None = None
     #: Which protocol produced productive_runtime_s; None when it was not
     #: measured. Two runtimes from different protocols are not comparable, the
@@ -253,6 +309,7 @@ class FitnessVector:
             else {}
         )
         inherited_raw = payload.get("inherited_capabilities")
+        inherited_source_raw = payload.get("inherited_capabilities_source")
         inherited_capabilities = (
             None
             if inherited_raw is None
@@ -299,6 +356,11 @@ class FitnessVector:
         return cls(
             measurement_protocol=protocol,
             inherited_capabilities=inherited_capabilities,
+            inherited_capabilities_source=(
+                str(inherited_source_raw)
+                if isinstance(inherited_source_raw, str)
+                else None
+            ),
             rate_sources=rate_sources,
             productive_runtime_s=(
                 float(productive_runtime_raw)
@@ -645,10 +707,12 @@ def compare_challenger(
         credited = [name for name in new_capabilities if name not in inherited]
         withheld = [name for name in new_capabilities if name in inherited]
         if withheld:
+            source = challenger.inherited_capabilities_source
             _mark_incommensurable(
                 "inherited_capabilities",
                 "not credited as achievements of this genome: "
-                + ", ".join(withheld),
+                + ", ".join(withheld)
+                + (f" (inheritance: {source})" if source else ""),
             )
         new_capabilities = credited
     if new_capabilities:
@@ -899,6 +963,7 @@ def fitness_from_research(
     failed_stages: int = 0,
     completed_stage_names: Iterable[str] | None = None,
     failed_stage_names: Iterable[str] | None = None,
+    inherited_capabilities: InheritedCapabilities | None = None,
 ) -> FitnessVector:
     rates: dict[str, float] = {}
     rate_sources: dict[str, str] = {}
@@ -1012,10 +1077,32 @@ def fitness_from_research(
         productive_runtime_s = (productive_runtime_s or 0.0) + float(duration)
     halt_cause_raw = physical_metrics.get("halt_cause")
 
+    capabilities = frozenset(str(item) for item in achieved)
+    # An inheritance that was applied and could not be read back withholds
+    # every capability instead of crediting every capability. Leaving the
+    # field at None would make the comparison charge the ancestor's factory to
+    # this genome, and the field has no third value meaning unknown, so the
+    # mistake is taken on the side that awards no progress and
+    # inherited_capabilities_source carries why.
+    inherited_names: frozenset[str] | None = None
+    inherited_source: str | None = None
+    if inherited_capabilities is not None:
+        inherited_source = inherited_capabilities.detail
+        inherited_names = (
+            inherited_capabilities.capabilities
+            if (
+                inherited_capabilities.resolved
+                and inherited_capabilities.capabilities is not None
+            )
+            else capabilities
+        )
+
     return FitnessVector(
         # Built from the observed game window, not from the sleep literal.
         measurement_protocol=RATE_PROTOCOL_OBSERVED_WINDOW,
-        capabilities=frozenset(str(item) for item in achieved),
+        capabilities=capabilities,
+        inherited_capabilities=inherited_names,
+        inherited_capabilities_source=inherited_source,
         rates_per_s=rates,
         rate_sources=rate_sources,
         productive_runtime_s=productive_runtime_s,
