@@ -31,6 +31,17 @@ A plan is one of three named outcomes, and all three are results:
     nothing within reach is free. A declared refusal is a reading about the
     world; building on top and letting the engine answer is not.
 
+Ground is not uniform. A tile carrying ore is free of entities, so it was
+chosen exactly like bare dirt: the world read of 2026-09-23 found nine burner
+inserters standing on resource tiles across three patches, and every one of
+them is a tile no drill will ever use. A candidate is now priced by the ground
+it takes -- measured bare ground first, then ground the survey never covered,
+then resource tiles, the scarcest last -- and the plan records how many
+resource tiles it spent. The price is a preference and never a veto: a stage
+whose only reachable tiles carry ore builds on ore and says so, because
+refusing there costs the whole stage. A drill is charged nothing, since a
+drill off the ore mines nothing.
+
 The scan is ordered by ring, then by Manhattan distance, then by ``(dx, dy)``
 and never by the iteration order of a set or a dict, so the same anchor in
 the same world always answers the same tile. A placement that cannot be
@@ -40,6 +51,7 @@ replayed from the run seed cannot be replayed at all.
 from __future__ import annotations
 
 import math
+from collections import Counter
 from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -70,6 +82,156 @@ REASON_FOOTPRINT_UNRESOLVED = "footprint_unresolved"
 #: is not evidence that the tiles were free.
 REASON_WORLD_UNREAD = "world_not_surveyed"
 
+#: The tiles taken carry a resource and no bare ground was within reach.
+#: Kept distinct from a plain shift: the ore under those tiles is spent
+#: either way, and a decision that does not say so cannot be measured later.
+REASON_RESOURCE_SPENT = "built_on_resource_tiles"
+
+#: ``type`` of a resource entity, as ``find_entities_filtered{type=
+#: "resource"}`` and ``_save_entity_state`` report it.
+RESOURCE_ENTITY_TYPE = "resource"
+
+#: Base-game resource prototypes, read only when a row carries no ``type``.
+#: A row that is neither typed nor named here stays in the blocking world,
+#: which is the conservative side: an unrecognised entity is an obstacle.
+RESOURCE_PROTOTYPE_NAMES = frozenset(
+    {"coal", "copper-ore", "crude-oil", "iron-ore", "stone", "uranium-ore"}
+)
+
+#: Entities that have to stand on the resource they consume. A rule over
+#: names, because what is planned here is a prototype name and not a live
+#: entity: Factorio 2.0 has two mining drills and the pumpjack.
+RESOURCE_SEEKING_NAMES = frozenset({"pumpjack"})
+_RESOURCE_SEEKING_SUFFIX = "-mining-drill"
+
+#: Ranks of the ground under a candidate, worst last: measured bare ground,
+#: ground the survey never covered, measured resource. The rank is carried
+#: apart from the price because "unknown" is not a quantity of tiles.
+_RANK_BARE = 0
+_RANK_UNSURVEYED = 1
+_RANK_RESOURCE = 2
+
+
+def is_resource_entity(entity: Mapping[str, Any]) -> bool:
+    """Whether one surveyed row is ore under the ground, not a machine."""
+    raw = entity.get("type")
+    if isinstance(raw, str) and raw.strip().strip('"') == RESOURCE_ENTITY_TYPE:
+        return True
+    return entity_name(entity) in RESOURCE_PROTOTYPE_NAMES
+
+
+def seeks_resource(entity: str) -> bool:
+    """Whether the entity mines the ground it stands on.
+
+    A drill moved off the ore places and mines nothing, so the ground price
+    never applies to one: it is charged nothing for the tiles it takes and
+    the scan answers exactly what it answered before there was a price.
+    """
+    name = (entity or "").strip().strip('"')
+    return name.endswith(_RESOURCE_SEEKING_SUFFIX) or name in RESOURCE_SEEKING_NAMES
+
+
+@dataclass(frozen=True)
+class _ResourceReading:
+    """What the ground under one candidate is, and what it would cost."""
+
+    rank: int
+    cost: float
+    tiles: int
+    unsurveyed: int
+    names: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ResourceSurvey:
+    """The ore one world read reported, and the window that read covered.
+
+    ``tiles`` maps a tile to the resource standing on it. ``surveyed`` is
+    the box the read covered, in world coordinates; outside it a tile is
+    unknown rather than bare. A read with no window declared knows where ore
+    is and nowhere that ore is absent, which is the weaker of the two
+    statements and the only one that cannot turn absence into zero.
+    """
+
+    tiles: Mapping[GridPoint, str] = field(default_factory=dict)
+    surveyed: tuple[float, float, float, float] | None = None
+
+    @classmethod
+    def from_entities(
+        cls,
+        entities: Iterable[Any],
+        surveyed: tuple[float, float, float, float] | None = None,
+    ) -> ResourceSurvey:
+        """Index the resource rows of a world read by the tile they cover."""
+        tiles: dict[GridPoint, str] = {}
+        for entity in entities or ():
+            if not isinstance(entity, Mapping):
+                continue
+            name = entity_name(entity)
+            if not name:
+                continue
+            for tile in entity_tiles(entity):
+                tiles[tile] = name
+        return cls(tiles=tiles, surveyed=surveyed)
+
+    def covers(self, tile: GridPoint) -> bool:
+        """Whether this read says anything at all about the tile."""
+        if tile in self.tiles:
+            return True
+        return self.surveyed is not None and _inside((tile,), self.surveyed)
+
+    def weights(self) -> dict[str, float]:
+        """What one tile of each resource costs, derived from this read.
+
+        A tile is priced by how scarce its resource is in the survey: the
+        most abundant resource costs 1.0 and every other one costs the ratio
+        of the tile counts, so a coal tile out of forty weighs more than an
+        iron tile out of six hundred. Two limits, stated rather than hidden:
+        the count is the surveyed window and not the patch on the map, so a
+        patch read in part looks scarcer than it is; and the amount left in
+        each tile, which the payload does carry, is not part of the weight,
+        because this prices ground rather than ore.
+        """
+        counts = Counter(self.tiles.values())
+        if not counts:
+            return {}
+        most = max(counts.values())
+        return {name: most / count for name, count in sorted(counts.items())}
+
+    def read(
+        self,
+        tiles: Iterable[GridPoint],
+        weights: Mapping[str, float],
+    ) -> _ResourceReading:
+        """Price one candidate footprint against this read.
+
+        Summed over the tiles in scan order rather than set order: the same
+        survey has to answer the same float for the same candidate.
+        """
+        spent: list[str] = []
+        cost = 0.0
+        unsurveyed = 0
+        for tile in _ordered(tiles):
+            name = self.tiles.get(tile)
+            if name is not None:
+                spent.append(name)
+                cost += float(weights.get(name, 1.0))
+            elif not self.covers(tile):
+                unsurveyed += 1
+        if spent:
+            rank = _RANK_RESOURCE
+        elif unsurveyed:
+            rank = _RANK_UNSURVEYED
+        else:
+            rank = _RANK_BARE
+        return _ResourceReading(
+            rank=rank,
+            cost=cost,
+            tiles=len(spent),
+            unsurveyed=unsurveyed,
+            names=tuple(sorted(set(spent))),
+        )
+
 
 @dataclass(frozen=True)
 class WorldSurvey:
@@ -82,6 +244,40 @@ class WorldSurvey:
 
     entities: tuple[Mapping[str, Any], ...] = ()
     footprints: Mapping[str, tuple[int, int]] = field(default_factory=dict)
+    resources: ResourceSurvey | None = None
+
+    @classmethod
+    def from_entities(
+        cls,
+        entities: Iterable[Any],
+        footprints: Mapping[str, tuple[int, int]] | None = None,
+        surveyed: tuple[float, float, float, float] | None = None,
+    ) -> WorldSurvey:
+        """Split one world read into what blocks and what lies under it.
+
+        Resource rows must not reach ``entities``: ore obstructs nothing,
+        and counting it as an obstacle would mark every tile of a patch
+        taken and refuse the patch entire.
+
+        A read holding no resource row at all answers ``resources=None``. A
+        read that asked for no resources and a world with no ore in it look
+        identical from here, the first is what this loop has been doing, and
+        a survey that guessed between them would be the absence-is-zero
+        failure this layer exists to keep out.
+        """
+        standing: list[Mapping[str, Any]] = []
+        ore: list[Mapping[str, Any]] = []
+        for entity in entities or ():
+            if not isinstance(entity, Mapping):
+                continue
+            (ore if is_resource_entity(entity) else standing).append(entity)
+        return cls(
+            entities=tuple(standing),
+            footprints=dict(footprints or {}),
+            resources=(
+                ResourceSurvey.from_entities(ore, surveyed=surveyed) if ore else None
+            ),
+        )
 
 
 @dataclass(frozen=True)
@@ -95,6 +291,18 @@ class PlacementPlan:
     adopted_name: str | None = None
     tiles: tuple[GridPoint, ...] = ()
     scanned: int = 0
+
+    #: Resource tiles the placement occupies, measured. None when no
+    #: resource survey reached the decision, which is not the same reading
+    #: as zero: it is "nobody looked under these tiles".
+    resource_tiles: int | None = None
+    #: The scarcity-weighted price the choice charged. 0.0 for an entity
+    #: that mines what it stands on, None on the same terms as above.
+    resource_cost: float | None = None
+    #: Which resources were occupied, sorted.
+    resource_names: tuple[str, ...] = ()
+    #: Tiles of this placement the survey never covered.
+    resource_unsurveyed: int | None = None
 
     @property
     def adopts(self) -> bool:
@@ -121,6 +329,10 @@ class PlacementPlan:
             ),
             "adopted_name": self.adopted_name,
             "tiles_scanned": self.scanned,
+            "resource_tiles": self.resource_tiles,
+            "resource_cost": self.resource_cost,
+            "resource_names": list(self.resource_names),
+            "resource_unsurveyed": self.resource_unsurveyed,
         }
 
 
@@ -216,6 +428,35 @@ def footprint_tiles(
     )
 
 
+def _build_on(
+    *,
+    position: tuple[float, float],
+    offset: tuple[int, int],
+    tiles: tuple[GridPoint, ...],
+    scanned: int,
+    reading: _ResourceReading | None,
+    priced: bool,
+) -> PlacementPlan:
+    """One build plan, with what the ground under it was measured to be."""
+    reason = REASON_ANCHOR_FREE if offset == (0, 0) else REASON_SHIFTED
+    if priced and reading is not None and reading.tiles:
+        reason = REASON_RESOURCE_SPENT
+    return PlacementPlan(
+        outcome=OUTCOME_BUILD,
+        position=position,
+        reason=reason,
+        shift=offset,
+        tiles=tiles,
+        scanned=scanned,
+        resource_tiles=None if reading is None else reading.tiles,
+        resource_cost=(
+            None if reading is None else (reading.cost if priced else 0.0)
+        ),
+        resource_names=() if reading is None else reading.names,
+        resource_unsurveyed=None if reading is None else reading.unsurveyed,
+    )
+
+
 def plan_placement(
     *,
     entity: str,
@@ -227,6 +468,7 @@ def plan_placement(
     reach: int = 0,
     region: tuple[float, float, float, float] | None = None,
     extra_tiles: Callable[[frozenset[GridPoint]], Iterable[GridPoint]] | None = None,
+    resources: ResourceSurvey | None = None,
 ) -> PlacementPlan:
     """Decide between adopting, building and refusing at one anchor.
 
@@ -244,6 +486,15 @@ def plan_placement(
     chest on top of a belt, which fails the whole placement. Those tiles must
     be free, and they are not held to ``region``, which is about the resource
     under the entity.
+
+    ``resources`` is the ore the same read reported. A tile carrying ore is
+    not equivalent to bare ground -- a machine standing on it holds a tile
+    no drill can use -- so the scan takes the cheapest ground it can reach
+    and falls back on the scan order between equals. The price covers the
+    reserved tiles too, since the chest of a cell spends a tile exactly as
+    the machine does. It is never a veto, it never applies to an entity that
+    mines what it stands on, and without a survey nothing is preferred and
+    nothing is claimed: an unread tile is unknown, not bare.
     """
     standing = [candidate for candidate in world if isinstance(candidate, Mapping)]
     template = {
@@ -289,7 +540,10 @@ def plan_placement(
 
     taken = blocked_tiles(standing, footprints)
     gate = region if region is not None and _inside(anchor_tiles, region) else None
+    priced = resources is not None and not seeks_resource(entity)
+    weights = {} if resources is None else resources.weights()
     offsets = scan_offsets(reach)
+    best: tuple[tuple[int, float, int], PlacementPlan] | None = None
     for scanned, (dx, dy) in enumerate(offsets, start=1):
         position = (origin[0] + dx, origin[1] + dy)
         tiles = footprint_tiles(
@@ -305,14 +559,24 @@ def plan_placement(
             needed |= set(extra_tiles(frozenset(tiles)))
         if needed & taken:
             continue
-        return PlacementPlan(
-            outcome=OUTCOME_BUILD,
+        reading = None if resources is None else resources.read(needed, weights)
+        candidate = _build_on(
             position=position,
-            reason=REASON_ANCHOR_FREE if (dx, dy) == (0, 0) else REASON_SHIFTED,
-            shift=(dx, dy),
+            offset=(dx, dy),
             tiles=_ordered(tiles),
             scanned=scanned,
+            reading=reading,
+            priced=priced,
         )
+        if reading is None or not priced:
+            return candidate
+        key = (reading.rank, reading.cost, scanned)
+        if best is None or key < best[0]:
+            best = (key, candidate)
+        if reading.rank == _RANK_BARE:
+            break
+    if best is not None:
+        return best[1]
     return PlacementPlan(
         outcome=OUTCOME_REFUSE,
         reason=REASON_TILES_TAKEN,
@@ -355,4 +619,5 @@ def plan_cell_placement(
         reach=reach,
         region=region,
         extra_tiles=extra_tiles,
+        resources=survey.resources,
     )
