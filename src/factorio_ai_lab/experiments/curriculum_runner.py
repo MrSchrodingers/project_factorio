@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import subprocess
 from dataclasses import asdict
 from datetime import UTC, datetime
 from itertools import pairwise
@@ -140,6 +141,60 @@ def read_json_object(path: Path) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         return {}
     return loaded if isinstance(loaded, dict) else {}
+
+
+def code_revision(*, root: Path | None = None) -> dict[str, Any]:
+    """Which revision of this repository produced the generation.
+
+    The loop runs for hours while the repository is still being worked on, so
+    a series of generations can span several versions of the selection rule,
+    the factory graph and the runtime catalogue. Without the revision in the
+    record, a change in the numbers cannot be attributed: an improvement that
+    came from a code change and one that came from evolution read the same.
+
+    A dirty tree is part of the fact, not an embarrassment to omit --
+    generation 37 was promoted under uncommitted code and its report says
+    nothing about it. When the revision cannot be read at all, every field
+    answers None with a stated reason; a plausible-looking string would be
+    worse than no answer.
+    """
+    directory = Path(root) if root is not None else Path(__file__).resolve().parents[3]
+
+    def _git(*args: str) -> str | None:
+        try:
+            done = subprocess.run(
+                ["git", "-C", str(directory), *args],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            _git.reason = f"git unavailable: {type(exc).__name__}"
+            return None
+        if done.returncode != 0:
+            _git.reason = (done.stderr or "").strip().splitlines()[:1] or ["git refused"]
+            _git.reason = _git.reason[0] if isinstance(_git.reason, list) else _git.reason
+            return None
+        return done.stdout.strip()
+
+    _git.reason = None
+    commit = _git("rev-parse", "HEAD")
+    if commit is None:
+        return {
+            "commit": None,
+            "branch": None,
+            "dirty": None,
+            "reason": _git.reason or "no repository at this path",
+        }
+    status = _git("status", "--porcelain")
+    return {
+        "commit": commit,
+        "branch": _git("rev-parse", "--abbrev-ref", "HEAD"),
+        # None when the tree could not be inspected: unknown is not clean.
+        "dirty": None if status is None else bool(status),
+        "reason": None,
+    }
 
 
 def incumbent_champion() -> dict[str, Any]:
@@ -4848,6 +4903,7 @@ def finalize_evolution_selection(
     report = {
         "at": selected_at,
         "generation": generation,
+        "code_revision": code_revision(),
         "run_id": journal.run_id,
         "challenger": candidate_record,
         "incumbent_run_id": incumbent.get("run_id") if incumbent else None,
