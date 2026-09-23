@@ -53,25 +53,43 @@ OPPOSITE_DIRECTION = {
 ROLLED_BACK_DRILL_VARIABLES = {"trial_drill"}
 
 
+def _script_text(value: ast.AST) -> str | None:
+    """A script literal as text, with its formatted values stubbed out."""
+    if isinstance(value, ast.Constant) and isinstance(value.value, str):
+        return value.value
+    if isinstance(value, ast.JoinedStr):
+        return "".join(
+            piece.value
+            if isinstance(piece, ast.Constant) and isinstance(piece.value, str)
+            else "0"
+            for piece in value.values
+        )
+    return None
+
+
 def _embedded_scripts() -> list[tuple[int, str]]:
-    """Every f-string assigned to a local named `code`, with its line number."""
+    """Every script the runner hands the engine, with its line number.
+
+    Two shapes carry one: the literal a stage assigns to ``code``, and the
+    literal a script builder returns. The second shape exists because the two
+    paths of stage 0 have to be comparable name by name, which they are only
+    when each is a function that can be called and read. A probe that knew
+    only the first shape stopped seeing the baseline mining cell the moment
+    that stage was split, and answered that the arena had five burner drills.
+    """
     found: list[tuple[int, str]] = []
     for node in ast.walk(RUNNER_TREE):
-        if not isinstance(node, ast.Assign):
-            continue
-        if "code" not in [t.id for t in node.targets if isinstance(t, ast.Name)]:
-            continue
-        value = node.value
-        if isinstance(value, ast.Constant) and isinstance(value.value, str):
-            found.append((node.lineno, value.value))
-        elif isinstance(value, ast.JoinedStr):
-            parts = [
-                piece.value
-                if isinstance(piece, ast.Constant) and isinstance(piece.value, str)
-                else "0"
-                for piece in value.values
+        if isinstance(node, ast.Assign):
+            named_code = "code" in [
+                target.id for target in node.targets if isinstance(target, ast.Name)
             ]
-            found.append((node.lineno, "".join(parts)))
+            text = _script_text(node.value) if named_code else None
+        elif isinstance(node, ast.Return) and node.value is not None:
+            text = _script_text(node.value)
+        else:
+            continue
+        if text is not None and "Prototype." in text:
+            found.append((node.lineno, text))
     return found
 
 
@@ -543,6 +561,7 @@ MACHINE_POSITIONS = {
 def _run_feed(
     *,
     vault_coal: int = 359,
+    quarantined: int | None = None,
     blocked: set[tuple[int, int]] | None = None,
     missing: set[str] | None = None,
 ) -> tuple[_World, dict[str, object]]:
@@ -555,6 +574,12 @@ def _run_feed(
     vault = world.spawn("bootstrap_vault", (-20, 0))
     vault.inventory["coal"] = vault_coal
     scope["bootstrap_vault"] = vault
+    # What stage 6 put in, bound by the quarantine script that put it there.
+    # Defaults to the whole stock: the container stage 6 placed itself was
+    # empty before, which is the world the cold start meets.
+    scope["bootstrap_quarantine"] = (
+        vault_coal if quarantined is None else quarantined
+    )
     script = curriculum_runner._bootstrap_vault_release_script() + (
         curriculum_runner._fuel_feed_script(
             machines=curriculum_runner.FUEL_FED_MACHINES,
@@ -569,6 +594,31 @@ def test_the_vault_is_emptied_into_the_player() -> None:
     world, scope = _run_feed()
     assert scope["fuel_vault_released"] == 359
     assert world.entities[(-20, 0)].inventory["coal"] == 0
+
+
+def test_only_the_quarantined_coal_comes_back_out() -> None:
+    """A vault in an inherited world is a container the world was using.
+
+    ``quarantine_container`` picks one that is already standing, because an
+    heir carries no chest to place. The coal beside the bootstrap coal in it
+    is the ancestor's, feeding a chain this stage may not empty, so the
+    release takes what this generation put in and leaves the rest.
+    """
+    world, scope = _run_feed(vault_coal=320, quarantined=11)
+
+    assert scope["fuel_vault_stock"] == 320
+    assert scope["fuel_vault_claim"] == 11
+    assert scope["fuel_vault_released"] == 11
+    assert world.entities[(-20, 0)].inventory["coal"] == 309
+
+
+def test_a_quarantine_larger_than_the_stock_takes_only_what_is_there() -> None:
+    # Something else drew from the container between the two stages. What is
+    # there bounds the claim; asking for more would raise instead of reading.
+    _, scope = _run_feed(vault_coal=4, quarantined=359)
+
+    assert scope["fuel_vault_claim"] == 4
+    assert scope["fuel_vault_released"] == 4
 
 
 def test_every_machine_gets_an_inserter_that_drops_into_it() -> None:

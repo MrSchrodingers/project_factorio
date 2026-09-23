@@ -55,7 +55,6 @@ from factorio_ai_lab.planning.fuel import (
     observed_window_seconds,
 )
 from factorio_ai_lab.planning.placement import (
-    OUTCOME_ADOPT,
     OUTCOME_BUILD,
     PlacementPlan,
     WorldSurvey,
@@ -277,6 +276,14 @@ SMELTING_OUTPUT_BASIS = "probe_furnace_contents"
 COAL_OUTPUT_BASIS = "coal_cell_chest_contents"
 COPPER_ORE_OUTPUT_BASIS = "copper_cell_chest_contents"
 COPPER_PLATE_OUTPUT_BASIS = "copper_cell_furnace_contents"
+
+#: What the belt-fed smelting stage counts as its output, for the same reason
+#: once more, and for one closer to home: the world plate counter over that
+#: window also carries the probe furnace stage 3 of this same generation left
+#: burning, so the belt cell was being credited with the direct cell's plates
+#: and then compared against them. The belt furnace is placed by this stage
+#: and read before and after its own window.
+BELT_SMELTING_OUTPUT_BASIS = "belt_furnace_contents"
 
 #: The stage carries bootstrap coal it may not let the new drill burn, and
 #: the standing world offered nowhere to park it. Named rather than silently
@@ -1526,10 +1533,10 @@ def cell_yield(
 
 
 def inherited_mining_cell(
-    env: Any,
+    survey: WorldSurvey | None,
     center: tuple[float, float],
-) -> tuple[float, float] | None:
-    """Centre of the drill an ancestor already left on the baseline tiles.
+) -> PlacementPlan | None:
+    """The mining cell an ancestor already left on the baseline tiles.
 
     Lifelong inheritance restores the promoted factory before the curriculum
     runs, and ``patch_center`` is deterministic for a fixed map, so an heir
@@ -1542,12 +1549,77 @@ def inherited_mining_cell(
     as a radius or a centre comparison, because a 2x2 drill one tile off
     shares half the baseline footprint and still blocks the placement. Only
     the ``adopt`` outcome is an inherited cell; a plan to build, or a refusal,
-    both mean there is nothing standing here to commission. Any failure to
-    read the live world answers None, which leaves the caller on the
+    both mean there is nothing standing here to commission. A world that
+    could not be surveyed plans to build, which leaves the caller on the
     construction path it took before inheritance existed.
+
+    The whole plan is answered, tiles included, because a mining cell is more
+    than its drill: :func:`inherited_cell_container` reads the container off
+    those tiles, and the commissioning script has to bind it under the name
+    the construction script binds.
     """
-    plan = plan_mining_cell(survey_world(env), center)
-    return plan.position if plan.outcome == OUTCOME_ADOPT else None
+    plan = plan_mining_cell(survey, center)
+    return plan if plan.adopts else None
+
+
+#: How far from an adopted drill a container still counts as that cell's own
+#: output chest, in tiles. ``mining_cell_reserve`` states the tile the
+#: construction path puts it on; the reach covers a cell whose chest stands a
+#: tile off that, and stops short of the next cell -- the inherited world
+#: holds the baseline cell at (27, 83) and the scaled one at (32, 83).
+BASELINE_CONTAINER_REACH = 2.0
+
+
+def inherited_cell_container(
+    survey: WorldSurvey | None,
+    drill_tiles: Collection[GridPoint],
+) -> tuple[tuple[float, float], str] | None:
+    """The container the adopted mining cell already drops its ore into.
+
+    The construction path binds ``chest`` when it places one; the adoption
+    path bound nothing, and generation 44 reached stage 13 and died there on
+    ``NameError: name 'chest' is not defined``, with the electronic-circuit
+    chain and the green-science chain both reading that name. The two paths
+    have to leave the same names behind, so the adopted cell's container is
+    read off the tile the construction path would have put it on:
+    ``mining_cell_reserve`` states that tile once, for both.
+
+    A container covering that tile wins; failing that, the nearest container
+    within ``BASELINE_CONTAINER_REACH`` of the cell, so a chest rebuilt one
+    tile over is still recognised as this cell's. Answers None when the world
+    was not surveyed or holds no container there -- which is a reading, not a
+    chest measured to be empty, and the caller binds ``chest`` to None so the
+    name exists either way.
+    """
+    if survey is None or not drill_tiles:
+        return None
+    tiles = frozenset(drill_tiles)
+    reserved = set(mining_cell_reserve(tiles))
+    anchor = tiles_center(tiles)
+    best: tuple[tuple[bool, float, float, float], tuple[float, float], str] | None
+    best = None
+    for entity in survey.entities:
+        name = entity_name(entity)
+        if name not in CONTAINER_PROTOTYPES:
+            continue
+        position = entity_position(entity)
+        if position is None:
+            continue
+        covers = bool(
+            footprint_tiles(
+                entity=name,
+                position=position,
+                footprints=survey.footprints,
+            )
+            & reserved
+        )
+        distance = math.hypot(position[0] - anchor[0], position[1] - anchor[1])
+        if not covers and distance > BASELINE_CONTAINER_REACH:
+            continue
+        key = (not covers, distance, position[1], position[0])
+        if best is None or key < best[0]:
+            best = (key, position, name)
+    return None if best is None else (best[1], best[2])
 
 
 def survey_stage_supply(
@@ -1880,6 +1952,82 @@ def coal_quarantine_script(
     return "\n".join(lines)
 
 
+#: Coal the baseline cell is charged with, on either path. The cell runs on
+#: it for the whole settle window; the figure is the one the curriculum has
+#: always used and is kept identical between the two paths so the window they
+#: measure is the same window.
+BASELINE_DRILL_COAL = 20
+
+
+def baseline_build_script(
+    *,
+    center: tuple[float, float],
+    settle_seconds: int,
+) -> str:
+    """FLE script that builds the baseline mining cell from nothing.
+
+    Binds ``drill`` and ``chest``: every later stage that reaches into the
+    baseline cell reads those two names out of the FLE namespace, and
+    :func:`baseline_adopt_script` binds the same two for the same reason.
+    """
+    return f"""
+drill = place_entity(
+    Prototype.BurnerMiningDrill,
+    position=Position(x={center[0]}, y={center[1]}),
+    direction=Direction.DOWN,
+)
+drill = insert_item(Prototype.Coal, drill, quantity={BASELINE_DRILL_COAL})
+chest = place_entity_next_to(
+    Prototype.WoodenChest,
+    drill.position,
+    direction=Direction.DOWN,
+)
+sleep({settle_seconds})
+print({{'chest_inventory': inspect_inventory(chest)}})
+"""
+
+
+def baseline_adopt_script(
+    *,
+    drill_position: tuple[float, float],
+    container: tuple[tuple[float, float], str] | None,
+    settle_seconds: int,
+) -> str:
+    """FLE script that commissions the mining cell the world already holds.
+
+    Placing here is what stalled the loop -- the tiles are taken -- so the
+    cell is fuelled and measured instead of rebuilt.
+
+    It binds the names :func:`baseline_build_script` binds, and that parity is
+    the contract: a name that exists only when the cell was built is a trap
+    for every stage downstream. Generation 44 walked into it at stage 13,
+    ``NameError: name 'chest' is not defined``, with stages 13 and 14 both
+    reading the name. A world with no container on the cell's tiles binds
+    ``chest`` to None, which a stage can test; a name that was never bound
+    cannot be tested at all.
+    """
+    if container is None:
+        chest_binding = "chest = None"
+    else:
+        position, name = container
+        chest_binding = (
+            "chest = get_entity(\n"
+            f"    Prototype.{container_prototype(name)},\n"
+            f"    Position(x={position[0]}, y={position[1]}),\n"
+            ")"
+        )
+    return f"""
+drill = get_entity(
+    Prototype.BurnerMiningDrill,
+    Position(x={drill_position[0]}, y={drill_position[1]}),
+)
+drill = insert_item(Prototype.Coal, drill, quantity={BASELINE_DRILL_COAL})
+{chest_binding}
+sleep({settle_seconds})
+print({{'drill_fuel': inspect_inventory(drill)}})
+"""
+
+
 def stage_baseline(
     executor: TransactionalFLEExecutor,
     env: Any,
@@ -1934,7 +2082,16 @@ print({'iron': iron, 'patch': patch})
     )
 
     fast_reposition(env, x=center[0], y=center[1])
-    inherited_drill = inherited_mining_cell(env, center)
+    # One survey serves both decisions: which cell is standing here, and which
+    # container it drops into. Two reads would decide against two worlds.
+    survey = survey_world(env)
+    inherited_cell = inherited_mining_cell(survey, center)
+    inherited_drill = None if inherited_cell is None else inherited_cell.position
+    inherited_container = (
+        None
+        if inherited_cell is None
+        else inherited_cell_container(survey, inherited_cell.tiles)
+    )
     journal.state["next_action"] = (
         "commission the inherited mining cell"
         if inherited_drill is not None
@@ -1959,31 +2116,16 @@ print({'iron': iron, 'patch': patch})
         # The cell is already standing and the tiles are taken. Fuel it and
         # measure it: placing here is exactly what stalled the loop, and
         # rebuilding what already works would produce no evidence anyway.
-        code = f"""
-drill = get_entity(
-    Prototype.BurnerMiningDrill,
-    Position(x={inherited_drill[0]}, y={inherited_drill[1]}),
-)
-drill = insert_item(Prototype.Coal, drill, quantity=20)
-sleep({settle_seconds})
-print({{'drill_fuel': inspect_inventory(drill)}})
-"""
+        code = baseline_adopt_script(
+            drill_position=inherited_drill,
+            container=inherited_container,
+            settle_seconds=settle_seconds,
+        )
     else:
-        code = f"""
-drill = place_entity(
-    Prototype.BurnerMiningDrill,
-    position=Position(x={center[0]}, y={center[1]}),
-    direction=Direction.DOWN,
-)
-drill = insert_item(Prototype.Coal, drill, quantity=20)
-chest = place_entity_next_to(
-    Prototype.WoodenChest,
-    drill.position,
-    direction=Direction.DOWN,
-)
-sleep({settle_seconds})
-print({{'chest_inventory': inspect_inventory(chest)}})
-"""
+        code = baseline_build_script(
+            center=center,
+            settle_seconds=settle_seconds,
+        )
     step = executor.execute(
         code,
         accept=accept_baseline,
@@ -2018,6 +2160,19 @@ print({{'chest_inventory': inspect_inventory(chest)}})
         journal.state["metrics"]["inherited_iron_output"] = measurement["iron_output"]
         journal.state["metrics"]["inherited_iron_rate_per_s"] = iron_rate
         journal.state["metrics"]["inherited_baseline_reward"] = step.reward
+        # Which container the commissioned cell delivers into, under the name
+        # the stages downstream read it by. None is a reading: the cell's
+        # tiles were surveyed and held no container, and ``chest`` was bound
+        # to None rather than left undefined.
+        journal.state["metrics"]["inherited_baseline_container"] = (
+            None
+            if inherited_container is None
+            else {
+                "x": inherited_container[0][0],
+                "y": inherited_container[0][1],
+                "name": inherited_container[1],
+            }
+        )
     else:
         journal.state["metrics"]["baseline_iron_output"] = measurement["iron_output"]
         journal.state["metrics"]["baseline_iron_rate_per_s"] = iron_rate
@@ -3607,21 +3762,26 @@ def stage_belt_smelting(
 
     plate_before = production_output(namespace, "iron-plate")
     clock = _StageClock(env)
-    measured: dict[str, float] = {
-        "iron_plate_before": plate_before,
-        "iron_plate_output": 0.0,
+    measured: dict[str, Any] = {
+        "iron_plate_world_before": plate_before,
     }
 
     def validate_belt_smelting(result: Any) -> bool:
         clock.stop()
         plate_after = production_output(namespace, "iron-plate")
-        delta = max(0.0, plate_after - plate_before)
-        measured["iron_plate_after"] = plate_after
-        measured["iron_plate_output"] = delta
+        measured["iron_plate_world_after"] = plate_after
+        # The world counter over this window also carries the probe furnace
+        # stage 3 left burning and every furnace the inherited factory runs,
+        # so it is recorded as world flow and gates nothing.
+        measured["iron_plate_world_flow"] = max(0.0, plate_after - plate_before)
+        measured["belt_plate_output"] = _namespace_measure(
+            namespace,
+            "belt_plates",
+        )
         return (
             not bool(result.info.get("error_occurred"))
             and result.candidate_game_state is not None
-            and delta > 0
+            and _measured_above(measured, "belt_plate_output")
         )
 
     fast_reposition(
@@ -3666,10 +3826,16 @@ if belt_furnace_fuel>0:
         belt_furnace,
         quantity=belt_furnace_fuel,
     )
+belt_plates_before=inspect_inventory(belt_furnace)[Prototype.IronPlate]
 sleep({settle_seconds})
+belt_plates=max(
+    0,
+    inspect_inventory(belt_furnace)[Prototype.IronPlate]-belt_plates_before,
+)
 print({{
     'buffer': inspect_inventory(buffer_chest),
     'furnace': inspect_inventory(belt_furnace),
+    'belt_plates': belt_plates,
     'belt_inserter_fuel': belt_inserter_fuel,
     'belt_furnace_fuel': belt_furnace_fuel,
     'supply_fuel_drawn': supply_fuel_drawn,
@@ -3681,6 +3847,12 @@ print({{
         use_checkpoint_for_action=False,
     )
 
+    journal.state["metrics"]["belt_smelting_plate_world_flow"] = measured.get(
+        "iron_plate_world_flow"
+    )
+    journal.state["metrics"]["belt_smelting_plate_basis"] = (
+        BELT_SMELTING_OUTPUT_BASIS
+    )
     if not step.accepted:
         journal.fail_stage(
             5,
@@ -3689,11 +3861,14 @@ print({{
         journal.event(
             "reject",
             "Belt-fed smelting integration rejected and rolled back.",
-            iron_plate_output=measured["iron_plate_output"],
+            # None, never 0.0: a step that aborted before the furnace was read
+            # did not measure an empty furnace.
+            iron_plate_output=measured.get("belt_plate_output"),
+            iron_plate_world_flow=measured.get("iron_plate_world_flow"),
         )
         return False
 
-    plates = measured["iron_plate_output"]
+    plates = float(measured["belt_plate_output"])
     # The direct-feed baseline is a reading stage 3 either took or did not,
     # and ``metrics.get(key, 0.0)`` made the second case look like the first:
     # a baseline window of 0.0 seconds reaches rate_per_second, which raises
@@ -3746,6 +3921,8 @@ print({{
         "accept",
         "Buffered belt-fed smelting accepted.",
         iron_plate_output=plates,
+        iron_plate_world_flow=measured.get("iron_plate_world_flow"),
+        output_basis=BELT_SMELTING_OUTPUT_BASIS,
         direct_feed_output=direct,
         throughput_rate_ratio=ratio,
         belt_plate_rate_per_s=belt_rate,
@@ -3760,6 +3937,7 @@ print({{
             "turns": logistics["turns"],
             "route_cost": logistics["route_cost"],
             "belt_smelting_plate_output": plates,
+            "belt_smelting_plate_basis": BELT_SMELTING_OUTPUT_BASIS,
             "belt_smelting_duration_s": window,
             "belt_smelting_plate_rate_per_s": belt_rate,
             "direct_feed_plate_output": direct,
@@ -5916,19 +6094,30 @@ def _bootstrap_vault_release_script() -> str:
     stalled with every burner machine at coal=0. The stock is released only
     after the coal and survival gates have already been decided, so the
     endogenous-fuel evidence those stages produced stays intact.
+
+    What comes back out is what this generation put in, never the stock the
+    container held. In a world that already has a factory the quarantine is a
+    container the world was already using -- ``quarantine_container`` picks
+    one rather than placing one, because an heir carries no chest -- and the
+    coal beside the bootstrap coal in it is the ancestor's, feeding a chain
+    this stage may not empty. ``bootstrap_quarantine`` is the amount that went
+    in, bound by the same script that put it there, and it is the ceiling
+    here.
     """
     return """
 fuel_vault_stock=0
+fuel_vault_claim=0
 fuel_vault_released=0
 fuel_vault_note=''
 try:
     move_to(bootstrap_vault.position)
     fuel_vault_stock=inspect_inventory(bootstrap_vault)[Prototype.Coal]
-    if fuel_vault_stock>0:
+    fuel_vault_claim=min(fuel_vault_stock,bootstrap_quarantine)
+    if fuel_vault_claim>0:
         fuel_vault_released=extract_item(
             Prototype.Coal,
             bootstrap_vault,
-            quantity=fuel_vault_stock,
+            quantity=fuel_vault_claim,
         )
 except Exception as fuel_vault_exc:
     fuel_vault_note=str(fuel_vault_exc)[:120].replace('rror','rr0r').replace('xception','xcepti0n')
@@ -6123,6 +6312,7 @@ print({
         "fuel_fed_count",
         "fuel_coal_loaded_total",
         "fuel_vault_stock",
+        "fuel_vault_claim",
         "fuel_vault_released",
     ):
         value = getattr(namespace, key, None)
@@ -6145,6 +6335,10 @@ print({
         "coal_loaded_total": measured["fuel_coal_loaded_total"],
         "coal_carried_before": measured["fuel_stock"],
         "vault_stock": measured["fuel_vault_stock"],
+        # What the release was allowed to take: the coal this generation
+        # quarantined, never the whole stock of a container the world was
+        # already using.
+        "vault_claim": measured["fuel_vault_claim"],
         "vault_released": measured["fuel_vault_released"],
         "vault_note": (
             str(vault_note)[:200] or None if vault_note is not None else None

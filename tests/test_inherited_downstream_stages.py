@@ -351,6 +351,11 @@ INHERITED_PLATE_FLOW = 40.0
 #: What one furnace of this generation actually smelts in the window.
 PROBE_PLATE_FLOW = 7.0
 
+#: What the belt-fed furnace of stage 5 actually smelts in its own window.
+#: Distinct from both numbers above on purpose: the stage is only measuring
+#: itself if its reading matches this one and not their sum.
+BELT_PLATE_FLOW = 9.0
+
 #: What one cell of this generation actually mines into its own container.
 CELL_ORE_FLOW = 31.0
 
@@ -382,6 +387,7 @@ class _FakeExecutor:
             "logistics_inserter_fuel",
             "belt_inserter_fuel",
             "belt_furnace_fuel",
+            "belt_plates",
             "supply_fuel_drawn",
             "supply_fuel_log",
             "supply_container_recovered",
@@ -462,6 +468,7 @@ class _FakeExecutor:
         self.namespace.logistics_inserter_fuel = 10.0
         self.namespace.belt_inserter_fuel = 10.0
         self.namespace.belt_furnace_fuel = 20.0
+        self.namespace.belt_plates = BELT_PLATE_FLOW
         return True
 
     def execute(
@@ -943,6 +950,80 @@ def test_the_belt_smelting_script_trips_no_fle_failure_trigger() -> None:
     _, executor, _ = _belt_smelting()
 
     assert _no_triggers(_belt_script(executor)) == []
+
+
+def test_belt_smelting_counts_its_own_furnace_and_not_the_world() -> None:
+    """The plate counter carries the furnace stage 3 left burning.
+
+    Stage 3 of this same generation leaves a fuelled probe furnace running,
+    and the inherited factory smelts throughout. Reading the world counter
+    credited stage 5 with both and then compared the result against stage 3 --
+    the same plates on both sides of the comparison. The furnace this stage
+    placed is read before and after its own window instead, which is what
+    stages 3, 6, 7 and 8 already do.
+    """
+    accepted, _, journal = _belt_smelting()
+    metrics = journal.state["metrics"]
+
+    assert accepted
+    assert metrics["belt_smelting_plate_output"] == BELT_PLATE_FLOW
+    assert metrics["belt_smelting_plate_basis"] == "belt_furnace_contents"
+    # The world flow over the same window is recorded, and it is a different
+    # number: it gates nothing and is not this cell's output.
+    assert metrics["belt_smelting_plate_world_flow"] == (
+        INHERITED_PLATE_FLOW + PROBE_PLATE_FLOW
+    )
+
+
+def test_belt_smelting_refuses_a_window_its_own_furnace_never_reported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A furnace that was never read did not smelt zero plates.
+
+    The world counter keeps moving whatever the step did, so accepting on it
+    accepted windows in which this cell produced nothing measurable.
+    """
+    world = _FakeWorld()
+    env = _FakeEnv(world)
+    executor = _FakeExecutor(env)
+    journal = _FakeJournal()
+    assert curriculum_runner.stage_smelting_probe(
+        executor,
+        env,
+        journal,
+        center=CENTRE,
+        settle_seconds=24,
+        region=PATCH_BOUNDS,
+    )
+    logistics = curriculum_runner.stage_astar_logistics(
+        executor,
+        env,
+        journal,
+        center=CENTRE,
+        settle_seconds=20,
+        turn_penalty=0.5,
+        region=PATCH_BOUNDS,
+    )
+    assert logistics is not None
+    original = _FakeExecutor._run
+
+    def _run_without_reading_the_furnace(self: _FakeExecutor, code: str) -> bool:
+        done = original(self, code)
+        if hasattr(self.namespace, "belt_plates"):
+            delattr(self.namespace, "belt_plates")
+        return done
+
+    monkeypatch.setattr(_FakeExecutor, "_run", _run_without_reading_the_furnace)
+    accepted = curriculum_runner.stage_belt_smelting(
+        executor,
+        env,
+        journal,
+        logistics=logistics,
+        settle_seconds=20,
+    )
+
+    assert not accepted
+    assert journal.state["metrics"]["belt_smelting_plate_world_flow"] > 0
 
 
 def test_belt_smelting_without_a_direct_feed_baseline_reports_no_comparison() -> None:

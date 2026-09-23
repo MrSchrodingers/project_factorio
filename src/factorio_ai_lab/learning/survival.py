@@ -9,8 +9,20 @@ from factorio_ai_lab.learning.autonomy import evaluate_factory_autonomy
 #: Rates divided by the literal argument of sleep().
 RATE_PROTOCOL_SLEEP_LITERAL = "sleep_literal_v1"
 
-#: Rates divided by the game time observed across the step.
+#: Rates divided by the game time observed across the step, with the output
+#: read off the world production counter.
 RATE_PROTOCOL_OBSERVED_WINDOW = "observed_window_v2"
+
+#: Same window, but the output is read from the cell the stage itself built
+#: instead of the world counter. In a world inherited from a promoted
+#: ancestor the counter also sums machines this generation did not build:
+#: measured in generation 46, the belt smelting stage reported 7 plates of
+#: its own against 83 on the counter, so 91% of the old figure belonged to
+#: the ancestor. The smaller number is the better measurement, which is
+#: exactly why it cannot be compared against a floor established by the
+#: larger one -- that would reject a challenger for a change of instrument
+#: and make the incumbent unbeatable for a reason unrelated to the factory.
+RATE_PROTOCOL_CELL_ATTRIBUTED = "cell_attributed_v3"
 
 #: The material moved through machines for the whole measured window: the
 #: agent placed and fuelled the cell before the window opened and handled no
@@ -1099,7 +1111,7 @@ def fitness_from_research(
 
     return FitnessVector(
         # Built from the observed game window, not from the sleep literal.
-        measurement_protocol=RATE_PROTOCOL_OBSERVED_WINDOW,
+        measurement_protocol=RATE_PROTOCOL_CELL_ATTRIBUTED,
         capabilities=capabilities,
         inherited_capabilities=inherited_names,
         inherited_capabilities_source=inherited_source,

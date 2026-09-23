@@ -28,25 +28,43 @@ RUNNER = (
 TRIGGERS = ("error", "exception: ")
 
 
+def _script_text(value: ast.AST | None) -> str | None:
+    if isinstance(value, ast.Constant) and isinstance(value.value, str):
+        return value.value
+    if isinstance(value, ast.JoinedStr):
+        return "".join(
+            piece.value
+            if isinstance(piece, ast.Constant) and isinstance(piece.value, str)
+            else "0"
+            for piece in value.values
+        )
+    return None
+
+
 def _embedded_scripts() -> list[tuple[int, str]]:
+    """Every script the runner hands the engine, in both shapes it has.
+
+    A stage assigns its script to ``code``; a script builder returns one. The
+    second shape exists because the two paths of stage 0 have to be
+    comparable name by name, which they are only when each is a function that
+    can be called and read. A probe that knew only the first shape would have
+    quietly stopped covering them, and this file is the guard whose silence
+    is indistinguishable from safety.
+    """
     tree = ast.parse(RUNNER.read_text(encoding="utf-8"))
     found: list[tuple[int, str]] = []
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Assign):
-            continue
-        if "code" not in [t.id for t in node.targets if isinstance(t, ast.Name)]:
-            continue
-        value = node.value
-        if isinstance(value, ast.Constant) and isinstance(value.value, str):
-            found.append((node.lineno, value.value))
-        elif isinstance(value, ast.JoinedStr):
-            parts = [
-                piece.value
-                if isinstance(piece, ast.Constant) and isinstance(piece.value, str)
-                else "0"
-                for piece in value.values
+        if isinstance(node, ast.Assign):
+            named_code = "code" in [
+                target.id for target in node.targets if isinstance(target, ast.Name)
             ]
-            found.append((node.lineno, "".join(parts)))
+            text = _script_text(node.value) if named_code else None
+        elif isinstance(node, ast.Return):
+            text = _script_text(node.value)
+        else:
+            continue
+        if text is not None and ("Prototype." in text or "Resource." in text):
+            found.append((node.lineno, text))
     return found
 
 
@@ -67,6 +85,18 @@ def _assigned_names(source: str) -> set[str]:
 
 def test_scripts_were_found() -> None:
     assert len(SCRIPTS) >= 10, f"apenas {len(SCRIPTS)} scripts extraidos"
+
+
+def test_both_paths_of_the_baseline_cell_are_covered() -> None:
+    # Guard the instrument. Stage 0 builds its cell or commissions the one it
+    # inherited, and only one of those was ever written as ``code = ...``.
+    sources = [source for _, source in SCRIPTS]
+    assert any("place_entity(\n    Prototype.BurnerMiningDrill" in s for s in sources), (
+        "o script que constroi a celula base saiu da cobertura"
+    )
+    assert any("get_entity(\n    Prototype.BurnerMiningDrill" in s for s in sources), (
+        "o script que comissiona a celula herdada saiu da cobertura"
+    )
 
 
 @pytest.mark.parametrize("lineno,source", SCRIPTS, ids=[str(n) for n, _ in SCRIPTS])

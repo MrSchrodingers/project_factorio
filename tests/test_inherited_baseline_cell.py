@@ -18,6 +18,13 @@ with the inheritance is not something this genome built, so the stage records
 its flow apart from ``baseline_iron_rate_per_s``, the key that
 ``survival.fitness_from_research`` credits as endogenous iron-ore output of
 this generation.
+
+Recognising it is also not enough. The cell is a drill and the container it
+drops into, and the construction path binds both under names the stages
+downstream read: generation 44 ran thirteen stages and died on ``NameError:
+name 'chest' is not defined`` because the adoption path bound only the drill.
+The two paths leave the same names behind, and the container is found on the
+tile the construction path would have put it on.
 """
 
 from __future__ import annotations
@@ -202,23 +209,28 @@ def _offline_lesson(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def test_the_survey_finds_the_drill_the_ancestor_left_on_the_baseline_tiles() -> None:
-    found = curriculum_runner.inherited_mining_cell(
-        _world([INHERITED_DRILL, INHERITED_CHEST]),
+def _adopted(entities: list[dict[str, Any]]) -> Any:
+    """The adoption plan for a world, or None when there is nothing to adopt."""
+    return curriculum_runner.inherited_mining_cell(
+        curriculum_runner.survey_world(_world(entities)),
         CENTRE,
     )
-    assert found == CENTRE
+
+
+def test_the_survey_finds_the_drill_the_ancestor_left_on_the_baseline_tiles() -> None:
+    found = _adopted([INHERITED_DRILL, INHERITED_CHEST])
+    assert found is not None
+    assert found.position == CENTRE
 
 
 def test_the_survey_answers_none_when_nothing_was_built() -> None:
-    assert curriculum_runner.inherited_mining_cell(_world([]), CENTRE) is None
+    assert _adopted([]) is None
 
 
 def test_a_drill_clear_of_the_baseline_tiles_is_not_adopted() -> None:
     # Placing at the centre still succeeds, so there is nothing to adopt and
     # the stage has to keep building.
-    found = curriculum_runner.inherited_mining_cell(_world([DISTANT_DRILL]), CENTRE)
-    assert found is None
+    assert _adopted([DISTANT_DRILL]) is None
 
 
 def test_the_survey_reads_tiles_not_the_centre_point() -> None:
@@ -230,8 +242,54 @@ def test_the_survey_reads_tiles_not_the_centre_point() -> None:
         "position": {"x": 28.0, "y": 83.0},
         "direction": 4,
     }
-    found = curriculum_runner.inherited_mining_cell(_world([overlapping]), CENTRE)
-    assert found == (28.0, 83.0)
+    found = _adopted([overlapping])
+    assert found is not None
+    assert found.position == (28.0, 83.0)
+
+
+def test_the_container_of_the_adopted_cell_is_found_on_the_tile_it_stands_on() -> None:
+    found = _adopted([INHERITED_DRILL, INHERITED_CHEST])
+    assert found is not None
+    container = curriculum_runner.inherited_cell_container(
+        curriculum_runner.survey_world(_world([INHERITED_DRILL, INHERITED_CHEST])),
+        found.tiles,
+    )
+    assert container == ((27.5, 84.5), "wooden-chest")
+
+
+def test_a_cell_whose_container_is_gone_reports_no_container() -> None:
+    # The drill is standing and nothing receives its ore. That is a reading
+    # about the world, not a container measured to be empty, and the stage
+    # binds the name to None rather than leaving it undefined.
+    found = _adopted([INHERITED_DRILL])
+    assert found is not None
+    assert (
+        curriculum_runner.inherited_cell_container(
+            curriculum_runner.survey_world(_world([INHERITED_DRILL])),
+            found.tiles,
+        )
+        is None
+    )
+
+
+def test_the_neighbouring_cell_container_is_not_taken_for_this_one() -> None:
+    # The inherited world holds a second mining cell at (32, 83) with its own
+    # chest at (32.5, 84.5). Reading that one would hand stage 13 the wrong
+    # buffer and credit this cell with the ore the other one mined.
+    neighbour = {
+        "name": "wooden-chest",
+        "position": {"x": 32.5, "y": 84.5},
+        "direction": 0,
+    }
+    found = _adopted([INHERITED_DRILL, neighbour])
+    assert found is not None
+    assert (
+        curriculum_runner.inherited_cell_container(
+            curriculum_runner.survey_world(_world([INHERITED_DRILL, neighbour])),
+            found.tiles,
+        )
+        is None
+    )
 
 
 def test_an_inherited_cell_is_not_rebuilt() -> None:
@@ -246,6 +304,31 @@ def test_an_inherited_cell_is_not_rebuilt() -> None:
     )
     assert journal.completed, "o estagio herdado nao foi concluido"
     assert journal.state["metrics"]["baseline_cell_origin"] == "inherited"
+
+
+def test_the_commissioned_cell_binds_the_container_for_the_stages_after_it() -> None:
+    """The name generation 44 died on, bound on the path that killed it."""
+    executor, journal = _run_stage(
+        _world([INHERITED_DRILL, INHERITED_CHEST]),
+        tiles_occupied=True,
+    )
+    commissioning = executor.scripts[-1]
+
+    assert "chest = get_entity(" in commissioning
+    assert "Position(x=27.5, y=84.5)" in commissioning
+    assert journal.state["metrics"]["inherited_baseline_container"] == {
+        "x": 27.5,
+        "y": 84.5,
+        "name": "wooden-chest",
+    }
+
+
+def test_a_commissioned_cell_with_no_container_binds_the_name_anyway() -> None:
+    executor, journal = _run_stage(_world([INHERITED_DRILL]), tiles_occupied=True)
+    commissioning = executor.scripts[-1]
+
+    assert "chest = None" in commissioning
+    assert journal.state["metrics"]["inherited_baseline_container"] is None
 
 
 def test_an_empty_world_is_still_built_from_scratch() -> None:
