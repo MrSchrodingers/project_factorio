@@ -34,6 +34,26 @@ from factorio_ai_lab.learning.knowledge import (
     recall_verified_lessons,
     verify_generated_knowledge,
 )
+from factorio_ai_lab.learning.repair_loop import (
+    INTENT_ATTACH_TO_LIVE_NETWORK,
+    INTENT_EXTEND_POWER_SUPPLY,
+    INTENT_INSERT_FUEL,
+    TOOL_PLACEMENT,
+    TOOL_RESUPPLY,
+    MachineReport,
+    RepairObservation,
+    RepairPlan,
+    RepairStep,
+    detect_deficits,
+    diagnose,
+    machine_reports_from_diagnostics,
+    order_steps,
+    produces_into_live_chain,
+    propose_actions,
+    record_repair,
+    select_action,
+    symptom_key,
+)
 from factorio_ai_lab.learning.spatial_policy import SpatialPolicy, route_cost
 from factorio_ai_lab.learning.survival import (
     FitnessVector,
@@ -97,6 +117,10 @@ EVOLUTION_CHAMPION = RUNS_DIR / "evolution_champion.json"
 EVOLUTION_HISTORY = RUNS_DIR / "evolution_history.jsonl"
 GENERATION_REPORTS = RUNS_DIR / "generation_reports"
 NICHE_ARCHIVE = RUNS_DIR / "niche_archive.json"
+#: Every repair this lab attempted, one row per action, appended forever. It
+#: is the only memory the repair cycle has: without it each generation
+#: re-decides which tool answers a symptom from nothing.
+REPAIR_LEDGER = RUNS_DIR / "repairs.jsonl"
 
 #: Where the parent of a mutation came from, as written in the report.
 PARENT_SOURCE_ARCHIVE = "niche_archive"
@@ -7832,6 +7856,835 @@ def finalize_evolution_selection(
     return decision.to_dict()
 
 
+# ---------------------------------------------------------------------------
+# Repair point.
+#
+# Until here a failed stage ended the generation, and a human read the report,
+# named the defect and wrote the branch that answered that one flow -- six
+# times in one day. `factorio_ai_lab.learning.repair_loop` already decides the
+# repair from the readings this runner takes; what it lacked was a caller.
+# This is the caller. It observes the live world, lets the loop detect,
+# propose and order, executes the actions the runner's tools already cover,
+# retries the stage once and writes what was predicted against what happened.
+# ---------------------------------------------------------------------------
+
+#: How many repaired retries one stage, and one whole generation, may spend.
+#: A repair cycle that does not stop is worse than the failure it answers: the
+#: generation would spend its horizon retrying one stage and measure nothing.
+#: One retry per stage is what the evidence supports -- a second attempt at the
+#: same symptom repeats an action already scored against the same world -- and
+#: three per generation bounds the whole cycle to about three stage windows.
+REPAIR_ATTEMPTS_PER_STAGE = 1
+REPAIR_ATTEMPTS_PER_GENERATION = 3
+
+#: How many ordered steps one attempt executes. The order is by derived
+#: prerequisite, so what falls outside the cap is what nothing depended on;
+#: it is recorded as not executed with its reason, never dropped.
+REPAIR_STEPS_PER_ATTEMPT = 3
+
+#: Exploration constant of the bandit that reads the repair ledger. The same
+#: default the placement bandit runs with, so the two are comparable.
+REPAIR_EXPLORATION = 2.0
+
+#: How many standing containers one refuel reads before it gives up looking.
+#: Each one costs an RCON round trip, and the nearest few are where a repair
+#: draws from anyway.
+REPAIR_FUEL_SOURCE_LIMIT = 6
+
+#: Coal one repair puts into one starved burner, sized from the burner profile
+#: over a tenth of the generation horizon. That lands inside the range of the
+#: curriculum's own doses (12 to 40 coal), which are sized to outlast a stage
+#: window: a repair has the same job, for the stage about to be retried. Every
+#: insert is clamped by what the agent actually holds, so a world short of coal
+#: feeds the machines it can and leaves the rest measured as still starved.
+REPAIR_FUEL_SECONDS = LAB_GENERATION_HORIZON_SECONDS / 10.0
+REPAIR_FUEL_DOSE = max(
+    1,
+    math.ceil(BURNER_MINING_DRILL.coal_for_seconds(REPAIR_FUEL_SECONDS)),
+)
+
+#: Diagnostics blocks that describe individual machines, read as machine
+#: reports so a stalled assembler is a deficit the loop can name. The block is
+#: whatever the stage that wrote it last measured: it is the journal's, not the
+#: live world's, and a prediction made against it is resolved under this same
+#: prefix so both halves agree where the number lives.
+REPAIR_MACHINE_REPORT_BLOCKS: tuple[str, ...] = ("electronic_circuit_diagnostics",)
+
+#: Entities a repair may address, under the prototype name a script asks for.
+#: An entity absent from here is recorded as unrepaired with its reason rather
+#: than guessed at: `Prototype.<PascalCase>` is right for most of the catalogue
+#: and wrong for enough of it (`pumpjack` is `PumpJack`) that deriving it would
+#: fail inside the game, where the failure reads as the repair not working.
+REPAIR_PROTOTYPES: dict[str, str] = {
+    "assembling-machine-1": "AssemblingMachine1",
+    "assembling-machine-2": "AssemblingMachine2",
+    "boiler": "Boiler",
+    "burner-inserter": "BurnerInserter",
+    "burner-mining-drill": "BurnerMiningDrill",
+    "electric-furnace": "ElectricFurnace",
+    "electric-mining-drill": "ElectricMiningDrill",
+    "lab": "Lab",
+    "steel-furnace": "SteelFurnace",
+    "stone-furnace": "StoneFurnace",
+}
+
+#: Why an ordered step did not run. A refusal is a result: a deficit nobody
+#: could repair is exactly what the ledger has to keep, so the gap is closed on
+#: purpose instead of being rediscovered by the next generation.
+REPAIR_NO_BINDING = "no_runner_binding_for_intent"
+REPAIR_NO_TARGET = "action_named_no_repairable_entity"
+REPAIR_NO_FUEL = "world_and_agent_hold_no_fuel"
+REPAIR_REJECTED = "step_rejected_by_the_executor"
+REPAIR_REMOVAL_UNPROVEN = "removal_not_proven_to_cut_no_live_chain"
+REPAIR_WORLD_UNREAD = "world_could_not_be_read"
+REPAIR_ATTEMPT_BUDGET_SPENT = "repair_attempt_budget_spent"
+REPAIR_STEP_BUDGET_SPENT = "repair_step_budget_spent"
+
+#: Refusals that cost the world nothing, decided over the graph before any
+#: script ran. They do not draw on the step budget: what that budget bounds is
+#: how often one attempt touches the game, and these never did.
+REPAIR_COSTLESS_REFUSALS = frozenset(
+    {REPAIR_NO_BINDING, REPAIR_NO_TARGET, REPAIR_REMOVAL_UNPROVEN}
+)
+
+#: What decided between two candidate actions for one symptom. Stated in every
+#: row because "the fixed rule chose" and "the ledger chose" are different
+#: claims about the same decision, and an implicit fallback reads as learning
+#: that never happened.
+REPAIR_CHOICE_FIXED_RULE = "fixed_rule_no_history"
+REPAIR_CHOICE_HISTORY = "repair_ledger_ucb1"
+
+
+@dataclass
+class RepairBudget:
+    """How much repairing one generation has left, per stage and in total."""
+
+    per_stage: int = REPAIR_ATTEMPTS_PER_STAGE
+    per_generation: int = REPAIR_ATTEMPTS_PER_GENERATION
+    spent_by_stage: dict[str, int] = field(default_factory=dict)
+    spent: int = 0
+
+    def allows(self, stage: str) -> bool:
+        return (
+            self.spent < self.per_generation
+            and self.spent_by_stage.get(stage, 0) < self.per_stage
+        )
+
+    def spend(self, stage: str) -> None:
+        self.spent_by_stage[stage] = self.spent_by_stage.get(stage, 0) + 1
+        self.spent += 1
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "attempts_spent": self.spent,
+            "attempts_per_stage": self.per_stage,
+            "attempts_per_generation": self.per_generation,
+            "spent_by_stage": dict(self.spent_by_stage),
+        }
+
+
+def live_factory_graph(env: Any) -> dict[str, Any] | None:
+    """The factory as it stands right now, nodes and edges included.
+
+    The stored generation report keeps only the aggregate metrics of this
+    graph, and a repair read off aggregates cannot name the entity it would
+    refuel: it would know ten burners are dry and none of their positions. The
+    snapshot is therefore taken again here, over the same call the world survey
+    and the end-of-generation graph already use.
+
+    None when the world did not answer. An unread world is not an empty one,
+    and every caller here records the difference.
+    """
+    unwrapped = getattr(env, "unwrapped", env)
+    instance = getattr(unwrapped, "instance", None)
+    try:
+        entities = instance.namespace._save_entity_state(
+            distance=500,
+            player_entities=True,
+            resource_entities=False,
+            items_on_ground=False,
+            encode=False,
+            compress=False,
+        )
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+        return None
+    return build_factory_graph(
+        [entity for entity in (entities or ()) if isinstance(entity, Mapping)]
+    )
+
+
+def repair_observation(env: Any, journal: ResearchJournal) -> RepairObservation | None:
+    """Everything one repair cycle may read: the live graph and the machines.
+
+    The graph comes from the world, never from the report, because only the
+    world names entities. The machine reports come from the diagnostics blocks
+    the stages wrote, because a machine's own window -- what it held before and
+    after, what its status said -- is not in the graph at all.
+    """
+    graph = live_factory_graph(env)
+    if graph is None:
+        return None
+    metrics = journal.state.get("metrics", {})
+    reports: list[MachineReport] = []
+    for block in REPAIR_MACHINE_REPORT_BLOCKS:
+        reports.extend(
+            machine_reports_from_diagnostics(
+                metrics.get(block),
+                metric_prefix=f"{block}.",
+            )
+        )
+    return RepairObservation(
+        graph=graph,
+        machine_reports=tuple(reports),
+        graph_metric_prefix="",
+    )
+
+
+def repair_measurements(
+    observation: RepairObservation,
+    journal: ResearchJournal,
+) -> dict[str, Any]:
+    """The one mapping both kinds of prediction are resolved against.
+
+    A graph prediction names ``fuel_starved_entities``; a machine prediction
+    names ``electronic_circuit_diagnostics.circuit_assembler.output_after``.
+    The first lives in the graph this observation was built from, the second in
+    the journal, so the reading handed to ``evaluate_prediction`` is both, with
+    the graph on top: of the two it is the one just measured.
+    """
+    return {
+        **dict(journal.state.get("metrics", {})),
+        **dict(observation.metrics),
+    }
+
+
+def read_repair_history(
+    path: Path | None = None,
+) -> dict[str, dict[str, list[float]]]:
+    """Every scored repair the ledger holds, as symptom -> action -> rewards.
+
+    Only rows that were executed and measured are counted. A row written for an
+    action nobody ran carries no evidence about that action, and folding its
+    absent reward into a zero would teach the chooser that an unbound tool is a
+    tool that failed.
+
+    Tolerant by construction: the file is appended to while a reader may be
+    holding it open, so a line that does not parse is the tail of a write in
+    flight and is skipped rather than raised on.
+    """
+    ledger = REPAIR_LEDGER if path is None else path
+    history: dict[str, dict[str, list[float]]] = {}
+    try:
+        raw_lines = ledger.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError):
+        return history
+    for raw in raw_lines:
+        line = raw.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(row, dict) or row.get("executed") is not True:
+            continue
+        symptom = row.get("symptom")
+        action = row.get("action_key")
+        outcome = row.get("outcome")
+        reward = outcome.get("reward") if isinstance(outcome, dict) else None
+        if not isinstance(symptom, str) or not isinstance(action, str):
+            continue
+        if isinstance(reward, bool) or not isinstance(reward, (int, float)):
+            continue
+        history.setdefault(symptom, {}).setdefault(action, []).append(float(reward))
+    return history
+
+
+def repair_scorer(
+    history: Mapping[str, Mapping[str, Sequence[float]]],
+    symptom: str,
+    arms: Sequence[str],
+) -> Callable[[str], float | None] | None:
+    """What the ledger has learned about these arms, as a score per arm.
+
+    None when the ledger holds nothing about any of them: the fixed rule in
+    ``select_action`` then decides, and the caller records that it did. An
+    empty history deciding silently would read exactly like a bandit that had
+    learned to prefer the first candidate.
+
+    An arm this symptom has never pulled scores infinite, which is UCB1's own
+    first rule: every arm is tried once before any mean is compared. Returning
+    None for it instead would hand it to ``select_action``, which drops
+    unscored arms whenever any arm has a score -- so one measured failure would
+    permanently retire every alternative that had never been tried.
+    """
+    measured = history.get(symptom) or {}
+    unique = tuple(dict.fromkeys(arms))
+    if not unique or not any(measured.get(arm) for arm in unique):
+        return None
+    bandit = UCB1Bandit(unique, exploration=REPAIR_EXPLORATION)
+    for arm in unique:
+        for reward in measured.get(arm) or ():
+            bandit.update(arm, float(reward))
+    stats = bandit.stats()
+
+    def score(key: str) -> float | None:
+        row = stats.get(key)
+        if row is None:
+            return None
+        return math.inf if row.pulls == 0 else row.ucb_score
+
+    return score
+
+
+def plan_stage_repairs(
+    observation: RepairObservation,
+    *,
+    history: Mapping[str, Mapping[str, Sequence[float]]],
+) -> tuple[RepairPlan, dict[str, str]]:
+    """Detect, diagnose, propose and order, choosing each action by the ledger.
+
+    The same composition ``plan_repairs`` performs, driven a step lower for one
+    reason: its ``score`` callback is handed an arm and nothing else, and an
+    arm scored without its symptom merges two different lessons -- refuelling a
+    boiler and refuelling a drill are one arm and two outcomes. Here each
+    proposal is scored against its own symptom, which is the pair the ledger is
+    indexed by.
+
+    Returns the plan and, per symptom, what decided its action.
+    """
+    proposals = tuple(
+        propose_actions(diagnose(deficit, observation), observation)
+        for deficit in detect_deficits(observation)
+    )
+    pairs: list[tuple[Any, Any]] = []
+    refusals: list[Any] = []
+    basis: dict[str, str] = {}
+    for proposal in proposals:
+        symptom = symptom_key(proposal.diagnosis)
+        score = repair_scorer(history, symptom, proposal.arms)
+        basis[symptom] = (
+            REPAIR_CHOICE_FIXED_RULE if score is None else REPAIR_CHOICE_HISTORY
+        )
+        chosen = select_action(proposal.candidates, score=score)
+        if chosen is None:
+            refusals.append(proposal)
+            continue
+        pairs.append((proposal, chosen))
+    plan = RepairPlan(
+        steps=order_steps(pairs),
+        refusals=tuple(refusals),
+        proposals=proposals,
+    )
+    return plan, basis
+
+
+def repair_entity_targets(
+    observation: RepairObservation,
+    identifiers: Sequence[str] | None,
+) -> tuple[tuple[str, str | None, float, float], ...]:
+    """Each named entity as (id, prototype or None, x, y), from the graph.
+
+    An identifier the graph does not hold is dropped: it named nothing this
+    world can be asked about. An entity the prototype table does not cover
+    keeps its position and answers None for the prototype, because a repair
+    that only needs a place to stand a pole does not need to name the machine.
+    """
+    nodes = {
+        str(node.get("id")): node
+        for node in observation.nodes
+        if isinstance(node.get("id"), str)
+    }
+    found: list[tuple[str, str | None, float, float]] = []
+    for identifier in identifiers or ():
+        node = nodes.get(str(identifier))
+        if node is None:
+            continue
+        x = node.get("x")
+        y = node.get("y")
+        if isinstance(x, bool) or isinstance(y, bool):
+            continue
+        if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
+            continue
+        found.append(
+            (
+                str(identifier),
+                REPAIR_PROTOTYPES.get(str(node.get("name", ""))),
+                float(x),
+                float(y),
+            )
+        )
+    return tuple(found)
+
+
+def repair_fuel_sources(
+    observation: RepairObservation,
+    instance: Any,
+    *,
+    anchor: tuple[float, float],
+) -> tuple[tuple[float, float, int], ...]:
+    """Containers that can spare coal, nearest to the starved machines first.
+
+    Only the surplus above ``FUEL_CHAIN_RESERVE_COAL`` is offered by a
+    container that feeds a chain, for the reason ``survey_stage_supply``
+    states: a draw is not a dismantling, but emptying the chest an inserter
+    pulls from stops the machine behind it, and that outage would be read as
+    this generation's own regression.
+    """
+    roles = sorted(
+        container_roles(observation.graph),
+        key=lambda role: (
+            math.hypot(role.position[0] - anchor[0], role.position[1] - anchor[1]),
+            role.position[1],
+            role.position[0],
+        ),
+    )[:REPAIR_FUEL_SOURCE_LIMIT]
+    sources: list[tuple[float, float, int]] = []
+    for role in roles:
+        available = _chest_item_count(
+            instance,
+            x=role.position[0],
+            y=role.position[1],
+            item=MINING_CELL_FUEL_ITEM,
+            container=role.name,
+        )
+        spare = available
+        if role.supplies_chain:
+            spare = available - int(FUEL_CHAIN_RESERVE_COAL)
+        if spare > 0:
+            sources.append((float(role.position[0]), float(role.position[1]), int(spare)))
+    return tuple(sources)
+
+
+def repair_refuel_code(
+    sources: Sequence[tuple[float, float, int]],
+    targets: Sequence[tuple[str, str | None, float, float]],
+    *,
+    dose: int,
+) -> str:
+    """Script that draws coal out of the standing world and feeds the starved.
+
+    Each draw and each insert is wrapped on its own: one container that will
+    not answer must not take down the inserts that would have worked, and one
+    machine that cannot be reached must not cost the others their charge. Every
+    insert is clamped by the inventory as it stands at that moment, so the
+    script never promises coal it no longer holds.
+
+    Whatever the engine says about a refused call is neutralised before it
+    travels in the payload: FLE marks a step failed on the substring ``error``
+    anywhere in what the script printed
+    (fle/env/gym_env/environment.py:451).
+    """
+    source_literal = ",".join(
+        f"({x},{y},{quantity})" for x, y, quantity in sources
+    )
+    target_literal = ",".join(
+        f"(Prototype.{prototype},{x},{y})"
+        for _, prototype, x, y in targets
+        if prototype is not None
+    )
+    code = f"""
+repair_sources=[{source_literal}]
+repair_targets=[{target_literal}]
+repair_drawn=0
+repair_inserted=0
+repair_log=[]
+repair_note=''
+for repair_source_x,repair_source_y,repair_spare in repair_sources:
+    try:
+        repair_short=max(0,{dose * max(1, len(targets))}-inspect_inventory()[Prototype.Coal])
+        if repair_short>0:
+            move_to(Position(x=repair_source_x,y=repair_source_y))
+            repair_drawn+=extract_item(
+                Prototype.Coal,
+                Position(x=repair_source_x,y=repair_source_y),
+                quantity=min(repair_short,repair_spare),
+            )
+    except Exception as repair_exc:
+        repair_note=(repair_note+' '+str(repair_exc)[:80])[:240].replace(
+            'rror','rr0r').replace('xception','xcepti0n')
+for repair_prototype,repair_x,repair_y in repair_targets:
+    try:
+        repair_dose=min({dose},inspect_inventory()[Prototype.Coal])
+        if repair_dose>0:
+            move_to(Position(x=repair_x,y=repair_y))
+            repair_machine=get_entity(repair_prototype,Position(x=repair_x,y=repair_y))
+            repair_machine=insert_item(
+                Prototype.Coal,
+                repair_machine,
+                quantity=repair_dose,
+            )
+            repair_inserted+=repair_dose
+            repair_log.append((repair_x,repair_y,repair_dose))
+    except Exception as repair_exc:
+        repair_note=(repair_note+' '+str(repair_exc)[:80])[:240].replace(
+            'rror','rr0r').replace('xception','xcepti0n')
+print({{
+    'repair_drawn':repair_drawn,
+    'repair_inserted':repair_inserted,
+    'repair_log':repair_log,
+    'repair_note':repair_note,
+}})
+"""
+    return code
+
+
+def repair_power_tap_code(
+    targets: Sequence[tuple[str, str | None, float, float]],
+) -> str:
+    """Script that stands one pole beside each machine that reported no power.
+
+    ``connect_entities`` stops laying poles once a position is inside the wire
+    reach of the network it is extending -- 9 tiles -- which is far wider than
+    the 3.5-tile area a machine actually draws from, so a line can report
+    success and end short of the machine
+    (fle/env/tools/agent/connect_entities/server.lua:446-450). One pole beside
+    the machine closes that gap, and a pole placed within wire reach joins the
+    network on its own.
+
+    The four sides are tried in a fixed order and the first that the engine
+    accepts ends that machine's turn, so a blocked tile costs one refusal
+    rather than the repair.
+    """
+    target_literal = ",".join(f"({x},{y})" for _, _, x, y in targets)
+    code = f"""
+repair_targets=[{target_literal}]
+repair_poles=0
+repair_pole_stock=inspect_inventory()[Prototype.MediumElectricPole]
+repair_note=''
+for repair_x,repair_y in repair_targets:
+    for repair_side in (Direction.LEFT,Direction.UP,Direction.RIGHT,Direction.DOWN):
+        if repair_pole_stock<1:
+            break
+        try:
+            move_to(Position(x=repair_x,y=repair_y))
+            repair_pole=place_entity_next_to(
+                Prototype.MediumElectricPole,
+                Position(x=repair_x,y=repair_y),
+                direction=repair_side,
+            )
+            repair_poles+=1
+            repair_pole_stock=inspect_inventory()[Prototype.MediumElectricPole]
+            break
+        except Exception as repair_exc:
+            repair_note=(repair_note+' '+str(repair_exc)[:80])[:240].replace(
+                'rror','rr0r').replace('xception','xcepti0n')
+print({{
+    'repair_poles':repair_poles,
+    'repair_pole_stock':repair_pole_stock,
+    'repair_note':repair_note,
+}})
+"""
+    return code
+
+
+def _repair_insert_fuel(
+    action: Any,
+    *,
+    observation: RepairObservation,
+    executor: TransactionalFLEExecutor,
+    env: Any,
+) -> tuple[bool, str | None, dict[str, Any]]:
+    """Put coal into the machines the graph measured as starved."""
+    targets = [
+        row
+        for row in repair_entity_targets(observation, action.targets)
+        if row[1] is not None
+    ]
+    if not targets:
+        return False, REPAIR_NO_TARGET, {}
+    instance = getattr(getattr(env, "unwrapped", env), "instance", None)
+    namespace = getattr(instance, "namespace", None)
+    carried = _carried_item_count(instance, MINING_CELL_FUEL_ITEM)
+    sources = repair_fuel_sources(
+        observation,
+        instance,
+        anchor=(targets[0][2], targets[0][3]),
+    )
+    if not sources and carried == 0:
+        # Measured on both sides: no container spares coal and the agent holds
+        # none. Refusing here keeps a step that could only fail out of the
+        # ledger, where it would read as this action not working.
+        return False, REPAIR_NO_FUEL, {"carried_coal": carried}
+    measured: dict[str, Any] = {"carried_coal": carried, "sources": len(sources)}
+
+    def validate(result: Any) -> bool:
+        measured["inserted"] = _namespace_measure(namespace, "repair_inserted")
+        measured["drawn"] = _namespace_measure(namespace, "repair_drawn")
+        note = _namespace_text(namespace, "repair_note")
+        measured["note"] = note[:200] if note else None
+        return (
+            not bool(result.info.get("error_occurred"))
+            and result.candidate_game_state is not None
+            and float(measured["inserted"] or 0.0) > 0.0
+        )
+
+    # Hand-feeding a machine is manual logistics, which is what the operation
+    # counters exist to measure. Booking it as infrastructure would make a
+    # repair look like the investment that removes future carrying.
+    step = executor.execute(
+        repair_refuel_code(sources, targets, dose=REPAIR_FUEL_DOSE),
+        accept=validate,
+        use_checkpoint_for_action=False,
+        purpose="operation",
+    )
+    if not step.accepted:
+        return False, REPAIR_REJECTED, measured
+    return True, None, measured
+
+
+def _repair_power_tap(
+    action: Any,
+    *,
+    observation: RepairObservation,
+    executor: TransactionalFLEExecutor,
+    env: Any,
+) -> tuple[bool, str | None, dict[str, Any]]:
+    """Stand a pole beside each machine that reported no power."""
+    targets = repair_entity_targets(observation, action.targets)
+    if not targets:
+        return False, REPAIR_NO_TARGET, {}
+    instance = getattr(getattr(env, "unwrapped", env), "instance", None)
+    namespace = getattr(instance, "namespace", None)
+    measured: dict[str, Any] = {"targets": len(targets)}
+
+    def validate(result: Any) -> bool:
+        measured["poles"] = _namespace_measure(namespace, "repair_poles")
+        measured["pole_stock"] = _namespace_measure(namespace, "repair_pole_stock")
+        note = _namespace_text(namespace, "repair_note")
+        measured["note"] = note[:200] if note else None
+        return (
+            not bool(result.info.get("error_occurred"))
+            and result.candidate_game_state is not None
+            and float(measured["poles"] or 0.0) > 0.0
+        )
+
+    # A pole is what the factory keeps: it is built once and carries power
+    # from then on, which is the investment the infrastructure counters are
+    # kept apart to measure.
+    step = executor.execute(
+        repair_power_tap_code(targets),
+        accept=validate,
+        use_checkpoint_for_action=False,
+        purpose="infrastructure",
+    )
+    if not step.accepted:
+        return False, REPAIR_REJECTED, measured
+    return True, None, measured
+
+
+#: Which runner function executes which named action. An intent absent from
+#: here is a tool the loop can name and the runner cannot yet run: it is
+#: recorded as not executed with that reason, which is what turns the gap into
+#: a queue instead of a silence.
+REPAIR_HANDLERS: dict[tuple[str, str], Callable[..., tuple[bool, str | None, dict[str, Any]]]] = {
+    (TOOL_RESUPPLY, INTENT_INSERT_FUEL): _repair_insert_fuel,
+    (TOOL_PLACEMENT, INTENT_EXTEND_POWER_SUPPLY): _repair_power_tap,
+    (TOOL_PLACEMENT, INTENT_ATTACH_TO_LIVE_NETWORK): _repair_power_tap,
+}
+
+
+def execute_repair_step(
+    step: RepairStep,
+    *,
+    observation: RepairObservation,
+    executor: TransactionalFLEExecutor,
+    env: Any,
+) -> tuple[bool, str | None, dict[str, Any]]:
+    """Run one ordered step with the tool it names, or say why it did not run.
+
+    Returns whether the world was changed, the reason it was not, and what the
+    step measured while trying.
+    """
+    action = step.action
+    for entity in action.removes:
+        # Nothing that is producing is ever taken down. `produces_into_live
+        # _chain` answers None for a graph that cannot decide, and an
+        # undecided graph is not permission: only a proven False is.
+        if produces_into_live_chain(observation.graph, entity) is not False:
+            return False, REPAIR_REMOVAL_UNPROVEN, {"entity": entity}
+    handler = REPAIR_HANDLERS.get((action.tool, action.intent))
+    if handler is None:
+        return False, REPAIR_NO_BINDING, {}
+    try:
+        return handler(action, observation=observation, executor=executor, env=env)
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:
+        return False, REPAIR_WORLD_UNREAD, {"note": type(exc).__name__}
+
+
+def _repair_row(
+    journal: ResearchJournal,
+    *,
+    stage: str,
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    """One ledger row, with the run it belongs to written into it."""
+    evolution = journal.state.get("evolution", {})
+    return {
+        "at": utc_now(),
+        "run_id": journal.run_id,
+        "generation": int(evolution.get("generation", 0) or 0),
+        "stage": stage,
+        **payload,
+    }
+
+
+def run_stage_with_repair(
+    attempt: Callable[[], Any],
+    *,
+    stage: str,
+    executor: TransactionalFLEExecutor,
+    env: Any,
+    journal: ResearchJournal,
+    budget: RepairBudget,
+    succeeded: Callable[[Any], bool] = bool,
+) -> Any:
+    """Run one stage; on failure repair what the world says is wrong, once.
+
+    The measurement brackets the whole attempt: the world is read before any
+    repair runs and again after the stage has been retried, because the retried
+    stage is what re-measures the machines a repair was aimed at. A step that
+    was not executed is scored against no reading at all, so it can never enter
+    the ledger as a repair that worked.
+
+    Every step, executed or refused, is appended to ``runs/repairs.jsonl`` with
+    its symptom, its action, what it predicted and what the world then did.
+    That file is what the next generation's choice between two tools for the
+    same symptom is made from.
+    """
+    outcome = attempt()
+    if succeeded(outcome):
+        return outcome
+
+    record: dict[str, Any] = {
+        "stage": stage,
+        "at": utc_now(),
+        "retried": False,
+        "budget": budget.to_dict(),
+        "steps": [],
+        "refusals": [],
+    }
+    if not budget.allows(stage):
+        _refuse_repair(journal, record, stage=stage, refusal=REPAIR_ATTEMPT_BUDGET_SPENT)
+        return outcome
+
+    observation = repair_observation(env, journal)
+    if observation is None:
+        _refuse_repair(journal, record, stage=stage, refusal=REPAIR_WORLD_UNREAD)
+        return outcome
+
+    before = repair_measurements(observation, journal)
+    plan, basis = plan_stage_repairs(observation, history=read_repair_history())
+    attempted: list[tuple[RepairStep, bool, str | None, dict[str, Any]]] = []
+    executed = 0
+    touched = 0
+    for step in plan.steps:
+        if touched >= REPAIR_STEPS_PER_ATTEMPT:
+            attempted.append((step, False, REPAIR_STEP_BUDGET_SPENT, {}))
+            continue
+        ran, reason, measured = execute_repair_step(
+            step,
+            observation=observation,
+            executor=executor,
+            env=env,
+        )
+        executed += 1 if ran else 0
+        # A step the game was asked about counts whether or not it was
+        # accepted: a rejected script is rolled back, but it was still run,
+        # and the budget exists to bound how often that happens.
+        touched += 0 if reason in REPAIR_COSTLESS_REFUSALS else 1
+        attempted.append((step, ran, reason, measured))
+
+    after: dict[str, Any] | None = None
+    if executed:
+        budget.spend(stage)
+        outcome = attempt()
+        record["retried"] = True
+        retried_observation = repair_observation(env, journal)
+        if retried_observation is not None:
+            after = repair_measurements(retried_observation, journal)
+
+    for step, ran, reason, measured in attempted:
+        scored = record_repair(step, before if ran else None, after if ran else None)
+        row = _repair_row(
+            journal,
+            stage=stage,
+            payload={
+                **scored.to_dict(),
+                "intent": step.action.intent,
+                "targets": list(step.action.targets or ()),
+                "executed": ran,
+                "not_executed": reason,
+                "choice_basis": basis.get(scored.symptom, REPAIR_CHOICE_FIXED_RULE),
+                "retried": record["retried"],
+                "measured": measured,
+            },
+        )
+        append_jsonl(REPAIR_LEDGER, row)
+        record["steps"].append(row)
+
+    for proposal in plan.refusals:
+        row = _repair_row(
+            journal,
+            stage=stage,
+            payload={
+                "symptom": symptom_key(proposal.diagnosis),
+                "refusal": proposal.refusal,
+                "executed": False,
+            },
+        )
+        append_jsonl(REPAIR_LEDGER, row)
+        record["refusals"].append(row)
+
+    record["budget"] = budget.to_dict()
+    _journal_repair(journal, record)
+    return outcome
+
+
+def _refuse_repair(
+    journal: ResearchJournal,
+    record: dict[str, Any],
+    *,
+    stage: str,
+    refusal: str,
+) -> None:
+    """End one attempt before it started, in the ledger as well as the journal.
+
+    A cycle that stops for its own budget, or because the world would not
+    answer, is a result of the cycle. Keeping it only in the journal would
+    leave the ledger unable to say how often the loop declined to act, which is
+    the number that says whether the budget is right.
+    """
+    row = _repair_row(
+        journal,
+        stage=stage,
+        payload={"refusal": refusal, "executed": False},
+    )
+    append_jsonl(REPAIR_LEDGER, row)
+    record["refusals"].append(row)
+    _journal_repair(journal, record)
+
+
+def _journal_repair(journal: ResearchJournal, record: Mapping[str, Any]) -> None:
+    """Keep one repair attempt in the generation report, and announce it."""
+    attempts = journal.state["metrics"].setdefault("stage_repairs", [])
+    attempts.append(dict(record))
+    journal.event(
+        "repair",
+        f"Repair cycle ran for {record.get('stage')}.",
+        stage=record.get("stage"),
+        retried=record.get("retried"),
+        executed=sum(1 for row in record.get("steps", ()) if row.get("executed")),
+        symptoms=sorted(
+            {
+                str(row.get("symptom"))
+                for row in list(record.get("steps", ())) + list(record.get("refusals", ()))
+                if row.get("symptom")
+            }
+        ),
+    )
+
+
 def run_curriculum(
     *,
     seed: int,
@@ -7932,6 +8785,10 @@ def run_curriculum(
         configuration=evolution["challenger"]["configuration"],
         advisor=advice.to_dict(),
     )
+    # One budget for the whole generation: a stage repaired here is a stage
+    # not available to be repaired later, which is what keeps a cycle of
+    # repairs from spending the horizon on one symptom.
+    repair_budget = RepairBudget()
 
     try:
         executor.reset(seed=seed)
@@ -7972,33 +8829,55 @@ def run_curriculum(
             radius_scale=genome.placement_radius_scale,
             region=placement_region,
         )
-        smelting_ok = stage_smelting_probe(
-            executor,
-            env,
-            journal,
-            center=center,
-            settle_seconds=smelt_settle,
-            region=placement_region,
-        )
-        logistics: dict[str, Any] | None = None
-        belt_smelt_ok = False
-        if smelting_ok:
-            logistics = stage_astar_logistics(
+        smelting_ok = run_stage_with_repair(
+            lambda: stage_smelting_probe(
                 executor,
                 env,
                 journal,
                 center=center,
-                settle_seconds=logistics_settle,
-                turn_penalty=turn_penalty,
+                settle_seconds=smelt_settle,
                 region=placement_region,
+            ),
+            stage="Smelting probe",
+            executor=executor,
+            env=env,
+            journal=journal,
+            budget=repair_budget,
+        )
+        logistics: dict[str, Any] | None = None
+        belt_smelt_ok = False
+        if smelting_ok:
+            logistics = run_stage_with_repair(
+                lambda: stage_astar_logistics(
+                    executor,
+                    env,
+                    journal,
+                    center=center,
+                    settle_seconds=logistics_settle,
+                    turn_penalty=turn_penalty,
+                    region=placement_region,
+                ),
+                stage="A* belt logistics",
+                executor=executor,
+                env=env,
+                journal=journal,
+                budget=repair_budget,
+                succeeded=lambda result: result is not None,
             )
         if logistics is not None:
-            belt_smelt_ok = stage_belt_smelting(
-                executor,
-                env,
-                journal,
-                logistics=logistics,
-                settle_seconds=belt_smelt_settle,
+            belt_smelt_ok = run_stage_with_repair(
+                lambda: stage_belt_smelting(
+                    executor,
+                    env,
+                    journal,
+                    logistics=logistics,
+                    settle_seconds=belt_smelt_settle,
+                ),
+                stage="Belt-fed smelting",
+                executor=executor,
+                env=env,
+                journal=journal,
+                budget=repair_budget,
             )
 
         achieved: set[str] = set()
@@ -8015,39 +8894,63 @@ def run_curriculum(
         if belt_smelt_ok:
             achieved.add("iron_backbone")
             update_engineering_frontier(journal, achieved=achieved)
-            coal_ok, coal_center = stage_coal_mining(
-                executor,
-                env,
-                journal,
-                settle_seconds=coal_mine_settle,
-                safety_stock=genome.coal_safety_stock,
-                producer_refuel=genome.coal_producer_refuel,
+            coal_ok, coal_center = run_stage_with_repair(
+                lambda: stage_coal_mining(
+                    executor,
+                    env,
+                    journal,
+                    settle_seconds=coal_mine_settle,
+                    safety_stock=genome.coal_safety_stock,
+                    producer_refuel=genome.coal_producer_refuel,
+                ),
+                stage="Coal self-sufficiency",
+                executor=executor,
+                env=env,
+                journal=journal,
+                budget=repair_budget,
+                succeeded=lambda result: bool(result[0]),
             )
         if coal_ok:
             achieved.add("coal_mining")
             update_engineering_frontier(journal, achieved=achieved)
         if belt_smelt_ok and coal_ok:
-            copper_ok, copper_center = stage_copper_mining(
-                executor,
-                env,
-                journal,
-                settle_seconds=copper_mine_settle,
-                safety_stock=genome.coal_safety_stock,
-                fuel_budget=genome.coal_copper_mining_budget,
+            copper_ok, copper_center = run_stage_with_repair(
+                lambda: stage_copper_mining(
+                    executor,
+                    env,
+                    journal,
+                    settle_seconds=copper_mine_settle,
+                    safety_stock=genome.coal_safety_stock,
+                    fuel_budget=genome.coal_copper_mining_budget,
+                ),
+                stage="Copper expansion",
+                executor=executor,
+                env=env,
+                journal=journal,
+                budget=repair_budget,
+                succeeded=lambda result: bool(result[0]),
             )
         if copper_ok and copper_center is not None:
             achieved.add("copper_mining")
             update_engineering_frontier(journal, achieved=achieved)
             if coal_ok:
-                copper_smelt_ok = stage_copper_smelting(
-                    executor,
-                    env,
-                    journal,
-                    center=copper_center,
-                    settle_seconds=copper_smelt_settle,
-                    safety_stock=genome.coal_safety_stock,
-                    fuel_budget=genome.coal_copper_smelting_budget,
-                    buffer_target=genome.buffer_target,
+                smelting_center = copper_center
+                copper_smelt_ok = run_stage_with_repair(
+                    lambda: stage_copper_smelting(
+                        executor,
+                        env,
+                        journal,
+                        center=smelting_center,
+                        settle_seconds=copper_smelt_settle,
+                        safety_stock=genome.coal_safety_stock,
+                        fuel_budget=genome.coal_copper_smelting_budget,
+                        buffer_target=genome.buffer_target,
+                    ),
+                    stage="Copper smelting",
+                    executor=executor,
+                    env=env,
+                    journal=journal,
+                    budget=repair_budget,
                 )
         if copper_smelt_ok:
             achieved.add("copper_smelting")
@@ -8060,39 +8963,70 @@ def run_curriculum(
             and coal_center is not None
             and copper_center is not None
         ):
-            survival_ok = stage_capability_survival(
-                executor,
-                env,
-                journal,
-                iron_center=center,
-                coal_center=coal_center,
-                copper_center=copper_center,
-                settle_seconds=20,
-                fuel_budget=genome.coal_survival_budget,
+            survival_iron_center = center
+            survival_coal_center = coal_center
+            survival_copper_center = copper_center
+            survival_ok = run_stage_with_repair(
+                lambda: stage_capability_survival(
+                    executor,
+                    env,
+                    journal,
+                    iron_center=survival_iron_center,
+                    coal_center=survival_coal_center,
+                    copper_center=survival_copper_center,
+                    settle_seconds=20,
+                    fuel_budget=genome.coal_survival_budget,
+                ),
+                stage="Capability survival soak",
+                executor=executor,
+                env=env,
+                journal=journal,
+                budget=repair_budget,
             )
 
         if survival_ok:
-            power_ok = stage_steam_power(
-                executor,
-                env,
-                journal,
-                settle_seconds=12,
+            power_ok = run_stage_with_repair(
+                lambda: stage_steam_power(
+                    executor,
+                    env,
+                    journal,
+                    settle_seconds=12,
+                ),
+                stage="Steam power",
+                executor=executor,
+                env=env,
+                journal=journal,
+                budget=repair_budget,
             )
         if power_ok:
             achieved.add("steam_power")
             update_engineering_frontier(journal, achieved=achieved)
-            manufacturing_ok = stage_powered_manufacturing(
-                executor,
-                env,
-                journal,
-                settle_seconds=14,
+            manufacturing_ok = run_stage_with_repair(
+                lambda: stage_powered_manufacturing(
+                    executor,
+                    env,
+                    journal,
+                    settle_seconds=14,
+                ),
+                stage="Powered manufacturing",
+                executor=executor,
+                env=env,
+                journal=journal,
+                budget=repair_budget,
             )
         if manufacturing_ok:
-            science_ok = stage_automation_science(
-                executor,
-                env,
-                journal,
-                settle_seconds=20,
+            science_ok = run_stage_with_repair(
+                lambda: stage_automation_science(
+                    executor,
+                    env,
+                    journal,
+                    settle_seconds=20,
+                ),
+                stage="Automation science",
+                executor=executor,
+                env=env,
+                journal=journal,
+                budget=repair_budget,
             )
         circuits_ok = False
         logistic_science_ok = False
@@ -8100,29 +9034,51 @@ def run_curriculum(
         if science_ok:
             achieved.add("automation_science")
             achieved.add("assembler_gears")
-            circuits_ok = stage_electronic_circuits(
-                executor,
-                env,
-                journal,
-                settle_seconds=18,
+            circuits_ok = run_stage_with_repair(
+                lambda: stage_electronic_circuits(
+                    executor,
+                    env,
+                    journal,
+                    settle_seconds=18,
+                ),
+                stage="Electronic circuits",
+                executor=executor,
+                env=env,
+                journal=journal,
+                budget=repair_budget,
             )
         if circuits_ok:
             achieved.add("electronic_circuits")
-            logistic_science_ok = stage_logistic_science(
-                executor,
-                env,
-                journal,
-                settle_seconds=24,
+            logistic_science_ok = run_stage_with_repair(
+                lambda: stage_logistic_science(
+                    executor,
+                    env,
+                    journal,
+                    settle_seconds=24,
+                ),
+                stage="Logistic science",
+                executor=executor,
+                env=env,
+                journal=journal,
+                budget=repair_budget,
             )
         if logistic_science_ok:
             achieved.add("logistic_science")
-            optimization_ok = stage_transactional_rebuild(
-                executor,
-                env,
-                journal,
-                logistics=logistics,
-                settle_seconds=18,
-                gain_threshold=genome.rebuild_gain_threshold,
+            rebuild_logistics = logistics
+            optimization_ok = run_stage_with_repair(
+                lambda: stage_transactional_rebuild(
+                    executor,
+                    env,
+                    journal,
+                    logistics=rebuild_logistics,
+                    settle_seconds=18,
+                    gain_threshold=genome.rebuild_gain_threshold,
+                ),
+                stage="Transactional rebuild optimization",
+                executor=executor,
+                env=env,
+                journal=journal,
+                budget=repair_budget,
             )
 
         progression = update_engineering_frontier(
