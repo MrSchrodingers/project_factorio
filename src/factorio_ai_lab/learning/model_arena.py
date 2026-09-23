@@ -86,6 +86,19 @@ class ModelArena:
         )
         temporary.replace(self.path)
 
+    def incumbent(self, task: str) -> dict[str, Any] | None:
+        """Return the promoted entry for a task, or None when there is none.
+
+        Consumers need the champion without reaching into the registry file
+        format. Anything that is not a well-formed entry reads as absent, so a
+        corrupt or partial registry denies the model instead of admitting it.
+        """
+        entry = self._read().get("tasks", {})
+        if not isinstance(entry, dict):
+            return None
+        record = entry.get(task)
+        return record if isinstance(record, dict) else None
+
     def select(self, candidate: ModelCandidate) -> ModelSelection:
         payload = self._read()
         tasks = payload.setdefault("tasks", {})
