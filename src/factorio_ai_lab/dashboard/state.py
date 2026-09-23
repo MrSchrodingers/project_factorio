@@ -17,6 +17,16 @@ from typing import Any, ClassVar
 from factorio_ai_lab.dashboard.rendering import WorldFrameRenderer
 from factorio_ai_lab.learning.autonomy import evaluate_factory_autonomy
 from factorio_ai_lab.learning.factory_graph import build_factory_graph
+from factorio_ai_lab.learning.survival_analysis import (
+    DISPOSITION_INELIGIBLE,
+    DISPOSITION_UNKNOWN,
+    SampleGate,
+    competing_risks,
+    evaluate_sample_gate,
+    hazard_table,
+    kaplan_meier,
+    observations_from_generation_reports,
+)
 from factorio_ai_lab.learning.telemetry import (
     append_jsonl as append_telemetry_jsonl,
 )
@@ -36,6 +46,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 RUNS_DIR = PROJECT_ROOT / "runs"
 RUNTIME_CONFIG = RUNS_DIR / "runtime_config.json"
 TELEMETRY_LOG = RUNS_DIR / "telemetry" / "world_samples.jsonl"
+GENERATION_REPORTS_DIR = RUNS_DIR / "generation_reports"
 
 
 DEFAULT_RUNTIME_CONFIG: dict[str, Any] = {
@@ -167,6 +178,168 @@ def _memory_status() -> dict[str, float]:
         "available_mib": round(available, 1),
         "used_mib": round(max(total - available, 0.0), 1),
     }
+
+
+SURVIVAL_EXCLUSION_UNREADABLE = "unreadable"
+
+
+def _generation_reports_fingerprint(directory: Path) -> tuple[tuple[str, int, int], ...]:
+    """Identity of the report set on disk, used to invalidate the survival cache.
+
+    A clock-based cache would serve a stale curve as if it were current: the
+    evolution loop appends a generation report roughly every 17 minutes, and
+    watching that move is the reason the panel exists. The fingerprint covers
+    the name, size and modification time of every report, so both a new report
+    and a rewritten one force a reread.
+    """
+    entries: list[tuple[str, int, int]] = []
+    for path in sorted(directory.glob("*.json")):
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        entries.append((path.name, stat.st_size, stat.st_mtime_ns))
+    return tuple(entries)
+
+
+def _read_generation_reports(
+    directory: Path,
+) -> tuple[list[dict[str, Any]], int, int, float | None]:
+    """Read the generation reports, counting the ones that could not be read.
+
+    Returns the decoded reports, how many files were on disk, how many were
+    unreadable, and the newest modification time. An unreadable report is
+    counted rather than skipped in silence: "no failure recorded" and "the
+    record could not be read" are different states and must not collapse.
+    """
+    reports: list[dict[str, Any]] = []
+    unreadable = 0
+    newest: float | None = None
+    paths = sorted(directory.glob("*.json"))
+    for path in paths:
+        try:
+            stat = path.stat()
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            unreadable += 1
+            continue
+        if not isinstance(loaded, dict):
+            unreadable += 1
+            continue
+        newest = stat.st_mtime if newest is None else max(newest, stat.st_mtime)
+        reports.append(loaded)
+    return reports, len(paths), unreadable, newest
+
+
+def _survival_gate_payload(gate: SampleGate) -> dict[str, Any]:
+    """The sample-size verdict, whole, so it travels with every number it qualifies."""
+    return {
+        "n": gate.n,
+        "n_events": gate.n_events,
+        "n_censored": gate.n_censored,
+        "distinct_event_times": gate.distinct_event_times,
+        "purpose": gate.purpose,
+        "min_events_required": gate.min_events_required,
+        "sufficient": gate.sufficient,
+        "verdict": gate.verdict,
+        "reason": gate.reason,
+    }
+
+
+def _survival_report_payload(directory: Path) -> dict[str, Any]:
+    """Survival across generations, or a declared absence of measurement.
+
+    Absence is never rendered as a curve. A missing directory, an unreadable
+    report or a generation that predates the instrumentation leaves ``curve``,
+    ``hazard`` and ``competing_risks`` null, with ``measured`` false and a
+    reason, because an empty curve on screen reads as a measured zero.
+
+    Every estimate carries its own sample gate alongside the sample-wide one:
+    a client that renders only the curve still has the verdict that qualifies
+    it.
+    """
+    payload: dict[str, Any] = {
+        "generated_at": time.time(),
+        "measured": False,
+        "reason": "",
+        "source": {
+            "directory": str(directory),
+            "exists": directory.is_dir(),
+            "reports_found": 0,
+            "reports_read": 0,
+            "newest_report_at": None,
+        },
+        "excluded": {
+            DISPOSITION_UNKNOWN: 0,
+            DISPOSITION_INELIGIBLE: 0,
+            "no_runtime": 0,
+            SURVIVAL_EXCLUSION_UNREADABLE: 0,
+        },
+        "sample": _survival_gate_payload(evaluate_sample_gate(())),
+        "curve": None,
+        "hazard": None,
+        "competing_risks": None,
+    }
+    if not payload["source"]["exists"]:
+        payload["reason"] = (
+            f"no generation report directory at {directory}: survival is not measured"
+        )
+        return payload
+
+    reports, found, unreadable, newest = _read_generation_reports(directory)
+    payload["source"]["reports_found"] = found
+    payload["source"]["reports_read"] = len(reports)
+    payload["source"]["newest_report_at"] = newest
+    payload["excluded"][SURVIVAL_EXCLUSION_UNREADABLE] = unreadable
+    if not found:
+        payload["reason"] = "no generation report on disk: survival is not measured"
+        return payload
+
+    extraction = observations_from_generation_reports(reports)
+    for reason_key, count in extraction.excluded.items():
+        payload["excluded"][reason_key] = payload["excluded"].get(reason_key, 0) + int(count)
+    payload["sample"] = _survival_gate_payload(extraction.gate)
+    if not extraction.observations:
+        excluded = payload["excluded"]
+        payload["reason"] = (
+            f"{found} report(s) on disk and no lifetime among them "
+            f"({excluded[DISPOSITION_UNKNOWN]} without a recognised halt cause, "
+            f"{excluded[DISPOSITION_INELIGIBLE]} with no factory built, "
+            f"{excluded['no_runtime']} without a productive runtime, "
+            f"{excluded[SURVIVAL_EXCLUSION_UNREADABLE]} unreadable): "
+            "survival is not measured"
+        )
+        return payload
+
+    curve = kaplan_meier(extraction.observations)
+    hazard = hazard_table(extraction.observations)
+    risks = competing_risks(extraction.observations)
+    payload["measured"] = True
+    payload["reason"] = (
+        f"{len(extraction.observations)} lifetime(s) extracted from {found} report(s); "
+        "the sample gate qualifies every number below"
+    )
+    payload["curve"] = {
+        "confidence_level": curve.confidence_level,
+        "follow_up_end_s": curve.follow_up_end_s,
+        "median_survival_s": curve.median_survival_s,
+        "median_survival_reason": curve.median_survival_reason,
+        "gate": _survival_gate_payload(curve.gate),
+        "points": [_json_safe(point) for point in curve.points],
+    }
+    payload["hazard"] = {
+        "gate": _survival_gate_payload(hazard.gate),
+        "points": [_json_safe(point) for point in hazard.points],
+    }
+    payload["competing_risks"] = {
+        "gate": _survival_gate_payload(risks.gate),
+        "cause_counts": dict(risks.cause_counts),
+        "incidence": {
+            cause: [_json_safe(point) for point in points]
+            for cause, points in risks.incidence.items()
+        },
+    }
+    return payload
 
 
 class RuntimeConfigStore:
@@ -1249,6 +1422,11 @@ class DashboardState:
         self._frame_cache: dict[str, tuple[float, bytes]] = {}
         self._frame_cache_lock = threading.Lock()
         self._artifact_cache: dict[str, tuple[float, Any]] = {}
+        self.generation_reports_dir = GENERATION_REPORTS_DIR
+        self._survival_cache: dict[
+            str,
+            tuple[tuple[tuple[str, int, int], ...], dict[str, Any]],
+        ] = {}
 
     def close(self) -> None:
         self.factorio.close()
@@ -1813,6 +1991,24 @@ class DashboardState:
             },
             "promotion": None,
         }
+
+    def survival_data(self, *, reports_dir: Path | None = None) -> dict[str, Any]:
+        """Kaplan-Meier, hazard and cumulative incidence over the generation reports.
+
+        Cached against the fingerprint of the report directory instead of a
+        TTL: the loop writes a report every ~17 minutes, and a clock-based
+        cache would eventually present a curve older than the generation being
+        watched as the current one.
+        """
+        directory = self.generation_reports_dir if reports_dir is None else Path(reports_dir)
+        key = str(directory)
+        fingerprint = _generation_reports_fingerprint(directory)
+        cached = self._survival_cache.get(key)
+        if cached is not None and cached[0] == fingerprint:
+            return cached[1]
+        payload = _survival_report_payload(directory)
+        self._survival_cache[key] = (fingerprint, payload)
+        return payload
 
     def dataset_data(self) -> dict[str, Any]:
         cached = self._artifact_cache.get("dataset-data")

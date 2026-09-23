@@ -196,6 +196,11 @@ def api_evolution() -> dict[str, Any]:
     return state.evolution_data()
 
 
+@app.get("/api/evolution/survival")
+async def api_evolution_survival() -> dict[str, Any]:
+    return json_finite(await asyncio.to_thread(state.survival_data))
+
+
 @app.get("/api/datasets")
 def api_datasets() -> dict[str, Any]:
     return state.dataset_data()
