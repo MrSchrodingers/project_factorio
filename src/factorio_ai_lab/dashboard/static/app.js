@@ -10,6 +10,7 @@ const state = {
   research: {},
   progression: { achieved: [], frontier: [], next_goal: null },
   productionPlan: {},
+  machineDiagnostics: {},
   autonomy: {},
   resourceOverview: { cells: [], points: [], totals: {}, nearest: {} },
   factoryGraph: { nodes: [], edges: [], metrics: {} },
@@ -2710,9 +2711,22 @@ function renderFactoryTopology() {
 }
 
 
+function blockerLabel(blocker) {
+  const technologies = Array.isArray(blocker.missing_technologies)
+    ? blocker.missing_technologies
+    : [];
+  return String(blocker.item || "?")
+    + " · " + String(blocker.kind || "blocked")
+    + (technologies.length ? " · " + technologies.join(" > ") : "");
+}
+
 function renderProductionDag() {
   const plan = state.productionPlan || {};
   const dag = plan.dag || null;
+  const dependency = plan.plan || null;
+  const blockers = dependency && Array.isArray(dependency.blockers)
+    ? dependency.blockers
+    : [];
   if (!dag) {
     setText(
       "productionDagTarget",
@@ -2724,7 +2738,15 @@ function renderProductionDag() {
     );
     const nodes = $("productionDagNodes");
     if (nodes) {
-      nodes.innerHTML = '<span class="placeholder-row">No craftable DAG for this frontier.</span>';
+      // A planner that refused the target says why. Rendering the generic
+      // placeholder instead would read as "no plan needed".
+      nodes.innerHTML = '<span class="placeholder-row">'
+        + escapeHtml(
+          plan.plan_error
+            ? "planner refused the target: " + plan.plan_error
+            : "No craftable DAG for this frontier."
+        )
+        + '</span>';
     }
     const raw = $("productionDagRaw");
     if (raw) raw.innerHTML = "";
@@ -2738,11 +2760,16 @@ function renderProductionDag() {
   );
   setText(
     "productionDagSource",
-    String(plan.source || "planner")
-      + " · "
-      + String(plan.catalog_source || "static catalog")
-      + " · Factorio "
-      + String(plan.factorio_data_version || "")
+    [
+      String(plan.source || "planner"),
+      String(plan.catalog_source || "static catalog"),
+      "Factorio " + String(plan.factorio_data_version || ""),
+      dependency
+        ? (dependency.feasible
+          ? "exequivel"
+          : blockers.length + " bloqueio(s)")
+        : null,
+    ].filter(Boolean).join(" · ")
   );
   const nodes = Array.isArray(dag.nodes) ? dag.nodes : [];
   const container = $("productionDagNodes");
@@ -2753,12 +2780,31 @@ function renderProductionDag() {
             formatNumber(item.count, 2) + " " + item.item
           ).join(" + ")
         : "";
-      return '<article class="dag-node">'
+      const technologies = Array.isArray(node.blocked_by_technologies)
+        ? node.blocked_by_technologies
+        : [];
+      // craftable_now === null means the plan never had to make this item.
+      // That is not the same as a recipe found runnable, so it says neither.
+      const gate = node.craftable_now === false
+        ? "bloqueado: " + (technologies.join(" > ") || "receita desabilitada")
+        : node.craftable_now === true
+          ? "receita liberada"
+          : "";
+      const machine = node.machine
+        ? String(node.machine)
+          + (node.machines === null || node.machines === undefined
+            ? " · dimensionamento indeterminado"
+            : " ×" + formatNumber(node.machines, 0))
+        : "";
+      return '<article class="dag-node'
+        + (node.craftable_now === false ? ' blocked' : '') + '">'
         + '<strong>' + escapeHtml(node.item) + '</strong>'
         + '<small>' + formatNumber(node.target_rate_per_s, 3) + '/s'
         + ' · min ' + formatNumber(node.minimum_machines_at_speed_1, 0)
         + ' machine(s)</small>'
         + '<small>' + escapeHtml(ingredients || "raw input") + '</small>'
+        + (machine ? '<small>' + escapeHtml(machine) + '</small>' : '')
+        + (gate ? '<small>' + escapeHtml(gate) + '</small>' : '')
         + '</article>';
     }).join("");
   }
@@ -2768,6 +2814,11 @@ function renderProductionDag() {
     raw.innerHTML = Object.entries(rawRequirements).map(([item, rate]) =>
       '<span class="raw-requirement">'
         + escapeHtml(item) + ' · ' + formatNumber(rate, 3) + '/s'
+        + '</span>'
+    ).join("")
+    + blockers.map((blocker) =>
+      '<span class="raw-requirement blocked">'
+        + escapeHtml(blockerLabel(blocker))
         + '</span>'
     ).join("");
   }
@@ -2924,6 +2975,32 @@ function renderWipHealth() {
       cls: noPower ? "bad" : "good",
     },
   ];
+  const diagnostics = state.machineDiagnostics || {};
+  const probes = Array.isArray(diagnostics.machines) ? diagnostics.machines : [];
+  for (const probe of probes) {
+    // "cable: 0.0" alone was on screen for four generations and was
+    // compatible with four incompatible failures. The cause the machine
+    // itself reported now travels beside the number.
+    const cause = probe.stall_cause;
+    const output = probe.output_after;
+    cells.push({
+      label: String(probe.machine || "machine").replaceAll("_", " "),
+      value: output === null || output === undefined
+        ? "unmeasured"
+        : formatNumber(output, 0) + " un",
+      detail: [
+        cause ? "causa " + cause : "causa nao medida",
+        probe.status_after ? "status " + probe.status_after : null,
+        probe.energy_after === null || probe.energy_after === undefined
+          ? null
+          : "energia " + formatNumber(probe.energy_after, 0),
+        probe.network_id === null || probe.network_id === undefined
+          ? null
+          : "rede " + formatNumber(probe.network_id, 0),
+      ].filter(Boolean).join(" · "),
+      cls: cause === "producing" ? "good" : cause ? "bad" : "warn",
+    });
+  }
   const container = $("wipGrid");
   if (container) {
     container.innerHTML = cells.map((cell) =>
@@ -3657,6 +3734,9 @@ function applyPayload(payload) {
   if (payload.research) state.research = payload.research;
   if (payload.progression) state.progression = payload.progression;
   if (payload.production_plan) state.productionPlan = payload.production_plan;
+  if (payload.machine_diagnostics) {
+    state.machineDiagnostics = payload.machine_diagnostics;
+  }
   if (payload.autonomy) state.autonomy = payload.autonomy;
   if (payload.resource_overview) state.resourceOverview = payload.resource_overview;
   if (payload.factory_graph) state.factoryGraph = payload.factory_graph;
@@ -3705,6 +3785,7 @@ async function loadInitialState() {
     "/api/research",
     "/api/progression",
     "/api/production-plan",
+    "/api/machine-diagnostics",
     "/api/autonomy",
     "/api/resource-overview",
     "/api/factory-graph",
@@ -3724,13 +3805,14 @@ async function loadInitialState() {
     research: payloads[5],
     progression: payloads[6],
     production_plan: payloads[7],
-    autonomy: payloads[8],
-    resource_overview: payloads[9],
-    factory_graph: payloads[10],
-    game_graph_summary: payloads[11],
-    evolution: payloads[12],
-    knowledge: payloads[13],
-    datasets: payloads[14],
+    machine_diagnostics: payloads[8],
+    autonomy: payloads[9],
+    resource_overview: payloads[10],
+    factory_graph: payloads[11],
+    game_graph_summary: payloads[12],
+    evolution: payloads[13],
+    knowledge: payloads[14],
+    datasets: payloads[15],
   });
 }
 

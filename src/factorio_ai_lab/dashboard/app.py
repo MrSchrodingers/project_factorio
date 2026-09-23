@@ -167,8 +167,19 @@ async def api_progression() -> dict[str, Any]:
 
 
 @app.get("/api/production-plan")
-async def production_plan() -> dict:
-    return state.production_plan_data()
+async def production_plan() -> dict[str, Any]:
+    # The plan is differential: what the world already holds decides which
+    # steps are still missing, so the snapshot is read before planning. Both
+    # reads are off-loop because both talk to RCON.
+    world = await asyncio.to_thread(state.factorio.snapshot)
+    return json_finite(
+        await asyncio.to_thread(state.production_plan_data, world=world)
+    )
+
+
+@app.get("/api/machine-diagnostics")
+async def api_machine_diagnostics() -> dict[str, Any]:
+    return json_finite(await asyncio.to_thread(state.machine_diagnostics_data))
 
 
 @app.get("/api/resource-overview")

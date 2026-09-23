@@ -10,7 +10,7 @@ import urllib.request
 from collections import defaultdict, deque
 from dataclasses import asdict, is_dataclass
 from enum import Enum
-from math import isfinite
+from math import ceil, isfinite
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -36,6 +36,11 @@ from factorio_ai_lab.learning.telemetry import (
     append_jsonl as append_telemetry_jsonl,
 )
 from factorio_ai_lab.learning.telemetry import compact_telemetry_sample
+from factorio_ai_lab.planning.dependency_plan import (
+    CapacityRequirement,
+    DependencyPlan,
+    DependencyPlanner,
+)
 from factorio_ai_lab.planning.factorio_catalog import (
     EARLY_GAME_PRODUCTION_PLANNER,
     FACTORIO_DATA_VERSION,
@@ -490,6 +495,357 @@ def _discovery_payload(path: Path, *, limit: int) -> dict[str, Any]:
         )
     )
     return payload
+
+
+#: Block the generation report records the assembler diagnostics under.
+MACHINE_DIAGNOSTICS_BLOCK = "electronic_circuit_diagnostics"
+
+#: Metrics recorded beside that block. They travel together so the panel can
+#: never show the output without the cause that explains it.
+MACHINE_DIAGNOSTICS_OUTPUT = "electronic_circuit_output"
+MACHINE_DIAGNOSTICS_RATE = "electronic_circuit_rate_per_s"
+
+
+def _reading(value: Any) -> float | None:
+    """A number the runtime actually reported, or None.
+
+    ``getattr(namespace, key, 0.0)`` cost this curriculum eleven generations:
+    a reading never taken became a measured zero, so a machine that was never
+    placed read exactly like a machine measured empty. Booleans are refused
+    because ``True`` is an ``int`` and would arrive here as 1.0.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    return number if isfinite(number) else None
+
+
+def _reading_text(value: Any) -> str | None:
+    """A string the runtime reported, or None when it reported nothing.
+
+    The empty string survives: a machine that answered "no recipe" answered,
+    which is not the same as a machine that was never asked.
+    """
+    return value if isinstance(value, str) else None
+
+
+def _input_readings(raw: Any) -> dict[str, float | None]:
+    """Ingredient counts one machine held, each keeping its own absence."""
+    if not isinstance(raw, dict):
+        return {}
+    return {str(key): _reading(value) for key, value in sorted(raw.items())}
+
+
+def _machine_probe_payload(name: str, raw: dict[str, Any]) -> dict[str, Any]:
+    """One machine's own readings, with every absence kept absent."""
+    return {
+        "machine": name,
+        "stall_cause": _reading_text(raw.get("stall_cause")),
+        "recipe": _reading_text(raw.get("recipe")),
+        "status_before": _reading_text(raw.get("status_before")),
+        "status_after": _reading_text(raw.get("status_after")),
+        "energy_before": _reading(raw.get("energy_before")),
+        "energy_after": _reading(raw.get("energy_after")),
+        # -1 is a reading, not an absence: the machine answered that it
+        # belongs to no electric network. None is a reading never taken.
+        "network_id": _reading(raw.get("network_id")),
+        "pole_gap": _reading(raw.get("pole_gap")),
+        "tap_placed": _reading(raw.get("tap_placed")),
+        "tap_gap": _reading(raw.get("tap_gap")),
+        "machine_stock": _reading(raw.get("machine_stock")),
+        "output_before": _reading(raw.get("output_before")),
+        "output_after": _reading(raw.get("output_after")),
+        "inputs_before": _input_readings(raw.get("inputs_before")),
+        "inputs_after": _input_readings(raw.get("inputs_after")),
+    }
+
+
+def _power_payload(raw: Any) -> dict[str, Any] | None:
+    """The supply the machines were attached to, or None when unrecorded."""
+    if not isinstance(raw, dict) or not raw:
+        return None
+    return {
+        "boiler_status_before": _reading_text(raw.get("boiler_status_before")),
+        "boiler_status_after": _reading_text(raw.get("boiler_status_after")),
+        "engine_status_before": _reading_text(raw.get("engine_status_before")),
+        "engine_status_after": _reading_text(raw.get("engine_status_after")),
+        "engine_energy_before": _reading(raw.get("engine_energy_before")),
+        "engine_energy_after": _reading(raw.get("engine_energy_after")),
+        "circuit_pole_network_id": _reading(
+            raw.get("circuit_pole_network_id")
+        ),
+        "note": _reading_text(raw.get("note")),
+    }
+
+
+def _latest_generation_report(
+    reports: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """The newest report, by the generation it states and then by file order."""
+    if not reports:
+        return None
+
+    def rank(entry: tuple[int, dict[str, Any]]) -> tuple[int, int]:
+        index, report = entry
+        generation = report.get("generation")
+        stated = (
+            generation
+            if isinstance(generation, int) and not isinstance(generation, bool)
+            else -1
+        )
+        return (stated, index)
+
+    return max(enumerate(reports), key=rank)[1]
+
+
+def _machine_diagnostics_payload(directory: Path) -> dict[str, Any]:
+    """Why the last generation's machines produced what they produced.
+
+    The report already names the cause: ``stall_cause`` sits next to the
+    status the machine reported, the energy it held and the electric network
+    it answered with. The panel dropped all of it and showed the output
+    alone, which leaves nothing on screen to tell a machine with no power
+    from one whose measurement window closed before a craft finished.
+
+    A report that recorded no such block is declared absent rather than
+    served as a machine found healthy with no cause.
+    """
+    reports, found, unreadable, _ = _read_generation_reports(directory)
+    absent: dict[str, Any] = {
+        "measured": False,
+        "source": {
+            "directory": str(directory),
+            "exists": directory.exists(),
+            "reports_found": found,
+            "reports_read": len(reports),
+            "unreadable": unreadable,
+        },
+        "generation": None,
+        "accepted": None,
+        "error_occurred": None,
+        "error": None,
+        "output": None,
+        "rate_per_s": None,
+        "machines": [],
+        "power": None,
+        "reason": f"no generation report could be read under {directory}",
+    }
+    report = _latest_generation_report(reports)
+    if report is None:
+        return absent
+    generation = report.get("generation")
+    absent["generation"] = (
+        generation
+        if isinstance(generation, int) and not isinstance(generation, bool)
+        else None
+    )
+    metrics = report.get("metrics")
+    metrics = metrics if isinstance(metrics, dict) else {}
+    block = metrics.get(MACHINE_DIAGNOSTICS_BLOCK)
+    if not isinstance(block, dict) or not block:
+        absent["reason"] = (
+            f"generation {absent['generation']} recorded no "
+            f"{MACHINE_DIAGNOSTICS_BLOCK}"
+        )
+        return absent
+    machines = [
+        _machine_probe_payload(str(name), row)
+        for name, row in sorted(block.items())
+        if isinstance(row, dict) and "stall_cause" in row
+    ]
+    if not machines:
+        absent["reason"] = (
+            f"generation {absent['generation']} recorded "
+            f"{MACHINE_DIAGNOSTICS_BLOCK} without a machine probe"
+        )
+        return absent
+    accepted = block.get("accepted")
+    error_occurred = block.get("error_occurred")
+    return {
+        "measured": True,
+        "source": absent["source"],
+        "generation": absent["generation"],
+        "accepted": accepted if isinstance(accepted, bool) else None,
+        "error_occurred": (
+            error_occurred if isinstance(error_occurred, bool) else None
+        ),
+        "error": _reading_text(block.get("error")),
+        "output": _reading(metrics.get(MACHINE_DIAGNOSTICS_OUTPUT)),
+        "rate_per_s": _reading(metrics.get(MACHINE_DIAGNOSTICS_RATE)),
+        "machines": machines,
+        "power": _power_payload(block.get("power")),
+        "reason": None,
+    }
+
+
+def _world_item_counts(world: Any) -> tuple[dict[str, float], bool]:
+    """What the world holds, by entity name, and whether it was measured.
+
+    A snapshot that did not connect yields no counts and ``False``. Passing
+    that on as an empty inventory would state that the world holds nothing,
+    which lets a failed RCON call decide between "build the machines you are
+    missing" and "build every machine from nothing".
+    """
+    if not isinstance(world, dict) or not world.get("connected"):
+        return {}, False
+    entities = world.get("entities")
+    if not isinstance(entities, list):
+        return {}, False
+    counts: defaultdict[str, float] = defaultdict(float)
+    for entity in entities:
+        if not isinstance(entity, dict):
+            continue
+        name = entity.get("name")
+        if isinstance(name, str) and name:
+            counts[name] += 1.0
+    return dict(counts), True
+
+
+def _catalog_fingerprint(
+    catalog: RuntimeFactorioCatalog | None,
+) -> tuple[int, ...] | None:
+    """Identity of the live catalog, cheap enough to take on every request.
+
+    Counts rather than contents. Everything the plan has to follow moves one
+    of these counts: a technology finishing flips ``researched`` and enables
+    the recipes it unlocks. Two different catalogs of identical size with
+    identical enabled and researched counts would collide, and no research
+    event produces that.
+    """
+    if catalog is None:
+        return None
+    return (
+        len(catalog.recipe_rows),
+        len(catalog.technology_rows),
+        len(catalog.machine_rows),
+        sum(1 for row in catalog.recipe_rows if row.get("enabled")),
+        sum(1 for row in catalog.technology_rows if row.get("researched")),
+    )
+
+
+def _minimum_machines(entry: CapacityRequirement) -> int | None:
+    """Machines a speed-1 machine would need, or None when unmeasured.
+
+    The old payload always carried a number here because ``RecipeSpec``
+    substitutes 0.5 s for a row with no ``energy``. The crafting time that
+    reaches this payload carries a status instead, so a time that was never
+    measured stays missing rather than sizing a step.
+    """
+    if entry.crafting_time_s is None:
+        return None
+    return max(1, ceil(entry.crafts_per_s * entry.crafting_time_s - 1e-12))
+
+
+def _dependency_dag_payload(
+    plan: DependencyPlan,
+    catalog: RuntimeFactorioCatalog,
+) -> dict[str, Any]:
+    """The rate balanced chain, in the shape the browser already renders.
+
+    Every key ``ProductionDag.to_dict`` served is still here, so the existing
+    renderer keeps working. Beside them sit the three facts the old payload
+    could not state: whether the recipe can be run at all, which machine
+    would run it, and how many of those the measured speed calls for.
+    """
+    nodes: list[dict[str, Any]] = []
+    for entry in plan.capacity:
+        choice = catalog.recipe_choice(entry.item)
+        step = plan.step(entry.item)
+        nodes.append(
+            {
+                "item": entry.item,
+                "target_rate_per_s": entry.rate_per_s,
+                "crafts_per_s": entry.crafts_per_s,
+                "crafting_time_s": entry.crafting_time_s,
+                "crafting_time_status": entry.crafting_time_status,
+                "minimum_machines_at_speed_1": _minimum_machines(entry),
+                "machine": entry.machine,
+                "machines": entry.machines,
+                "machine_count_status": entry.status,
+                "craftable_now": None if step is None else step.craftable_now,
+                "blocked_by_technologies": (
+                    [] if step is None else list(step.blocked_by_technologies)
+                ),
+                "ingredients": (
+                    []
+                    if choice is None
+                    else [
+                        {"item": ingredient.item, "count": ingredient.count}
+                        for ingredient in choice.spec.ingredients
+                    ]
+                ),
+            }
+        )
+    return {
+        "target_item": plan.target_item,
+        "target_rate_per_s": plan.target_rate_per_s,
+        "nodes": nodes,
+        "raw_requirements_per_s": dict(plan.raw_rate_per_s or {}),
+    }
+
+
+def _production_plan_body(
+    catalog: RuntimeFactorioCatalog | None,
+    item: str,
+    target_rate: float,
+    available: dict[str, float],
+    availability_measured: bool,
+) -> dict[str, Any]:
+    """The plan itself, with a refusal reported rather than raised.
+
+    ``DependencyPlanner`` cuts a recipe cycle and declares it instead of
+    raising, which already removes the failure that reached the handler. The
+    call is guarded anyway: it used to sit outside the guard that protected
+    the catalog choice, so anything it raised answered the request with a 500
+    and left the panel with neither a plan nor a reason.
+    """
+    body: dict[str, Any] = {
+        "catalog_source": (
+            "live_factorio_prototypes"
+            if catalog is not None
+            else "static_early_game_catalog"
+        ),
+        "planner": (
+            "dependency_planner" if catalog is not None else "production_dag"
+        ),
+        "availability": {
+            "measured": availability_measured,
+            "source": "world_entities" if availability_measured else None,
+            "counts": (
+                dict(sorted(available.items()))
+                if availability_measured
+                else None
+            ),
+        },
+        "dag": None,
+        "plan": None,
+        "plan_error": None,
+    }
+    try:
+        if catalog is None:
+            body["dag"] = EARLY_GAME_PRODUCTION_PLANNER.plan(
+                item,
+                target_rate,
+            ).to_dict()
+        else:
+            plan = DependencyPlanner(catalog).plan(
+                item,
+                rate_per_s=target_rate,
+                available=available if availability_measured else None,
+            )
+            body["plan"] = plan.as_dict()
+            body["dag"] = _dependency_dag_payload(plan, catalog)
+    except (
+        ArithmeticError,
+        LookupError,
+        RuntimeError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        body["dag"] = None
+        body["plan"] = None
+        body["plan_error"] = f"{type(exc).__name__}: {exc}"
+    return body
 
 
 class RuntimeConfigStore:
@@ -1620,6 +1976,14 @@ class DashboardState:
             str,
             tuple[tuple[int, int] | None, dict[str, Any]],
         ] = {}
+        self._machine_diagnostics_cache: dict[
+            str,
+            tuple[tuple[tuple[str, int, int], ...], dict[str, Any]],
+        ] = {}
+        self._production_plan_cache: dict[
+            str,
+            tuple[tuple[Any, ...], dict[str, Any]],
+        ] = {}
 
     def close(self) -> None:
         self.factorio.close()
@@ -1876,7 +2240,9 @@ class DashboardState:
             "production_plan": self.production_plan_data(
                 research=research,
                 progression=progression,
+                world=world,
             ),
+            "machine_diagnostics": self.machine_diagnostics_data(),
             "autonomy": self.autonomy_data(
                 world=world,
                 research=research,
@@ -2229,6 +2595,32 @@ class DashboardState:
         self._discovery_cache[key] = (fingerprint, payload)
         return payload
 
+    def machine_diagnostics_data(
+        self,
+        *,
+        reports_dir: Path | None = None,
+    ) -> dict[str, Any]:
+        """Why the machines of the last generation produced what they did.
+
+        Cached against the fingerprint of the report directory instead of a
+        TTL, like the survival and discovery endpoints: the loop writes a
+        report every ~17 minutes, and a clock-based cache would present the
+        cause measured two generations ago as the current one.
+        """
+        directory = (
+            self.generation_reports_dir
+            if reports_dir is None
+            else Path(reports_dir)
+        )
+        key = str(directory)
+        fingerprint = _generation_reports_fingerprint(directory)
+        cached = self._machine_diagnostics_cache.get(key)
+        if cached is not None and cached[0] == fingerprint:
+            return cached[1]
+        payload = _machine_diagnostics_payload(directory)
+        self._machine_diagnostics_cache[key] = (fingerprint, payload)
+        return payload
+
     def dataset_data(self) -> dict[str, Any]:
         cached = self._artifact_cache.get("dataset-data")
         now = time.time()
@@ -2550,11 +2942,30 @@ class DashboardState:
         self._artifact_cache[cache_key] = (now, summary)
         return summary
 
+    def _live_catalog(self, item: str) -> RuntimeFactorioCatalog | None:
+        """The live prototype catalog, when it is connected and knows ``item``.
+
+        Returns None on every way the read can fail, so the caller falls back
+        to the static catalog instead of planning against half a payload.
+        """
+        try:
+            payload = self.factorio.game_knowledge()
+        except (OSError, RuntimeError, TypeError, ValueError):
+            return None
+        if not isinstance(payload, dict) or not payload.get("connected"):
+            return None
+        try:
+            catalog = RuntimeFactorioCatalog(payload)
+        except (TypeError, ValueError):
+            return None
+        return catalog if catalog.recipe_choice(item) is not None else None
+
     def production_plan_data(
         self,
         *,
         research: dict[str, Any] | None = None,
         progression: dict[str, Any] | None = None,
+        world: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         research = research if research is not None else self.research_data()
         progression = (
@@ -2625,27 +3036,38 @@ class DashboardState:
                 "dag": None,
             }
         item, target_rate = target
-        planner = EARLY_GAME_PRODUCTION_PLANNER
-        planner_source = "static_early_game_catalog"
-        try:
-            runtime_payload = self.factorio.game_knowledge()
-            if runtime_payload.get("connected"):
-                runtime_catalog = RuntimeFactorioCatalog(runtime_payload)
-                if runtime_catalog.recipe_choice(item) is not None:
-                    planner = runtime_catalog.planner()
-                    planner_source = "live_factorio_prototypes"
-        except (OSError, RuntimeError, TypeError, ValueError):
-            pass
-        dag = planner.plan(item, target_rate)
-        return {
+        world = world if world is not None else self.factorio.snapshot()
+        available, availability_measured = _world_item_counts(world)
+        header = {
             "source": source,
-            "catalog_source": planner_source,
             "goal_id": goal_id,
             "goal_label": next_goal.get("label") if isinstance(next_goal, dict) else None,
             "factorio_data_version": FACTORIO_DATA_VERSION,
             "target_rate_per_s": target_rate,
-            "dag": dag.to_dict(),
         }
+        catalog = self._live_catalog(item)
+        # Fingerprint, not a clock: the plan may only change when the catalog,
+        # the target or what the world holds changes, and each of those is in
+        # here. A TTL would serve a plan drawn before a technology finished as
+        # the current one.
+        fingerprint = (
+            _catalog_fingerprint(catalog),
+            availability_measured,
+            tuple(sorted(available.items())),
+        )
+        cache_key = f"{source}|{goal_id}|{item}|{target_rate}"
+        cached = self._production_plan_cache.get(cache_key)
+        if cached is not None and cached[0] == fingerprint:
+            return {**header, **cached[1]}
+        body = _production_plan_body(
+            catalog,
+            item,
+            target_rate,
+            available,
+            availability_measured,
+        )
+        self._production_plan_cache[cache_key] = (fingerprint, body)
+        return {**header, **body}
 
     def world_scene(
         self,
