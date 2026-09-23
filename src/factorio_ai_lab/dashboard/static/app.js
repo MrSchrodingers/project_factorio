@@ -2720,6 +2720,29 @@ function blockerLabel(blocker) {
     + (technologies.length ? " · " + technologies.join(" > ") : "");
 }
 
+function renderValidatedRecord(record) {
+  const el = $("productionDagRecord");
+  if (!el) return;
+  if (!record) {
+    el.textContent = "";
+    return;
+  }
+  // The record is evidence from a run that already finished, not the plan
+  // being served. Saying which is which is the reason it is on screen.
+  const dag = record.record && record.record.dag ? record.record.dag : {};
+  const stamp = record.recorded_at || record.artifact_updated_at;
+  const target = dag.target_item
+    ? String(dag.target_item)
+      + " · " + formatNumber(dag.target_rate_per_s, 3) + "/s"
+    : "alvo não declarado";
+  el.textContent = "registro de execução validada (não é o plano servido): "
+    + String(record.plan_id || "?")
+    + " · " + target
+    + " · artefato " + String(record.artifact || "?")
+    + " · gravado " + (stamp ? String(stamp) : "não medido")
+    + (record.run_id ? " · run " + String(record.run_id) : "");
+}
+
 function renderProductionDag() {
   const plan = state.productionPlan || {};
   const dag = plan.dag || null;
@@ -2727,6 +2750,7 @@ function renderProductionDag() {
   const blockers = dependency && Array.isArray(dependency.blockers)
     ? dependency.blockers
     : [];
+  renderValidatedRecord(plan.validated_plan || null);
   if (!dag) {
     setText(
       "productionDagTarget",
@@ -2769,6 +2793,7 @@ function renderProductionDag() {
           ? "exequivel"
           : blockers.length + " bloqueio(s)")
         : null,
+      plan.validated_plan ? "registro validado ao lado" : null,
     ].filter(Boolean).join(" · ")
   );
   const nodes = Array.isArray(dag.nodes) ? dag.nodes : [];

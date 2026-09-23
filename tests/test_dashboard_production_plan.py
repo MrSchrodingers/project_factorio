@@ -30,6 +30,7 @@ from fastapi.testclient import TestClient
 
 from factorio_ai_lab.dashboard import app as dashboard_app
 from factorio_ai_lab.dashboard.state import DashboardState
+from factorio_ai_lab.planning.factorio_catalog import FACTORIO_DATA_VERSION
 
 PLAN_URL = "/api/production-plan"
 DIAGNOSTICS_URL = "/api/machine-diagnostics"
@@ -177,12 +178,54 @@ def _state_with(payload: dict[str, Any]) -> DashboardState:
 def _plan_payload(
     payload: dict[str, Any],
     world: dict[str, Any],
+    research: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return _state_with(payload).production_plan_data(
-        research={},
+        research={} if research is None else research,
         progression=_progression(),
         world=world,
     )
+
+
+def _recorded_plan(
+    *,
+    target_item: str = "electronic-circuit",
+    target_rate_per_s: float = 0.20,
+    material_budget: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """A plan shaped like the one a validated run writes to the journal."""
+    return {
+        "factorio_data_version": "0.0.0-recorded",
+        "target_rate_per_s": target_rate_per_s,
+        "validation_horizon_s": 120.0,
+        "safety_factor": 1.5,
+        "material_budget": (
+            {"iron_plate": 40, "copper_plate": 20}
+            if material_budget is None
+            else material_budget
+        ),
+        "dag": {
+            "target_item": target_item,
+            "target_rate_per_s": target_rate_per_s,
+            "nodes": [],
+            "raw_requirements_per_s": {"iron-ore": 1.0},
+        },
+    }
+
+
+def _research_with_record(
+    record: dict[str, Any],
+    *,
+    plan_id: str = "electronic_circuits",
+    updated_at: str | None = "2026-09-23T12:00:00Z",
+    run_id: str | None = "run-77",
+) -> dict[str, Any]:
+    research: dict[str, Any] = {"production_plans": {plan_id: record}}
+    if updated_at is not None:
+        research["updated_at"] = updated_at
+    if run_id is not None:
+        research["run_id"] = run_id
+    return research
 
 
 def _parse_like_browser(text: str) -> Any:
@@ -371,6 +414,170 @@ def test_plan_cache_follows_the_catalog_not_the_clock() -> None:
     )
     assert refreshed["plan"] is not first["plan"], "research has to force a replan"
     assert refreshed["plan"]["missing_technologies"] == []
+
+
+def test_a_recorded_plan_never_hides_a_research_blocker() -> None:
+    """The defect: a stored artifact answered the request on its own.
+
+    ``production_plans`` non-empty returned the recorded plan and called no
+    planner at all, so a target locked behind ``automation`` reached the
+    panel as a chain ready to build.
+    """
+    payload = _plan_payload(
+        _catalog_payload(),
+        _world(),
+        research=_research_with_record(_recorded_plan()),
+    )
+
+    plan = payload["plan"]
+    assert plan is not None, "a record must not replace the live plan"
+    assert payload["planner"] == "dependency_planner"
+    assert payload["catalog_source"] == "live_factorio_prototypes"
+    assert plan["feasible"] is False
+    assert "automation" in plan["missing_technologies"]
+    machine = _step(plan, "assembling-machine-1")
+    assert machine is not None
+    assert machine["craftable_now"] is False
+
+
+def test_the_record_is_served_as_a_declared_artifact() -> None:
+    record = _recorded_plan()
+    payload = _plan_payload(
+        _catalog_payload(),
+        _world(),
+        research=_research_with_record(record),
+    )
+
+    validated = payload["validated_plan"]
+    assert validated["plan_id"] == "electronic_circuits"
+    assert validated["artifact"] == "runs/research_state.json"
+    assert validated["artifact_updated_at"] == "2026-09-23T12:00:00Z"
+    assert validated["run_id"] == "run-77"
+    assert validated["recorded_at"] is None
+    assert validated["record"] == record, "the record is kept whole"
+    assert payload["source"] == "validated_run_plan"
+    # The recorded data version used to be merged into the payload root,
+    # where it reads as the version the live plan was drawn against.
+    assert payload["factorio_data_version"] == FACTORIO_DATA_VERSION
+
+
+def test_a_time_never_written_is_absent_not_invented() -> None:
+    payload = _plan_payload(
+        _catalog_payload(),
+        _world(),
+        research=_research_with_record(
+            _recorded_plan(),
+            updated_at=None,
+            run_id=None,
+        ),
+    )
+
+    validated = payload["validated_plan"]
+    assert validated["artifact_updated_at"] is None
+    assert validated["run_id"] is None
+
+
+def test_no_record_reads_as_no_record() -> None:
+    payload = _plan_payload(_catalog_payload(), _world())
+
+    assert payload["validated_plan"] is None
+
+
+def test_the_live_plan_answers_about_the_recorded_target() -> None:
+    payload = _plan_payload(
+        _catalog_payload(),
+        _world(),
+        research=_research_with_record(
+            _recorded_plan(target_item="iron-gear-wheel", target_rate_per_s=0.05),
+            plan_id="assembler_gears",
+        ),
+    )
+
+    assert payload["goal_id"] == "assembler_gears"
+    assert payload["target_rate_per_s"] == 0.05
+    assert payload["dag"]["target_item"] == "iron-gear-wheel"
+    assert payload["plan"]["target_item"] == "iron-gear-wheel"
+
+
+def test_a_record_without_a_target_keeps_the_frontier_one() -> None:
+    record = _recorded_plan()
+    record["dag"] = {"nodes": []}
+    record["target_rate_per_s"] = None
+
+    payload = _plan_payload(
+        _catalog_payload(),
+        _world(),
+        research=_research_with_record(record),
+    )
+
+    assert payload["source"] == "frontier"
+    assert payload["dag"]["target_item"] == "electronic-circuit"
+    assert payload["validated_plan"]["plan_id"] == "electronic_circuits"
+
+
+def test_a_rewritten_record_is_never_served_from_the_plan_cache() -> None:
+    state = _state_with(_catalog_payload())
+    first = state.production_plan_data(
+        research=_research_with_record(
+            _recorded_plan(),
+            updated_at="2026-09-23T12:00:00Z",
+        ),
+        progression=_progression(),
+        world=_world(),
+    )
+    second = state.production_plan_data(
+        research=_research_with_record(
+            _recorded_plan(),
+            updated_at="2026-09-23T18:30:00Z",
+        ),
+        progression=_progression(),
+        world=_world(),
+    )
+
+    assert first["validated_plan"]["artifact_updated_at"] == "2026-09-23T12:00:00Z"
+    assert second["validated_plan"]["artifact_updated_at"] == "2026-09-23T18:30:00Z"
+    # Same catalog, same target, same world: the plan itself is still reused.
+    assert second["plan"] is first["plan"]
+
+
+def test_the_endpoint_serves_the_record_and_the_blockers_as_strict_json(
+    monkeypatch,
+) -> None:
+    record = _recorded_plan(
+        material_budget={"iron_plate": float("inf"), "copper_plate": 20},
+    )
+    monkeypatch.setattr(
+        dashboard_app.state.factorio,
+        "game_knowledge",
+        lambda **_: _catalog_payload(),
+    )
+    monkeypatch.setattr(
+        dashboard_app.state.factorio,
+        "snapshot",
+        lambda: _world(),
+    )
+    monkeypatch.setattr(
+        dashboard_app.state,
+        "research_data",
+        lambda: _research_with_record(record),
+    )
+    monkeypatch.setattr(
+        dashboard_app.state,
+        "engineering_progression_data",
+        lambda **_: _progression(),
+    )
+
+    response = TestClient(dashboard_app.app).get(PLAN_URL)
+
+    assert response.status_code == 200
+    body = _parse_like_browser(response.text)
+    assert body["plan"]["feasible"] is False
+    assert "automation" in body["plan"]["missing_technologies"]
+    assert body["validated_plan"]["artifact"] == "runs/research_state.json"
+    assert body["validated_plan"]["artifact_updated_at"] == "2026-09-23T12:00:00Z"
+    budget = body["validated_plan"]["record"]["material_budget"]
+    assert budget["iron_plate"] is None, "a non-finite value must not reach the wire"
+    assert budget["copper_plate"] == 20
 
 
 # -- machine diagnostics ------------------------------------------------

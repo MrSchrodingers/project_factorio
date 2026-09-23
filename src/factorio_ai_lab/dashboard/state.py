@@ -701,6 +701,60 @@ def _world_item_counts(world: Any) -> tuple[dict[str, float], bool]:
     return dict(counts), True
 
 
+def _text_or_none(value: Any) -> str | None:
+    """A non-empty string when there is one, None when it was never written."""
+    return value if isinstance(value, str) and value else None
+
+
+def _validated_run_plan(research: dict[str, Any]) -> dict[str, Any] | None:
+    """The last plan a real run recorded, wrapped in where it came from.
+
+    A plan a run validated is evidence, so it is kept. It is also a stored
+    artifact: it was drawn under the technologies, the machines and the
+    inventory of the run that wrote it. It used to be merged into the payload
+    root and returned on its own, which hid every blocker only the live
+    planner can see and let recorded values land in fields a reader takes as
+    live. It is served as a named record instead, beside the live plan, with
+    the artifact that holds it and the last time that artifact was written.
+    """
+    plans = research.get("production_plans")
+    if not isinstance(plans, dict) or not plans:
+        return None
+    key = next(reversed(plans))
+    record = plans.get(key)
+    if not isinstance(record, dict):
+        return None
+    return {
+        "plan_id": str(key),
+        "artifact": "runs/research_state.json",
+        "run_id": _text_or_none(research.get("run_id")),
+        "recorded_at": _text_or_none(record.get("recorded_at")),
+        "artifact_updated_at": _text_or_none(research.get("updated_at")),
+        "record": record,
+    }
+
+
+def _recorded_plan_target(record: dict[str, Any]) -> tuple[str, float] | None:
+    """Item and rate a recorded plan was drawn for, when it states both.
+
+    A record naming neither is not turned into a target of zero: the caller
+    keeps the frontier target and still serves the record.
+    """
+    dag = record.get("dag")
+    item = dag.get("target_item") if isinstance(dag, dict) else None
+    if not isinstance(item, str) or not item:
+        return None
+    rate = record.get("target_rate_per_s")
+    if isinstance(rate, bool) or not isinstance(rate, (int, float)):
+        rate = dag.get("target_rate_per_s")
+    if isinstance(rate, bool) or not isinstance(rate, (int, float)):
+        return None
+    rate = float(rate)
+    if not isfinite(rate) or rate <= 0.0:
+        return None
+    return item, rate
+
+
 def _catalog_fingerprint(
     catalog: RuntimeFactorioCatalog | None,
 ) -> tuple[int, ...] | None:
@@ -2967,22 +3021,23 @@ class DashboardState:
         progression: dict[str, Any] | None = None,
         world: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """The plan for the current target, and the record behind it.
+
+        Provenance is split across three declared fields. ``source`` names
+        where the target came from; ``planner`` and ``catalog_source`` name
+        what drew the ``dag`` and the ``plan`` being served; and
+        ``validated_plan`` carries the stored artifact whole, with the file
+        that holds it and when that file was last written. Serving only the
+        artifact, which is what happened before, left a target blocked by
+        research looking like a plan ready to execute.
+        """
         research = research if research is not None else self.research_data()
         progression = (
             progression
             if progression is not None
             else self.engineering_progression_data(research=research)
         )
-        plans = research.get("production_plans", {})
-        if isinstance(plans, dict) and plans:
-            key = next(reversed(plans))
-            plan = plans.get(key)
-            if isinstance(plan, dict):
-                return {
-                    "source": "validated_run_plan",
-                    "plan_id": key,
-                    **plan,
-                }
+        validated = _validated_run_plan(research)
 
         next_goal = progression.get("next_goal")
         goal_id = (
@@ -3028,11 +3083,31 @@ class DashboardState:
                                 source = "latest_lab_generation"
                 except (OSError, json.JSONDecodeError):
                     pass
+        recorded_target = (
+            _recorded_plan_target(validated["record"])
+            if validated is not None
+            else None
+        )
+        if recorded_target is not None:
+            # The record states which target a real run was building, so the
+            # live plan is drawn for that same target and the two describe
+            # the same thing. What the record cannot state is whether the
+            # target is reachable now: research, machines and inventory all
+            # moved since it was written.
+            target = recorded_target
+            source = "validated_run_plan"
+            goal_id = validated["plan_id"] or goal_id
+            if (
+                not isinstance(next_goal, dict)
+                or str(next_goal.get("goal_id") or "") != goal_id
+            ):
+                next_goal = None
         if target is None:
             return {
                 "source": source,
                 "goal_id": goal_id or None,
                 "factorio_data_version": FACTORIO_DATA_VERSION,
+                "validated_plan": validated,
                 "dag": None,
             }
         item, target_rate = target
@@ -3044,6 +3119,11 @@ class DashboardState:
             "goal_label": next_goal.get("label") if isinstance(next_goal, dict) else None,
             "factorio_data_version": FACTORIO_DATA_VERSION,
             "target_rate_per_s": target_rate,
+            # Rebuilt on every request instead of cached with the plan body:
+            # the body only depends on the catalog, the target and what the
+            # world holds, so a record rewritten between two requests would
+            # otherwise be served with the timestamp of the previous one.
+            "validated_plan": validated,
         }
         catalog = self._live_catalog(item)
         # Fingerprint, not a clock: the plan may only change when the catalog,
