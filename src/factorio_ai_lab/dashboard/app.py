@@ -48,7 +48,27 @@ app = FastAPI(
     version="0.11.0",
     lifespan=lifespan,
 )
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+class _VersionedStatic(StaticFiles):
+    """Static files that are safe to cache only when the URL is versioned.
+
+    The pages reference the bundle with a content hash (?v=<hash>, stamped by
+    frontend/stamp.mjs), so a hashed URL can be cached hard. Without the hash
+    the browser has to revalidate, otherwise a rebuild is invisible to anyone
+    holding the previous copy - which is exactly what happened: the bundle was
+    rebuilt repeatedly while phones kept serving a stale one from cache.
+    """
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        query = scope.get("query_string", b"").decode("latin-1")
+        if "v=" in query:
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        else:
+            response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return response
+
+
+app.mount("/static", _VersionedStatic(directory=STATIC_DIR), name="static")
 
 
 class RuntimePatch(BaseModel):
@@ -67,7 +87,12 @@ class RuntimePatch(BaseModel):
 
 @app.get("/")
 def root() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+    # The page carries the content hashes of everything else, so it is the one
+    # file that must never be served stale.
+    return FileResponse(
+        STATIC_DIR / "index.html",
+        headers={"Cache-Control": "no-cache, must-revalidate"},
+    )
 
 
 @app.get("/api/status")
