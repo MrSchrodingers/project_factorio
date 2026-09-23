@@ -79,6 +79,8 @@ export interface SpriteManifestEntry {
 export interface SpriteManifest {
   sprites: Record<string, SpriteManifestEntry>;
   count: number;
+  /** Frames the server packs into one strip; long loops are sampled down. */
+  strip_frames?: number;
 }
 
 /** Physical topology from GET /api/factory-graph, drawn as an overlay. */

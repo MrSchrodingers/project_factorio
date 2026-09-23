@@ -11,12 +11,18 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 
 from factorio_ai_lab.dashboard.rendering import resolve_official_icon
-from factorio_ai_lab.dashboard.sprites import SpriteLibrary, sprite_manifest
+from factorio_ai_lab.dashboard.sprites import (
+    SpriteLibrary,
+    TileLibrary,
+    sprite_manifest,
+    tile_manifest,
+)
 from factorio_ai_lab.dashboard.state import DashboardState, json_finite
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 state = DashboardState()
 sprites = SpriteLibrary()
+tiles = TileLibrary()
 
 
 async def _telemetry_loop() -> None:
@@ -185,11 +191,54 @@ def api_official_icon(entity_name: str) -> FileResponse:
     )
 
 
+@app.get("/api/assets/tiles.json")
+def api_tile_manifest() -> dict[str, Any]:
+    manifest = tile_manifest(tiles)
+    manifest["library"] = tiles.status()
+    return manifest
+
+
+@app.get("/api/assets/tile/{family}/{kind}.png")
+def api_ground_tile(family: str, kind: str, variant: int = 0) -> Response:
+    if family not in {"terrain", "resource"}:
+        raise HTTPException(400, "family must be terrain or resource")
+    png = tiles.render(family, kind, variant)
+    if png is None:
+        raise HTTPException(404, "no local texture for this tile")
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={
+            "Cache-Control": "public, max-age=86400, immutable",
+            "X-Asset-Source": "Factorio official graphics 2.0.73 (local only)",
+        },
+    )
+
+
 @app.get("/api/assets/sprites.json")
 def api_sprite_manifest() -> dict[str, Any]:
     manifest = sprite_manifest()
+    manifest["strip_frames"] = SpriteLibrary.MAX_STRIP_FRAMES
     manifest["library"] = sprites.status()
     return manifest
+
+
+@app.get("/api/assets/strip/{entity_name}.png")
+def api_entity_strip(entity_name: str, direction: int = 0) -> Response:
+    """Whole animation as one image, to keep the request count low."""
+    result = sprites.strip(entity_name, direction)
+    if result is None:
+        raise HTTPException(404, "no verified sprite spec for this entity")
+    png, frames = result
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={
+            "Cache-Control": "public, max-age=86400, immutable",
+            "X-Frame-Count": str(frames),
+            "X-Asset-Source": "Factorio official graphics 2.0.73 (local only)",
+        },
+    )
 
 
 @app.get("/api/assets/sprite/{entity_name}.png")

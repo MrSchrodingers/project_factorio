@@ -32,6 +32,23 @@ import type {
   SceneEntity,
 } from "./types";
 
+/** Factorio tile name -> local texture family. */
+const TERRAIN_TEXTURE: Record<string, string> = {
+  water: "water",
+  deepwater: "deepwater",
+  "water-green": "water",
+  "deepwater-green": "deepwater",
+  "water-shallow": "water",
+  "water-mud": "water",
+  "stone-path": "stone-path",
+  concrete: "concrete",
+  "refined-concrete": "refined-concrete",
+  "hazard-concrete-left": "concrete",
+  "hazard-concrete-right": "concrete",
+  "refined-hazard-concrete-left": "refined-concrete",
+  "refined-hazard-concrete-right": "refined-concrete",
+};
+
 const DIRECTION_VECTORS: Record<number, [number, number]> = {
   0: [0, -1],
   4: [1, 0],
@@ -140,38 +157,68 @@ export class SceneRenderer {
    */
   private drawGround(input: RenderInput): void {
     const { ctx } = this;
-    const { camera } = input;
+    const { camera, assets } = input;
     const view = camera.viewport();
     const scale = camera.scale;
 
     ctx.fillStyle = GROUND_VARIANTS[0];
     ctx.fillRect(0, 0, camera.viewportWidth, camera.viewportHeight);
-    if (scale < 5) return;
+    if (scale < 4) return;
 
-    // Patch size grows as we zoom out so the texture keeps a constant
-    // on-screen frequency. Per-tile variation at survey zoom looks like
-    // static, not like terrain.
+    const x0 = Math.floor(view.left);
+    const x1 = Math.ceil(view.right);
+    const y0 = Math.floor(view.top);
+    const y1 = Math.ceil(view.bottom);
+    const size = Math.ceil(scale) + 1;
+    const variants = assets.terrainVariants("grass");
+
+    if (variants > 0) {
+      // Real grass tiles, varied by a position hash so the ground does not
+      // repeat in a visible lattice.
+      for (let y = y0; y <= y1; y++) {
+        const screenY = Math.floor(camera.worldToScreenY(y));
+        for (let x = x0; x <= x1; x++) {
+          const tile = assets.terrainTile("grass", tileHash(x, y));
+          if (tile) {
+            ctx.drawImage(
+              tile,
+              Math.floor(camera.worldToScreenX(x)),
+              screenY,
+              size,
+              size,
+            );
+          }
+        }
+      }
+      return;
+    }
+
+    // Fallback while the textures are still loading: low-contrast patches.
     const patch = scale >= 20 ? 2 : scale >= 10 ? 4 : 8;
-    const x0 = Math.floor(view.left / patch) * patch;
-    const x1 = Math.ceil(view.right / patch) * patch;
-    const y0 = Math.floor(view.top / patch) * patch;
-    const y1 = Math.ceil(view.bottom / patch) * patch;
-    const size = Math.ceil(scale * patch) + 1;
-
-    for (let y = y0; y <= y1; y += patch) {
+    const px0 = Math.floor(view.left / patch) * patch;
+    const px1 = Math.ceil(view.right / patch) * patch;
+    const py0 = Math.floor(view.top / patch) * patch;
+    const py1 = Math.ceil(view.bottom / patch) * patch;
+    const patchSize = Math.ceil(scale * patch) + 1;
+    for (let y = py0; y <= py1; y += patch) {
       const screenY = Math.floor(camera.worldToScreenY(y));
-      for (let x = x0; x <= x1; x += patch) {
+      for (let x = px0; x <= px1; x += patch) {
         const variant = tileHash(x / patch, y / patch) % GROUND_VARIANTS.length;
-        if (variant === 0) continue; // base fill already covers it
+        if (variant === 0) continue;
         ctx.fillStyle = GROUND_VARIANTS[variant];
-        ctx.fillRect(Math.floor(camera.worldToScreenX(x)), screenY, size, size);
+        ctx.fillRect(
+          Math.floor(camera.worldToScreenX(x)),
+          screenY,
+          patchSize,
+          patchSize,
+        );
       }
     }
   }
 
   private drawTerrain(input: RenderInput): void {
     const { ctx } = this;
-    const { camera, scene } = input;
+    const { camera, scene, assets } = input;
     if (!scene) return;
     const view = camera.viewport();
     const size = Math.ceil(camera.scale) + 1;
@@ -180,79 +227,73 @@ export class SceneRenderer {
       if (run.y < view.top - 1 || run.y > view.bottom + 1) continue;
       if (run.x2 < view.left - 1 || run.x1 > view.right + 1) continue;
       const color = TERRAIN_COLORS[run.name];
-      if (!color) continue;
-      const left = Math.floor(camera.worldToScreenX(run.x1));
-      const right = Math.floor(camera.worldToScreenX(run.x2 + 1));
-      ctx.fillStyle = color;
-      ctx.fillRect(
-        left,
-        Math.floor(camera.worldToScreenY(run.y)),
-        Math.max(1, right - left),
-        size,
-      );
-    }
+      const texture = TERRAIN_TEXTURE[run.name];
+      const screenY = Math.floor(camera.worldToScreenY(run.y));
 
-    // Plate joints on paved tiles: a flat grey block reads as missing data.
-    if (camera.scale >= 8) {
-      ctx.strokeStyle = "rgba(0,0,0,.16)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      for (const run of scene.terrain_runs) {
-        if (!TERRAIN_COLORS[run.name] || run.name.includes("water")) continue;
-        if (run.y < view.top - 1 || run.y > view.bottom + 1) continue;
-        const y = Math.floor(camera.worldToScreenY(run.y)) + 0.5;
-        ctx.moveTo(Math.floor(camera.worldToScreenX(run.x1)), y);
-        ctx.lineTo(Math.floor(camera.worldToScreenX(run.x2 + 1)), y);
+      // Flat colour first: it fills any gap while a tile is still decoding,
+      // and it is what shows if the texture is unavailable.
+      if (color) {
+        const left = Math.floor(camera.worldToScreenX(run.x1));
+        const right = Math.floor(camera.worldToScreenX(run.x2 + 1));
+        ctx.fillStyle = color;
+        ctx.fillRect(left, screenY, Math.max(1, right - left), size);
       }
-      ctx.stroke();
+      if (!texture || camera.scale < 4) continue;
+
+      const from = Math.max(run.x1, Math.floor(view.left) - 1);
+      const to = Math.min(run.x2, Math.ceil(view.right) + 1);
+      for (let x = from; x <= to; x++) {
+        const tile = assets.terrainTile(texture, tileHash(x, run.y));
+        if (!tile) continue;
+        ctx.drawImage(
+          tile,
+          Math.floor(camera.worldToScreenX(x)),
+          screenY,
+          size,
+          size,
+        );
+      }
     }
   }
 
   private drawResources(input: RenderInput): void {
     const { ctx } = this;
-    const { camera, scene } = input;
+    const { camera, scene, assets } = input;
     if (!scene) return;
     const view = camera.viewport();
     const size = Math.max(1, Math.ceil(camera.scale));
 
-    // Richness modulates alpha so a depleting patch visibly fades.
     for (const resource of scene.resources) {
       const { x, y } = resource.position;
       if (x < view.left - 1 || x > view.right + 1) continue;
       if (y < view.top - 1 || y > view.bottom + 1) continue;
-      const color = ORE_COLORS[resource.name];
-      if (!color) continue;
-      const richness = Math.min(1, Math.max(0.25, resource.amount / 1500));
       const screenX = Math.floor(camera.worldToScreenX(x - 0.5));
       const screenY = Math.floor(camera.worldToScreenY(y - 0.5));
 
+      const variants = assets.resourceVariants(resource.name);
+      if (variants > 0 && camera.scale >= 4) {
+        // Sheet columns run sparse to dense, so richness picks the column:
+        // a depleting patch visibly thins out, as it does in game.
+        const richness = Math.min(1, Math.max(0, resource.amount / 2000));
+        const column = Math.min(
+          variants - 1,
+          Math.floor(richness * (variants - 1) + 0.5),
+        );
+        const tile = assets.resourceTile(resource.name, column);
+        if (tile) {
+          ctx.drawImage(tile, screenX, screenY, size, size);
+          continue;
+        }
+      }
+
+      const color = ORE_COLORS[resource.name];
+      if (!color) continue;
+      const richness = Math.min(1, Math.max(0.25, resource.amount / 1500));
       ctx.globalAlpha = 0.4 + richness * 0.4;
       ctx.fillStyle = color;
       ctx.fillRect(screenX, screenY, size, size);
-
-      // Grain: ore is a deposit, not a painted rectangle. Two deterministic
-      // specks per tile give the patch texture without any per-frame cost.
-      if (camera.scale >= 9) {
-        const h = tileHash(x, y);
-        ctx.globalAlpha = 0.30 + richness * 0.35;
-        ctx.fillStyle = "rgba(255,255,255,.85)";
-        const grain = Math.max(1, Math.round(camera.scale * 0.16));
-        ctx.fillRect(
-          screenX + (h % Math.max(1, size - grain)),
-          screenY + ((h >> 7) % Math.max(1, size - grain)),
-          grain,
-          grain,
-        );
-        ctx.fillStyle = "rgba(0,0,0,.55)";
-        ctx.fillRect(
-          screenX + ((h >> 13) % Math.max(1, size - grain)),
-          screenY + ((h >> 19) % Math.max(1, size - grain)),
-          grain,
-          grain,
-        );
-      }
+      ctx.globalAlpha = 1;
     }
-    ctx.globalAlpha = 1;
   }
 
   private drawNatural(input: RenderInput): void {
@@ -352,19 +393,26 @@ export class SceneRenderer {
 
     const direction = cardinal(entity.direction);
     const phase = Math.abs(((entity.x * 7 + entity.y * 13) | 0) % 16);
-    const frame = assets.frameFor(entity.name, input.animationTick, phase);
-    const sprite = assets.sprite(entity.name, direction, frame);
+    const strip = assets.strip(entity.name, direction);
 
-    if (sprite && sprite.width > 0) {
-      // Scale by footprint width, preserving the sheet's aspect ratio, and
+    if (strip && strip.width > 0) {
+      const frames = assets.stripFrames(entity.name);
+      const frame = assets.frameFor(entity.name, input.animationTick, phase);
+      const frameW = strip.width / frames;
+      const frameH = strip.height;
+      // Scale by footprint width, preserving the frame's aspect ratio, and
       // anchor the bottom of the art near the bottom of the tile so tall
       // machines lean north the way they do in game.
       const info = assets.spriteInfo(entity.name);
       const extra = info?.scale ?? 1;
       const drawW = tileW * extra;
-      const drawH = (sprite.height / sprite.width) * drawW;
+      const drawH = (frameH / frameW) * drawW;
       ctx.drawImage(
-        sprite,
+        strip,
+        frame * frameW,
+        0,
+        frameW,
+        frameH,
         screenX - drawW / 2,
         screenY + tileH / 2 - drawH,
         drawW,
@@ -612,24 +660,49 @@ export class SceneRenderer {
     ctx.textAlign = "center";
     ctx.textBaseline = "alphabetic";
 
-    // Collapse identical adjacent names (a belt run) into one label per group.
-    const drawn: Array<{ x: number; y: number }> = [];
-    for (const entity of scene.entities) {
-      if (
-        entity.x < view.left ||
-        entity.x > view.right ||
-        entity.y < view.top ||
-        entity.y > view.bottom
-      ) {
-        continue;
-      }
+    // Reject a label whose box overlaps one already placed. Spacing by centre
+    // distance alone let two wide names sit side by side and overprint.
+    const placed: Array<{ x0: number; y0: number; x1: number; y1: number }> = [];
+    const overlaps = (box: { x0: number; y0: number; x1: number; y1: number }) =>
+      placed.some(
+        (other) =>
+          box.x0 < other.x1 &&
+          box.x1 > other.x0 &&
+          box.y0 < other.y1 &&
+          box.y1 > other.y0,
+      );
+
+    // Nearest first, so the machine under the cursor keeps its name when the
+    // area is crowded.
+    const ordered = scene.entities
+      .filter(
+        (entity) =>
+          entity.x >= view.left &&
+          entity.x <= view.right &&
+          entity.y >= view.top &&
+          entity.y <= view.bottom,
+      )
+      .sort((a, b) => {
+        const sizeA = footprint(a, scene.prototypes);
+        const sizeB = footprint(b, scene.prototypes);
+        return sizeB.width * sizeB.height - sizeA.width * sizeA.height;
+      });
+
+    for (const entity of ordered) {
+      const label = humanize(entity.name);
+      const width = ctx.measureText(label).width;
       const x = camera.worldToScreenX(entity.x);
       const y = camera.worldToScreenY(entity.y);
-      if (drawn.some((p) => Math.hypot(p.x - x, p.y - y) < 44)) continue;
-      drawn.push({ x, y });
       const size = footprint(entity, scene.prototypes);
-      const label = humanize(entity.name);
       const textY = y - (size.height * camera.scale) / 2 - 6;
+      const box = {
+        x0: x - width / 2 - 3,
+        y0: textY - 10,
+        x1: x + width / 2 + 3,
+        y1: textY + 3,
+      };
+      if (overlaps(box)) continue;
+      placed.push(box);
       ctx.lineWidth = 3;
       ctx.strokeStyle = "rgba(10,12,13,.85)";
       ctx.strokeText(label, x, textY);

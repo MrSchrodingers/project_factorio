@@ -22,7 +22,9 @@ from typing import Any
 from PIL import Image
 
 from factorio_ai_lab.dashboard.rendering import (
+    ASSET_ROOT,
     ENTITY_DIR,
+    FLE_RESOURCE_DIR,
     _cardinal_direction,
     resolve_official_icon,
 )
@@ -221,6 +223,7 @@ class SpriteLibrary:
 
     def __init__(self, max_entries: int = 512) -> None:
         self._cache: dict[tuple[str, int, int], bytes] = {}
+        self._strip_cache: dict[tuple[str, int, int], tuple[bytes, int]] = {}
         self._lock = Lock()
         self._max_entries = max_entries
 
@@ -311,6 +314,56 @@ class SpriteLibrary:
             self._cache[key] = payload
         return payload
 
+
+
+    # Frames served one request at a time saturate the browser's per-origin
+    # connection limit: a dozen machines at 32 frames each is hundreds of
+    # requests, which starves the ground textures and makes the map flicker
+    # between textured and flat while it loads. A strip is one request.
+    MAX_STRIP_FRAMES = 12
+
+    def strip(self, name: str, direction: int) -> tuple[bytes, int] | None:
+        """All frames of one animation, side by side, plus the frame count.
+
+        Long animations are sampled down to MAX_STRIP_FRAMES evenly spaced
+        frames: past roughly a dozen the motion is indistinguishable at map
+        zoom, and the bytes are not.
+        """
+        spec = SPRITE_SPECS.get(name)
+        if spec is None:
+            return None
+        cardinal = _cardinal_direction(direction)
+        key = (name, cardinal, -1)
+        with self._lock:
+            cached = self._strip_cache.get(key)
+            if cached is not None:
+                return cached
+
+        total = max(1, spec.frames)
+        count = min(total, self.MAX_STRIP_FRAMES)
+        indices = [round(i * total / count) % total for i in range(count)]
+
+        frames: list[Image.Image] = []
+        for index in indices:
+            payload = self.render(name, cardinal, index)
+            if payload is None:
+                return None
+            frames.append(Image.open(BytesIO(payload)).convert("RGBA"))
+
+        width = frames[0].width
+        height = frames[0].height
+        sheet = Image.new("RGBA", (width * len(frames), height), (0, 0, 0, 0))
+        for position, frame in enumerate(frames):
+            sheet.alpha_composite(frame, (position * width, 0))
+        buffer = BytesIO()
+        sheet.save(buffer, format="PNG", optimize=True)
+        result = (buffer.getvalue(), len(frames))
+        with self._lock:
+            if len(self._strip_cache) >= 64:
+                self._strip_cache.clear()
+            self._strip_cache[key] = result
+        return result
+
     @staticmethod
     def icon_path(name: str) -> Path | None:
         return resolve_official_icon(name)
@@ -327,3 +380,120 @@ def sprite_manifest() -> dict[str, Any]:
             "scale": spec.scale,
         }
     return {"sprites": entries, "count": len(entries)}
+
+# --------------------------------------------------------------- ground tiles
+
+TERRAIN_SHEETS: dict[str, str] = {
+    "grass": "terrain/grass-1.png",
+    "grass-2": "terrain/grass-2.png",
+    "dirt": "terrain/dirt-1.png",
+    "dry-dirt": "terrain/dry-dirt.png",
+    "water": "terrain/water/water1.png",
+    "deepwater": "terrain/deepwater/deepwater1.png",
+    "concrete": "terrain/concrete/concrete.png",
+    "refined-concrete": "terrain/concrete/refined-concrete.png",
+    "stone-path": "terrain/stone-path/stone-path-1.png",
+}
+
+# Resource sprites live in the FLE spritemap tree, as a grid of 32px tiles
+# whose columns run from a sparse scattering to a dense pile. Picking the
+# column by richness is how the game itself shows a patch depleting.
+RESOURCE_SHEETS: dict[str, str] = {
+    "iron-ore": "iron-ore/iron-ore.png",
+    "copper-ore": "copper-ore/copper-ore.png",
+    "coal": "coal/coal.png",
+    "stone": "stone/stone.png",
+    "crude-oil": "crude-oil/crude-oil.png",
+}
+
+TILE_PIXELS = 32
+
+
+class TileLibrary:
+    """Single 32px tiles cut from the official terrain and resource sheets.
+
+    The map used to paint terrain and ore as flat coloured rectangles, which
+    is legible but reads as a diagram rather than as the game. These are the
+    real textures, served one tile at a time so the browser can cache each
+    variant forever.
+    """
+
+    def __init__(self, max_entries: int = 256) -> None:
+        self._cache: dict[tuple[str, str, int], bytes] = {}
+        self._lock = Lock()
+        self._max_entries = max_entries
+
+    def status(self) -> dict[str, Any]:
+        return {
+            "terrain_kinds": sorted(TERRAIN_SHEETS),
+            "resource_kinds": sorted(RESOURCE_SHEETS),
+            "cached_tiles": len(self._cache),
+        }
+
+    @staticmethod
+    def _sheet_path(family: str, kind: str) -> Path | None:
+        if family == "terrain":
+            relative = TERRAIN_SHEETS.get(kind)
+            return ASSET_ROOT / relative if relative else None
+        if family == "resource":
+            relative = RESOURCE_SHEETS.get(kind)
+            return FLE_RESOURCE_DIR / relative if relative else None
+        return None
+
+    def variants(self, family: str, kind: str) -> int:
+        """How many distinct tiles the sheet offers on its first row."""
+        path = self._sheet_path(family, kind)
+        if path is None or not path.is_file():
+            return 0
+        try:
+            with Image.open(path) as sheet:
+                return max(1, sheet.width // TILE_PIXELS)
+        except (OSError, ValueError):
+            return 0
+
+    def render(self, family: str, kind: str, variant: int) -> bytes | None:
+        path = self._sheet_path(family, kind)
+        if path is None or not path.is_file():
+            return None
+        key = (family, kind, variant)
+        with self._lock:
+            cached = self._cache.get(key)
+            if cached is not None:
+                return cached
+        try:
+            with Image.open(path) as sheet:
+                image = sheet.convert("RGBA")
+                columns = max(1, image.width // TILE_PIXELS)
+                column = max(0, variant) % columns
+                # Only row 0 is used: later rows are edge transitions, which
+                # would show as seams when repeated across open ground.
+                crop = image.crop((
+                    column * TILE_PIXELS,
+                    0,
+                    (column + 1) * TILE_PIXELS,
+                    TILE_PIXELS,
+                ))
+        except (OSError, ValueError):
+            return None
+        buffer = BytesIO()
+        crop.save(buffer, format="PNG", optimize=True)
+        payload = buffer.getvalue()
+        with self._lock:
+            if len(self._cache) >= self._max_entries:
+                self._cache.clear()
+            self._cache[key] = payload
+        return payload
+
+
+def tile_manifest(library: TileLibrary) -> dict[str, Any]:
+    terrain = {
+        kind: library.variants("terrain", kind) for kind in sorted(TERRAIN_SHEETS)
+    }
+    resources = {
+        kind: library.variants("resource", kind) for kind in sorted(RESOURCE_SHEETS)
+    }
+    return {
+        "tile_pixels": TILE_PIXELS,
+        "terrain": {k: v for k, v in terrain.items() if v > 0},
+        "resources": {k: v for k, v in resources.items() if v > 0},
+    }

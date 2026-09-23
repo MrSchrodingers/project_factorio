@@ -84,6 +84,7 @@ export class FactoryMap {
   private userHasMoved = false;
   private lastPopulatedAt = 0;
   private resetNoticeUntil = 0;
+  private drawErrors = 0;
   private locked = false;
   private activePointers = 0;
 
@@ -474,7 +475,31 @@ export class FactoryMap {
    * scene is expected and temporary; we keep the previous geometry visible
    * and label what happened.
    */
-  private applyScene(scene: Scene, initial: boolean): void {
+  /**
+   * Lua serialises an empty table as `{}`, not `[]`, so a viewport with no
+   * trees or no ore used to arrive with a non-iterable field. The backend
+   * normalises this now; the client does too, because one bad frame here
+   * kills the render loop permanently.
+   */
+  private static normalise(scene: Scene): Scene {
+    const list = <T,>(value: unknown): T[] =>
+      Array.isArray(value)
+        ? (value as T[])
+        : value && typeof value === "object"
+          ? (Object.values(value as Record<string, T>) as T[])
+          : [];
+    return {
+      ...scene,
+      entities: list(scene.entities),
+      resources: list(scene.resources),
+      natural: list(scene.natural),
+      terrain_runs: list(scene.terrain_runs),
+      prototypes: scene.prototypes ?? {},
+    };
+  }
+
+  private applyScene(rawScene: Scene, initial: boolean): void {
+    const scene = FactoryMap.normalise(rawScene);
     const populated = scene.entity_count > 0;
     const previous = this.scene;
     const hadPopulated = previous !== null && previous.entity_count > 0;
@@ -704,17 +729,24 @@ export class FactoryMap {
       const elapsed = (performance.now() - this.lastTickAt) / 1000;
       this.animationTick = (this.lastTick ?? 0) + elapsed * this.ticksPerSecond;
     }
-    this.renderer.draw({
-      scene: this.scene,
-      graph: this.graph,
-      camera: this.camera,
-      assets: this.assets,
-      overlays: this.overlays,
-      hovered: this.hovered,
-      selected: this.selected,
-      animationTick: Math.floor(this.animationTick),
-    });
-    this.updateScaleBar();
+    try {
+      this.renderer.draw({
+        scene: this.scene,
+        graph: this.graph,
+        camera: this.camera,
+        assets: this.assets,
+        overlays: this.overlays,
+        hovered: this.hovered,
+        selected: this.selected,
+        animationTick: Math.floor(this.animationTick),
+      });
+      this.updateScaleBar();
+    } catch (error) {
+      // Never let one bad frame end the animation: an exception here would
+      // skip the next requestAnimationFrame and freeze the map silently.
+      this.drawErrors += 1;
+      if (this.drawErrors <= 3) console.error("[factory-map] frame falhou", error);
+    }
     requestAnimationFrame(this.loop);
   };
 }

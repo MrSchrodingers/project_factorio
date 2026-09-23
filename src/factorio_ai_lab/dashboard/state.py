@@ -51,6 +51,21 @@ DEFAULT_RUNTIME_CONFIG: dict[str, Any] = {
 }
 
 
+def _as_list(value: Any) -> list[Any]:
+    """Coerce a Lua-serialised collection into a JSON array.
+
+    ``helpers.table_to_json`` renders an empty Lua table as ``{}``, not
+    ``[]``, so a viewport with no trees or no ore arrives as an object. The
+    browser then throws on ``for...of``, which kills the render loop for good
+    because the next frame is never scheduled.
+    """
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict):
+        return list(value.values())
+    return []
+
+
 def json_finite(value: Any, depth: int = 0) -> Any:
     """Replace non-finite floats with None so the payload stays valid JSON.
 
@@ -2286,9 +2301,9 @@ class DashboardState:
             "entities": entities,
             "entity_count": len(entities),
             "character": character,
-            "resources": map_context.get("resources", []),
-            "natural": map_context.get("natural", []),
-            "terrain_runs": map_context.get("terrain_runs", []),
+            "resources": _as_list(map_context.get("resources")),
+            "natural": _as_list(map_context.get("natural")),
+            "terrain_runs": _as_list(map_context.get("terrain_runs")),
             "water_tile_count": map_context.get("water_tile_count", 0),
             "prototypes": prototypes.get("by_name", {}),
             "prototype_count": prototypes.get("count", 0),
