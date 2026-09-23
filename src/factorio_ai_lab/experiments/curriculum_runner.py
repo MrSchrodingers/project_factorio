@@ -4,6 +4,7 @@ import argparse
 import json
 import math
 import subprocess
+from collections.abc import Mapping
 from dataclasses import asdict
 from datetime import UTC, datetime
 from itertools import pairwise
@@ -41,7 +42,12 @@ from factorio_ai_lab.planning.factorio_catalog import (
     EARLY_GAME_PRODUCTION_PLANNER,
     FACTORIO_DATA_VERSION,
 )
-from factorio_ai_lab.planning.footprints import blocked_tiles, prototype_footprints
+from factorio_ai_lab.planning.footprints import (
+    blocked_tiles,
+    entity_name,
+    entity_tiles,
+    prototype_footprints,
+)
 from factorio_ai_lab.planning.fuel import (
     BURNER_MINING_DRILL,
     STONE_FURNACE,
@@ -856,6 +862,73 @@ def production_output(namespace: Any, item: str) -> float:
     return float(stats.get("output", {}).get(item, 0.0))
 
 
+#: Prototype the baseline mining cell is made of. Stated once so the survey
+#: below and the construction script cannot drift apart.
+BASELINE_DRILL_NAME = BURNER_MINING_DRILL.name
+
+
+def inherited_mining_cell(
+    env: Any,
+    center: tuple[float, float],
+) -> tuple[float, float] | None:
+    """Centre of the drill an ancestor already left on the baseline tiles.
+
+    Lifelong inheritance restores the promoted factory before the curriculum
+    runs, and ``patch_center`` is deterministic for a fixed map, so an heir
+    computes the same tiles its ancestor already built on. ``place_entity``
+    answers "entity already exists at the target position" there, FLE marks
+    the step failed on that text, and stage 0 raises for every heir until the
+    checkpoint changes.
+
+    Occupancy is read as tiles, never as a radius or a centre comparison: a
+    2x2 drill one tile off shares half the baseline footprint and still
+    blocks the placement, while a guessed radius over-blocks small entities
+    and leaves large ones open. Any failure to read the live world answers
+    None, which leaves the caller on the construction path it took before
+    inheritance existed.
+    """
+    unwrapped = getattr(env, "unwrapped", env)
+    instance = getattr(unwrapped, "instance", None)
+    try:
+        entities = instance.namespace._save_entity_state(
+            distance=500,
+            player_entities=True,
+            resource_entities=False,
+            items_on_ground=False,
+            encode=False,
+            compress=False,
+        )
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+        return None
+
+    footprints = _runtime_entity_footprints(instance)
+    wanted = entity_tiles(
+        {
+            "name": BASELINE_DRILL_NAME,
+            "position": {"x": center[0], "y": center[1]},
+        },
+        footprints,
+    )
+    if not wanted:
+        return None
+
+    for entity in entities or ():
+        if not isinstance(entity, Mapping):
+            continue
+        if entity_name(entity) != BASELINE_DRILL_NAME:
+            continue
+        if not entity_tiles(entity, footprints) & wanted:
+            continue
+        position = entity.get("position")
+        if not isinstance(position, Mapping):
+            continue
+        try:
+            return (float(position["x"]), float(position["y"]))
+        except (KeyError, TypeError, ValueError):
+            return None
+    return None
+
+
 def stage_baseline(
     executor: TransactionalFLEExecutor,
     env: Any,
@@ -910,7 +983,12 @@ print({'iron': iron, 'patch': patch})
     )
 
     fast_reposition(env, x=center[0], y=center[1])
-    journal.state["next_action"] = "build burner drill and chest"
+    inherited_drill = inherited_mining_cell(env, center)
+    journal.state["next_action"] = (
+        "commission the inherited mining cell"
+        if inherited_drill is not None
+        else "build burner drill and chest"
+    )
     journal.flush()
 
     clock = _StageClock(env)
@@ -926,7 +1004,21 @@ print({'iron': iron, 'patch': patch})
             and iron_output > 0
         )
 
-    code = f"""
+    if inherited_drill is not None:
+        # The cell is already standing and the tiles are taken. Fuel it and
+        # measure it: placing here is exactly what stalled the loop, and
+        # rebuilding what already works would produce no evidence anyway.
+        code = f"""
+drill = get_entity(
+    Prototype.BurnerMiningDrill,
+    Position(x={inherited_drill[0]}, y={inherited_drill[1]}),
+)
+drill = insert_item(Prototype.Coal, drill, quantity=20)
+sleep({settle_seconds})
+print({{'drill_fuel': inspect_inventory(drill)}})
+"""
+    else:
+        code = f"""
 drill = place_entity(
     Prototype.BurnerMiningDrill,
     position=Position(x={center[0]}, y={center[1]}),
@@ -947,41 +1039,75 @@ print({{'chest_inventory': inspect_inventory(chest)}})
         use_checkpoint_for_action=False,
     )
     if not step.accepted:
-        raise RuntimeError("baseline mining cell did not produce iron")
+        raise RuntimeError(
+            "inherited baseline mining cell did not produce iron"
+            if inherited_drill is not None
+            else "baseline mining cell did not produce iron"
+        )
 
+    # An inherited cell is measured under its own metric prefix. The flow is
+    # real, but the achievement is the ancestor's, and
+    # survival.fitness_from_research credits baseline_iron_rate_per_s as
+    # endogenous output of this genome. Writing the inherited number there
+    # would report inheritance as production, which is the exact failure mode
+    # inherited_capabilities exists to prevent.
+    inherited = inherited_drill is not None
+    metric_prefix = "inherited_iron" if inherited else "baseline_iron"
     window = _record_observed_window(
         journal,
         clock,
-        metric_prefix="baseline_iron",
+        metric_prefix=metric_prefix,
         fallback_seconds=float(settle_seconds),
     )
-    journal.state["metrics"]["baseline_iron_output"] = measurement["iron_output"]
-    journal.state["metrics"]["baseline_iron_rate_per_s"] = rate_per_second(
-        measurement["iron_output"],
-        window,
+    iron_rate = rate_per_second(measurement["iron_output"], window)
+    journal.state["metrics"]["baseline_cell_origin"] = (
+        "inherited" if inherited else "built"
     )
-    journal.state["metrics"]["baseline_reward"] = step.reward
+    if inherited:
+        journal.state["metrics"]["inherited_iron_output"] = measurement["iron_output"]
+        journal.state["metrics"]["inherited_iron_rate_per_s"] = iron_rate
+        journal.state["metrics"]["inherited_baseline_reward"] = step.reward
+    else:
+        journal.state["metrics"]["baseline_iron_output"] = measurement["iron_output"]
+        journal.state["metrics"]["baseline_iron_rate_per_s"] = iron_rate
+        journal.state["metrics"]["baseline_reward"] = step.reward
     journal.complete_stage(
         0,
-        f"Baseline cell accepted with {measurement['iron_output']:.0f} iron ore output.",
+        (
+            f"Inherited mining cell adopted, {measurement['iron_output']:.0f} iron "
+            "ore measured and not credited to this generation."
+            if inherited
+            else f"Baseline cell accepted with {measurement['iron_output']:.0f} "
+            "iron ore output."
+        ),
     )
     journal.event(
         "accept",
-        "Baseline drill-to-chest mining cell accepted.",
+        (
+            "Baseline mining cell was already standing from the inherited factory."
+            if inherited
+            else "Baseline drill-to-chest mining cell accepted."
+        ),
         reward=step.reward,
         iron_output=measurement["iron_output"],
+        cell_origin="inherited" if inherited else "built",
     )
     lesson = synthesize_lesson(
         stage="baseline_mining",
         facts={
             "iron_output": measurement["iron_output"],
             "reward": step.reward,
-            "entities_added": 2,
+            "entities_added": 0 if inherited else 2,
+            "cell_origin": "inherited" if inherited else "built",
             "placement": {"x": center[0], "y": center[1]},
         },
         fallback_lesson=(
-            "A burner drill placed inside the measured iron patch and aligned "
-            "to a chest produces validated iron output."
+            "A burner drill inherited on the measured iron patch keeps "
+            "producing without being rebuilt, so the stage measures it "
+            "instead of placing over it."
+            if inherited
+            else "A burner drill placed inside the measured iron patch and "
+            "aligned to a chest produces validated iron output."
         ),
         fallback_hypothesis=(
             "Test a second compact mining cell at several offsets and promote "
