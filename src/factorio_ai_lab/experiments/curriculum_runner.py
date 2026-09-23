@@ -22,7 +22,12 @@ from factorio_ai_lab.learning.archive import ArchiveSchemaError, NicheArchive
 from factorio_ai_lab.learning.bandit import UCB1Bandit
 from factorio_ai_lab.learning.evolution import apply_advice, challenger_genome
 from factorio_ai_lab.learning.factory_graph import build_factory_graph
-from factorio_ai_lab.learning.knowledge import verify_generated_knowledge
+from factorio_ai_lab.learning.knowledge import (
+    KnowledgeRecall,
+    recall_not_consulted,
+    recall_verified_lessons,
+    verify_generated_knowledge,
+)
 from factorio_ai_lab.learning.spatial_policy import SpatialPolicy, route_cost
 from factorio_ai_lab.learning.survival import (
     FitnessVector,
@@ -76,6 +81,25 @@ PARENT_SAMPLING_LABEL = "niche_archive_parent_v1"
 
 THROUGHPUT_EQUIVALENCE_TOLERANCE = 1.0
 
+#: Which knowledge-log `stage` slug each curriculum stage writes its lessons
+#: under. The slugs are the ones synthesize_lesson is called with; stages that
+#: synthesize no lesson are absent on purpose, and a bottleneck on one of them
+#: falls back to the most recent verified lessons under a declared basis.
+KNOWLEDGE_STAGE_BY_CURRICULUM_NAME: dict[str, str] = {
+    "Baseline iron mining": "baseline_mining",
+    "Online placement learning": "online_placement_learning",
+    "Smelting probe": "smelting_probe",
+    "A* belt logistics": "astar_belt_logistics",
+    "Belt-fed smelting": "belt_fed_smelting",
+    "Coal self-sufficiency": "coal_self_sufficiency",
+    "Copper expansion": "copper_mining",
+    "Copper smelting": "copper_smelting",
+    "Automation science": "automation_science",
+}
+
+#: How many recalled lessons one generation decides with. The advisor payload
+#: is budgeted in characters, so more lessons would mean shorter lessons.
+KNOWLEDGE_RECALL_LIMIT = 3
 
 
 PLACEMENT_ARMS: dict[str, tuple[float, float]] = {
@@ -4617,6 +4641,90 @@ print({{
     return True
 
 
+def bottleneck_stage_name(previous_research: dict[str, Any]) -> str | None:
+    """The stage the previous run got stuck on.
+
+    The generation report already defines the bottleneck as the first failed
+    stage, and this keeps that definition instead of inventing a second one.
+    A run that failed nothing is bottlenecked on wherever it stopped.
+    """
+    curriculum = previous_research.get("curriculum")
+    if isinstance(curriculum, list):
+        for stage in curriculum:
+            if isinstance(stage, dict) and stage.get("status") == "failed":
+                name = stage.get("name")
+                if isinstance(name, str) and name:
+                    return name
+    stage_name = previous_research.get("stage")
+    if isinstance(stage_name, str) and stage_name:
+        return stage_name
+    return None
+
+
+def knowledge_stage_for(curriculum_stage: str | None) -> str | None:
+    """The knowledge-log slug a curriculum stage records its lessons under."""
+    if curriculum_stage is None:
+        return None
+    return KNOWLEDGE_STAGE_BY_CURRICULUM_NAME.get(curriculum_stage)
+
+
+def knowledge_recall_for_run(previous_research: dict[str, Any]) -> KnowledgeRecall:
+    """The verified lessons this generation is entitled to decide with.
+
+    Relevance is the stage of the previous run's bottleneck: lessons written
+    under that stage are the ones about the obstacle still standing.
+    """
+    return recall_verified_lessons(
+        KNOWLEDGE_LOG,
+        stage=knowledge_stage_for(bottleneck_stage_name(previous_research)),
+        limit=KNOWLEDGE_RECALL_LIMIT,
+    )
+
+
+def recalled_knowledge_report(evolution: dict[str, Any]) -> dict[str, Any]:
+    """What the generation report says about the knowledge it decided with.
+
+    A generation that never consulted the log says so, because a missing
+    field would be read as a generation that consulted it and found nothing.
+    """
+    recorded = evolution.get("knowledge_recall")
+    if isinstance(recorded, dict):
+        return recorded
+    return recall_not_consulted().to_dict()
+
+
+def build_advisor_context(
+    *,
+    champion_configuration: dict[str, Any],
+    previous_research: dict[str, Any],
+    candidate: dict[str, Any],
+    recall: KnowledgeRecall,
+) -> dict[str, Any]:
+    """The evidence handed to the advisor, recalled knowledge included.
+
+    The counts of both populations travel with the lessons so the advice
+    cannot be read as using knowledge without showing how much was discarded.
+    """
+    previous_evolution = previous_research.get("evolution")
+    return {
+        "champion_configuration": champion_configuration,
+        "previous_run": {
+            "run_id": previous_research.get("run_id"),
+            "arena": previous_research.get("arena"),
+            "status": previous_research.get("status"),
+            "stage": previous_research.get("stage"),
+            "detail": previous_research.get("detail"),
+            "next_action": previous_research.get("next_action"),
+            "promotion": previous_evolution.get("promotion")
+            if isinstance(previous_evolution, dict)
+            else None,
+            "metrics": previous_research.get("metrics", {}),
+        },
+        "candidate_before_advice": candidate,
+        **recall.to_advisor_context(),
+    }
+
+
 def finalize_evolution_selection(
     journal: ResearchJournal,
     *,
@@ -4747,6 +4855,7 @@ def finalize_evolution_selection(
         "decision": decision.to_dict(),
         "archive": evolution.get("archive"),
         "parent": evolution.get("parent"),
+        "knowledge_recall": recalled_knowledge_report(evolution),
         "bottleneck": failed_stage_names[0] if failed_stage_names else None,
         "failed_stages": failed_stage_names,
         "completed_stages": completed_stage_names,
@@ -4851,23 +4960,18 @@ def run_curriculum(
         default_exploration=exploration,
         seed=seed,
     )
+    # Lessons that passed verification are recalled before the advice is
+    # asked for, and the recall travels into the generation report so the
+    # advice can later be attributed to the knowledge it was given.
+    recall = knowledge_recall_for_run(previous_research)
+    evolution["knowledge_recall"] = recall.to_dict()
     advice = propose_evolution_advice(
-        {
-            "champion_configuration": champion_configuration,
-            "previous_run": {
-                "run_id": previous_research.get("run_id"),
-                "arena": previous_research.get("arena"),
-                "status": previous_research.get("status"),
-                "stage": previous_research.get("stage"),
-                "detail": previous_research.get("detail"),
-                "next_action": previous_research.get("next_action"),
-                "promotion": previous_research.get("evolution", {}).get("promotion")
-                if isinstance(previous_research.get("evolution"), dict)
-                else None,
-                "metrics": previous_research.get("metrics", {}),
-            },
-            "candidate_before_advice": base_genome.to_dict(),
-        }
+        build_advisor_context(
+            champion_configuration=champion_configuration,
+            previous_research=previous_research,
+            candidate=base_genome.to_dict(),
+            recall=recall,
+        )
     )
     genome = apply_advice(base_genome, advice.adjustments)
     evolution["advisor"] = advice.to_dict()
