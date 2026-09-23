@@ -6,7 +6,11 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-_DIRECTION_VECTORS = {
+#: Unit vector per cardinal Factorio direction. Public because any module that
+#: proposes new entities has to face them the same way this one reads them: a
+#: second private copy of the table would let the two drift and silently stop
+#: producing the edges that prove a chain exists.
+DIRECTION_VECTORS = {
     0: (0.0, -1.0),
     4: (1.0, 0.0),
     8: (0.0, 1.0),
@@ -74,6 +78,11 @@ UNKNOWN_STATUS = "unknown"
 #: what is counted as starved and whether the snapshot measured anything.
 FUEL_STARVED_CATEGORIES = frozenset({"extraction", "processing", "transfer", "energy"})
 POWER_STARVED_CATEGORIES = frozenset({"extraction", "processing", "transfer", "research"})
+
+#: Edge relations that carry items. Reachability over exactly these relations is
+#: what `producers_reaching_processor` counts, so a consumer that wants to reason
+#: about the same chains has to use the same set and not a look-alike of it.
+MATERIAL_RELATIONS = frozenset({"belt_flow", "pickup", "drop", "material_output"})
 
 #: The snapshot holds no entity that could produce anything.
 HALT_CAUSE_NO_FACTORY = "no_factory"
@@ -167,6 +176,23 @@ class GraphEdge:
         }
 
 
+def node_id(entity: Mapping[str, Any], index: int) -> str:
+    """
+    Identifier this module gives one entity of the snapshot.
+
+    Public because a caller that wants to map a graph node back to the raw
+    entity it came from has no other way to do it: the node carries only the
+    identifier. Re-deriving the rule outside would make the two copies drift
+    the moment the snapshot stops reporting `unit_number`, and the drift is
+    silent - the caller just stops finding its own entities.
+
+    `index` is the position in the sequence handed to `build_factory_graph`,
+    including entries that the builder later drops for having no position.
+    """
+    unit = entity.get("unit_number", entity.get("entity_number"))
+    return f"u{unit}" if isinstance(unit, (int, float)) else f"i{index}"
+
+
 def _position(entity: Mapping[str, Any]) -> tuple[float, float] | None:
     raw = entity.get("position")
     if not isinstance(raw, Mapping):
@@ -183,7 +209,7 @@ def _cardinal_direction(raw: Any) -> int:
     except (TypeError, ValueError):
         return 0
     return min(
-        _DIRECTION_VECTORS,
+        DIRECTION_VECTORS,
         key=lambda value: min(abs(direction - value), 16 - abs(direction - value)),
     )
 
@@ -270,11 +296,10 @@ def build_factory_graph(
         pos = _position(entity)
         if pos is None:
             continue
-        unit = entity.get("unit_number", entity.get("entity_number"))
-        node_id = f"u{unit}" if isinstance(unit, (int, float)) else f"i{index}"
+        identifier = node_id(entity, index)
         name = str(entity.get("name", "entity"))
         node = GraphNode(
-            node_id=node_id,
+            node_id=identifier,
             name=name,
             category=_category(name),
             x=pos[0],
@@ -282,7 +307,7 @@ def build_factory_graph(
             status=normalize_status(entity.get("status")),
         )
         nodes.append(node)
-        raw_by_id[node_id] = entity
+        raw_by_id[identifier] = entity
 
     edges: set[GraphEdge] = set()
     # Directional conveyor adjacency.
@@ -290,7 +315,7 @@ def build_factory_graph(
     for source in belt_nodes:
         raw = raw_by_id[source.node_id]
         direction = _cardinal_direction(raw.get("direction"))
-        dx, dy = _DIRECTION_VECTORS[direction]
+        dx, dy = DIRECTION_VECTORS[direction]
         target = _nearest(
             belt_nodes,
             source.x + dx,
@@ -305,7 +330,7 @@ def build_factory_graph(
     for inserter in (node for node in nodes if node.category == "transfer"):
         raw = raw_by_id[inserter.node_id]
         direction = _cardinal_direction(raw.get("direction"))
-        dx, dy = _DIRECTION_VECTORS[direction]
+        dx, dy = DIRECTION_VECTORS[direction]
         reach = 2.0 if inserter.name == "long-handed-inserter" else 1.15
         pickup = _nearest(
             nodes,
@@ -332,7 +357,7 @@ def build_factory_graph(
     for drill in (node for node in nodes if node.category == "extraction"):
         raw = raw_by_id[drill.node_id]
         direction = _cardinal_direction(raw.get("direction"))
-        dx, dy = _DIRECTION_VECTORS[direction]
+        dx, dy = DIRECTION_VECTORS[direction]
         target = _nearest(
             nodes,
             drill.x + dx * 1.5,
@@ -381,10 +406,9 @@ def build_factory_graph(
             if _distance(pole, consumer) <= 4.0:
                 edges.add(GraphEdge(pole.node_id, consumer.node_id, "power_supply"))
 
-    material_relations = {"belt_flow", "pickup", "drop", "material_output"}
     adjacency: dict[str, set[str]] = {}
     for edge in edges:
-        if edge.relation in material_relations:
+        if edge.relation in MATERIAL_RELATIONS:
             adjacency.setdefault(edge.source, set()).add(edge.target)
 
     fluid_adjacency: dict[str, set[str]] = {}
@@ -466,7 +490,7 @@ def build_factory_graph(
             "producers_reaching_buffer": producers_to_buffer,
             "isolated_producers": isolated_producers,
             "material_edge_count": sum(
-                edge.relation in material_relations for edge in edges
+                edge.relation in MATERIAL_RELATIONS for edge in edges
             ),
             "power_edge_count": sum(
                 edge.relation.startswith("power_") for edge in edges
