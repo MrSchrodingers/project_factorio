@@ -21,6 +21,15 @@ reasons with, and under two constraints:
     heir that dismantles the inherited factory to run its own trial reports
     the ancestor's collapse as its own regression.
 
+``salvage first, smelt second``
+    a container the ancestor left unattached costs nothing to take and no
+    game time to make. When the world holds none -- which is what the world
+    becomes one promotion after the single orphan chest is committed -- the
+    recourse is to make one out of the ore the heir is carrying, in a furnace
+    this generation places. It is offered as a measured option and never
+    assumed, and it is strictly second: it spends a furnace, the ore and the
+    seconds the smelt takes.
+
 ``a refusal is a result``
     when the world holds no fuel and no spare container, the plan says so, in
     words, and the stage stops on that sentence. Letting the engine answer
@@ -54,6 +63,17 @@ REASON_NO_MATERIAL_EDGE = "no_material_edge_touches_it"
 REFUSAL_NO_FUEL_IN_WORLD = "no_container_holds_the_fuel"
 REFUSAL_FUEL_SHORT = "containers_hold_less_fuel_than_the_step_needs"
 REFUSAL_NO_SPARE_CONTAINER = "every_container_belongs_to_a_chain"
+
+#: Why the second source did not cover it either. Kept apart from the one
+#: above: a world whose containers all belong to a chain can still be a world
+#: an heir can smelt a container in, and only when both fail has the stage
+#: really run out of ways to get one.
+REFUSAL_CANNOT_SMELT_CONTAINER = "no_furnace_or_ore_to_smelt_a_container"
+
+#: Why a smelted container belongs to this generation. A chest made out of
+#: the ore the heir carried is not a chest it found standing, and a ledger
+#: that could not tell the two apart would read inheritance as production.
+REASON_SMELTED_FROM_CARRIED_ORE = "smelted_from_the_ore_the_heir_carried"
 
 
 @dataclass(frozen=True)
@@ -138,6 +158,78 @@ class ContainerSalvage:
 
 
 @dataclass(frozen=True)
+class SmeltingOption:
+    """What a stage could make a container out of, as measured.
+
+    Every field is a reading taken off the world or the agent's inventory. A
+    caller that could not take one passes no option at all rather than a
+    zero: an unread inventory is not an empty inventory, and the difference
+    is the one this project spent eleven generations relearning.
+
+    The furnace is one this generation places, not one it found standing. The
+    inherited furnaces hold the ancestor's plates in their output, so
+    extracting from them would carry that stock into this generation's
+    inventory under the name of its own production.
+    """
+
+    container_name: str
+    plates_needed: int
+    ore_carried: int = 0
+    plates_carried: int = 0
+    furnaces_carried: int = 0
+    furnace_position: tuple[float, float] | None = None
+    fuel_per_smelt: int = 0
+    seconds: float = 0.0
+
+    @property
+    def ore_to_smelt(self) -> int:
+        """Ore this smelt still has to put through a furnace."""
+        return max(
+            0,
+            max(0, int(self.plates_needed)) - max(0, int(self.plates_carried)),
+        )
+
+    @property
+    def covered(self) -> bool:
+        """True only when inventory and world really cover one container."""
+        if self.ore_to_smelt <= 0:
+            return True
+        if int(self.furnaces_carried) < 1 or self.furnace_position is None:
+            return False
+        return int(self.ore_carried) >= self.ore_to_smelt
+
+
+@dataclass(frozen=True)
+class ContainerSmelt:
+    """The container a stage plans to make, and what making it costs."""
+
+    container_name: str
+    plates_needed: int
+    plates_carried: int = 0
+    ore_to_smelt: int = 0
+    fuel_to_insert: int = 0
+    seconds: float = 0.0
+    position: tuple[float, float] | None = None
+    reason: str = REASON_SMELTED_FROM_CARRIED_ORE
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "container_name": self.container_name,
+            "plates_needed": self.plates_needed,
+            "plates_carried": self.plates_carried,
+            "ore_to_smelt": self.ore_to_smelt,
+            "fuel_to_insert": self.fuel_to_insert,
+            "seconds": self.seconds,
+            "position": (
+                None
+                if self.position is None
+                else {"x": self.position[0], "y": self.position[1]}
+            ),
+            "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True)
 class SupplyPlan:
     """What a stage will draw from the world, and what it could not find."""
 
@@ -147,7 +239,22 @@ class SupplyPlan:
     container_needed: bool = False
     containers_carried: int = 0
     salvage: ContainerSalvage | None = None
+    smelt: ContainerSmelt | None = None
     refusals: tuple[str, ...] = ()
+
+    @property
+    def container_name(self) -> str | None:
+        """Which container this plan ends up handing the stage.
+
+        None when the plan obtains none: either the stage already carries
+        what it needs, or it needs none, or it refused. The caller keeps its
+        own default for the first two and must not build for the third.
+        """
+        if self.smelt is not None:
+            return self.smelt.container_name
+        if self.salvage is not None:
+            return self.salvage.name
+        return None
 
     @property
     def fuel_planned(self) -> int:
@@ -166,7 +273,9 @@ class SupplyPlan:
             "fuel_draws": [draw.to_dict() for draw in self.fuel_draws],
             "container_needed": self.container_needed,
             "containers_carried": self.containers_carried,
+            "container_name": self.container_name,
             "salvage": None if self.salvage is None else self.salvage.to_dict(),
+            "smelt": None if self.smelt is None else self.smelt.to_dict(),
             "refusals": list(self.refusals),
         }
 
@@ -266,6 +375,7 @@ def plan_supply(
     container_needed: bool = False,
     containers_carried: int = 0,
     spare_containers: Sequence[ContainerSalvage] = (),
+    smelting: SmeltingOption | None = None,
 ) -> SupplyPlan:
     """Decide what the stage draws, from what the world was measured to hold.
 
@@ -278,14 +388,52 @@ def plan_supply(
 
     At most one container is ever salvaged, the emptiest and then the nearest,
     because an empty one carries no inherited stock into this generation's
-    inventory. Anything the plan cannot cover becomes a named refusal rather
-    than a silent shortfall.
+    inventory. When nothing can be salvaged and ``smelting`` shows the heir
+    can make one, it plans that instead. Anything the plan cannot cover
+    becomes a named refusal rather than a silent shortfall.
+
+    The container is decided before the charge, because making one burns fuel
+    too: sizing the draw first would leave the furnace running on coal the
+    drill was already counted for, and the stage would find its drill short
+    at the far end of the window.
     """
-    needed = max(0, int(fuel_needed))
     carried = max(0, int(fuel_carried))
-    shortfall = max(0, needed - carried)
     draws: list[FuelDraw] = []
     refusals: list[str] = []
+
+    salvage: ContainerSalvage | None = None
+    smelt: ContainerSmelt | None = None
+    if container_needed and int(containers_carried) < 1:
+        if spare_containers:
+            salvage = min(
+                spare_containers,
+                key=lambda item: (
+                    item.holding,
+                    _distance_from(anchor, item.position),
+                    item.position[1],
+                    item.position[0],
+                ),
+            )
+        elif smelting is not None and smelting.covered:
+            pending = smelting.ore_to_smelt
+            smelt = ContainerSmelt(
+                container_name=smelting.container_name,
+                plates_needed=max(0, int(smelting.plates_needed)),
+                plates_carried=max(0, int(smelting.plates_carried)),
+                ore_to_smelt=pending,
+                fuel_to_insert=(
+                    0 if pending <= 0 else max(0, int(smelting.fuel_per_smelt))
+                ),
+                seconds=0.0 if pending <= 0 else float(smelting.seconds),
+                position=None if pending <= 0 else smelting.furnace_position,
+            )
+        else:
+            refusals.append(REFUSAL_NO_SPARE_CONTAINER)
+            if smelting is not None:
+                refusals.append(REFUSAL_CANNOT_SMELT_CONTAINER)
+
+    needed = max(0, int(fuel_needed)) + (0 if smelt is None else smelt.fuel_to_insert)
+    shortfall = max(0, needed - carried)
 
     if shortfall > 0:
         usable = [source for source in fuel_sources if source.available > 0]
@@ -317,21 +465,6 @@ def plan_supply(
             if remaining > 0:
                 refusals.append(REFUSAL_FUEL_SHORT)
 
-    salvage: ContainerSalvage | None = None
-    if container_needed and int(containers_carried) < 1:
-        if not spare_containers:
-            refusals.append(REFUSAL_NO_SPARE_CONTAINER)
-        else:
-            salvage = min(
-                spare_containers,
-                key=lambda item: (
-                    item.holding,
-                    _distance_from(anchor, item.position),
-                    item.position[1],
-                    item.position[0],
-                ),
-            )
-
     return SupplyPlan(
         fuel_needed=needed,
         fuel_carried=carried,
@@ -339,5 +472,6 @@ def plan_supply(
         container_needed=bool(container_needed),
         containers_carried=max(0, int(containers_carried)),
         salvage=salvage,
+        smelt=smelt,
         refusals=tuple(refusals),
     )

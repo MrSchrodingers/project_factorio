@@ -290,6 +290,170 @@ def test_exactly_one_container_is_salvaged_and_it_is_the_emptiest() -> None:
 
 
 # --------------------------------------------------------------------------
+# The second source: a container the heir smelts when none can be salvaged.
+# --------------------------------------------------------------------------
+
+#: What the heir of generation 37 carries and what one chest costs, measured
+#: over RCON on 2026-09-23: `iron-chest` is enabled, costs 8 iron plates and
+#: is crafted by hand; the inheritance ledger of the promoted checkpoint has
+#: 24 iron ore and 7 stone furnaces in it, and no chest at all.
+FURNACE_SPOT = (30.0, 79.0)
+
+
+def _smelting(**overrides: Any) -> resupply.SmeltingOption:
+    fields: dict[str, Any] = {
+        "container_name": "iron-chest",
+        "plates_needed": 8,
+        "ore_carried": 24,
+        "plates_carried": 0,
+        "furnaces_carried": 7,
+        "furnace_position": FURNACE_SPOT,
+        "fuel_per_smelt": 1,
+        "seconds": 26,
+    }
+    fields.update(overrides)
+    return resupply.SmeltingOption(**fields)
+
+
+def _smelted_plan(**overrides: Any) -> resupply.SupplyPlan:
+    return resupply.plan_supply(
+        anchor=CENTRE,
+        fuel_needed=12,
+        fuel_carried=0,
+        fuel_sources=_sources(),
+        container_needed=True,
+        containers_carried=0,
+        spare_containers=(),
+        smelting=_smelting(**overrides),
+    )
+
+
+def test_a_world_with_no_spare_container_smelts_one_from_the_carried_ore() -> None:
+    """The world one promotion after stage 2 commits the only orphan chest."""
+    plan = _smelted_plan()
+
+    assert not plan.refused
+    assert plan.salvage is None
+    assert plan.smelt is not None
+    assert plan.smelt.ore_to_smelt == 8
+    assert plan.smelt.position == FURNACE_SPOT
+    assert plan.smelt.reason == resupply.REASON_SMELTED_FROM_CARRIED_ORE
+    assert plan.container_name == "iron-chest"
+
+
+def test_the_salvage_is_the_first_choice_and_the_smelt_the_second() -> None:
+    plan = resupply.plan_supply(
+        anchor=CENTRE,
+        fuel_needed=12,
+        fuel_carried=12,
+        container_needed=True,
+        containers_carried=0,
+        spare_containers=(
+            resupply.ContainerSalvage(position=ORPHAN, name=CHEST, holding=0),
+        ),
+        smelting=_smelting(),
+    )
+
+    assert plan.smelt is None, (
+        "a etapa fundiu um bau tendo um de graca no mundo"
+    )
+    assert plan.salvage is not None
+    assert plan.container_name == CHEST
+
+
+def test_a_heir_with_no_ore_refuses_with_both_causes_named() -> None:
+    plan = _smelted_plan(ore_carried=0)
+
+    assert plan.smelt is None
+    assert plan.refusals == (
+        resupply.REFUSAL_NO_SPARE_CONTAINER,
+        resupply.REFUSAL_CANNOT_SMELT_CONTAINER,
+    )
+
+
+def test_a_heir_with_no_furnace_refuses_instead_of_planning_a_smelt() -> None:
+    plan = _smelted_plan(furnaces_carried=0)
+
+    assert plan.smelt is None
+    assert resupply.REFUSAL_CANNOT_SMELT_CONTAINER in plan.refusals
+
+
+def test_a_world_with_nowhere_free_for_the_furnace_refuses_by_name() -> None:
+    plan = _smelted_plan(furnace_position=None)
+
+    assert plan.smelt is None
+    assert resupply.REFUSAL_CANNOT_SMELT_CONTAINER in plan.refusals
+
+
+def test_a_heir_that_already_carries_the_plates_smelts_no_ore() -> None:
+    plan = _smelted_plan(plates_carried=8, ore_carried=0, furnaces_carried=0)
+
+    assert plan.smelt is not None
+    assert plan.smelt.ore_to_smelt == 0
+    assert plan.smelt.fuel_to_insert == 0
+    assert plan.fuel_needed == 12, (
+        "a carga cresceu por uma fundicao que nao vai acontecer"
+    )
+
+
+def test_the_charge_of_the_smelt_is_drawn_with_the_rest() -> None:
+    plan = _smelted_plan()
+
+    assert plan.fuel_needed == 13
+    assert plan.fuel_planned == 13, (
+        "o combustivel da fornalha saiu da carga do furo em vez do mundo"
+    )
+
+
+def test_the_script_smelts_the_plates_and_crafts_the_container() -> None:
+    script = _script(_smelted_plan())
+
+    assert (
+        "place_entity(Prototype.StoneFurnace,"
+        f"position=Position(x={FURNACE_SPOT[0]},y={FURNACE_SPOT[1]}),exact=False)"
+    ) in script
+    assert "insert_item(Prototype.IronOre,supply_furnace,quantity=supply_smelt_ore)" in (
+        script
+    )
+    assert "sleep(26)" in script
+    assert "craft_item(Prototype.IronChest,quantity=1)" in script
+    assert "supply_container_smelted=" in script
+
+
+def test_the_script_smelts_nothing_when_the_plan_salvages() -> None:
+    script = _script(_full_plan())
+
+    assert "craft_item" not in script
+    assert "supply_container_smelted=0" in script, (
+        "o contador da fundicao nao foi declarado para um passo que nao funde"
+    )
+
+
+def test_the_smelting_script_is_valid_python_for_the_engine() -> None:
+    ast.parse(_script(_smelted_plan()))
+
+
+def test_the_smelting_script_trips_no_fle_failure_trigger() -> None:
+    offenders: list[str] = []
+    for node in ast.walk(ast.parse(_script(_smelted_plan()))):
+        if isinstance(node, ast.Name) and any(
+            trigger.strip() in node.id.lower() for trigger in TRIGGERS
+        ):
+            offenders.append(node.id)
+        if (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and any(trigger in node.value.lower() for trigger in TRIGGERS)
+        ):
+            offenders.append(node.value[:60])
+
+    assert not offenders, (
+        f"{offenders} contem uma palavra que o FLE usa para marcar a acao "
+        "como falha (environment.py:451)"
+    )
+
+
+# --------------------------------------------------------------------------
 # The script the stage runs in the game.
 # --------------------------------------------------------------------------
 

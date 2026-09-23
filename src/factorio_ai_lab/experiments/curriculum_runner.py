@@ -4,7 +4,7 @@ import argparse
 import json
 import math
 import subprocess
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from itertools import pairwise
@@ -45,6 +45,7 @@ from factorio_ai_lab.planning.factorio_catalog import (
 )
 from factorio_ai_lab.planning.footprints import (
     blocked_tiles,
+    entity_footprint,
     entity_name,
     prototype_footprints,
 )
@@ -59,15 +60,20 @@ from factorio_ai_lab.planning.placement import (
     PlacementPlan,
     WorldSurvey,
     entity_position,
+    footprint_tiles,
     plan_cell_placement,
+    snap_to_grid,
 )
 from factorio_ai_lab.planning.progression import (
     DEFAULT_ENGINEERING_PLANNER,
     EngineeringState,
 )
 from factorio_ai_lab.planning.resupply import (
+    REFUSAL_NO_FUEL_IN_WORLD,
+    REFUSAL_NO_SPARE_CONTAINER,
     ContainerSalvage,
     FuelSource,
+    SmeltingOption,
     SupplyPlan,
     container_roles,
     plan_supply,
@@ -246,6 +252,12 @@ NO_TRIAL_SUPPLY = "no_trial_supply_in_world"
 #: flow of the inherited factory over the step window, identically for every
 #: arm, whether or not its own placement succeeded.
 TRIAL_OUTPUT_BASIS = "trial_cell_chest_contents"
+
+#: What the smelting probe counts as its output. The world plate counter is
+#: not that: the inherited factory carries furnaces of its own, and a reading
+#: taken off the global counter would credit this generation with whatever
+#: they happen to smelt during the window.
+SMELTING_OUTPUT_BASIS = "probe_furnace_contents"
 
 
 class PlacementNotMeasured(RuntimeError):
@@ -1023,6 +1035,47 @@ BASELINE_CHEST_PROTOTYPE = "WoodenChest"
 MINING_CELL_FUEL_ITEM = "coal"
 MINING_CELL_FUEL_PROTOTYPE = "Coal"
 
+#: The container a stage makes when the standing world holds no spare one.
+#: Measured over RCON on 2026-09-23 against the recipes this run has
+#: enabled: `iron-chest` is one of them, costs 8 iron plates and is crafted
+#: by hand; `iron-plate` is one iron ore smelted for 3.2 s. The heir of
+#: generation 37 carries 24 iron ore and 7 stone furnaces and no chest at
+#: all, which is the case this exists for.
+SMELTED_CHEST_NAME = "iron-chest"
+SMELTED_CHEST_PROTOTYPE = "IronChest"
+CONTAINER_PLATES = 8
+CONTAINER_SMELT_SECONDS = 26
+
+#: Every container a cell may drop into, under the prototype name a script
+#: places it by. Stated once because the two are read in different places --
+#: the survey matches entities by name, the script asks for a prototype --
+#: and a pair that drifts apart measures one container and places another. A
+#: name absent from here is placed as the baseline chest, which fails loudly
+#: at place_entity instead of quietly measuring the wrong container.
+CONTAINER_PROTOTYPES: dict[str, str] = {
+    BASELINE_CHEST_NAME: BASELINE_CHEST_PROTOTYPE,
+    SMELTED_CHEST_NAME: SMELTED_CHEST_PROTOTYPE,
+}
+
+#: The inserter that lifts ore off the belt into the terminal container.
+LOGISTICS_INSERTER_NAME = "burner-inserter"
+
+#: What a smelting cell is made of besides the drill, under both names.
+SMELTING_FURNACE_NAME = "stone-furnace"
+SMELTING_FURNACE_PROTOTYPE = "StoneFurnace"
+
+#: The ore a container is smelted from and the plate it becomes, under both
+#: names for the same reason.
+SMELT_ORE_ITEM = "iron-ore"
+SMELT_ORE_PROTOTYPE = "IronOre"
+SMELT_PLATE_ITEM = "iron-plate"
+SMELT_PLATE_PROTOTYPE = "IronPlate"
+
+#: What the burner inserter of the belt line is charged with. The dose the
+#: curriculum has always used, kept as a floor for the same reason the mining
+#: doses are: an inserter that stops mid-window measures fuel, not logistics.
+LOGISTICS_INSERTER_COAL = 10
+
 #: How the journal records the state of a stage's supply plan. A world that
 #: could not be read is not a world that holds nothing: the first leaves the
 #: stage on the path it took before any of this existed, the second is a
@@ -1037,6 +1090,21 @@ SUPPLY_WORLD_UNREAD = "world_not_surveyed"
 #: reading, which is what `planning.fuel` exists to prevent.
 TRIAL_COAL_FLOOR = 12
 SCALE_COAL_FLOOR = 20
+SMELT_COAL_FLOOR = 20
+
+#: Coal one container smelt burns, derived from the furnace draw over the
+#: window the smelt takes instead of a number written here.
+CONTAINER_SMELT_FUEL = STONE_FURNACE.coal_for_seconds(
+    float(CONTAINER_SMELT_SECONDS)
+)
+
+#: Refusals a stage cannot build around: the world holds no fuel at all, or
+#: no container at all. A world merely short of fuel is a different reading
+#: -- the stage draws what is there, inserts what it drew and records the
+#: shortfall, which is a measurement rather than an assumption.
+BLOCKING_REFUSALS: frozenset[str] = frozenset(
+    {REFUSAL_NO_FUEL_IN_WORLD, REFUSAL_NO_SPARE_CONTAINER}
+)
 
 
 def survey_world(env: Any) -> WorldSurvey | None:
@@ -1089,6 +1157,196 @@ def mining_cell_reserve(tiles: frozenset[GridPoint]) -> tuple[GridPoint, ...]:
     )
 
 
+def tiles_center(tiles: Collection[GridPoint]) -> tuple[float, float]:
+    """Centre of a rectangular tile set, in world coordinates."""
+    left = min(tile.x for tile in tiles)
+    right = max(tile.x for tile in tiles)
+    top = min(tile.y for tile in tiles)
+    bottom = max(tile.y for tile in tiles)
+    return ((left + right + 1) / 2, (top + bottom + 1) / 2)
+
+
+def smelting_furnace_anchor(
+    drill_position: tuple[float, float],
+    footprints: Mapping[str, tuple[int, int]] | None = None,
+) -> tuple[float, float]:
+    """Where ``place_entity_next_to(StoneFurnace, drill.position, DOWN)`` lands.
+
+    FLE offsets the new entity by ``ceil(ref_height + entity_height) / 2``
+    from the reference centre and the engine then snaps it to the grid
+    (fle/env/tools/agent/place_entity_next_to/server.lua:179). For the 2x2
+    drill and the 2x2 furnace of this cell that is two tiles down, which is
+    where the inherited cell stands: drill (27, 73), furnace (27, 75),
+    measured off the promoted checkpoint on 2026-09-23. Deriving it keeps the
+    reserve below and the adoption check honest if either footprint changes.
+    """
+    drill = entity_footprint(
+        {"name": BASELINE_DRILL_NAME, "direction": 0},
+        footprints,
+    )
+    furnace = entity_footprint(
+        {"name": SMELTING_FURNACE_NAME, "direction": 0},
+        footprints,
+    )
+    offset = math.ceil(drill[1] + furnace[1]) / 2
+    return snap_to_grid(
+        (drill_position[0], drill_position[1] + offset),
+        furnace,
+    )
+
+
+def smelting_cell_reserve(
+    footprints: Mapping[str, tuple[int, int]] | None = None,
+) -> Callable[[frozenset[GridPoint]], Iterable[GridPoint]]:
+    """The tiles a smelting cell needs besides the drill's own footprint.
+
+    A drill placed where the furnace cannot follow fails the whole step one
+    line later, at ``place_entity_next_to``, with the same message the drill
+    placement would have given. Planning both together is what makes the
+    shift meaningful.
+    """
+
+    def reserve(tiles: frozenset[GridPoint]) -> tuple[GridPoint, ...]:
+        if not tiles:
+            return ()
+        return tuple(
+            footprint_tiles(
+                entity=SMELTING_FURNACE_NAME,
+                position=smelting_furnace_anchor(
+                    tiles_center(tiles),
+                    footprints,
+                ),
+                footprints=footprints,
+            )
+        )
+
+    return reserve
+
+
+def plan_smelting_cell(
+    survey: WorldSurvey | None,
+    anchor: tuple[float, float],
+    *,
+    reach: int = 0,
+    region: tuple[float, float, float, float] | None = None,
+) -> PlacementPlan:
+    """Where the smelting probe's drill goes, given the world as it stands.
+
+    Nothing is adopted. The probe's claim is that this generation built a
+    cell that smelts, and the inherited furnaces are no basis for it: both
+    of the ones standing hold a full output stack, measured at 100 iron
+    plates each off the promoted checkpoint, so a furnace that was adopted
+    is a furnace that has stopped. The plan moves the cell to free tiles
+    instead, and what it measures there is its own.
+    """
+    return plan_cell_placement(
+        survey,
+        anchor,
+        entity=BASELINE_DRILL_NAME,
+        adopt_names=TRIAL_ADOPTS_NOTHING,
+        reach=reach,
+        region=region,
+        extra_tiles=smelting_cell_reserve(
+            None if survey is None else survey.footprints
+        ),
+    )
+
+
+def plan_smelting_furnace(
+    survey: WorldSurvey | None,
+    drill_position: tuple[float, float],
+) -> PlacementPlan:
+    """Whether the tiles under the cell's furnace are really free.
+
+    No reach and nothing adopted: the script places the furnace with
+    ``place_entity_next_to``, so the only tiles that decide anything are the
+    ones the engine will use, and a furnace standing on them is a furnace
+    this generation did not build. The drill plan already reserved these
+    tiles; this is the reading that says so in the journal.
+    """
+    return plan_cell_placement(
+        survey,
+        smelting_furnace_anchor(
+            drill_position,
+            None if survey is None else survey.footprints,
+        ),
+        entity=SMELTING_FURNACE_NAME,
+        adopt_names=TRIAL_ADOPTS_NOTHING,
+    )
+
+
+@dataclass(frozen=True)
+class LogisticsGeometry:
+    """Where the belt line of the logistics stage runs and unloads.
+
+    Stated once, as offsets from the drill, because four places depend on
+    it: the route endpoints, the terminal inserter and chest, the tiles the
+    placement reserves, and the furnace the next stage extends into. A copy
+    that drifts would reserve one set of tiles and build on another.
+    """
+
+    start: GridPoint
+    goal: GridPoint
+    inserter: tuple[float, float]
+    chest: tuple[float, float]
+    downstream_inserter: tuple[float, float]
+    downstream_furnace: tuple[float, float]
+
+
+def logistics_geometry(drill_position: tuple[float, float]) -> LogisticsGeometry:
+    """The belt line and its terminal, derived from where the drill stands.
+
+    The downstream pair is where ``stage_belt_smelting`` puts its inserter
+    and furnace: one tile east of the chest, and then the position
+    ``place_entity_next_to`` computes from that inserter.
+    """
+    start_world = (drill_position[0] + 0.5, drill_position[1] + 1.5)
+    goal_world = (drill_position[0] + 5.5, drill_position[1] + 4.5)
+    goal = GridPoint(round(goal_world[0] - 0.5), round(goal_world[1] - 0.5))
+    return LogisticsGeometry(
+        start=GridPoint(round(start_world[0] - 0.5), round(start_world[1] - 0.5)),
+        goal=goal,
+        inserter=(goal.x + 1.5, goal.y + 0.5),
+        chest=(goal.x + 2.5, goal.y + 0.5),
+        downstream_inserter=(goal.x + 3.5, goal.y + 0.5),
+        downstream_furnace=(goal.x + 5.0, goal.y + 1.0),
+    )
+
+
+def logistics_cell_reserve(
+    footprints: Mapping[str, tuple[int, int]] | None = None,
+) -> Callable[[frozenset[GridPoint]], Iterable[GridPoint]]:
+    """Tiles the belt line needs besides the drill, given the drill footprint.
+
+    The route itself is planned around what is standing, so only the fixed
+    points are reserved: where the belt starts and ends, the inserter and
+    chest at the terminal, and the two entities the next stage extends the
+    terminal with. Both containers this curriculum places are one tile, so
+    the chest is reserved under the baseline name whichever one the supply
+    plan ends up handing over.
+    """
+
+    def reserve(tiles: frozenset[GridPoint]) -> tuple[GridPoint, ...]:
+        if not tiles:
+            return ()
+        geometry = logistics_geometry(tiles_center(tiles))
+        reserved: set[GridPoint] = {geometry.start, geometry.goal}
+        for position, name in (
+            (geometry.inserter, LOGISTICS_INSERTER_NAME),
+            (geometry.chest, BASELINE_CHEST_NAME),
+            (geometry.downstream_inserter, LOGISTICS_INSERTER_NAME),
+            (geometry.downstream_furnace, SMELTING_FURNACE_NAME),
+        ):
+            reserved |= footprint_tiles(
+                entity=name,
+                position=position,
+                footprints=footprints,
+            )
+        return tuple(reserved)
+
+    return reserve
+
+
 def plan_mining_cell(
     survey: WorldSurvey | None,
     anchor: tuple[float, float],
@@ -1109,21 +1367,57 @@ def plan_mining_cell(
     )
 
 
+def container_prototype(name: str) -> str:
+    """FLE prototype name for a container entity name."""
+    return CONTAINER_PROTOTYPES.get(name, BASELINE_CHEST_PROTOTYPE)
+
+
+def cell_container(plan: SupplyPlan | None) -> str:
+    """Which container the cell this plan supplies will be built out of.
+
+    The plan names one only when it obtained one: a salvaged chest is the
+    kind that was standing, a smelted one is the kind the recipe makes, and
+    a stage that already carried what it needed keeps the baseline.
+    """
+    if plan is None:
+        return BASELINE_CHEST_NAME
+    return plan.container_name or BASELINE_CHEST_NAME
+
+
+def blocking_refusals(plan: SupplyPlan | None) -> tuple[str, ...]:
+    """The refusals of a plan that leave a stage with nothing to run on.
+
+    A world that holds no fuel at all, or no container at all, stops the
+    stage; a world merely short of fuel does not. Keeping the two apart is
+    what lets a stage draw eleven coal and say so instead of refusing a
+    window it could have measured.
+    """
+    if plan is None:
+        return ()
+    return tuple(
+        refusal for refusal in plan.refusals if refusal in BLOCKING_REFUSALS
+    )
+
+
 def container_positions(
     survey: WorldSurvey | None,
+    *,
+    names: Collection[str] = tuple(CONTAINER_PROTOTYPES),
 ) -> frozenset[tuple[float, float]]:
     """Where the containers stood before a stage placed anything.
 
     What a trial built has to stay distinguishable from what it inherited:
     the ancestor's chests hold ore this generation did not mine, and summing
     them into a trial reading would credit the arm with the ancestor's
-    factory.
+    factory. Every container kind a cell may be built of is read, not only
+    the baseline one, or a cell built out of a smelted chest would be
+    measured as if the world had always held it.
     """
     if survey is None:
         return frozenset()
     found: set[tuple[float, float]] = set()
     for entity in survey.entities:
-        if entity_name(entity) != BASELINE_CHEST_NAME:
+        if entity_name(entity) not in names:
             continue
         position = entity_position(entity)
         if position is not None:
@@ -1136,6 +1430,7 @@ def cell_yield(
     *,
     inherited_containers: Collection[tuple[float, float]],
     item: str,
+    container_name: str = BASELINE_CHEST_NAME,
 ) -> float | None:
     """How much ``item`` sits in containers that were not standing before.
 
@@ -1156,7 +1451,7 @@ def cell_yield(
     total = 0.0
     measured = False
     for entity in survey.entities:
-        if entity_name(entity) != BASELINE_CHEST_NAME:
+        if entity_name(entity) != container_name:
             continue
         position = entity_position(entity)
         if position is None or position in inherited_containers:
@@ -1168,6 +1463,7 @@ def cell_yield(
                 x=position[0],
                 y=position[1],
                 item=item,
+                container=container_name,
             )
         )
     return total if measured else None
@@ -1215,6 +1511,12 @@ def survey_stage_supply(
     rather than assumed, and the only honest place to find it is the world as
     it stands: the containers that hold fuel, and the containers no material
     edge touches.
+
+    When the world holds no spare container the survey offers the second
+    source: the ore and the furnace the heir carries, which
+    :func:`plan_supply` turns into a container this generation smelted. That
+    case is not hypothetical -- the single unattached chest is committed by
+    stage 2, so the generation after the next promotion finds none.
 
     Answers None when the world, or the agent's own inventory, could not be
     read. That is not a world measured to be empty: it leaves the caller on
@@ -1264,6 +1566,35 @@ def survey_stage_supply(
                     ),
                 )
             )
+    smelting: SmeltingOption | None = None
+    if container_needed:
+        ore_carried = _carried_item_count(instance, SMELT_ORE_ITEM)
+        plates_carried = _carried_item_count(instance, SMELT_PLATE_ITEM)
+        furnaces_carried = _carried_item_count(instance, SMELTING_FURNACE_NAME)
+        if ore_carried is None or plates_carried is None or furnaces_carried is None:
+            return None
+        # The furnace is one this generation places. An inherited furnace
+        # holds the ancestor's plates in its output, and extracting from it
+        # would carry that stock into this generation's inventory as though
+        # this generation had smelted it.
+        furnace_plan = plan_cell_placement(
+            survey,
+            anchor,
+            entity=SMELTING_FURNACE_NAME,
+            adopt_names=TRIAL_ADOPTS_NOTHING,
+            reach=PLACEMENT_SCAN_REACH,
+        )
+        smelting = SmeltingOption(
+            container_name=SMELTED_CHEST_NAME,
+            plates_needed=CONTAINER_PLATES,
+            ore_carried=ore_carried,
+            plates_carried=plates_carried,
+            furnaces_carried=furnaces_carried,
+            furnace_position=furnace_plan.position if furnace_plan.builds else None,
+            fuel_per_smelt=CONTAINER_SMELT_FUEL,
+            seconds=CONTAINER_SMELT_SECONDS,
+        )
+
     return plan_supply(
         anchor=anchor,
         fuel_needed=fuel_needed,
@@ -1272,6 +1603,7 @@ def survey_stage_supply(
         container_needed=container_needed,
         containers_carried=containers_carried,
         spare_containers=tuple(spares),
+        smelting=smelting,
     )
 
 
@@ -1302,6 +1634,12 @@ def mining_cell_supply_script(
     is wrapped on its own: one container that will not answer must not take
     down the draws that would have worked.
 
+    A plan that smelts its container adds a furnace, one charge of coal, the
+    ore and the seconds the smelt takes, and then crafts the chest. It is
+    placed with ``exact=False``: the drill of this cell is already standing
+    when the prelude runs, so a furnace aimed at tiles planned before that
+    placement lets the engine step aside instead of failing the step.
+
     Whatever the engine says about a refused call is neutralised before it
     travels in the payload. FLE marks a step failed on the substring ``error``
     anywhere in what the script printed (fle/env/gym_env/environment.py:451),
@@ -1313,6 +1651,7 @@ def mining_cell_supply_script(
         "supply_fuel_drawn=0",
         "supply_fuel_log=[]",
         "supply_container_recovered=0",
+        "supply_container_smelted=0",
         "supply_note=''",
     ]
     if plan is None:
@@ -1321,11 +1660,16 @@ def mining_cell_supply_script(
         "    supply_note=(supply_note+' '+str(supply_exc)[:80])[:240]"
         ".replace('rror','rr0r').replace('xception','xcepti0n')"
     )
+    # Clamped against what the plan says the step needs, not against the
+    # dose alone: a plan that smelts a container has to draw the furnace's
+    # charge too, and a clamp that ignored it would leave the drill short at
+    # the far end of the window.
+    charge = int(plan.fuel_needed) if plan.fuel_needed else int(fuel_needed)
     for draw in plan.fuel_draws:
         x, y = draw.position
         lines.append(
             "try:\n"
-            f"    supply_short=max(0,{int(fuel_needed)}"
+            f"    supply_short=max(0,{charge}"
             f"-inspect_inventory()[Prototype.{MINING_CELL_FUEL_PROTOTYPE}])\n"
             "    if supply_short>0:\n"
             f"        supply_taken=extract_item(Prototype.{MINING_CELL_FUEL_PROTOTYPE},"
@@ -1344,6 +1688,36 @@ def mining_cell_supply_script(
             f"        pickup_entity(Prototype.{BASELINE_CHEST_PROTOTYPE},"
             f"Position(x={x},y={y}))\n"
             "        supply_container_recovered=1\n"
+            "except Exception as supply_exc:\n" + note
+        )
+    smelt = plan.smelt
+    if smelt is not None and smelt.ore_to_smelt > 0 and smelt.position is not None:
+        x, y = smelt.position
+        chest = container_prototype(smelt.container_name)
+        lines.append(
+            "try:\n"
+            f"    if inspect_inventory()[Prototype.{chest}]<1:\n"
+            f"        supply_furnace=place_entity(Prototype."
+            f"{SMELTING_FURNACE_PROTOTYPE},"
+            f"position=Position(x={x},y={y}),exact=False)\n"
+            f"        supply_smelt_coal=min({int(smelt.fuel_to_insert)},"
+            f"inspect_inventory()[Prototype.{MINING_CELL_FUEL_PROTOTYPE}])\n"
+            "        if supply_smelt_coal>0:\n"
+            f"            supply_furnace=insert_item(Prototype."
+            f"{MINING_CELL_FUEL_PROTOTYPE},supply_furnace,"
+            "quantity=supply_smelt_coal)\n"
+            f"        supply_smelt_ore=min({int(smelt.ore_to_smelt)},"
+            f"inspect_inventory()[Prototype.{SMELT_ORE_PROTOTYPE}])\n"
+            "        if supply_smelt_ore>0:\n"
+            f"            supply_furnace=insert_item(Prototype."
+            f"{SMELT_ORE_PROTOTYPE},supply_furnace,quantity=supply_smelt_ore)\n"
+            f"            sleep({int(smelt.seconds)})\n"
+            f"            extract_item(Prototype.{SMELT_PLATE_PROTOTYPE},"
+            "supply_furnace.position,quantity=supply_smelt_ore)\n"
+            f"        if inspect_inventory()[Prototype.{SMELT_PLATE_PROTOTYPE}]"
+            f">={int(smelt.plates_needed)}:\n"
+            f"            supply_container_smelted=craft_item(Prototype.{chest},"
+            "quantity=1)\n"
             "except Exception as supply_exc:\n" + note
         )
     return "\n".join(lines)
@@ -1667,6 +2041,16 @@ def stage_online_learning(
         )
         raise PlacementNotMeasured(NO_TRIAL_SUPPLY)
     supply_prelude = mining_cell_supply_script(supply, fuel_needed=trial_dose)
+    # Which container the cell is assembled from is a reading, not a
+    # constant: the heir carries none, the world holds one spare until a
+    # promotion commits it, and after that the plan smelts one. The trial
+    # measures the chest it placed, so it has to look for the kind it placed.
+    trial_container = cell_container(supply)
+    trial_container_binding = (
+        f"trial_container_type = Prototype.{container_prototype(trial_container)}"
+    )
+    online["container_name"] = trial_container
+    journal.state["metrics"]["placement_trial_container"] = trial_container
 
     bandit = UCB1Bandit(tuple(buildable), exploration=exploration)
 
@@ -1685,6 +2069,7 @@ def stage_online_learning(
             "trial_fuel": None,
             "supply_fuel_drawn": None,
             "supply_container_recovered": None,
+            "supply_container_smelted": None,
             "supply_log": None,
             "supply_note": None,
             "valid": False,
@@ -1702,6 +2087,7 @@ def stage_online_learning(
                 env,
                 inherited_containers=inherited_containers,
                 item="iron-ore",
+                container_name=trial_container,
             )
             measured_state["world_output_after"] = production_output(
                 namespace,
@@ -1718,6 +2104,10 @@ def stage_online_learning(
             measured_state["supply_container_recovered"] = _namespace_measure(
                 namespace,
                 "supply_container_recovered",
+            )
+            measured_state["supply_container_smelted"] = _namespace_measure(
+                namespace,
+                "supply_container_smelted",
             )
             measured_state["supply_log"] = _supply_log_rows(
                 getattr(namespace, "supply_fuel_log", None)
@@ -1739,6 +2129,7 @@ def stage_online_learning(
             return False
 
         code = f"""
+{trial_container_binding}
 trial_drill = place_entity(
     Prototype.BurnerMiningDrill,
     position=Position(x={target[0]}, y={target[1]}),
@@ -1749,7 +2140,7 @@ trial_fuel = min({trial_dose}, inspect_inventory()[Prototype.Coal])
 if trial_fuel > 0:
     trial_drill = insert_item(Prototype.Coal, trial_drill, quantity=trial_fuel)
 trial_chest = place_entity_next_to(
-    Prototype.WoodenChest,
+    trial_container_type,
     trial_drill.position,
     direction=Direction.DOWN,
 )
@@ -1801,6 +2192,8 @@ print({{
             "coal_inserted": measured["trial_fuel"],
             "supply_fuel_drawn": measured["supply_fuel_drawn"],
             "supply_container_recovered": measured["supply_container_recovered"],
+            "supply_container_smelted": measured["supply_container_smelted"],
+            "container_name": trial_container,
             "supply_draws": measured["supply_log"],
             "supply_note": measured["supply_note"],
             "at": utc_now(),
@@ -1962,6 +2355,11 @@ def stage_scale_mining(
             + ", ".join(supply.refusals)
         )
     supply_prelude = mining_cell_supply_script(supply, fuel_needed=scale_dose)
+    scale_container = cell_container(supply)
+    scale_container_binding = (
+        f"scale_container_type = Prototype.{container_prototype(scale_container)}"
+    )
+    journal.state["metrics"]["scaled_container"] = scale_container
 
     journal.set_stage(
         2,
@@ -1980,6 +2378,7 @@ def stage_scale_mining(
         "coal_inserted": None,
         "supply_fuel_drawn": None,
         "supply_container_recovered": None,
+        "supply_container_smelted": None,
         "supply_draws": None,
     }
 
@@ -1999,6 +2398,10 @@ def stage_scale_mining(
             namespace,
             "supply_container_recovered",
         )
+        drawn["supply_container_smelted"] = _namespace_measure(
+            namespace,
+            "supply_container_smelted",
+        )
         drawn["supply_draws"] = _supply_log_rows(
             getattr(namespace, "supply_fuel_log", None)
         )
@@ -2009,6 +2412,7 @@ def stage_scale_mining(
         )
 
     code = f"""
+{scale_container_binding}
 scale_drill = place_entity(
     Prototype.BurnerMiningDrill,
     position=Position(x={target[0]}, y={target[1]}),
@@ -2019,7 +2423,7 @@ scale_fuel = min({scale_dose}, inspect_inventory()[Prototype.Coal])
 if scale_fuel > 0:
     scale_drill = insert_item(Prototype.Coal, scale_drill, quantity=scale_fuel)
 scale_chest = place_entity_next_to(
-    Prototype.WoodenChest,
+    scale_container_type,
     scale_drill.position,
     direction=Direction.DOWN,
 )
@@ -2072,9 +2476,10 @@ def stage_smelting_probe(
     *,
     center: tuple[float, float],
     settle_seconds: int,
+    region: tuple[float, float, float, float] | None = None,
 ) -> bool:
     namespace = env.unwrapped.instance.namespace
-    target = (center[0], center[1] - 10.5)
+    anchor = (center[0], center[1] - 10.5)
 
     journal.set_stage(
         3,
@@ -2082,22 +2487,124 @@ def stage_smelting_probe(
         detail="Testing direct burner-drill-to-furnace smelting with rollback protection.",
         next_action="probe iron-plate automation",
     )
+
+    # The anchor is a fixed offset from a patch centre that is deterministic
+    # on a fixed map, so an heir aims at the tiles its ancestor's own
+    # smelting cell stands on. Generations 38 and 39 both died here, on
+    # "entity already exists at the target position {x = 27, y = 73}", and
+    # with them every stage the curriculum reaches through this one. The
+    # decision is the placement layer's, over tiles, and it covers the
+    # furnace too: a drill placed where the furnace cannot follow fails the
+    # same way one line later.
+    survey = survey_world(env)
+    drill_plan = plan_smelting_cell(
+        survey,
+        anchor,
+        reach=PLACEMENT_SCAN_REACH,
+        region=region,
+    )
+    journal.state["metrics"]["smelting_drill_placement"] = drill_plan.to_dict()
+    if drill_plan.position is None:
+        journal.fail_stage(
+            3,
+            f"Smelting probe found no free tiles for its drill: {drill_plan.reason}.",
+        )
+        journal.event(
+            "refusal",
+            "Smelting probe refused: the standing factory occupies its tiles.",
+            placement=drill_plan.to_dict(),
+        )
+        return False
+    target = drill_plan.position
+    furnace_plan = plan_smelting_furnace(survey, target)
+    journal.state["metrics"]["smelting_furnace_placement"] = furnace_plan.to_dict()
+    if furnace_plan.position is None:
+        journal.fail_stage(
+            3,
+            f"Smelting probe found no free tiles for its furnace: {furnace_plan.reason}.",
+        )
+        journal.event(
+            "refusal",
+            "Smelting probe refused: nothing free below the drill for a furnace.",
+            placement=furnace_plan.to_dict(),
+        )
+        return False
+
+    # Both burners are charged out of the standing world. An heir carries
+    # whatever its ancestor was holding, which by the time stage 2 has
+    # committed is no coal at all: generation 39 measured `fuel_carried: 0`
+    # at both of the stages before this one.
+    drill_dose = max(
+        SMELT_COAL_FLOOR,
+        BURNER_MINING_DRILL.coal_for_seconds(
+            float(settle_seconds) + STAGE_OVERHEAD_SECONDS
+        ),
+    )
+    furnace_dose = max(
+        SMELT_COAL_FLOOR,
+        STONE_FURNACE.coal_for_seconds(
+            float(settle_seconds) + STAGE_OVERHEAD_SECONDS
+        ),
+    )
+    supply = survey_stage_supply(
+        env,
+        anchor=target,
+        fuel_needed=drill_dose + furnace_dose,
+        container_needed=False,
+    )
+    journal.state["metrics"]["smelting_supply"] = supply_report(supply)
+    journal.state["metrics"]["smelting_coal_dose"] = drill_dose + furnace_dose
+    blocked = blocking_refusals(supply)
+    if blocked:
+        journal.fail_stage(
+            3,
+            "Smelting probe refused: the standing world holds no fuel for it "
+            f"({', '.join(blocked)}).",
+        )
+        journal.event(
+            "refusal",
+            "Smelting probe refused: no fuel in the standing world.",
+            supply=journal.state["metrics"]["smelting_supply"],
+        )
+        return False
+    supply_prelude = mining_cell_supply_script(
+        supply,
+        fuel_needed=drill_dose + furnace_dose,
+    )
+
     fast_reposition(env, x=target[0], y=target[1])
     plate_before = production_output(namespace, "iron-plate")
     clock = _StageClock(env)
-    measured: dict[str, float] = {}
+    measured: dict[str, Any] = {}
 
     def validate_smelting(result: Any) -> bool:
         clock.stop()
         plate_after = production_output(namespace, "iron-plate")
-        plates = max(0.0, plate_after - plate_before)
-        measured["iron_plate_output"] = plates
-        measured["iron_plate_before"] = plate_before
-        measured["iron_plate_after"] = plate_after
+        measured["iron_plate_world_before"] = plate_before
+        measured["iron_plate_world_after"] = plate_after
+        # Read off the furnace this step placed. The world counter over the
+        # same window also carries the inherited furnaces, and a stage that
+        # took its number from there would report their flow as its own.
+        measured["iron_plate_output"] = _namespace_measure(namespace, "smelt_plates")
+        measured["drill_coal_inserted"] = _namespace_measure(
+            namespace,
+            "smelt_drill_fuel",
+        )
+        measured["furnace_coal_inserted"] = _namespace_measure(
+            namespace,
+            "smelt_furnace_fuel",
+        )
+        measured["supply_fuel_drawn"] = _namespace_measure(
+            namespace,
+            "supply_fuel_drawn",
+        )
+        measured["supply_draws"] = _supply_log_rows(
+            getattr(namespace, "supply_fuel_log", None)
+        )
         return (
             not bool(result.info.get("error_occurred"))
             and result.candidate_game_state is not None
-            and plates > 0
+            and _measured_above(measured, "iron_plate_output")
         )
 
     code = f"""
@@ -2106,15 +2613,35 @@ smelt_drill = place_entity(
     position=Position(x={target[0]}, y={target[1]}),
     direction=Direction.DOWN,
 )
-smelt_drill = insert_item(Prototype.Coal, smelt_drill, quantity=20)
+{supply_prelude}
+smelt_drill_fuel = min({drill_dose}, inspect_inventory()[Prototype.Coal])
+if smelt_drill_fuel > 0:
+    smelt_drill = insert_item(Prototype.Coal, smelt_drill, quantity=smelt_drill_fuel)
 smelt_furnace = place_entity_next_to(
     Prototype.StoneFurnace,
     smelt_drill.position,
     direction=Direction.DOWN,
 )
-smelt_furnace = insert_item(Prototype.Coal, smelt_furnace, quantity=20)
+smelt_furnace_fuel = min({furnace_dose}, inspect_inventory()[Prototype.Coal])
+if smelt_furnace_fuel > 0:
+    smelt_furnace = insert_item(
+        Prototype.Coal,
+        smelt_furnace,
+        quantity=smelt_furnace_fuel,
+    )
+smelt_plates_before = inspect_inventory(smelt_furnace)[Prototype.IronPlate]
 sleep({settle_seconds})
-print({{'furnace_inventory': inspect_inventory(smelt_furnace)}})
+smelt_plates = max(
+    0,
+    inspect_inventory(smelt_furnace)[Prototype.IronPlate] - smelt_plates_before,
+)
+print({{
+    'furnace_inventory': inspect_inventory(smelt_furnace),
+    'smelt_plates': smelt_plates,
+    'smelt_drill_fuel': smelt_drill_fuel,
+    'smelt_furnace_fuel': smelt_furnace_fuel,
+    'supply_fuel_drawn': supply_fuel_drawn,
+}})
 """
     step = executor.execute(
         code,
@@ -2122,8 +2649,16 @@ print({{'furnace_inventory': inspect_inventory(smelt_furnace)}})
         use_checkpoint_for_action=False,
     )
 
+    drawn = {
+        "drill_coal_inserted": measured.get("drill_coal_inserted"),
+        "furnace_coal_inserted": measured.get("furnace_coal_inserted"),
+        "supply_fuel_drawn": measured.get("supply_fuel_drawn"),
+        "supply_draws": measured.get("supply_draws"),
+    }
+    journal.state["metrics"]["smelting_supply_drawn"] = drawn
+
     if step.accepted:
-        plates = measured["iron_plate_output"]
+        plates = float(measured["iron_plate_output"])
         window = _record_observed_window(
             journal,
             clock,
@@ -2135,6 +2670,8 @@ print({{'furnace_inventory': inspect_inventory(smelt_furnace)}})
             {
                 "iron_plate_output": plates,
                 "direct_smelting_plate_rate_per_s": plate_rate,
+                "smelting_cell_origin": "built",
+                "smelting_plate_basis": SMELTING_OUTPUT_BASIS,
             }
         )
         journal.complete_stage(
@@ -2147,6 +2684,8 @@ print({{'furnace_inventory': inspect_inventory(smelt_furnace)}})
             iron_plate_output=plates,
             duration_s=window,
             plate_rate_per_s=plate_rate,
+            placement=drill_plan.to_dict(),
+            output_basis=SMELTING_OUTPUT_BASIS,
         )
         lesson = synthesize_lesson(
             stage="smelting_probe",
@@ -2156,6 +2695,8 @@ print({{'furnace_inventory': inspect_inventory(smelt_furnace)}})
                 "duration_s": window,
                 "plate_rate_per_s": plate_rate,
                 "engine_reward": step.reward,
+                "placement_shift": drill_plan.shift,
+                "output_basis": SMELTING_OUTPUT_BASIS,
             },
             fallback_lesson=(
                 "A burner drill can directly feed a fueled stone furnace in "
@@ -2176,15 +2717,18 @@ print({{'furnace_inventory': inspect_inventory(smelt_furnace)}})
     journal.event(
         "reject",
         "Smelting probe rejected and checkpoint restored.",
-        iron_plate_output=measured.get("iron_plate_output", 0.0),
+        # None, never 0.0: a step that aborted before the furnace was read
+        # did not measure an empty furnace.
+        iron_plate_output=measured.get("iron_plate_output"),
+        placement=drill_plan.to_dict(),
     )
     lesson = synthesize_lesson(
         stage="smelting_probe",
         facts={
             "accepted": False,
-            "iron_plate_output": measured.get("iron_plate_output", 0.0),
+            "iron_plate_output": measured.get("iron_plate_output"),
             "engine_reward": step.reward,
-            "error": _step_error_text(step.info),
+            "failure_text": _step_error_text(step.info),
             "result": str(step.info.get("result"))[:1200],
         },
         fallback_lesson=(
@@ -2198,7 +2742,6 @@ print({{'furnace_inventory': inspect_inventory(smelt_furnace)}})
     )
     journal.event("knowledge", lesson["lesson"])
     return False
-
 
 
 def _count_route_turns(path: tuple[GridPoint, ...]) -> int:
@@ -2391,15 +2934,45 @@ def stage_astar_logistics(
     center: tuple[float, float],
     settle_seconds: int,
     turn_penalty: float,
+    region: tuple[float, float, float, float] | None = None,
 ) -> dict[str, Any] | None:
     namespace = env.unwrapped.instance.namespace
     instance = env.unwrapped.instance
 
-    drill_position = (center[0] - 8.0, center[1] - 0.5)
-    start_world = (drill_position[0] + 0.5, drill_position[1] + 1.5)
-    goal_world = (drill_position[0] + 5.5, drill_position[1] + 4.5)
-    start = GridPoint(round(start_world[0] - 0.5), round(start_world[1] - 0.5))
-    goal = GridPoint(round(goal_world[0] - 0.5), round(goal_world[1] - 0.5))
+    anchor = (center[0] - 8.0, center[1] - 0.5)
+    # One reading of the world decides the drill, the route and the terminal,
+    # so the belt is planned around the same world the drill was placed
+    # against. The anchor is a fixed offset from a deterministic patch
+    # centre, which is how an heir came to aim its drill at the tiles the
+    # inherited cell at (19, 83) already stands on.
+    survey = survey_world(env)
+    drill_plan = plan_cell_placement(
+        survey,
+        anchor,
+        entity=BASELINE_DRILL_NAME,
+        adopt_names=TRIAL_ADOPTS_NOTHING,
+        reach=PLACEMENT_SCAN_REACH,
+        region=region,
+        extra_tiles=logistics_cell_reserve(
+            None if survey is None else survey.footprints
+        ),
+    )
+    journal.state["metrics"]["logistics_placement"] = drill_plan.to_dict()
+    if drill_plan.position is None:
+        journal.fail_stage(
+            4,
+            f"A* logistics found no free tiles for its cell: {drill_plan.reason}.",
+        )
+        journal.event(
+            "refusal",
+            "A* logistics refused: the standing factory occupies its tiles.",
+            placement=drill_plan.to_dict(),
+        )
+        return None
+    drill_position = drill_plan.position
+    geometry = logistics_geometry(drill_position)
+    start = geometry.start
+    goal = geometry.goal
 
     patch_bounds = journal.state.get("world", {}).get("patch_bounds", {})
     left_top = patch_bounds.get("left_top", {})
@@ -2409,18 +2982,22 @@ def stage_astar_logistics(
     min_y = math.floor(float(left_top.get("y", center[1] - 14)))
     max_y = math.ceil(float(right_bottom.get("y", center[1] + 14)))
 
-    entities = namespace._save_entity_state(
-        distance=500,
-        player_entities=True,
-        resource_entities=False,
-        items_on_ground=False,
-        encode=False,
-        compress=False,
-    )
+    if survey is not None:
+        entities: list[Any] = [dict(entity) for entity in survey.entities]
+        runtime_footprints = dict(survey.footprints)
+    else:
+        entities = namespace._save_entity_state(
+            distance=500,
+            player_entities=True,
+            resource_entities=False,
+            items_on_ground=False,
+            encode=False,
+            compress=False,
+        )
+        runtime_footprints = _runtime_entity_footprints(instance)
     # Block the tiles each entity really occupies. A guessed radius both
     # over-blocks 2x2 entities and leaves 3x3 machines open, which is how a
     # planned belt ends up crossing a machine and only failing at place_entity.
-    runtime_footprints = _runtime_entity_footprints(instance)
     blocked: set[GridPoint] = blocked_tiles(entities, runtime_footprints)
 
     blocked.discard(start)
@@ -2495,9 +3072,51 @@ def stage_astar_logistics(
             ")"
         )
 
-    last = path[-1]
-    inserter_position = (last.x + 1.5, last.y + 0.5)
-    chest_position = (last.x + 2.5, last.y + 0.5)
+    # The same geometry the placement reserved tiles for, not a second copy
+    # of the offsets: a terminal computed here would drift from the tiles the
+    # drill was moved to keep free.
+    inserter_position = geometry.inserter
+    chest_position = geometry.chest
+
+    # The cell is charged and its container found in the standing world. The
+    # heir of generation 37 carries 44 drills, 492 belts and 41 inserters,
+    # and not one chest: measured off the promoted checkpoint's inheritance
+    # ledger on 2026-09-23.
+    drill_dose = max(
+        SCALE_COAL_FLOOR,
+        BURNER_MINING_DRILL.coal_for_seconds(
+            float(settle_seconds) + STAGE_OVERHEAD_SECONDS
+        ),
+    )
+    logistics_dose = drill_dose + LOGISTICS_INSERTER_COAL
+    supply = survey_stage_supply(
+        env,
+        anchor=drill_position,
+        fuel_needed=logistics_dose,
+        container_needed=True,
+    )
+    journal.state["metrics"]["logistics_supply"] = supply_report(supply)
+    journal.state["metrics"]["logistics_coal_dose"] = logistics_dose
+    withheld_supply = blocking_refusals(supply)
+    if withheld_supply:
+        journal.fail_stage(
+            4,
+            "A* logistics refused: the standing world supplies no terminal "
+            f"({', '.join(withheld_supply)}).",
+        )
+        journal.event(
+            "refusal",
+            "A* logistics refused: neither fuel nor a container in the world.",
+            supply=journal.state["metrics"]["logistics_supply"],
+        )
+        return None
+    supply_prelude = mining_cell_supply_script(supply, fuel_needed=logistics_dose)
+    logistics_container = cell_container(supply)
+    logistics_container_binding = (
+        "logistics_container_type = Prototype."
+        f"{container_prototype(logistics_container)}"
+    )
+    journal.state["metrics"]["logistics_container"] = logistics_container
 
     journal.set_stage(
         4,
@@ -2542,6 +3161,7 @@ def stage_astar_logistics(
             x=chest_position[0],
             y=chest_position[1],
             item="iron-ore",
+            container=logistics_container,
         )
         measured["chest_iron"] = float(chest_iron)
         return (
@@ -2551,34 +3171,48 @@ def stage_astar_logistics(
         )
 
     code = f"""
+{logistics_container_binding}
 logistics_drill=place_entity(
     Prototype.BurnerMiningDrill,
     position=Position(x={drill_position[0]},y={drill_position[1]}),
     direction=Direction.DOWN,
 )
-logistics_drill=insert_item(
-    Prototype.Coal,
-    logistics_drill,
-    quantity=20,
-)
+{supply_prelude}
+logistics_drill_fuel=min({drill_dose},inspect_inventory()[Prototype.Coal])
+if logistics_drill_fuel>0:
+    logistics_drill=insert_item(
+        Prototype.Coal,
+        logistics_drill,
+        quantity=logistics_drill_fuel,
+    )
 {chr(10).join(belt_lines)}
 logistics_inserter=place_entity(
     Prototype.BurnerInserter,
     position=Position(x={inserter_position[0]},y={inserter_position[1]}),
     direction=Direction.RIGHT,
 )
-logistics_inserter=insert_item(
-    Prototype.Coal,
-    logistics_inserter,
-    quantity=10,
+logistics_inserter_fuel=min(
+    {LOGISTICS_INSERTER_COAL},
+    inspect_inventory()[Prototype.Coal],
 )
+if logistics_inserter_fuel>0:
+    logistics_inserter=insert_item(
+        Prototype.Coal,
+        logistics_inserter,
+        quantity=logistics_inserter_fuel,
+    )
 logistics_chest=place_entity(
-    Prototype.WoodenChest,
+    logistics_container_type,
     position=Position(x={chest_position[0]},y={chest_position[1]}),
     direction=Direction.UP,
 )
 sleep({settle_seconds})
-print({{'logistics_chest': inspect_inventory(logistics_chest)}})
+print({{
+    'logistics_chest': inspect_inventory(logistics_chest),
+    'logistics_drill_fuel': logistics_drill_fuel,
+    'logistics_inserter_fuel': logistics_inserter_fuel,
+    'supply_fuel_drawn': supply_fuel_drawn,
+}})
 """
     step = executor.execute(
         code,
@@ -2607,6 +3241,33 @@ print({{'logistics_chest': inspect_inventory(logistics_chest)}})
             "logistics_route_cost": route.cost,
             "logistics_expanded_nodes": route.expanded_nodes,
             "logistics_chest_iron": measured["chest_iron"],
+            # None, never 0.0, when the step never reached the draw: a
+            # withdrawal nobody measured is not a withdrawal of nothing.
+            "logistics_supply_drawn": {
+                "drill_coal_inserted": _namespace_measure(
+                    namespace,
+                    "logistics_drill_fuel",
+                ),
+                "inserter_coal_inserted": _namespace_measure(
+                    namespace,
+                    "logistics_inserter_fuel",
+                ),
+                "supply_fuel_drawn": _namespace_measure(
+                    namespace,
+                    "supply_fuel_drawn",
+                ),
+                "supply_container_recovered": _namespace_measure(
+                    namespace,
+                    "supply_container_recovered",
+                ),
+                "supply_container_smelted": _namespace_measure(
+                    namespace,
+                    "supply_container_smelted",
+                ),
+                "supply_draws": _supply_log_rows(
+                    getattr(namespace, "supply_fuel_log", None)
+                ),
+            },
         }
     )
     journal.complete_stage(
@@ -2709,6 +3370,14 @@ print({{'logistics_chest': inspect_inventory(logistics_chest)}})
             "x": chest_position[0],
             "y": chest_position[1],
         },
+        # Which container the terminal actually is. The next stage opens it
+        # by prototype, and a stage that assumed the baseline chest would
+        # read an entity that is not there.
+        "chest_name": logistics_container,
+        "drill_position": {
+            "x": drill_position[0],
+            "y": drill_position[1],
+        },
         "path": [
             {"x": point.x + 0.5, "y": point.y + 0.5}
             for point in path
@@ -2726,10 +3395,48 @@ def stage_belt_smelting(
 ) -> bool:
     namespace = env.unwrapped.instance.namespace
     chest = logistics["chest_position"]
+    chest_name = str(logistics.get("chest_name", BASELINE_CHEST_NAME))
     downstream_inserter = {
         "x": float(chest["x"]) + 1.0,
         "y": float(chest["y"]),
     }
+
+    # Both burners are charged out of the standing world, for the same reason
+    # the stages before this one are: the heir carries no coal by the time it
+    # gets here. The tiles these two go on were reserved by the placement of
+    # stage 4, which is why this stage plans no position of its own.
+    furnace_dose = max(
+        SMELT_COAL_FLOOR,
+        STONE_FURNACE.coal_for_seconds(
+            float(settle_seconds) + STAGE_OVERHEAD_SECONDS
+        ),
+    )
+    belt_dose = furnace_dose + LOGISTICS_INSERTER_COAL
+    supply = survey_stage_supply(
+        env,
+        anchor=(float(chest["x"]), float(chest["y"])),
+        fuel_needed=belt_dose,
+        container_needed=False,
+    )
+    journal.state["metrics"]["belt_smelting_supply"] = supply_report(supply)
+    journal.state["metrics"]["belt_smelting_coal_dose"] = belt_dose
+    withheld_supply = blocking_refusals(supply)
+    if withheld_supply:
+        journal.fail_stage(
+            5,
+            "Belt-fed smelting refused: the standing world holds no fuel for "
+            f"it ({', '.join(withheld_supply)}).",
+        )
+        journal.event(
+            "refusal",
+            "Belt-fed smelting refused: no fuel in the standing world.",
+            supply=journal.state["metrics"]["belt_smelting_supply"],
+        )
+        return False
+    supply_prelude = mining_cell_supply_script(supply, fuel_needed=belt_dose)
+    belt_container_binding = (
+        f"belt_container_type = Prototype.{container_prototype(chest_name)}"
+    )
 
     journal.set_stage(
         5,
@@ -2766,8 +3473,9 @@ def stage_belt_smelting(
         y=downstream_inserter["y"],
     )
     code = f"""
+{belt_container_binding}
 buffer_chest=get_entity(
-    Prototype.WoodenChest,
+    belt_container_type,
     Position(x={chest["x"]},y={chest["y"]}),
 )
 smelt_out_inserter=place_entity(
@@ -2778,25 +3486,36 @@ smelt_out_inserter=place_entity(
     ),
     direction=Direction.RIGHT,
 )
-smelt_out_inserter=insert_item(
-    Prototype.Coal,
-    smelt_out_inserter,
-    quantity=10,
+{supply_prelude}
+belt_inserter_fuel=min(
+    {LOGISTICS_INSERTER_COAL},
+    inspect_inventory()[Prototype.Coal],
 )
+if belt_inserter_fuel>0:
+    smelt_out_inserter=insert_item(
+        Prototype.Coal,
+        smelt_out_inserter,
+        quantity=belt_inserter_fuel,
+    )
 belt_furnace=place_entity_next_to(
     Prototype.StoneFurnace,
     smelt_out_inserter.position,
     direction=Direction.RIGHT,
 )
-belt_furnace=insert_item(
-    Prototype.Coal,
-    belt_furnace,
-    quantity=20,
-)
+belt_furnace_fuel=min({furnace_dose},inspect_inventory()[Prototype.Coal])
+if belt_furnace_fuel>0:
+    belt_furnace=insert_item(
+        Prototype.Coal,
+        belt_furnace,
+        quantity=belt_furnace_fuel,
+    )
 sleep({settle_seconds})
 print({{
     'buffer': inspect_inventory(buffer_chest),
     'furnace': inspect_inventory(belt_furnace),
+    'belt_inserter_fuel': belt_inserter_fuel,
+    'belt_furnace_fuel': belt_furnace_fuel,
+    'supply_fuel_drawn': supply_fuel_drawn,
 }})
 """
     step = executor.execute(
@@ -5926,6 +6645,7 @@ def run_curriculum(
             journal,
             center=center,
             settle_seconds=smelt_settle,
+            region=placement_region,
         )
         logistics: dict[str, Any] | None = None
         belt_smelt_ok = False
@@ -5937,6 +6657,7 @@ def run_curriculum(
                 center=center,
                 settle_seconds=logistics_settle,
                 turn_penalty=turn_penalty,
+                region=placement_region,
             )
         if logistics is not None:
             belt_smelt_ok = stage_belt_smelting(
