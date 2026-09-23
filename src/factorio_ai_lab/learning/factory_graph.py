@@ -52,6 +52,86 @@ _POWER_CONSUMERS = _PROCESSORS | {"lab", "electric-mining-drill"} | _INSERTERS
 _FLUID_TRANSPORT = {"pipe", "pipe-to-ground", "pump"}
 _FLUID_ENDPOINTS = {"offshore-pump", "boiler", "steam-engine", "steam-turbine"}
 
+#: Entity status strings exactly as Factorio reports them. The mod serializer
+#: resolves the numeric status back to its key in `defines.entity_status`, so a
+#: string that is not a key of that table can never reach this module: matching
+#: on one is dead code that reads as a measurement.
+FUEL_STARVED_STATUSES = frozenset({"no_fuel"})
+POWER_STARVED_STATUSES = frozenset(
+    {
+        "no_power",
+        "low_power",
+        "not_plugged_in_electric_network",
+    }
+)
+
+#: Written when an entity reports no status at all. It means "not measured",
+#: never "healthy": a snapshot in which every entity carries it proves nothing
+#: about fuel or power.
+UNKNOWN_STATUS = "unknown"
+
+#: Categories whose entities burn fuel or draw electricity. They decide both
+#: what is counted as starved and whether the snapshot measured anything.
+FUEL_STARVED_CATEGORIES = frozenset({"extraction", "processing", "transfer", "energy"})
+POWER_STARVED_CATEGORIES = frozenset({"extraction", "processing", "transfer", "research"})
+
+#: The snapshot holds no entity that could produce anything.
+HALT_CAUSE_NO_FACTORY = "no_factory"
+#: At least one burner ran dry.
+HALT_CAUSE_FUEL = "fuel_starvation"
+#: At least one electric consumer lost its supply.
+HALT_CAUSE_POWER = "power_starvation"
+#: Both failures are present; neither is known to have come first.
+HALT_CAUSE_FUEL_AND_POWER = "fuel_and_power_starvation"
+#: Entities reported their status and none of them is starved.
+HALT_CAUSE_NONE_OBSERVED = "none_observed"
+
+
+def normalize_status(raw: Any) -> str:
+    """
+    Reduce a reported status to the bare `defines.entity_status` key.
+
+    The mod serializer quotes the key it writes, so the same status arrives as
+    no_fuel through one snapshot path and quoted through another. Both have to
+    compare equal, otherwise a starved factory reads as healthy.
+    """
+    text = str(raw if raw is not None else "").strip().strip('"').strip()
+    return text or UNKNOWN_STATUS
+
+
+def classify_halt_cause(
+    *,
+    fuel_starved_entities: int,
+    power_starved_entities: int,
+    operational_entities: int,
+    status_observed: bool,
+) -> str | None:
+    """
+    Name what is broken in a terminal snapshot.
+
+    This is a verdict about one instant, not a post-mortem: it reports what was
+    starved when the snapshot was taken, never for how long the factory ran
+    before stopping. `build_factory_graph` receives a single snapshot with no
+    timestamps, so a factory that produced for 500 s and died is
+    indistinguishable here from one that was never alive. The duration axis has
+    to be measured elsewhere; `FitnessVector.productive_runtime_s` carries it.
+
+    Returns None when no entity in the affected categories reported a status:
+    nothing was measured, which is not the same as nothing being wrong.
+    """
+    if operational_entities <= 0:
+        return HALT_CAUSE_NO_FACTORY
+    if not status_observed:
+        return None
+    if fuel_starved_entities > 0 and power_starved_entities > 0:
+        return HALT_CAUSE_FUEL_AND_POWER
+    if fuel_starved_entities > 0:
+        return HALT_CAUSE_FUEL
+    if power_starved_entities > 0:
+        return HALT_CAUSE_POWER
+    return HALT_CAUSE_NONE_OBSERVED
+
+
 
 @dataclass(frozen=True)
 class GraphNode:
@@ -199,7 +279,7 @@ def build_factory_graph(
             category=_category(name),
             x=pos[0],
             y=pos[1],
-            status=str(entity.get("status") or "unknown").strip('"'),
+            status=normalize_status(entity.get("status")),
         )
         nodes.append(node)
         raw_by_id[node_id] = entity
@@ -343,20 +423,32 @@ def build_factory_graph(
         categories[node.category] = categories.get(node.category, 0) + 1
 
     fuel_starved_entities = sum(
-        node.status == "no_fuel"
+        node.status in FUEL_STARVED_STATUSES
         for node in nodes
-        if node.category in {"extraction", "processing", "transfer", "energy"}
+        if node.category in FUEL_STARVED_CATEGORIES
     )
     power_starved_entities = sum(
-        node.status
-        in {
-            "no_power",
-            "low_power",
-            "not_plugged_in_electric_network",
-            "not_connected",
-        }
+        node.status in POWER_STARVED_STATUSES
         for node in nodes
-        if node.category in {"extraction", "processing", "transfer", "research"}
+        if node.category in POWER_STARVED_CATEGORIES
+    )
+    # A starvation count of zero is evidence of health only when something
+    # actually reported a status; otherwise the zero is an absence of
+    # measurement and the halt cause stays None.
+    operational_nodes = [
+        node
+        for node in nodes
+        if node.category in FUEL_STARVED_CATEGORIES | POWER_STARVED_CATEGORIES
+    ]
+    entity_status_observed = any(
+        node.status != UNKNOWN_STATUS
+        for node in operational_nodes
+    )
+    halt_cause = classify_halt_cause(
+        fuel_starved_entities=fuel_starved_entities,
+        power_starved_entities=power_starved_entities,
+        operational_entities=len(operational_nodes),
+        status_observed=entity_status_observed,
     )
 
     return {
@@ -390,5 +482,7 @@ def build_factory_graph(
             ),
             "fuel_starved_entities": fuel_starved_entities,
             "power_starved_entities": power_starved_entities,
+            "entity_status_observed": entity_status_observed,
+            "halt_cause": halt_cause,
         },
     }

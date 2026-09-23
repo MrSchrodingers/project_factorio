@@ -555,6 +555,108 @@ def _game_ticks(env: Any) -> int | None:
         return None
 
 
+class _StageClock:
+    """Game clock bracketing the step a stage measures.
+
+    `stop` belongs inside the acceptance callback. A rejected step is rolled
+    back by resetting the environment to the checkpoint taken before it ran,
+    which rewinds the tick counter, so reading the clock after `execute`
+    returns would throw away the window that was just measured.
+    """
+
+    def __init__(self, env: Any) -> None:
+        self._env = env
+        self.ticks_before = _game_ticks(env)
+        self.ticks_after: int | None = None
+
+    def stop(self) -> None:
+        self.ticks_after = _game_ticks(self._env)
+
+    def window(self, fallback_seconds: float) -> float:
+        return observed_window_seconds(
+            self.ticks_before,
+            self.ticks_after,
+            fallback_seconds,
+        )
+
+    def source(self) -> str:
+        """Which instrument produced the window.
+
+        Mirrors the fallback branches of `observed_window_seconds`: without
+        two readings, or with a counter that did not advance, the window is
+        the sleep literal and has to be labelled as one.
+        """
+        if (
+            self.ticks_before is None
+            or self.ticks_after is None
+            or self.ticks_after <= self.ticks_before
+        ):
+            return "sleep_literal"
+        return "observed_game_ticks"
+
+
+def _record_observed_window(
+    journal: ResearchJournal,
+    clock: _StageClock,
+    *,
+    metric_prefix: str,
+    fallback_seconds: float,
+) -> float:
+    """Window a stage actually ran for, journalled with its instrument.
+
+    The game keeps running through move_to, extract_item and place_entity, so
+    dividing output by the sleep literal inflated every rate by the ratio
+    between the two windows -- roughly five-fold where it was measured. Stages
+    divide by the returned window and record where it came from, so rates
+    taken with different instruments are never compared as if they were the
+    same measurement.
+    """
+    window = clock.window(fallback_seconds)
+    journal.state["metrics"][f"{metric_prefix}_duration_s"] = window
+    journal.state["metrics"][f"{metric_prefix}_duration_source"] = clock.source()
+    return window
+
+
+def _namespace_measure(namespace: Any, key: str) -> float | None:
+    """Value the remote script assigned to `key`, or None when it never did.
+
+    A missing attribute means the script aborted before that assignment.
+    Defaulting it to 0.0 makes an abort indistinguishable from a real
+    measurement of zero, which is how `circuit_iron_ore: 0.0` was read for
+    eleven generations as an empty iron buffer while the buffer held ~137 ore.
+    """
+    raw = getattr(namespace, key, None)
+    return None if raw is None else float(raw or 0.0)
+
+
+def _measured_at_least(measured: dict[str, Any], key: str, threshold: float) -> bool:
+    """True only when the script reported a number that clears `threshold`.
+
+    An unmeasured key clears no gate: it carries no evidence in either
+    direction, and comparing it numerically would raise instead of decide.
+    """
+    value = measured.get(key)
+    return isinstance(value, (int, float)) and float(value) >= threshold
+
+
+def _measured_above(
+    measured: dict[str, Any],
+    key: str,
+    threshold: float = 0.0,
+) -> bool:
+    """True only when the script reported a number strictly above `threshold`."""
+    value = measured.get(key)
+    return isinstance(value, (int, float)) and float(value) > threshold
+
+
+def _measured_text(measured: dict[str, Any], key: str, spec: str = ".0f") -> str:
+    """Measurement rendered for prose, or a marker when it was never taken."""
+    value = measured.get(key)
+    if not isinstance(value, (int, float)):
+        return "unmeasured"
+    return format(float(value), spec)
+
+
 def production_output(namespace: Any, item: str) -> float:
     stats = namespace._get_production_stats()
     return float(stats.get("output", {}).get(item, 0.0))
@@ -617,9 +719,11 @@ print({'iron': iron, 'patch': patch})
     journal.state["next_action"] = "build burner drill and chest"
     journal.flush()
 
+    clock = _StageClock(env)
     measurement: dict[str, float] = {}
 
     def accept_baseline(result: Any) -> bool:
+        clock.stop()
         iron_output = production_output(namespace, "iron-ore")
         measurement["iron_output"] = iron_output
         return (
@@ -651,10 +755,16 @@ print({{'chest_inventory': inspect_inventory(chest)}})
     if not step.accepted:
         raise RuntimeError("baseline mining cell did not produce iron")
 
+    window = _record_observed_window(
+        journal,
+        clock,
+        metric_prefix="baseline_iron",
+        fallback_seconds=float(settle_seconds),
+    )
     journal.state["metrics"]["baseline_iron_output"] = measurement["iron_output"]
     journal.state["metrics"]["baseline_iron_rate_per_s"] = rate_per_second(
         measurement["iron_output"],
-        settle_seconds,
+        window,
     )
     journal.state["metrics"]["baseline_reward"] = step.reward
     journal.complete_stage(
@@ -948,9 +1058,11 @@ def stage_scale_mining(
     )
     fast_reposition(env, x=target[0], y=target[1])
     output_before = production_output(namespace, "iron-ore")
+    clock = _StageClock(env)
     measured: dict[str, float] = {}
 
     def accept_scale(result: Any) -> bool:
+        clock.stop()
         output_after = production_output(namespace, "iron-ore")
         iron_output = max(0.0, output_after - output_before)
         measured["iron_output"] = iron_output
@@ -985,10 +1097,16 @@ print({{'scale_inventory': inspect_inventory(scale_chest)}})
     if not step.accepted:
         raise RuntimeError("learned placement failed promotion")
 
+    window = _record_observed_window(
+        journal,
+        clock,
+        metric_prefix="scaled_iron",
+        fallback_seconds=float(settle_seconds),
+    )
     journal.state["metrics"]["scaled_iron_output"] = measured["iron_output"]
     journal.state["metrics"]["scaled_iron_rate_per_s"] = rate_per_second(
         measured["iron_output"],
-        settle_seconds,
+        window,
     )
     journal.state["metrics"]["scaled_reward"] = step.reward
     journal.complete_stage(
@@ -1023,9 +1141,11 @@ def stage_smelting_probe(
     )
     fast_reposition(env, x=target[0], y=target[1])
     plate_before = production_output(namespace, "iron-plate")
+    clock = _StageClock(env)
     measured: dict[str, float] = {}
 
     def validate_smelting(result: Any) -> bool:
+        clock.stop()
         plate_after = production_output(namespace, "iron-plate")
         plates = max(0.0, plate_after - plate_before)
         measured["iron_plate_output"] = plates
@@ -1061,11 +1181,16 @@ print({{'furnace_inventory': inspect_inventory(smelt_furnace)}})
 
     if step.accepted:
         plates = measured["iron_plate_output"]
-        plate_rate = rate_per_second(plates, float(settle_seconds))
+        window = _record_observed_window(
+            journal,
+            clock,
+            metric_prefix="direct_smelting",
+            fallback_seconds=float(settle_seconds),
+        )
+        plate_rate = rate_per_second(plates, window)
         journal.state["metrics"].update(
             {
                 "iron_plate_output": plates,
-                "direct_smelting_duration_s": float(settle_seconds),
                 "direct_smelting_plate_rate_per_s": plate_rate,
             }
         )
@@ -1077,7 +1202,7 @@ print({{'furnace_inventory': inspect_inventory(smelt_furnace)}})
             "accept",
             "Direct drill-to-furnace smelting cell accepted.",
             iron_plate_output=plates,
-            duration_s=float(settle_seconds),
+            duration_s=window,
             plate_rate_per_s=plate_rate,
         )
         lesson = synthesize_lesson(
@@ -1085,7 +1210,7 @@ print({{'furnace_inventory': inspect_inventory(smelt_furnace)}})
             facts={
                 "accepted": True,
                 "iron_plate_output": plates,
-                "duration_s": float(settle_seconds),
+                "duration_s": window,
                 "plate_rate_per_s": plate_rate,
                 "engine_reward": step.reward,
             },
@@ -1581,12 +1706,14 @@ def stage_belt_smelting(
     )
 
     plate_before = production_output(namespace, "iron-plate")
+    clock = _StageClock(env)
     measured: dict[str, float] = {
         "iron_plate_before": plate_before,
         "iron_plate_output": 0.0,
     }
 
     def validate_belt_smelting(result: Any) -> bool:
+        clock.stop()
         plate_after = production_output(namespace, "iron-plate")
         delta = max(0.0, plate_after - plate_before)
         measured["iron_plate_after"] = plate_after
@@ -1666,10 +1793,16 @@ print({{
         )
     )
     belt_count = max(1, int(logistics["belt_count"]))
-    belt_rate = rate_per_second(plates, float(settle_seconds))
+    window = _record_observed_window(
+        journal,
+        clock,
+        metric_prefix="belt_smelting",
+        fallback_seconds=float(settle_seconds),
+    )
+    belt_rate = rate_per_second(plates, window)
     ratio = normalized_rate_ratio(
         candidate_count=plates,
-        candidate_duration_s=float(settle_seconds),
+        candidate_duration_s=window,
         baseline_count=direct,
         baseline_duration_s=direct_duration,
     )
@@ -1678,7 +1811,6 @@ print({{
     journal.state["metrics"].update(
         {
             "belt_smelting_plate_output": plates,
-            "belt_smelting_duration_s": float(settle_seconds),
             "belt_smelting_plate_rate_per_s": belt_rate,
             "belt_smelting_reward": step.reward,
             "belt_smelting_vs_direct_rate_ratio": ratio,
@@ -1689,7 +1821,7 @@ print({{
         5,
         (
             f"Belt-fed smelting accepted with {plates:.0f} iron plates "
-            f"over {settle_seconds}s ({belt_rate:.3f} plates/s); "
+            f"over {window:.0f}s ({belt_rate:.3f} plates/s); "
             f"{ratio:.3f}x the normalized direct-feed rate." if ratio is not None else "no valid direct-feed rate baseline."
         ),
     )
@@ -1711,7 +1843,7 @@ print({{
             "turns": logistics["turns"],
             "route_cost": logistics["route_cost"],
             "belt_smelting_plate_output": plates,
-            "belt_smelting_duration_s": float(settle_seconds),
+            "belt_smelting_duration_s": window,
             "belt_smelting_plate_rate_per_s": belt_rate,
             "direct_feed_plate_output": direct,
             "direct_feed_duration_s": direct_duration,
@@ -1750,7 +1882,8 @@ def stage_electronic_circuits(
         next_action="validate electronic-circuit manufacturing chain",
     )
     before = production_output(namespace, "electronic-circuit")
-    measured: dict[str, float] = {}
+    clock = _StageClock(env)
+    measured: dict[str, Any] = {}
 
     code = f"""
 # Reactivate upstream production first. This stage must prove a causal
@@ -1936,6 +2069,7 @@ print({{
 """
 
     def validate(result: Any) -> bool:
+        clock.stop()
         output = max(
             0.0,
             production_output(namespace, "electronic-circuit") - before,
@@ -1961,8 +2095,7 @@ print({{
             "circuit_copper",
             "circuit_iron",
         ):
-            raw = getattr(namespace, key, None)
-            measured[key] = None if raw is None else float(raw or 0.0)
+            measured[key] = _namespace_measure(namespace, key)
         nav_error = getattr(namespace, "circuit_nav_note", "") or ""
         measured["circuit_nav_note"] = str(nav_error)[:400] or None
         return (
@@ -1978,10 +2111,16 @@ print({{
         use_checkpoint_for_action=False,
     )
     output = max(measured.get("output", 0.0), measured.get("inventory", 0.0))
+    window = _record_observed_window(
+        journal,
+        clock,
+        metric_prefix="electronic_circuit",
+        fallback_seconds=float(settle_seconds),
+    )
     journal.state["metrics"]["electronic_circuit_output"] = output
     journal.state["metrics"]["electronic_circuit_rate_per_s"] = rate_per_second(
         output,
-        settle_seconds,
+        window,
     )
     if not step.accepted:
         journal.state["metrics"]["electronic_circuit_counterexample"] = {
@@ -2080,6 +2219,7 @@ def stage_logistic_science(
         next_action="validate green-science industrial DAG",
     )
     before = production_output(namespace, "logistic-science-pack")
+    clock = _StageClock(env)
     measured: dict[str, float] = {}
 
     gear_plate_budget = max(
@@ -2394,6 +2534,7 @@ print({{
 """
 
     def validate(result: Any) -> bool:
+        clock.stop()
         output = max(
             0.0,
             production_output(namespace, "logistic-science-pack") - before,
@@ -2430,10 +2571,16 @@ print({{
         use_checkpoint_for_action=False,
     )
     output = max(measured.get("output", 0.0), measured.get("inventory", 0.0))
+    window = _record_observed_window(
+        journal,
+        clock,
+        metric_prefix="logistic_science",
+        fallback_seconds=float(settle_seconds),
+    )
     journal.state["metrics"]["logistic_science_output"] = output
     journal.state["metrics"]["logistic_science_rate_per_s"] = rate_per_second(
         output,
-        settle_seconds,
+        window,
     )
     journal.state["metrics"]["logistic_science_dag_target_rate_per_s"] = target_rate
     if not step.accepted:
@@ -2519,6 +2666,7 @@ def stage_transactional_rebuild(
         )
 
     plate_before = production_output(namespace, "iron-plate")
+    clock = _StageClock(env)
     measured: dict[str, float] = {}
 
     code = f"""
@@ -2547,9 +2695,13 @@ print({{
 """
 
     def validate(result: Any) -> bool:
+        clock.stop()
         plate_after = production_output(namespace, "iron-plate")
         output = max(0.0, plate_after - plate_before)
-        candidate_rate = rate_per_second(output, settle_seconds)
+        candidate_rate = rate_per_second(
+            output,
+            clock.window(float(settle_seconds)),
+        )
         removed = float(getattr(namespace, "removed_count", 0) or 0)
         measured.update(
             {
@@ -2574,6 +2726,12 @@ print({{
         code,
         accept=validate,
         use_checkpoint_for_action=False,
+    )
+    _record_observed_window(
+        journal,
+        clock,
+        metric_prefix="rebuild",
+        fallback_seconds=float(settle_seconds),
     )
     journal.state["metrics"].update(
         {
@@ -2727,7 +2885,8 @@ print({'coal': coal, 'patch': coal_patch})
 
     fast_reposition(env, x=center[0], y=center[1])
     output_before = production_output(namespace, "coal")
-    measured: dict[str, float] = {}
+    clock = _StageClock(env)
+    measured: dict[str, Any] = {}
     # One external coal lasts roughly one burner-drill fuel cycle. We wait
     # beyond that cycle before transferring mined coal back into the drill, so
     # the second production window is causally powered by endogenous fuel.
@@ -2735,9 +2894,13 @@ print({'coal': coal, 'patch': coal_patch})
     seed_seconds = max(30, settle_seconds)
 
     def validate_coal(result: Any) -> bool:
+        clock.stop()
         output_after = production_output(namespace, "coal")
         delta = max(0.0, output_after - output_before)
         measured["coal_output"] = delta
+        # An attribute the script never assigned is an abort, not a zero:
+        # keep it unmeasured so the gate below refuses it instead of reading
+        # it as a measured failure.
         for key in (
             "bootstrap_total",
             "bootstrap_quarantine",
@@ -2749,14 +2912,14 @@ print({'coal': coal, 'patch': coal_patch})
             "endogenous_stockpile",
             "operational_refuel",
         ):
-            measured[key] = float(getattr(namespace, key, 0.0) or 0.0)
+            measured[key] = _namespace_measure(namespace, key)
         return (
             not bool(result.info.get("error_occurred"))
             and result.candidate_game_state is not None
             and delta > 0
-            and measured["transfer_1"] >= 1
-            and measured["endogenous_growth"] > 0
-            and measured["endogenous_stockpile"] > 0
+            and _measured_at_least(measured, "transfer_1", 1)
+            and _measured_above(measured, "endogenous_growth")
+            and _measured_above(measured, "endogenous_stockpile")
         )
 
     code = f"""
@@ -2876,11 +3039,15 @@ print({{
     output = measured["coal_output"]
     coal_chest = namespace.coal_chest
     bootstrap_vault = namespace.bootstrap_vault
-    duration = float(seed_seconds + settle_seconds)
+    duration = _record_observed_window(
+        journal,
+        clock,
+        metric_prefix="coal_mining",
+        fallback_seconds=float(seed_seconds + settle_seconds),
+    )
     journal.state["metrics"].update(
         {
             "coal_output": output,
-            "coal_mining_duration_s": duration,
             "coal_rate_per_s": rate_per_second(output, duration),
             "coal_bootstrap_seed": float(bootstrap_seed),
             "coal_bootstrap_quarantined": measured["bootstrap_quarantine"],
@@ -2921,8 +3088,9 @@ print({{
         6,
         (
             f"Coal survived endogenous refueling: {output:.0f} produced, "
-            f"{measured['endogenous_stockpile']:.0f} buffered internally, with "
-            f"{measured['bootstrap_quarantine']:.0f} bootstrap coal quarantined."
+            f"{_measured_text(measured, 'endogenous_stockpile')} buffered "
+            f"internally, with {_measured_text(measured, 'bootstrap_quarantine')} "
+            "bootstrap coal quarantined."
         ),
     )
     journal.event(
@@ -3017,7 +3185,7 @@ print({'copper': copper, 'patch': copper_patch})
 
     fast_reposition(env, x=center[0], y=center[1])
     output_before = production_output(namespace, "copper-ore")
-    ticks_before = _game_ticks(env)
+    clock = _StageClock(env)
     measured: dict[str, float] = {}
 
     # The drill is fuelled once and never refuelled, so a charge that burns
@@ -3031,6 +3199,7 @@ print({'copper': copper, 'patch': copper_patch})
     fuel_budget = max(int(fuel_budget), required_fuel)
 
     def validate_copper(result: Any) -> bool:
+        clock.stop()
         output_after = production_output(namespace, "copper-ore")
         delta = max(0.0, output_after - output_before)
         measured["copper_ore_output"] = delta
@@ -3099,16 +3268,13 @@ print({{'copper_inventory': inspect_inventory(copper_chest)}})
     # Divide by the window that actually elapsed. Dividing by the sleep
     # literal inflated every copper rate roughly five-fold, because the game
     # ran through the whole step and not only through the sleep.
-    window = observed_window_seconds(
-        ticks_before,
-        _game_ticks(env),
-        float(settle_seconds),
+    window = _record_observed_window(
+        journal,
+        clock,
+        metric_prefix="copper_mining",
+        fallback_seconds=float(settle_seconds),
     )
     journal.state["metrics"]["copper_ore_output"] = output
-    journal.state["metrics"]["copper_mining_duration_s"] = window
-    journal.state["metrics"]["copper_mining_duration_source"] = (
-        "observed_game_ticks" if ticks_before is not None else "sleep_literal"
-    )
     journal.state["metrics"]["copper_mining_fuel_required"] = float(required_fuel)
     journal.state["metrics"]["copper_ore_rate_per_s"] = rate_per_second(
         output,
@@ -3172,8 +3338,8 @@ def stage_copper_smelting(
         next_action="validate buffered copper plate production",
     )
     plate_before = production_output(namespace, "copper-plate")
-    ticks_before = _game_ticks(env)
-    measured: dict[str, float] = {}
+    clock = _StageClock(env)
+    measured: dict[str, Any] = {}
 
     # Same defect as the drill: a furnace charged once burns out partway and
     # the stage then reports fuel dose instead of smelting throughput. A
@@ -3183,20 +3349,22 @@ def stage_copper_smelting(
     fuel_budget = max(int(fuel_budget), required_fuel)
 
     def validate_smelting(result: Any) -> bool:
+        clock.stop()
         plate_after = production_output(namespace, "copper-plate")
         delta = max(0.0, plate_after - plate_before)
         measured["copper_plate_output"] = delta
+        # An attribute the script never assigned is an abort, not a zero.
         for key in (
             "copper_ore_transfer",
             "copper_smelting_fuel",
             "copper_furnace_inventory",
         ):
-            measured[key] = float(getattr(namespace, key, 0.0) or 0.0)
+            measured[key] = _namespace_measure(namespace, key)
         return (
             not bool(result.info.get("error_occurred"))
             and result.candidate_game_state is not None
-            and measured["copper_ore_transfer"] > 0
-            and measured["copper_smelting_fuel"] > 0
+            and _measured_above(measured, "copper_ore_transfer")
+            and _measured_above(measured, "copper_smelting_fuel")
             and delta > 0
         )
 
@@ -3286,16 +3454,13 @@ print({{
         return False
 
     plates = measured["copper_plate_output"]
-    window = observed_window_seconds(
-        ticks_before,
-        _game_ticks(env),
-        float(settle_seconds),
+    window = _record_observed_window(
+        journal,
+        clock,
+        metric_prefix="copper_smelting",
+        fallback_seconds=float(settle_seconds),
     )
     journal.state["metrics"]["copper_plate_output"] = plates
-    journal.state["metrics"]["copper_smelting_duration_s"] = window
-    journal.state["metrics"]["copper_smelting_duration_source"] = (
-        "observed_game_ticks" if ticks_before is not None else "sleep_literal"
-    )
     journal.state["metrics"]["copper_smelting_fuel_required"] = float(required_fuel)
     journal.state["metrics"]["copper_plate_rate_per_s"] = rate_per_second(
         plates,
@@ -3372,7 +3537,8 @@ def stage_capability_survival(
         "copper_ore": production_output(namespace, "copper-ore"),
         "copper_plate": production_output(namespace, "copper-plate"),
     }
-    measured: dict[str, float] = {}
+    clock = _StageClock(env)
+    measured: dict[str, Any] = {}
 
     code = f"""
 move_to(coal_chest.position)
@@ -3438,6 +3604,7 @@ print({{
 """
 
     def validate(result: Any) -> bool:
+        clock.stop()
         after = {
             "iron_ore": production_output(namespace, "iron-ore"),
             "iron_plate": production_output(namespace, "iron-plate"),
@@ -3458,6 +3625,7 @@ print({{
             0.0,
             after["copper_plate"] - before["copper_plate"],
         )
+        # An attribute the script never assigned is an abort, not a zero.
         for key in (
             "refueled_count",
             "survival_transfer",
@@ -3465,13 +3633,13 @@ print({{
             "survival_copper_feed",
             "survival_coal_reserve",
         ):
-            measured[key] = float(getattr(namespace, key, 0.0) or 0.0)
+            measured[key] = _namespace_measure(namespace, key)
         return (
             not bool(result.info.get("error_occurred"))
             and result.candidate_game_state is not None
-            and measured["survival_transfer"] >= 5
-            and measured["refueled_count"] >= 5
-            and measured["survival_copper_feed"] > 0
+            and _measured_at_least(measured, "survival_transfer", 5)
+            and _measured_at_least(measured, "refueled_count", 5)
+            and _measured_above(measured, "survival_copper_feed")
             and measured["iron"] > 0
             and measured["coal"] > 0
             and measured["copper_ore"] > 0
@@ -3483,7 +3651,15 @@ print({{
         accept=validate,
         use_checkpoint_for_action=False,
     )
-    total_window = settle_seconds + 8
+    # The fallback covers the sleep literal plus the fixed 8 s settle inside
+    # the script; the wait loop ahead of them is exactly why the observed
+    # window is the honest denominator here.
+    total_window = _record_observed_window(
+        journal,
+        clock,
+        metric_prefix="survival",
+        fallback_seconds=float(settle_seconds + 8),
+    )
     journal.state["metrics"].update(
         {
             "survival_iron_output": measured.get("iron", 0.0),
@@ -3985,6 +4161,7 @@ def stage_powered_manufacturing(
         next_action="manufacture iron gears electrically",
     )
     before = production_output(namespace, "iron-gear-wheel")
+    clock = _StageClock(env)
     measured: dict[str, float] = {}
 
     code = f"""
@@ -4045,6 +4222,7 @@ print({{
 """
 
     def validate(result: Any) -> bool:
+        clock.stop()
         delta = max(
             0.0,
             production_output(namespace, "iron-gear-wheel") - before,
@@ -4069,10 +4247,16 @@ print({{
         use_checkpoint_for_action=False,
     )
     output = max(measured.get("output", 0.0), measured.get("inventory", 0.0))
+    window = _record_observed_window(
+        journal,
+        clock,
+        metric_prefix="iron_gear_wheel",
+        fallback_seconds=float(settle_seconds),
+    )
     journal.state["metrics"]["iron_gear_wheel_output"] = output
     journal.state["metrics"]["iron_gear_wheel_rate_per_s"] = rate_per_second(
         output,
-        settle_seconds,
+        window,
     )
     if not step.accepted:
         journal.fail_stage(
@@ -4116,6 +4300,7 @@ def stage_automation_science(
         next_action="produce automation science packs",
     )
     before = production_output(namespace, "automation-science-pack")
+    clock = _StageClock(env)
     measured: dict[str, float] = {}
 
     code = f"""
@@ -4185,6 +4370,7 @@ print({{
 """
 
     def validate(result: Any) -> bool:
+        clock.stop()
         delta = max(
             0.0,
             production_output(namespace, "automation-science-pack") - before,
@@ -4213,10 +4399,16 @@ print({{
         use_checkpoint_for_action=False,
     )
     output = max(measured.get("output", 0.0), measured.get("inventory", 0.0))
+    window = _record_observed_window(
+        journal,
+        clock,
+        metric_prefix="automation_science",
+        fallback_seconds=float(settle_seconds),
+    )
     journal.state["metrics"]["automation_science_output"] = output
     journal.state["metrics"]["automation_science_rate_per_s"] = rate_per_second(
         output,
-        settle_seconds,
+        window,
     )
     if not step.accepted:
         journal.fail_stage(

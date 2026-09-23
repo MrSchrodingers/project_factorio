@@ -296,10 +296,12 @@ class AutonomyEvaluationTests(unittest.TestCase):
         self.assertFalse(report.topology["healthy_power"])
         self.assertFalse(report.topology["zero_manual_logistics"])
 
-    def test_not_connected_counts_as_power_failure(self) -> None:
+    def test_disconnected_network_counts_as_power_failure(self) -> None:
+        # "not_connected" used to stand here; it is not a key of
+        # defines.entity_status, so no entity can ever report it.
         report = evaluate_factory_autonomy(
             entities=[
-                entity("steam-engine", 0, 0, "not_connected"),
+                entity("steam-engine", 0, 0, "not_plugged_in_electric_network"),
                 entity("lab", 2, 0, "no_power"),
                 entity("offshore-pump", -2, 0),
                 entity("boiler", -1, 0),

@@ -20,6 +20,7 @@ from factorio_ai_lab.experiments.curriculum_runner import (
     run_curriculum,
 )
 from factorio_ai_lab.experiments.open_play_runner import (
+    LIFELONG_CHECKPOINT,
     OPEN_PLAY_ROBUSTNESS_STATE,
     run_open_play_validation,
 )
@@ -28,6 +29,13 @@ from factorio_ai_lab.learning.experience import (
     CounterexampleRecord,
     ExperienceBuffer,
     counterexample_signature,
+)
+from factorio_ai_lab.learning.lifelong import (
+    LifelongWarmStart,
+    attribute_generation,
+    capture_champion_state,
+    load_champion_state,
+    summarize_state,
 )
 from factorio_ai_lab.learning.robustness import OpenPlayRobustnessGate
 from factorio_ai_lab.planning.factorio_catalog import (
@@ -847,11 +855,117 @@ def _repair_open_play_strategy(
     return adjusted
 
 
+def _load_lifelong_inheritance(
+    enabled: bool,
+) -> tuple[Any | None, dict[str, Any]]:
+    """Read the substrate a previous promoted generation left behind.
+
+    Having nothing to inherit is the normal state of the first generation and
+    is reported as such, not as an error.
+    """
+    if not enabled:
+        return None, {
+            "available": False,
+            "reason": "disabled",
+            "path": str(LIFELONG_CHECKPOINT),
+        }
+    try:
+        inheritance = load_champion_state(LIFELONG_CHECKPOINT)
+    except (OSError, TypeError, ValueError, KeyError) as exc:
+        return None, {
+            "available": False,
+            "reason": "load_error",
+            "path": str(LIFELONG_CHECKPOINT),
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+    if inheritance is None:
+        return None, {
+            "available": False,
+            "reason": "no_champion_state",
+            "path": str(LIFELONG_CHECKPOINT),
+        }
+    return inheritance, inheritance.to_record()
+
+
+def _lifelong_attribution(
+    inheritance: Any | None,
+    warm_start: Any | None,
+) -> tuple[Any | None, dict[str, Any]]:
+    """Split the world the generation ended with into inherited and built.
+
+    Absolute stage metrics stop being evidence the moment a generation starts
+    on an inherited factory: "reached capability X" becomes trivially true for
+    every capability the ancestor already had. The loop therefore records the
+    inherited ledger, the per-entity delta built during this generation and an
+    explicit contamination flag, so fitness can read the delta instead of the
+    absolute counts.
+    """
+    inherited_ledger = getattr(inheritance, "ledger", None)
+    final_state = (
+        warm_start.final_game_state() if warm_start is not None else None
+    )
+    final_ledger = None
+    summarize_error: str | None = None
+    if final_state is not None:
+        try:
+            final_ledger = summarize_state(final_state)
+        except (TypeError, ValueError) as exc:
+            summarize_error = f"{type(exc).__name__}: {exc}"
+    report = attribute_generation(inherited_ledger, final_ledger)
+    report["warm_start"] = (
+        warm_start.to_record()
+        if warm_start is not None
+        else {"warm_started": False, "executors_reset": 0}
+    )
+    if summarize_error is not None:
+        report["error"] = summarize_error
+    return final_state, report
+
+
+def _capture_lifelong_state(
+    *,
+    game_state: Any | None,
+    lab: dict[str, Any],
+    seed: int,
+) -> dict[str, Any]:
+    """Persist the factory only when the generation was actually promoted.
+
+    Promotion is the selection event. Capturing a rejected generation would
+    let the substrate drift with noise instead of with survival.
+    """
+    evolution = lab.get("evolution", {})
+    evolution = evolution if isinstance(evolution, dict) else {}
+    promotion = evolution.get("promotion", {})
+    promotion = promotion if isinstance(promotion, dict) else {}
+    if not bool(promotion.get("promoted")):
+        return {"captured": False, "reason": "not_promoted"}
+    if game_state is None:
+        return {"captured": False, "reason": "no_world_state"}
+    try:
+        record = capture_champion_state(
+            LIFELONG_CHECKPOINT,
+            game_state,
+            run_id=str(lab.get("run_id") or "unknown"),
+            generation=evolution.get("generation"),
+            seed=seed,
+            arena="lab_play",
+            reason=str(promotion.get("reason") or ""),
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        return {
+            "captured": False,
+            "reason": "capture_error",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+    return {"captured": True, **record}
+
+
 def run_loop(
     *,
     generations: int,
     seed: int,
     stop_on_validated: bool,
+    lifelong_inheritance: bool = True,
 ) -> dict[str, Any]:
     if generations < 1:
         raise ValueError("generations must be >= 1")
@@ -874,6 +988,8 @@ def run_loop(
             "last_open_play_run": None,
             "world_model": None,
             "next_open_play_strategy": None,
+            "lifelong_inheritance_enabled": lifelong_inheritance,
+            "lifelong": None,
         }
         atomic_json(LOOP_STATE, state)
 
@@ -902,6 +1018,12 @@ def run_loop(
                 )
             )
 
+            inheritance, inheritance_record = _load_lifelong_inheritance(
+                lifelong_inheritance
+            )
+            state["lifelong"] = {"inheritance": inheritance_record}
+            warm_start: Any | None = None
+
             if robustness_pending:
                 lab = {
                     "run_id": existing_champion.get("run_id"),
@@ -918,20 +1040,44 @@ def run_loop(
                     },
                 }
             else:
-                lab = run_curriculum(
-                    seed=iteration_seed,
-                    placement_episodes=8,
-                    baseline_settle=16,
-                    trial_settle=8,
-                    scale_settle=14,
-                    smelt_settle=24,
-                    logistics_settle=30,
-                    belt_smelt_settle=32,
-                    coal_mine_settle=24,
-                    copper_mine_settle=16,
-                    copper_smelt_settle=24,
-                    exploration=2.0,
-                )
+                # Only the lab arena inherits. Open-play validation keeps
+                # starting from an empty world on purpose: it is the evidence
+                # that the genome can build the factory, and a warm start
+                # would turn that proof into a tautology.
+                with LifelongWarmStart(
+                    inheritance.game_state
+                    if inheritance is not None
+                    else None
+                ) as warm_start:
+                    lab = run_curriculum(
+                        seed=iteration_seed,
+                        placement_episodes=8,
+                        baseline_settle=16,
+                        trial_settle=8,
+                        scale_settle=14,
+                        smelt_settle=24,
+                        logistics_settle=30,
+                        belt_smelt_settle=32,
+                        coal_mine_settle=24,
+                        copper_mine_settle=16,
+                        copper_smelt_settle=24,
+                        exploration=2.0,
+                    )
+
+            final_world_state, attribution = _lifelong_attribution(
+                inheritance,
+                warm_start,
+            )
+            capture = _capture_lifelong_state(
+                game_state=final_world_state,
+                lab=lab,
+                seed=iteration_seed,
+            )
+            state["lifelong"] = {
+                "inheritance": inheritance_record,
+                "attribution": attribution,
+                "capture": capture,
+            }
 
             state["completed_generations"] = index + 1
             state["last_lab_run"] = {
@@ -940,6 +1086,17 @@ def run_loop(
                 "generation": lab.get("evolution", {}).get("generation"),
                 "promotion": lab.get("evolution", {}).get("promotion"),
                 "robustness_freeze": robustness_pending,
+                "lifelong": {
+                    "warm_started": attribution["warm_start"]["warm_started"],
+                    "evidence_contaminated": attribution[
+                        "evidence_contaminated"
+                    ],
+                    "inherited_entity_total": attribution["inherited"][
+                        "entity_total"
+                    ],
+                    "built_entity_total": attribution["built"]["entity_total"],
+                    "captured": capture["captured"],
+                },
             }
 
             model = _train_world_models(iteration_seed)
@@ -988,6 +1145,7 @@ def run_loop(
                 "open_play": state["last_open_play_run"] if should_validate else None,
                 "world_model": model,
                 "next_open_play_strategy": state["next_open_play_strategy"],
+                "lifelong": state["lifelong"],
             }
             append_jsonl(LOOP_HISTORY, record)
             state["updated_at"] = utc_now()
@@ -1013,12 +1171,21 @@ def main() -> None:
         "--continue-after-validated",
         action="store_true",
     )
+    parser.add_argument(
+        "--no-lifelong-inheritance",
+        action="store_true",
+        help=(
+            "start every generation from an empty world instead of the "
+            "factory left by the last promoted generation"
+        ),
+    )
     args = parser.parse_args()
     try:
         result = run_loop(
             generations=args.generations,
             seed=args.seed,
             stop_on_validated=not args.continue_after_validated,
+            lifelong_inheritance=not args.no_lifelong_inheritance,
         )
     except Exception as exc:
         state = {}

@@ -4,11 +4,69 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from factorio_ai_lab.learning.autonomy import evaluate_factory_autonomy
+
 #: Rates divided by the literal argument of sleep().
 RATE_PROTOCOL_SLEEP_LITERAL = "sleep_literal_v1"
 
 #: Rates divided by the game time observed across the step.
 RATE_PROTOCOL_OBSERVED_WINDOW = "observed_window_v2"
+
+#: The material moved through machines for the whole measured window: the
+#: agent placed and fuelled the cell before the window opened and handled no
+#: item inside it. This is the only kind of rate that survives the agent
+#: walking away.
+RATE_SOURCE_ENDOGENOUS = "endogenous_flow"
+
+#: The agent moved or crafted the material inside the measured window
+#: (extract_item/insert_item/craft between machines). A machine may have done
+#: the transformation, but the flow stops when the agent stops.
+RATE_SOURCE_INTERVENTION = "intervention_batch"
+
+#: Provenance unknown. Not a synonym for either of the two above: an
+#: unclassified rate is excluded from both sums, and the sums report None
+#: instead of a partial total that would read like a measurement.
+RATE_SOURCE_UNCLASSIFIED = "unclassified"
+
+#: Which kind of measurement produced each metric key, read off the stage that
+#: writes it in experiments/curriculum_runner.py. A key absent from this table
+#: is reported as RATE_SOURCE_UNCLASSIFIED rather than assumed automated.
+_RATE_SOURCE_BY_METRIC: Mapping[str, str] = {
+    # Belt-fed furnace: inserters feed it and the window holds no agent call.
+    "belt_smelting_plate_rate_per_s": RATE_SOURCE_ENDOGENOUS,
+    # Drill mining into a chest across a sleep window with no agent call.
+    "baseline_iron_rate_per_s": RATE_SOURCE_ENDOGENOUS,
+    "scaled_iron_rate_per_s": RATE_SOURCE_ENDOGENOUS,
+    "copper_ore_rate_per_s": RATE_SOURCE_ENDOGENOUS,
+    # Hand-fed furnace batch: insert_item(ore, coal) and then measure.
+    "direct_smelting_plate_rate_per_s": RATE_SOURCE_INTERVENTION,
+    "copper_plate_rate_per_s": RATE_SOURCE_INTERVENTION,
+    # Assembler whose inputs the agent inserts between rounds.
+    "iron_gear_wheel_rate_per_s": RATE_SOURCE_INTERVENTION,
+    "automation_science_rate_per_s": RATE_SOURCE_INTERVENTION,
+    "logistic_science_rate_per_s": RATE_SOURCE_INTERVENTION,
+    # Survival stage: the agent extracts and inserts inside the window.
+    "survival_iron_rate_per_s": RATE_SOURCE_INTERVENTION,
+    "survival_coal_rate_per_s": RATE_SOURCE_INTERVENTION,
+    "survival_copper_rate_per_s": RATE_SOURCE_INTERVENTION,
+    # Coal stage refuels the drill with extract/insert inside the window.
+    "coal_rate_per_s": RATE_SOURCE_INTERVENTION,
+}
+
+#: How productive_runtime_s was obtained: the sum of the stage measurement
+#: windows that recorded positive output.
+PRODUCTIVE_RUNTIME_STAGE_WINDOWS = "stage_windows_with_output_v1"
+
+#: (duration metric, output metric) pairs whose window is only counted as
+#: productive time when the paired output is positive. Stages that record no
+#: duration cannot contribute, which is why the sum is a lower bound.
+_PRODUCTIVE_WINDOW_METRICS: tuple[tuple[str, str], ...] = (
+    ("coal_mining_duration_s", "coal_output"),
+    ("direct_smelting_duration_s", "iron_plate_output"),
+    ("belt_smelting_duration_s", "belt_smelting_plate_output"),
+    ("copper_mining_duration_s", "copper_ore_output"),
+    ("copper_smelting_duration_s", "copper_plate_output"),
+)
 
 
 @dataclass(frozen=True)
@@ -37,10 +95,76 @@ class FitnessVector:
     #: that. Comparing across protocols would make the incumbent unbeatable
     #: for a reason that has nothing to do with the factory.
     measurement_protocol: str = RATE_PROTOCOL_SLEEP_LITERAL
+    #: Provenance of each key in rates_per_s: RATE_SOURCE_ENDOGENOUS for flow
+    #: machines sustained on their own, RATE_SOURCE_INTERVENTION for a batch
+    #: the agent fed by hand. total_rate_per_s adds both and therefore cannot
+    #: tell automation from manual labour. Empty for a fitness recorded before
+    #: this field existed, which is why the sums below answer None instead of
+    #: crediting an old vector with automation it never demonstrated.
+    rate_sources: Mapping[str, str] = field(default_factory=dict)
+    #: Seconds of measured production. A lower bound, not the factory lifetime:
+    #: it adds the stage windows that recorded output and ignores everything
+    #: that was never timed. None means no window was measured at all, 0.0
+    #: would mean windows were measured and none of them produced.
+    productive_runtime_s: float | None = None
+    #: Which protocol produced productive_runtime_s; None when it was not
+    #: measured. Two runtimes from different protocols are not comparable, the
+    #: same way two rates from different rate protocols are not.
+    productive_runtime_source: str | None = None
+    #: What was broken in the terminal snapshot -- see
+    #: factory_graph.classify_halt_cause. It names the cause, never the moment:
+    #: paired with productive_runtime_s it separates a factory that ran and
+    #: died from one that was born dead. None means no status was observed.
+    halt_cause: str | None = None
 
     @property
     def total_rate_per_s(self) -> float:
+        """
+        Every measured rate added together, automation and hand work alike.
+
+        Kept unchanged so the recorded history stays readable; read
+        endogenous_rate_per_s when the question is whether the factory
+        produces without the agent.
+        """
         return sum(max(0.0, float(value)) for value in self.rates_per_s.values())
+
+    @property
+    def unclassified_rate_keys(self) -> tuple[str, ...]:
+        """Rate keys whose provenance is unknown, sorted."""
+        known = {RATE_SOURCE_ENDOGENOUS, RATE_SOURCE_INTERVENTION}
+        return tuple(
+            sorted(
+                key
+                for key in self.rates_per_s
+                if self.rate_sources.get(key) not in known
+            )
+        )
+
+    def _rate_sum(self, source: str) -> float | None:
+        if self.unclassified_rate_keys:
+            # A partial total reads like a measurement of the whole. Refuse it
+            # and let the caller see which keys are missing.
+            return None
+        return sum(
+            max(0.0, float(value))
+            for key, value in self.rates_per_s.items()
+            if self.rate_sources.get(key) == source
+        )
+
+    @property
+    def endogenous_rate_per_s(self) -> float | None:
+        """
+        Throughput machines sustained without agent handling.
+
+        0.0 means every measured rate was an intervention batch; None means at
+        least one rate has unknown provenance, so no honest sum exists.
+        """
+        return self._rate_sum(RATE_SOURCE_ENDOGENOUS)
+
+    @property
+    def intervention_rate_per_s(self) -> float | None:
+        """Throughput that only existed because the agent handled material."""
+        return self._rate_sum(RATE_SOURCE_INTERVENTION)
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -50,6 +174,19 @@ class FitnessVector:
             for key, value in sorted(self.rates_per_s.items())
         }
         payload["total_rate_per_s"] = round(self.total_rate_per_s, 8)
+        payload["rate_sources"] = {
+            str(key): str(value)
+            for key, value in sorted(self.rate_sources.items())
+        }
+        endogenous = self.endogenous_rate_per_s
+        intervention = self.intervention_rate_per_s
+        payload["endogenous_rate_per_s"] = (
+            None if endogenous is None else round(endogenous, 8)
+        )
+        payload["intervention_rate_per_s"] = (
+            None if intervention is None else round(intervention, 8)
+        )
+        payload["unclassified_rate_keys"] = list(self.unclassified_rate_keys)
         return payload
 
     @classmethod
@@ -79,6 +216,21 @@ class FitnessVector:
         isolated_producers_raw = payload.get("isolated_producers")
         fuel_starved_raw = payload.get("fuel_starved_entities")
         power_starved_raw = payload.get("power_starved_entities")
+        sources_raw = payload.get("rate_sources", {})
+        # A fitness recorded before provenance existed leaves this empty, so
+        # its rates stay unclassified and the endogenous sum stays None.
+        rate_sources = (
+            {
+                str(key): str(value)
+                for key, value in sources_raw.items()
+                if isinstance(key, str) and isinstance(value, str)
+            }
+            if isinstance(sources_raw, Mapping)
+            else {}
+        )
+        productive_runtime_raw = payload.get("productive_runtime_s")
+        productive_source_raw = payload.get("productive_runtime_source")
+        halt_cause_raw = payload.get("halt_cause")
         # A fitness recorded before this field existed came from the
         # sleep-literal denominator, so that is the honest default.
         protocol = str(
@@ -87,6 +239,22 @@ class FitnessVector:
         )
         return cls(
             measurement_protocol=protocol,
+            rate_sources=rate_sources,
+            productive_runtime_s=(
+                float(productive_runtime_raw)
+                if isinstance(productive_runtime_raw, (int, float))
+                else None
+            ),
+            productive_runtime_source=(
+                str(productive_source_raw)
+                if isinstance(productive_source_raw, str)
+                else None
+            ),
+            halt_cause=(
+                str(halt_cause_raw)
+                if isinstance(halt_cause_raw, str)
+                else None
+            ),
             capabilities=capabilities,
             rates_per_s=rates,
             external_dependencies=int(payload.get("external_dependencies", 0) or 0),
@@ -539,6 +707,68 @@ def compare_challenger(
     )
 
 
+def _snapshot_from_physical_graph(
+    physical_graph: Mapping[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """
+    Rebuild the entity rows the autonomy evaluator reads from graph nodes.
+
+    build_factory_graph keeps name, position and status for every entity it
+    could place, which is exactly the evidence evaluate_factory_autonomy needs.
+    """
+    nodes = (
+        physical_graph.get("nodes")
+        if isinstance(physical_graph, Mapping)
+        else None
+    )
+    if not isinstance(nodes, (list, tuple)):
+        return []
+    rows: list[dict[str, Any]] = []
+    for node in nodes:
+        if not isinstance(node, Mapping):
+            continue
+        name = node.get("name")
+        x = node.get("x")
+        y = node.get("y")
+        if not isinstance(name, str):
+            continue
+        if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
+            continue
+        rows.append(
+            {
+                "name": name,
+                "position": {"x": float(x), "y": float(y)},
+                "status": node.get("status"),
+            }
+        )
+    return rows
+
+
+def _autonomy_from_physical_graph(
+    physical_graph: Mapping[str, Any] | None,
+    *,
+    production_rates_per_s: Mapping[str, float],
+    interventions: Mapping[str, int] | None,
+    soak_runtime_s: float | None,
+) -> Mapping[str, Any]:
+    """
+    Measure autonomy from the terminal snapshot when no soak payload exists.
+
+    Returns an empty mapping when no snapshot reached this builder: autonomy
+    then stays unmeasured (None in the fitness vector), which is not the same
+    as measured at zero.
+    """
+    rows = _snapshot_from_physical_graph(physical_graph)
+    if not rows:
+        return {}
+    return evaluate_factory_autonomy(
+        entities=rows,
+        interventions=interventions,
+        production_rates_per_s=production_rates_per_s,
+        soak_runtime_s=soak_runtime_s,
+    ).to_dict()
+
+
 def fitness_from_research(
     *,
     metrics: Mapping[str, Any],
@@ -548,6 +778,7 @@ def fitness_from_research(
     failed_stages: int = 0,
 ) -> FitnessVector:
     rates: dict[str, float] = {}
+    rate_sources: dict[str, str] = {}
 
     metric_candidates = {
         "iron-system": ("survival_iron_rate_per_s",),
@@ -569,6 +800,10 @@ def fitness_from_research(
             value = metrics.get(key)
             if isinstance(value, (int, float)) and float(value) > 0:
                 rates[item] = float(value)
+                rate_sources[item] = _RATE_SOURCE_BY_METRIC.get(
+                    key,
+                    RATE_SOURCE_UNCLASSIFIED,
+                )
                 break
 
     external_dependencies = 0
@@ -584,8 +819,6 @@ def fitness_from_research(
 
     route_cost_raw = metrics.get("logistics_route_cost")
     route_turns_raw = metrics.get("logistics_turns")
-    autonomy_raw = metrics.get("autonomy")
-    autonomy = autonomy_raw if isinstance(autonomy_raw, Mapping) else {}
     interventions_raw = metrics.get("interventions")
     interventions = (
         interventions_raw
@@ -602,6 +835,29 @@ def fitness_from_research(
         if isinstance(committed_raw, Mapping)
         else {}
     )
+    soak_raw = metrics.get("autonomy_soak_runtime_s")
+    soak_runtime_s = (
+        float(soak_raw)
+        if isinstance(soak_raw, (int, float))
+        else None
+    )
+    autonomy_raw = metrics.get("autonomy")
+    autonomy: Mapping[str, Any] = (
+        autonomy_raw if isinstance(autonomy_raw, Mapping) else {}
+    )
+    if not autonomy:
+        # A generation that never ran the autonomy soak carries no autonomy
+        # payload, and both autonomy fields stayed null in every report so
+        # far. The terminal snapshot behind physical_graph is the same
+        # evidence the soak reads minus the window itself, so evaluating it
+        # here is what turns the score into a measurement. The missing window
+        # is reported as an unmeasured gate, never as a zero.
+        autonomy = _autonomy_from_physical_graph(
+            physical_graph,
+            production_rates_per_s=rates,
+            interventions=committed or None,
+            soak_runtime_s=soak_runtime_s,
+        )
     manual_logistics_raw = autonomy.get("manual_logistics_calls")
     if not isinstance(manual_logistics_raw, (int, float)):
         manual_logistics_raw = committed.get("manual_logistics_calls")
@@ -617,11 +873,39 @@ def fitness_from_research(
         else {}
     )
 
+    # Lower bound on productive time: only windows that were timed and that
+    # recorded output are added. What is missing to measure the real lifetime
+    # is a status time series (or a first-failure tick); a single terminal
+    # snapshot cannot date the failure it reports, so no number is invented
+    # for it here.
+    productive_runtime_s: float | None = None
+    for duration_key, output_key in _PRODUCTIVE_WINDOW_METRICS:
+        duration = metrics.get(duration_key)
+        output = metrics.get(output_key)
+        if not isinstance(duration, (int, float)) or float(duration) <= 0:
+            continue
+        if not isinstance(output, (int, float)) or float(output) <= 0:
+            continue
+        productive_runtime_s = (productive_runtime_s or 0.0) + float(duration)
+    halt_cause_raw = physical_metrics.get("halt_cause")
+
     return FitnessVector(
         # Built from the observed game window, not from the sleep literal.
         measurement_protocol=RATE_PROTOCOL_OBSERVED_WINDOW,
         capabilities=frozenset(str(item) for item in achieved),
         rates_per_s=rates,
+        rate_sources=rate_sources,
+        productive_runtime_s=productive_runtime_s,
+        productive_runtime_source=(
+            PRODUCTIVE_RUNTIME_STAGE_WINDOWS
+            if productive_runtime_s is not None
+            else None
+        ),
+        halt_cause=(
+            str(halt_cause_raw)
+            if isinstance(halt_cause_raw, str)
+            else None
+        ),
         external_dependencies=external_dependencies,
         failures=max(0, int(failed_stages)),
         route_cost=(

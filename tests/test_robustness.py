@@ -3,7 +3,9 @@ from pathlib import Path
 from factorio_ai_lab.learning.robustness import OpenPlayRobustnessGate
 
 
-def test_robustness_gate_requires_distinct_seeds(tmp_path: Path) -> None:
+def test_robustness_gate_requires_distinct_worlds(tmp_path: Path) -> None:
+    # Distinct seeds are not distinct trials here: qualification counts the
+    # terrain signatures the runs were actually observed on.
     gate = OpenPlayRobustnessGate(tmp_path / "robustness.json", required_passes=3)
     config = {"layout": 1}
     first = gate.record(
@@ -12,6 +14,7 @@ def test_robustness_gate_requires_distinct_seeds(tmp_path: Path) -> None:
         run_id="r1",
         seed=10,
         passed=True,
+        world_signature="world-a",
     )
     second = gate.record(
         champion_run_id="champion",
@@ -19,6 +22,7 @@ def test_robustness_gate_requires_distinct_seeds(tmp_path: Path) -> None:
         run_id="r2",
         seed=10,
         passed=True,
+        world_signature="world-a",
     )
     third = gate.record(
         champion_run_id="champion",
@@ -26,6 +30,7 @@ def test_robustness_gate_requires_distinct_seeds(tmp_path: Path) -> None:
         run_id="r3",
         seed=11,
         passed=True,
+        world_signature="world-b",
     )
     assert not first["qualified"]
     assert not second["qualified"]
@@ -36,9 +41,11 @@ def test_robustness_gate_requires_distinct_seeds(tmp_path: Path) -> None:
         run_id="r4",
         seed=12,
         passed=True,
+        world_signature="world-c",
     )
     assert final["qualified"]
     assert final["distinct_pass_seed_count"] == 3
+    assert final["distinct_pass_world_count"] == 3
 
 
 def test_robustness_state_resets_on_configuration_change(tmp_path: Path) -> None:

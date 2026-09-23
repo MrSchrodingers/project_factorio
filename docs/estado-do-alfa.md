@@ -1,209 +1,117 @@
-# Roadmap: de automacao roteirizada para evolucao por sobrevivencia
+# Estado do alfa: o que foi corrigido e o que resta
 
-Data: 2026-09-23. Este documento lista o que falta implementar para o projeto
-satisfazer o requisito do dono: **o agente nao deve ser guiado; deve aprender e
-evoluir a partir da persistencia da sobrevivencia**, e deve aprender a ser
-engenheiro de producao, nao a se adaptar a um terreno especifico.
+Data: 2026-09-23. Este documento nao e plano de fases. E o registro do que foi
+corrigido, com a evidencia que sustenta cada item, e a lista fechada do que
+falta para o alfa - aquilo que, uma vez feito, permite deixar o sistema
+evoluindo sem que ele acumule ruido com aparencia de conhecimento.
 
-O que esta marcado `[medido]` foi verificado nesta maquina, com o comando e a
-saida registrados na sessao. O que esta marcado `[proposta]` e desenho, nao
-observacao. Nao ha item "pronto" aqui: pronto exige teste que falhava e passa.
-
----
-
-## 1. O que bloqueia o requisito hoje
-
-### 1.1 Nada persiste entre geracoes `[medido]`
-
-`experiments/curriculum_runner.py:4074` executa `executor.reset(seed=seed)`
-antes de cada geracao, e o mundo volta a zero. Varredura do runner:
-
-```
-load_entity_state  -> 0 ocorrencias
-load_blueprint     -> 0 ocorrencias
-lifelong           -> 0 ocorrencias
-warm_start         -> 0 ocorrencias
-```
-
-Existe um nome reservado para isso, `LIFELONG_CHECKPOINT`
-(`experiments/open_play_runner.py:39`), escrito em um unico ponto (`:5584`),
-lido por ninguem, e o arquivo `runs/lifelong_champion_state.json` **nunca foi
-criado**. A ideia foi cogitada e nao chegou ao caminho que roda.
-
-Consequencia direta: o que se propaga entre geracoes sao 21 numeros do genoma,
-nao uma fabrica. Um campeao que sobreviveu recomeca do zero, exatamente como o
-primeiro. Selecao por sobrevivencia sem nada que sobreviva nao tem substrato.
-
-### 1.2 O mapa nunca muda, e o gate multi-seed nao testa o que promete `[medido]`
-
-Os patches sao identicos em oito geracoes consecutivas (22 a 29):
-
-```
-ferro (27, 83)   cobre (-58.5, 83)   carvao (27, 8.5)
-```
-
-A seed incrementa a cada geracao (`iteration_seed = seed + iteration_offset +
-index`, 20260931 a 20260938) e **nao altera o terreno**. A causa esta em duas
-camadas:
-
-- `fle/cluster/config/map-gen-settings.json` tem `"seed": null`: o mundo e
-  gerado uma vez, quando o container do Factorio sobe.
-- `integrations/fle.py:176-183` repassa a seed para `environment.reset(...)`,
-  que limpa entidades. O terreno ja existe e nao e regenerado.
-
-Isso tem duas consequencias opostas, e as duas importam:
-
-1. **A comparacao campeao-vs-desafiante e limpa**: os dois enfrentam o mesmo
-   terreno, as mesmas distancias ate os patches. Nao ha ruido de mundo
-   misturado ao de desempenho.
-2. **O que a selecao premia e especializacao, nao engenharia.** Um agente
-   avaliado sempre no mesmo mapa aprende esse mapa. Nada no fitness distingue
-   "sabe construir uma fabrica" de "decorou onde fica o ferro".
-
-O `OpenPlayRobustnessGate` (`learning/robustness.py`, usado em
-`open_play_runner.py:5560`) exige 3 seeds distintas, o que parece endereçar
-isso. Nao endereça: as seeds nao mudam o terreno, entao as tres passagens
-ocorreriam no mesmo mundo. Estado atual do gate, que nunca passou:
-
-```
-pass_count: 0 | distinct_pass_seeds: [] | qualified: false
-autonomy_runtime_s: 0.0
-```
-
-### 1.3 As metricas centrais de sobrevivencia nunca foram populadas `[medido]`
-
-No relatorio da geracao 29, os unicos campos nulos do fitness sao exatamente
-os dois que o requisito precisa:
-
-```
-fitness com None: ['autonomy_score', 'closed_loop_autonomy']
-```
-
-A instrumentacao que os calcularia existe e nao alimenta decisao:
-`learning/autonomy.py:155-160` ja deriva `boiler_has_inserter` e
-`boiler_has_belt`. `autonomy_soak_runtime_s` e `0.0` em todas as execucoes.
-
-### 1.4 A producao nao vem de rede fisica `[medido]`
-
-Cobertura mineracao-para-processamento de 16,7%; dois `burner-inserter` no
-mundo, exatamente os dois que o roteiro coloca; producao constante em
-138/92/10 enquanto as chamadas manuais foram de 26 para 191. O transporte e o
-personagem, via `insert_item`/`extract_item`.
-
-`total_rate_per_s` soma taxa de lote manual com taxa de fluxo fisico sem
-distinguir. Um numero que trata trabalho manual e automacao como a mesma coisa
-nao pode selecionar automacao.
+Criterio de "fechado": teste que falhava e passa, suite verde, exit code
+registrado. Nada aqui e marcado fechado por inspecao visual.
 
 ---
 
-## 2. Implementacoes, em ordem de dependencia
+## O achado que organiza todo o resto
 
-A ordem importa: mexer no curriculo antes de ter persistencia e medicao
-produziria um sistema com aparencia de emergente e sem capacidade de aprender.
+Quatro dos cinco bloqueios encontrados nao estavam na inteligencia do agente.
+Estavam na **instrumentacao**, e de um jeito que produzia diagnostico confiante
+e falso:
 
-### P0 - Sobreviver por tempo suficiente para haver o que selecionar
-
-**P0.1 Alimentacao automatica de combustivel** `[em implementacao]`
-Baú + burner-inserter para o boiler e para os drills; liberar os 359 carvoes
-do `bootstrap_vault`, que o codigo nunca reabre. Hoje 100% da extracao morre
-por falta de carvao (6 drills + 1 boiler com `coal=0`, estavel por ~592 s de
-jogo), e as 2 entidades sem energia sao consequencia em cadeia do boiler.
-Enquanto isso nao existir, nenhuma fabrica sobrevive tempo suficiente para que
-sobrevivencia signifique algo.
-
-**P0.2 Denominador observado nos estagios restantes** `[proposta]`
-Feito em cobre (mineracao e fundicao). Faltam `coal`, `baseline`,
-`scale_mining`, `smelting_probe`, `belt_smelting`, que ainda dividem pelo
-literal do `sleep()` e inflam a taxa em cerca de cinco vezes. Reusar
-`planning/fuel.py::observed_window_seconds`.
-
-**P0.3 Sentinela `None` nos tres blocos restantes** `[proposta]`
-`curriculum_runner.py:2702`, `:3113`, `:3378` ainda usam
-`getattr(ns, k, 0.0)`, que transforma "nao executado" em "medido zero". Esse
-padrao ja custou 11 geracoes de diagnostico falso.
-
-### P1 - Medir sobrevivencia
-
-**P1.1 Popular `autonomy_score` e `closed_loop_autonomy`** `[proposta]`
-Ligar `learning/autonomy.py` ao fitness. Sem isso o gate de autonomia e
-decorativo e o requisito nao tem metrica.
-
-**P1.2 Tempo vivo e mortalidade por causa** `[proposta]`
-Registrar, por entidade, quanto tempo esteve produtiva e o que a matou (sem
-combustivel / sem energia / sem insumo). Uma fabrica que roda 500 s e morre e
-diferente de uma que nasce morta; hoje as duas pontuam igual, porque a medida
-e um instantaneo terminal.
-
-**P1.3 Separar producao endogena de intervencao** `[proposta]`
-`total_rate_per_s` precisa distinguir o que veio de rede fisica do que veio de
-`insert_item`. Enquanto somar os dois, a selecao nao pode preferir automacao.
-
-### P2 - Persistir
-
-**P2.1 Estado que atravessa geracoes** `[proposta]`
-Implementar de fato o que `LIFELONG_CHECKPOINT` nomeia: ao fim de uma geracao
-promovida, salvar a fabrica (blueprint ou estado de entidades) e iniciar a
-geracao seguinte a partir dela, em vez de do zero. E o substrato sem o qual
-"persistencia da sobrevivencia" nao existe.
-
-**P2.2 Destruir para reconstruir** `[proposta]`
-Com estado persistente, o agente precisa poder demolir parte do que herdou
-para refazer melhor. Na literatura isso tem nome: *ruin-and-recreate* / large
-neighborhood search (ver `docs/pesquisa-metodologia.md`). Sem isso, herdar
-estado vira divida tecnica acumulada em vez de vantagem.
-
-### P3 - Generalizar, em vez de decorar o mapa
-
-**P3.1 Variacao real de terreno** `[proposta]`
-Fazer a seed chegar ao gerador de mapa (`map-gen-settings.json` hoje com
-`"seed": null`), o que exige recriar o mundo e nao apenas limpar entidades.
-E a mudanca mais invasiva da lista, porque altera o ciclo de vida do container.
-
-**P3.2 Avaliacao em conjunto fixo de mapas** `[proposta]`
-A tensao entre "mapa fixo da comparacao limpa" e "mapa variavel forca
-generalizacao" nao se resolve escolhendo um lado. Resolve-se avaliando cada
-genoma sobre o **mesmo conjunto** de N mapas e agregando (media, ou pior caso
-para pressionar robustez). A comparacao continua justa, porque todos enfrentam
-o mesmo conjunto, e o fitness deixa de premiar quem decorou um terreno. E a
-pratica padrao em avaliacao de generalizacao em RL.
-
-**P3.3 Corrigir o gate multi-seed** `[proposta]`
-Depois de P3.1, o `OpenPlayRobustnessGate` passa a testar o que promete. Antes
-dela, exigir "3 seeds distintas" da uma garantia que o mecanismo nao entrega.
-
-### P4 - Trocar roteiro por pressao seletiva
-
-**P4.1 Curriculo como objetivo, nao como sequencia de acoes** `[proposta]`
-Os 16 estagios executam acoes predeterminadas. Para o comportamento emergir,
-o estagio precisa declarar **o que** deve ser verdade (ha placas de ferro
-sendo produzidas de forma sustentada) e nao **como** consegui-lo. Ultimo item
-da lista de proposito: sem P0-P3, trocar o roteiro produz um sistema que
-parece emergente e continua sem poder aprender.
-
----
-
-## 3. Dividas de instrumentacao que enganam quem le
-
-Nao bloqueiam a evolucao, mas produzem confianca indevida e devem ser
-corrigidas antes de qualquer afirmacao publica de desempenho.
-
-| Item | Estado | Evidencia |
+| defeito | efeito | evidencia |
 |---|---|---|
-| `risk_accuracy: 0.9928` sobre classe com taxa base de 92,93% | pior que o baseline trivial, que esta no mesmo arquivo (`risk_persistence_accuracy: 1.0`) e nenhum gate consulta | `[medido]` |
-| World model retreinado a cada geracao e nunca carregado | zero call-sites de predicao; perde da persistencia em 4/4 folds | `[medido]` |
-| `spatial_policy.npz` carregado, metadata descreve `spatial_policy_mlp.npz` | md5 diferentes | `[medido]` |
-| `not_connected` em `factory_graph.py:356` e `autonomy.py:13` | status inexistente em `defines.entity_status` do Factorio 2.0.73 | `[medido]` |
-| (1+1)-ES mutando 21 parametros com 19 avaliacoes | menos de uma avaliacao por dimensao | `[medido]` |
+| `info["error"]` lido de uma chave que o FLE nao produz | toda mensagem de falha descartada; contraexemplos com `"error": null` | `fle/env/gym_env/environment.py:504` entrega `result`, nao `error` |
+| `getattr(ns, k, 0.0)` como default | "nao executado" virava "medido zero", e o zero virava o sintoma | `circuit_iron_ore: 0.0` enquanto o bau tinha 137 minerios, medido por RCON |
+| FLE marca falha por substring "error" no texto impresso | uma variavel chamada `circuit_nav_error` reprovou um estagio que produzira 5 circuitos | `environment.py:451` |
+| denominador = literal do `sleep()` | toda taxa inflada ~5x; o campeao registra copper-ore a 0,8125/s contra 0,25/s de capacidade fisica do drill | janela real medida ~80 s contra literal de 16 |
+| metrica media dose de combustivel, nao producao | `ore == floor(6,667 x carvao)`; o gate de cobre era o teste `coal_budget >= 2` | 9 execucoes com 1 carvao deram exatamente 6; 7 com 2 deram exatamente 13 |
+
+Enquanto um instrumento converte "nao executado" em "medido zero", geracoes nao
+acumulam conhecimento: acumulam ruido com aparencia de dado. Por isso a ordem de
+trabalho foi instrumentacao antes de mecanismo.
 
 ---
 
-## 4. Dominios do jogo ausentes por inteiro `[medido]`
+## Fechado
 
-Poluicao e biters, rede eletrica como modelo (so leitura de status textual),
-trens, throughput de esteira por tier, e depleção de patch. Isso delimita o
-escopo honesto do que existe: um agente de bootstrap early-game sem pressao
-externa, nao um construtor de fabrica.
+Cada item abaixo tem commit, teste que falhava e passa, e suite verde.
 
-Enquanto nao houver pressao externa (biters, poluicao, escassez), "sobreviver"
-significa apenas "nao ficar sem carvao". A pressao seletiva do requisito e
-mais fraca do que parece.
+**Payload ao vivo em JSON valido** (`30e87d4`). O WebSocket serializava custo de
+rota infinito como o token bare `Infinity`, que `JSON.parse` rejeita, e o
+navegador descartava 100% das atualizacoes. Medido antes: 27 erros de console,
+zero payload aceito. Depois: 3/3 parseados.
+
+**Regua comensuravel na selecao** (`ddf7d37`). O fitness do campeao tinha 7
+chaves; o do desafiante, 14. Tres restricoes duras reprovavam por metricas que o
+incumbente nunca enfrentou - o incumbente nao era dificil de bater, era
+imbativel. Replay sobre os 23 desafiantes historicos: zero vereditos mudam, o
+que confirma que a correcao remove o veto ilegitimo sem promover ninguem
+retroativamente.
+
+**Footprint real no planejamento de rota** (`d099e11`). O A* usava raio fixo
+adivinhado. Medido na cena real: 75 tiles ocupados ficavam livres e 21 livres
+eram bloqueados; `electric-mining-drill` ocupa 45 tiles e marcava 5. A rota
+atravessava o interior de uma assembling machine e a falha so aparecia depois,
+no `place_entity`.
+
+**Erro real do estagio registrado, e nao-medido separado de zero** (`c68e698`).
+Ver tabela acima. Foi o que permitiu, na geracao seguinte, ler a mensagem que
+faltava ha 11 geracoes.
+
+**Bau de ferro recuperado** (`0ad948e`). A variavel `chest` vinha `None` do
+namespace do FLE; a entidade existia no mundo o tempo todo. Recuperacao por
+varredura, sem posicao fixa no codigo.
+
+**Heuristica de falha do FLE nao disparada por nome de variavel** (`8619fb9`).
+E `tests/test_fle_triggers.py` fecha a armadilha para os 17 scripts do
+curriculo.
+
+**Producao de cobre medida por janela e carga reais** (`d4d1f8f`). Inclui
+`planning/fuel.py`, que dimensiona carga a partir das figuras do runtime
+(carvao 4 MJ, drill 150 kW, fornalha 90 kW), e `measurement_protocol` no
+`FitnessVector`: taxas medidas por instrumentos diferentes sao declaradas
+incomensuraveis em vez de comparadas. Sem isso, corrigir o denominador tornaria
+o piso do campeao inatingivel e reprovaria 9 metricas de uma vez.
+
+**Alimentacao automatica das queimadoras** (`4192d17`). Bau + `BurnerInserter`
+por maquina, carga dimensionada pelo horizonte de geracao. Inclui
+`purpose="infrastructure"` no executor: instalar automacao deixou de ser contado
+como logistica manual, o que faria `survival.py` registrar a instalacao da
+automacao como regressao.
+
+**Mapa da fabrica reescrito** (`d3f3e48`, `19bd5a7`, `f42f069`, `c323b4b`,
+`db81107`). Canvas no cliente com camera local, sprites assentados pelo
+footprint real do prototype, texturas oficiais do jogo, navegacao por toque, e
+versionamento de asset por hash de conteudo - o bundle foi reconstruido seis
+vezes enquanto as paginas pediam `?v=0.12.0`, e um celular que tivesse aberto o
+painel antes servia do cache a versao que congelava o canvas.
+
+---
+
+## Em execucao
+
+Quatro frentes, em arquivos disjuntos, com o mesmo criterio de fechamento.
+
+1. **Janela observada e sentinela nos estagios restantes.** Nove estagios ainda
+   dividem pelo literal do `sleep()`; tres blocos ainda usam `getattr(..., 0.0)`.
+2. **Metricas de sobrevivencia.** `autonomy_score` e `closed_loop_autonomy` sao
+   os unicos campos nulos do fitness da geracao 29, e sao exatamente os que o
+   requisito precisa. Inclui separar producao endogena de intervencao, e medir
+   tempo vivo e causa da morte em vez de instantaneo terminal.
+3. **Persistencia entre geracoes.** `LIFELONG_CHECKPOINT` e um nome reservado
+   sem implementacao: escrito em um ponto, lido por ninguem, arquivo nunca
+   criado. Sem substrato que sobreviva, selecao por sobrevivencia nao tem sobre
+   o que operar.
+4. **Generalizacao.** Os patches sao identicos em oito geracoes (ferro 27,83;
+   cobre -58.5,83; carvao 27,8.5) enquanto a seed incrementa - `"seed": null` no
+   map-gen e `environment.reset()` que limpa entidades sem regenerar terreno.
+   O gate multi-seed rodaria as tres seeds no mesmo mundo.
+
+---
+
+## Limite de escopo que nao e defeito
+
+Quatro dominios do jogo estao ausentes por inteiro: poluicao e biters, rede
+eletrica como modelo, trens, e throughput de esteira por tier. Enquanto nao
+houver pressao externa, "sobreviver" significa apenas "nao ficar sem carvao", e
+a pressao seletiva e mais fraca do que o nome sugere. Isso delimita o que o alfa
+pode demonstrar: um agente de bootstrap early-game que se sustenta, nao um
+construtor de fabrica sob ameaca.
