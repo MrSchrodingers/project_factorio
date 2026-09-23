@@ -16,6 +16,11 @@ from typing import Any, ClassVar
 
 from factorio_ai_lab.dashboard.rendering import WorldFrameRenderer
 from factorio_ai_lab.learning.autonomy import evaluate_factory_autonomy
+from factorio_ai_lab.learning.discovery import (
+    Discovery,
+    discoveries_from_history,
+    summarise,
+)
 from factorio_ai_lab.learning.factory_graph import build_factory_graph
 from factorio_ai_lab.learning.survival_analysis import (
     DISPOSITION_INELIGIBLE,
@@ -47,6 +52,12 @@ RUNS_DIR = PROJECT_ROOT / "runs"
 RUNTIME_CONFIG = RUNS_DIR / "runtime_config.json"
 TELEMETRY_LOG = RUNS_DIR / "telemetry" / "world_samples.jsonl"
 GENERATION_REPORTS_DIR = RUNS_DIR / "generation_reports"
+EVOLUTION_HISTORY_PATH = RUNS_DIR / "evolution_history.jsonl"
+
+#: How many findings the discoveries payload carries at most. The whole set
+#: is summarised regardless; the cut is reported next to the list so a
+#: truncated view is never mistaken for the whole record.
+DISCOVERY_PAYLOAD_LIMIT = 200
 
 
 DEFAULT_RUNTIME_CONFIG: dict[str, Any] = {
@@ -339,6 +350,145 @@ def _survival_report_payload(directory: Path) -> dict[str, Any]:
             for cause, points in risks.incidence.items()
         },
     }
+    return payload
+
+
+def _evolution_history_fingerprint(path: Path) -> tuple[int, int] | None:
+    """Identity of the history file, used to invalidate the discoveries cache.
+
+    The loop appends one generation every ~17 minutes, so a clock-based cache
+    would keep serving findings from before the generation being watched.
+    Size and modification time together catch both an append and a rewrite.
+    None means the file is not there, which is itself a state worth caching.
+    """
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return (stat.st_size, stat.st_mtime_ns)
+
+
+def _read_evolution_history(path: Path) -> tuple[list[dict[str, Any]], int, int, bool]:
+    """Read the history rows, counting the lines that could not be read.
+
+    Returns the decoded rows, how many non-empty lines were on disk, how many
+    of them were unreadable, and whether the file itself could be opened at
+    all. A malformed line is counted and skipped rather than aborting the
+    read: the loop writes the file while it is being served, so a half-written
+    last line is expected, not exceptional. A file that cannot be opened
+    reports zero lines, and that zero must not be read as an empty history.
+    """
+    rows: list[dict[str, Any]] = []
+    found = 0
+    unreadable = 0
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return [], 0, 0, False
+    for line in raw.splitlines():
+        if not line.strip():
+            continue
+        found += 1
+        try:
+            loaded = json.loads(line)
+        except json.JSONDecodeError:
+            unreadable += 1
+            continue
+        if not isinstance(loaded, dict):
+            unreadable += 1
+            continue
+        rows.append(loaded)
+    return rows, found, unreadable, True
+
+
+def _discovery_payload(path: Path, *, limit: int) -> dict[str, Any]:
+    """What each generation found, or a declared absence of a record to read.
+
+    Absence is never rendered as a summary of zeros. A missing file, an empty
+    one and one whose every line is unreadable leave ``summary`` null with
+    ``measured`` false and a reason, because "nothing was found" and "there was
+    nothing to read" are different statements.
+
+    ``retained`` keeps the three states the record carries: promoted, rejected,
+    and no verdict written. The third is not the second.
+
+    The summary covers every finding; ``discoveries`` carries at most ``limit``
+    of them, most recent first, and the payload states the total and whether it
+    was cut.
+    """
+    payload: dict[str, Any] = {
+        "generated_at": time.time(),
+        "measured": False,
+        "reason": "",
+        "source": {
+            "path": str(path),
+            "exists": path.is_file(),
+            "lines_found": 0,
+            "lines_read": 0,
+            "lines_unreadable": 0,
+            "readable": None,
+            "modified_at": None,
+        },
+        "summary": None,
+        "discoveries": [],
+        "total": 0,
+        "returned": 0,
+        "limit": limit,
+        "truncated": False,
+    }
+    if not payload["source"]["exists"]:
+        payload["reason"] = (
+            f"no evolution history at {path}: what the search found is not recorded"
+        )
+        return payload
+
+    try:
+        payload["source"]["modified_at"] = path.stat().st_mtime
+    except OSError:
+        payload["source"]["modified_at"] = None
+
+    rows, found, unreadable, readable = _read_evolution_history(path)
+    payload["source"]["lines_found"] = found
+    payload["source"]["lines_read"] = len(rows)
+    payload["source"]["lines_unreadable"] = unreadable
+    payload["source"]["readable"] = readable
+    if not rows:
+        if not readable:
+            payload["reason"] = (
+                f"evolution history at {path} exists but could not be read: "
+                "what the search found is not recorded"
+            )
+        elif not found:
+            payload["reason"] = (
+                f"evolution history at {path} is empty: "
+                "what the search found is not recorded"
+            )
+        else:
+            payload["reason"] = (
+                f"evolution history at {path} has {found} line(s) and none could be read "
+                f"({unreadable} unreadable): what the search found is not recorded"
+            )
+        return payload
+
+    found_items: tuple[Discovery, ...] = discoveries_from_history(rows)
+    ordered = [item.to_dict() for item in reversed(found_items)]
+    shown = ordered[:limit] if limit >= 0 else ordered
+
+    payload["measured"] = True
+    payload["summary"] = summarise(found_items)
+    payload["discoveries"] = shown
+    payload["total"] = len(ordered)
+    payload["returned"] = len(shown)
+    payload["truncated"] = len(shown) < len(ordered)
+    payload["reason"] = (
+        f"{len(found_items)} finding(s) recovered from {len(rows)} generation record(s) "
+        f"({unreadable} unreadable line(s)); "
+        + (
+            f"showing the {len(shown)} most recent"
+            if payload["truncated"]
+            else "showing all of them"
+        )
+    )
     return payload
 
 
@@ -1427,6 +1577,11 @@ class DashboardState:
             str,
             tuple[tuple[tuple[str, int, int], ...], dict[str, Any]],
         ] = {}
+        self.evolution_history_path = EVOLUTION_HISTORY_PATH
+        self._discovery_cache: dict[
+            str,
+            tuple[tuple[int, int] | None, dict[str, Any]],
+        ] = {}
 
     def close(self) -> None:
         self.factorio.close()
@@ -1841,18 +1996,16 @@ class DashboardState:
     ) -> dict[str, Any]:
         research = research if research is not None else self.research_data()
         current = research.get("evolution", {})
-        history_path = RUNS_DIR / "evolution_history.jsonl"
-        history: list[dict[str, Any]] = []
-        if history_path.exists():
-            try:
-                for raw_line in history_path.read_text(encoding="utf-8").splitlines():
-                    if not raw_line.strip():
-                        continue
-                    row = json.loads(raw_line)
-                    if isinstance(row, dict):
-                        history.append(row)
-            except (OSError, json.JSONDecodeError):
-                history = []
+        # One malformed line used to discard the whole history: the parse was
+        # wrapped in a single try and the handler answered with an empty list,
+        # so the panel reported zero generations and said nothing about why.
+        # The loop appends to this file while the dashboard serves it, which
+        # makes a half-written last line an expected state rather than a
+        # corruption. The shared reader skips and counts the bad line instead.
+        history_path = self.evolution_history_path
+        history, history_found, history_unreadable, _ = _read_evolution_history(
+            history_path
+        )
         history = history[-16:]
 
         latest_report: dict[str, Any] | None = None
@@ -1972,6 +2125,10 @@ class DashboardState:
             "champion": champion or None,
             "validated_champion": validated or None,
             "history": history,
+            # Stated so a short history reads as a short history and
+            # not as a silent loss.
+            "history_lines_found": history_found,
+            "history_lines_unreadable": history_unreadable,
             "continuous_loop": loop_state or None,
             "latest_report": latest_report,
             "learning_artifacts": learning_artifacts,
@@ -2008,6 +2165,30 @@ class DashboardState:
             return cached[1]
         payload = _survival_report_payload(directory)
         self._survival_cache[key] = (fingerprint, payload)
+        return payload
+
+    def discovery_data(
+        self,
+        *,
+        history_path: Path | None = None,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        """What each generation found, kept or not, read back from the history.
+
+        Cached against the fingerprint of the history file instead of a TTL:
+        the loop appends a generation every ~17 minutes, and a clock-based
+        cache would present findings older than the generation on screen as
+        the current ones.
+        """
+        path = self.evolution_history_path if history_path is None else Path(history_path)
+        size = DISCOVERY_PAYLOAD_LIMIT if limit is None else int(limit)
+        key = f"{path}|{size}"
+        fingerprint = _evolution_history_fingerprint(path)
+        cached = self._discovery_cache.get(key)
+        if cached is not None and cached[0] == fingerprint:
+            return cached[1]
+        payload = _discovery_payload(path, limit=size)
+        self._discovery_cache[key] = (fingerprint, payload)
         return payload
 
     def dataset_data(self) -> dict[str, Any]:

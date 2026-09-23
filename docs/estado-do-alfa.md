@@ -2,108 +2,112 @@
 
 Data: 2026-09-23. Este documento nao e plano de fases. E o registro do que foi
 corrigido, com a evidencia que sustenta cada item, e a lista fechada do que
-falta para o alfa - aquilo que, uma vez feito, permite deixar o sistema
-evoluindo sem que ele acumule ruido com aparencia de conhecimento.
+falta.
 
 Criterio de "fechado": teste que falhava e passa, suite verde, exit code
 registrado. Nada aqui e marcado fechado por inspecao visual.
 
 ---
 
-## O achado que organiza todo o resto
+## O achado que organiza esta rodada
 
-Quatro dos cinco bloqueios encontrados nao estavam na inteligencia do agente.
-Estavam na **instrumentacao**, e de um jeito que produzia diagnostico confiante
-e falso:
+A regua de selecao punia quem avancava.
 
-| defeito | efeito | evidencia |
-|---|---|---|
-| `info["error"]` lido de uma chave que o FLE nao produz | toda mensagem de falha descartada; contraexemplos com `"error": null` | `fle/env/gym_env/environment.py:504` entrega `result`, nao `error` |
-| `getattr(ns, k, 0.0)` como default | "nao executado" virava "medido zero", e o zero virava o sintoma | `circuit_iron_ore: 0.0` enquanto o bau tinha 137 minerios, medido por RCON |
-| FLE marca falha por substring "error" no texto impresso | uma variavel chamada `circuit_nav_error` reprovou um estagio que produzira 5 circuitos | `environment.py:451` |
-| denominador = literal do `sleep()` | toda taxa inflada ~5x; o campeao registra copper-ore a 0,8125/s contra 0,25/s de capacidade fisica do drill | janela real medida ~80 s contra literal de 16 |
-| metrica media dose de combustivel, nao producao | `ore == floor(6,667 x carvao)`; o gate de cobre era o teste `coal_budget >= 2` | 9 execucoes com 1 carvao deram exatamente 6; 7 com 2 deram exatamente 13 |
+`compare_challenger` comparava `challenger.failures > champion.failures` como
+contagem absoluta. O incumbente era a geracao 6, promovida quando o curriculo
+parava antes; ela registra `failures=0` porque nunca enfrentou o estagio
+dificil. Todo desafiante posterior roda 16 estagios, completa 13 ou 14 - mais
+longe do que o incumbente jamais foi - falha o seguinte, e le como `0→1`.
 
-Enquanto um instrumento converte "nao executado" em "medido zero", geracoes nao
-acumulam conhecimento: acumulam ruido com aparencia de dado. Por isso a ordem de
-trabalho foi instrumentacao antes de mecanismo.
+Doze das 37 geracoes gravadas foram rejeitadas com essa como unica regressao:
+7, 10, 11, 15, 29, 30, 31, 32, 33, 34, 35 e 36. Tres delas - 29, 34 e 36 -
+haviam completado `Electronic circuits`, o estagio em que a corrida estava
+parada desde a geracao 13.
 
----
+Precisao que a primeira versao deste documento nao tinha: o estagio nao e
+confiavelmente alcancavel. Foi completado em 4 das 26 geracoes que gravaram
+nomes de estagio (29, 34, 36 e 37), isto e, 15% delas. O numero acima descreve
+o que a selecao descartou, nao um gargalo resolvido.
 
-## Fechado
+O efeito composto, medido pelo registro de descobertas sobre o historico real:
 
-Cada item abaixo tem commit, teste que falhava e passa, e suite verde.
+| tipo de achado | total | retidos | descartados |
+|---|---:|---:|---:|
+| melhoria de rota | 12 | 0 | 12 |
+| capacidade vista pela primeira vez | 11 | 0 | 11 |
+| deslocamento de gargalo | 9 | 0 | 9 |
 
-**Payload ao vivo em JSON valido** (`30e87d4`). O WebSocket serializava custo de
-rota infinito como o token bare `Infinity`, que `JSON.parse` rejeita, e o
-navegador descartava 100% das atualizacoes. Medido antes: 27 erros de console,
-zero payload aceito. Depois: 3/3 parseados.
+A rota mais barata que a busca ja produziu, 7.252 contra 7.505 do incumbente,
+foi encontrada na geracao 21 e descartada.
 
-**Regua comensuravel na selecao** (`ddf7d37`). O fitness do campeao tinha 7
-chaves; o do desafiante, 14. Tres restricoes duras reprovavam por metricas que o
-incumbente nunca enfrentou - o incumbente nao era dificil de bater, era
-imbativel. Replay sobre os 23 desafiantes historicos: zero vereditos mudam, o
-que confirma que a correcao remove o veto ilegitimo sem promover ninguem
-retroativamente.
+Uma causa, tres sintomas. Sem promocao, o arquivo de nichos nao recebe
+linhagem nova, a heranca entre geracoes nao captura nada (a captura exige
+promocao) e nenhuma descoberta e retida. Nao era falta de capacidade do
+agente: era a regua.
 
-**Footprint real no planejamento de rota** (`d099e11`). O A* usava raio fixo
-adivinhado. Medido na cena real: 75 tiles ocupados ficavam livres e 21 livres
-eram bloqueados; `electric-mining-drill` ocupa 45 tiles e marcava 5. A rota
-atravessava o interior de uma assembling machine e a falha so aparecia depois,
-no `place_entity`.
+A correcao compara estagios por nome. Falhar um estagio que o incumbente
+completou e capacidade perdida; falhar um que ele nunca completou e custo de
+explorar e nao decide. Quando os nomes nao existem dos dois lados, o eixo e
+declarado incomensuravel em vez de decidido por contagem - a mesma disciplina
+que `_commensurate` ja aplicava as metricas opcionais.
 
-**Erro real do estagio registrado, e nao-medido separado de zero** (`c68e698`).
-Ver tabela acima. Foi o que permitiu, na geracao seguinte, ler a mensagem que
-faltava ha 11 geracoes.
-
-**Bau de ferro recuperado** (`0ad948e`). A variavel `chest` vinha `None` do
-namespace do FLE; a entidade existia no mundo o tempo todo. Recuperacao por
-varredura, sem posicao fixa no codigo.
-
-**Heuristica de falha do FLE nao disparada por nome de variavel** (`8619fb9`).
-E `tests/test_fle_triggers.py` fecha a armadilha para os 17 scripts do
-curriculo.
-
-**Producao de cobre medida por janela e carga reais** (`d4d1f8f`). Inclui
-`planning/fuel.py`, que dimensiona carga a partir das figuras do runtime
-(carvao 4 MJ, drill 150 kW, fornalha 90 kW), e `measurement_protocol` no
-`FitnessVector`: taxas medidas por instrumentos diferentes sao declaradas
-incomensuraveis em vez de comparadas. Sem isso, corrigir o denominador tornaria
-o piso do campeao inatingivel e reprovaria 9 metricas de uma vez.
-
-**Alimentacao automatica das queimadoras** (`4192d17`). Bau + `BurnerInserter`
-por maquina, carga dimensionada pelo horizonte de geracao. Inclui
-`purpose="infrastructure"` no executor: instalar automacao deixou de ser contado
-como logistica manual, o que faria `survival.py` registrar a instalacao da
-automacao como regressao.
-
-**Mapa da fabrica reescrito** (`d3f3e48`, `19bd5a7`, `f42f069`, `c323b4b`,
-`db81107`). Canvas no cliente com camera local, sprites assentados pelo
-footprint real do prototype, texturas oficiais do jogo, navegacao por toque, e
-versionamento de asset por hash de conteudo - o bundle foi reconstruido seis
-vezes enquanto as paginas pediam `?v=0.12.0`, e um celular que tivesse aberto o
-painel antes servia do cache a versao que congelava o canvas.
+**Verificado em producao.** A geracao 37 rodou com a correcao em disco e foi
+promovida: primeira promocao desde a geracao 6. Seu fitness registra 14
+estagios completados, `failed_stages: ['Logistic science']`, `failures: 1` -
+um campeao que a regua antiga teria considerado impossivel - mais
+`halt_cause: fuel_and_power_starvation` e `productive_runtime_s: 680.4`.
 
 ---
 
-## Em execucao
+## Fechado nesta rodada
 
-Quatro frentes, em arquivos disjuntos, com o mesmo criterio de fechamento.
+**Ruin-and-recreate como operacao precificada** (`aede3bf`). Tres operadores de
+destruicao sobre o grafo medido, modelo de custo que compara tempo de parada e
+material contra a capacidade projetada, e recusa nomeada quando o ganho nao
+cobre o custo. A capacidade projetada e medida pelo mesmo `build_factory_graph`
+que mediu a linha de base. Terminacao argumentada: todo round aceito decresce
+estritamente o par (produtores desconectados, contagem de esteiras).
 
-1. **Janela observada e sentinela nos estagios restantes.** Nove estagios ainda
-   dividem pelo literal do `sleep()`; tres blocos ainda usam `getattr(..., 0.0)`.
-2. **Metricas de sobrevivencia.** `autonomy_score` e `closed_loop_autonomy` sao
-   os unicos campos nulos do fitness da geracao 29, e sao exatamente os que o
-   requisito precisa. Inclui separar producao endogena de intervencao, e medir
-   tempo vivo e causa da morte em vez de instantaneo terminal.
-3. **Persistencia entre geracoes.** `LIFELONG_CHECKPOINT` e um nome reservado
-   sem implementacao: escrito em um ponto, lido por ninguem, arquivo nunca
-   criado. Sem substrato que sobreviva, selecao por sobrevivencia nao tem sobre
-   o que operar.
-4. **Generalizacao.** Os patches sao identicos em oito geracoes (ferro 27,83;
-   cobre -58.5,83; carvao 27,8.5) enquanto a seed incrementa - `"seed": null` no
-   map-gen e `environment.reset()` que limpa entidades sem regenerar terreno.
-   O gate multi-seed rodaria as tres seeds no mesmo mundo.
+**Analise de sobrevivencia com censura** (`e6710b1`). Kaplan-Meier com variancia
+de Greenwood e limites log-log, hazard condicional com Nelson-Aalen, incidencia
+cumulativa de Aalen-Johansen para causas competidoras. Cox, log-rank e p-valor
+nao foram implementados: com este n transfeririam confianca que o dado nao
+carrega. Todo resultado carrega um portao de amostra que hoje responde
+`insufficient` e diz quantos eventos faltam.
+
+**Arquivo de nichos** (`08c968e`). Um elite por nicho comportamental, seguindo
+Mouret e Clune, "Illuminating search spaces by mapping elites"
+(arXiv:1504.04909, 2015). Tres eixos ja medidos: fracao endogena da producao,
+capacidades construidas por este genoma e causa de parada. Nichar por modo de
+falha guarda a melhor solucao de cada forma de morrer. A ocupacao e decidida
+por `compare_challenger`, nao por escalar inventado.
+
+**Registro de descobertas** (`11d9bef`). Recupera do historico o que cada
+geracao encontrou e se foi retido. Retencao tem tres estados: retido,
+descartado e sem veredito gravado.
+
+**Portao do world model em tempo de chamada** (`c2da924`). Toda chamada declara
+qual modelo respondeu, contra qual linha de base, em qual feature, e se aquele
+par foi medido. Feature nao coberta pelo holdout e recusada em vez de
+respondida pelo veredito agregado.
+
+**Sobrevivencia exposta no painel** (`df71c35`). `GET /api/evolution/survival`,
+com o portao de amostra viajando junto do numero e cache invalidado por
+fingerprint do diretorio, nao por tempo.
+
+---
+
+## O que resta
+
+1. **Ligar os modulos ao laco.** `rebuild.py`, `archive.py` e
+   `world_model_policy.py` estao commitados e nao tem chamador. Enquanto nao
+   tiverem, sao biblioteca, nao comportamento.
+2. **Memoria de conhecimento na decisao.** 370 licoes gravadas, 163 verificadas.
+   O unico uso hoje e contar linhas (`knowledge_count_at_selection`). Nenhuma
+   licao e lida para decidir nada.
+3. **Frontend.** Nenhum dos endpoints novos e renderizado. A evolucao temporal
+   esta observavel por `curl`, nao no painel.
+4. **Responsividade mobile**, deixada para o fim por pedido do dono.
 
 ---
 
@@ -112,6 +116,13 @@ Quatro frentes, em arquivos disjuntos, com o mesmo criterio de fechamento.
 Quatro dominios do jogo estao ausentes por inteiro: poluicao e biters, rede
 eletrica como modelo, trens, e throughput de esteira por tier. Enquanto nao
 houver pressao externa, "sobreviver" significa apenas "nao ficar sem carvao", e
-a pressao seletiva e mais fraca do que o nome sugere. Isso delimita o que o alfa
-pode demonstrar: um agente de bootstrap early-game que se sustenta, nao um
+a pressao seletiva e mais fraca do que o nome sugere. Isso delimita o que o
+alfa pode demonstrar: um agente de bootstrap early-game que se sustenta, nao um
 construtor de fabrica sob ameaca.
+
+Duas limitacoes do eixo de tempo estao registradas no codigo e valem repetir
+aqui. `productive_runtime_s` e um limite inferior somado de janelas de estagio
+cronometradas, entao o tempo e quantizado pelo desenho do curriculo.
+`halt_cause` e um veredito sobre o snapshot terminal e nao data a falha que
+reporta. Datar exige uma serie temporal de status que a instrumentacao ainda
+nao emite.
