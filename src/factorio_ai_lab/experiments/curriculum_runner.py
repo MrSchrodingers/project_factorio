@@ -1950,11 +1950,15 @@ if circuit_coal>=5:
         quantity=2,
     )
 if circuit_copper_ore>0:
-    copper_furnace=insert_item(
-        Prototype.CopperOre,
-        copper_furnace,
-        quantity=circuit_copper_ore,
-    )
+    circuit_cu_in_furnace=inspect_inventory(copper_furnace)[Prototype.CopperOre]
+    circuit_cu_room=max(0,24-circuit_cu_in_furnace)
+    circuit_copper_ore=min(circuit_copper_ore,circuit_cu_room)
+    if circuit_copper_ore>0:
+        copper_furnace=insert_item(
+            Prototype.CopperOre,
+            copper_furnace,
+            quantity=circuit_copper_ore,
+        )
 move_to(smelt_furnace.position)
 if circuit_coal>=7:
     smelt_furnace=insert_item(
@@ -1963,11 +1967,15 @@ if circuit_coal>=7:
         quantity=2,
     )
 if circuit_iron_ore>0:
-    smelt_furnace=insert_item(
-        Prototype.IronOre,
-        smelt_furnace,
-        quantity=circuit_iron_ore,
-    )
+    circuit_furnace_ore=inspect_inventory(smelt_furnace)[Prototype.IronOre]
+    circuit_ore_room=max(0,24-circuit_furnace_ore)
+    circuit_iron_ore=min(circuit_iron_ore,circuit_ore_room)
+    if circuit_iron_ore>0:
+        smelt_furnace=insert_item(
+            Prototype.IronOre,
+            smelt_furnace,
+            quantity=circuit_iron_ore,
+        )
 sleep(20)
 
 move_to(copper_furnace.position)
