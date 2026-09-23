@@ -7,8 +7,14 @@ from math import isfinite
 from typing import Any
 
 from factorio_ai_lab.planning.production_dag import (
+    PROBE_ABSENT,
+    PROBE_FAILED,
+    PROBE_MEASURED,
+    PROBE_STATUSES,
+    PROBE_UNKNOWN,
     ProductionDagPlanner,
     RecipeIngredient,
+    RecipeProduct,
     RecipeSpec,
 )
 
@@ -19,29 +25,52 @@ TICKS_PER_SECOND = 60.0
 #: Unit the runtime states belt speed in.
 BELT_SPEED_UNIT = "tiles_per_tick"
 
-#: The probe read the field and the runtime answered with a number.
-PROBE_MEASURED = "measured"
-#: The probe ran and the runtime answered that this entity has no such field.
-PROBE_ABSENT = "absent"
-#: The read itself failed, so nothing is known about the field.
-PROBE_FAILED = "probe_failed"
-#: No status travelled with the row, so a failed read and an absent field
-#: cannot be told apart. Kept distinct from ``PROBE_ABSENT`` on purpose: a
-#: payload that cannot say is not a payload that says "no".
-PROBE_UNKNOWN = "unknown"
+# The probe statuses are defined next to ``RecipeSpec``, which carries one,
+# and re-exported here because this module is where callers read them from:
+# ``PROBE_MEASURED`` (the probe read the field and the runtime answered with a
+# number), ``PROBE_ABSENT`` (the runtime answered that this entity has no such
+# field), ``PROBE_FAILED`` (the read itself failed) and ``PROBE_UNKNOWN`` (no
+# status travelled with the row, so a failed read and an absent field cannot
+# be told apart).
 
-_PROBE_STATUSES = frozenset(
-    {PROBE_MEASURED, PROBE_ABSENT, PROBE_FAILED, PROBE_UNKNOWN}
-)
+__all__ = [
+    "BELT_SPEED_UNIT",
+    "PROBE_ABSENT",
+    "PROBE_FAILED",
+    "PROBE_MEASURED",
+    "PROBE_STATUSES",
+    "PROBE_UNKNOWN",
+    "TICKS_PER_SECOND",
+    "BeltSpeed",
+    "MachineSpeed",
+    "RecipeProduct",
+    "RuntimeFactorioCatalog",
+    "RuntimeRecipeChoice",
+]
 
 
 @dataclass(frozen=True)
 class RuntimeRecipeChoice:
+    """The recipe this catalog plans ``product_name`` with.
+
+    ``product_amount`` is what one execution yields of ``product_name``;
+    :attr:`products` is everything that same execution yields, so a consumer
+    can credit the byproducts instead of planning them again.
+    """
+
     recipe_name: str
     product_name: str
     product_amount: float
     spec: RecipeSpec
     enabled: bool
+
+    @property
+    def products(self) -> tuple[RecipeProduct, ...]:
+        return self.spec.products
+
+    @property
+    def byproducts(self) -> tuple[RecipeProduct, ...]:
+        return self.spec.byproducts
 
 
 @dataclass(frozen=True)
@@ -131,7 +160,7 @@ def _probe_number(
     raw_status = row.get(status_key)
     status = (
         raw_status
-        if isinstance(raw_status, str) and raw_status in _PROBE_STATUSES
+        if isinstance(raw_status, str) and raw_status in PROBE_STATUSES
         else None
     )
     if status is None:
@@ -191,6 +220,51 @@ def _belt_speed_from_row(row: Mapping[str, Any]) -> BeltSpeed | None:
     )
 
 
+def _recipe_time(row: Mapping[str, Any]) -> tuple[float | None, str]:
+    """Crafting time of a recipe row, with the status that qualifies it.
+
+    The runtime states it as ``energy``, in seconds. A row that carries no
+    usable ``energy`` yields no time at all: substituting a plausible default
+    here is how an absent field used to reach every machine count downstream
+    as if it had been measured. A zero or negative figure is not a crafting
+    time either, so it reads as unknown rather than as a measurement.
+    """
+    value, status = _probe_number(row, "energy", "energy_status")
+    if value is not None and value <= 0.0:
+        return None, PROBE_UNKNOWN
+    return value, status
+
+
+def _recipe_products(row: Mapping[str, Any]) -> tuple[RecipeProduct, ...]:
+    """Every product one execution of this recipe yields.
+
+    Oil processing is the case that makes this mandatory: one execution of
+    ``advanced-oil-processing`` yields heavy oil, light oil and petroleum gas
+    together, and a plan that sees only the product it asked for counts the
+    other two a second time.
+    """
+    products_raw = row.get("products", [])
+    if not isinstance(products_raw, Sequence) or isinstance(
+        products_raw, (str, bytes)
+    ):
+        return ()
+    products: list[RecipeProduct] = []
+    for product in products_raw:
+        if not isinstance(product, Mapping):
+            continue
+        name = str(product.get("name") or "")
+        amount = product.get("amount")
+        if (
+            not name
+            or not isinstance(amount, (int, float))
+            or isinstance(amount, bool)
+            or float(amount) <= 0
+        ):
+            continue
+        products.append(RecipeProduct(name, float(amount)))
+    return tuple(products)
+
+
 def _rows(payload: Mapping[str, Any], key: str) -> list[Mapping[str, Any]]:
     raw = payload.get(key, [])
     if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
@@ -236,35 +310,29 @@ class RuntimeFactorioCatalog:
                 and isinstance(item.get("amount"), (int, float))
                 and float(item.get("amount", 0.0)) > 0
             )
-            products_raw = row.get("products", [])
-            for product in products_raw:
-                if not isinstance(product, Mapping):
-                    continue
-                product_name = str(product.get("name") or "")
-                amount = product.get("amount")
-                if (
-                    not product_name
-                    or not isinstance(amount, (int, float))
-                    or float(amount) <= 0
-                ):
-                    continue
+            products = _recipe_products(row)
+            crafting_time_s, crafting_time_status = _recipe_time(row)
+            category = (
+                str((row.get("categories") or ["crafting"])[0])
+                if isinstance(row.get("categories"), list)
+                and row.get("categories")
+                else "crafting"
+            )
+            for product in products:
                 spec = RecipeSpec(
-                    item=product_name,
-                    output_count=float(amount),
-                    crafting_time_s=max(0.001, float(row.get("energy", 0.5) or 0.5)),
+                    item=product.item,
+                    output_count=product.count,
+                    crafting_time_s=crafting_time_s,
                     ingredients=ingredients,
-                    category=(
-                        str((row.get("categories") or ["crafting"])[0])
-                        if isinstance(row.get("categories"), list)
-                        and row.get("categories")
-                        else "crafting"
-                    ),
+                    category=category,
+                    products=products,
+                    crafting_time_status=crafting_time_status,
                 )
-                self._recipes_by_product[product_name].append(
+                self._recipes_by_product[product.item].append(
                     RuntimeRecipeChoice(
                         recipe_name=name,
-                        product_name=product_name,
-                        product_amount=float(amount),
+                        product_name=product.item,
+                        product_amount=product.count,
                         spec=spec,
                         enabled=bool(row.get("enabled")),
                     )
@@ -287,12 +355,23 @@ class RuntimeFactorioCatalog:
             if belt_speed is not None:
                 self._belt_speeds[belt_speed.name] = belt_speed
 
+    def recipe_choices(self, item: str) -> tuple[RuntimeRecipeChoice, ...]:
+        """Every recipe that yields ``item``, in payload order.
+
+        :meth:`recipe_choice` answers with one of these. The full list is what
+        lets a caller see the alternatives, including the multi-product ones
+        whose other outputs it would otherwise plan twice.
+        """
+        return tuple(self._recipes_by_product.get(item, []))
+
     def recipe_choice(self, item: str) -> RuntimeRecipeChoice | None:
         choices = self._recipes_by_product.get(item, [])
         if not choices:
             return None
         # Prefer the canonical same-name recipe, then currently enabled
-        # alternatives, then recipes with fewer ingredient types/byproducts.
+        # alternatives, then recipes with fewer ingredient types, then the
+        # first by name. Byproducts do not enter the order: the chosen recipe
+        # states them on :attr:`RuntimeRecipeChoice.products` instead.
         return min(
             choices,
             key=lambda choice: (
@@ -376,6 +455,11 @@ class RuntimeFactorioCatalog:
                 "enabled": choice.enabled,
                 "category": choice.spec.category,
                 "crafting_time_s": choice.spec.crafting_time_s,
+                "crafting_time_status": choice.spec.crafting_time_status,
+                "products": [
+                    {"item": product.item, "count": product.count}
+                    for product in choice.products
+                ],
                 "unlock_technologies": list(
                     self._unlock_by_recipe.get(choice.recipe_name, [])
                 ),
@@ -414,6 +498,10 @@ class RuntimeFactorioCatalog:
             "measured_crafting_speed_count": sum(
                 speed.crafting_speed_measured
                 for speed in self._machine_speeds.values()
+            ),
+            "measured_crafting_time_count": sum(
+                _recipe_time(row)[1] == PROBE_MEASURED
+                for row in self.recipe_rows
             ),
             "belt_speeds": [
                 belt.as_dict() for belt in self._belt_speeds.values()

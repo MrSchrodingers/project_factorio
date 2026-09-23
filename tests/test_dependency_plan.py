@@ -36,7 +36,10 @@ from factorio_ai_lab.planning.dependency_plan import (
     MISSING_CRAFTING_TIME,
     DependencyPlanner,
 )
-from factorio_ai_lab.planning.runtime_catalog import RuntimeFactorioCatalog
+from factorio_ai_lab.planning.runtime_catalog import (
+    PROBE_UNKNOWN,
+    RuntimeFactorioCatalog,
+)
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 KNOWLEDGE_GRAPH = REPO_ROOT / "runs" / "game_knowledge_graph.json"
@@ -141,8 +144,8 @@ PAYLOAD: dict[str, object] = {
             products=[_item("stone-furnace", 1)],
             enabled=True,
         ),
-        # No ``energy`` field at all. The catalog substitutes 0.5 s here; the
-        # planner must keep the absence an absence.
+        # No ``energy`` field at all. The catalog reports no time here, and
+        # the planner must keep the absence an absence.
         _recipe(
             "timeless-widget",
             energy=None,
@@ -693,8 +696,11 @@ def test_absent_recipe_time_is_absent_not_the_catalog_default(
     catalog: RuntimeFactorioCatalog,
     unlocked_planner: DependencyPlanner,
 ) -> None:
-    # The catalog fabricates 0.5 s for a row that carries no ``energy``.
-    assert catalog.recipe_provider("timeless-widget").crafting_time_s == 0.5
+    # A row that carries no ``energy`` reaches the spec as no time at all,
+    # qualified by its status, instead of as a substituted 0.5 s.
+    spec = catalog.recipe_provider("timeless-widget")
+    assert spec.crafting_time_s is None
+    assert spec.crafting_time_status == PROBE_UNKNOWN
     plan = unlocked_planner.plan(
         "timeless-widget",
         1,
