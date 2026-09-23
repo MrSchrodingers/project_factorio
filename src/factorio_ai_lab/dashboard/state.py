@@ -1006,18 +1006,32 @@ for name,technology in pairs(prototypes.technology) do
 end
 table.sort(technologies,function(a,b) return a.name<b.name end)
 
+-- Reads one prototype field and reports how the read went. A failed read
+-- and a field the prototype does not have both yield no value, so only the
+-- status separates them. Factorio 2.0 removed
+-- LuaEntityPrototype.crafting_speed: reading it raises "LuaEntityPrototype
+-- doesn't contain key crafting_speed", which the old pcall stored as nil and
+-- served as "this machine has no crafting speed".
+local function probe(read)
+  local ok,value=pcall(read)
+  if not ok then return nil,"probe_failed" end
+  if value==nil then return nil,"absent" end
+  return value,"measured"
+end
+
 local machines={}
+local belts={}
 for name,entity in pairs(prototypes.entity) do
   local ok_categories,categories=pcall(function()
     return entity.crafting_categories
   end)
-  local ok_speed,speed=pcall(function()
-    return entity.crafting_speed
+  local crafting_speed,crafting_speed_status=probe(function()
+    return entity.get_crafting_speed()
   end)
   local ok_resources,resource_categories=pcall(function()
     return entity.resource_categories
   end)
-  local ok_mining,mining_speed=pcall(function()
+  local mining_speed,mining_speed_status=probe(function()
     return entity.mining_speed
   end)
   local crafting=ok_categories and categories and next(categories)~=nil
@@ -1027,13 +1041,33 @@ for name,entity in pairs(prototypes.entity) do
       name=name,
       type=entity.type,
       crafting_categories=crafting and string_array(categories) or {},
-      crafting_speed=ok_speed and speed or nil,
+      crafting_speed=crafting_speed,
+      crafting_speed_status=crafting_speed_status,
       resource_categories=mining and string_array(resource_categories) or {},
-      mining_speed=ok_mining and mining_speed or nil
+      mining_speed=mining_speed,
+      mining_speed_status=mining_speed_status
+    }
+  end
+  local belt_speed,belt_speed_status=probe(function()
+    return entity.belt_speed
+  end)
+  if belt_speed_status~="absent" then
+    local reach,reach_status=probe(function()
+      return entity.max_underground_distance
+    end)
+    belts[#belts+1]={
+      name=name,
+      type=entity.type,
+      belt_speed=belt_speed,
+      belt_speed_status=belt_speed_status,
+      belt_speed_unit="tiles_per_tick",
+      max_underground_distance=reach,
+      max_underground_distance_status=reach_status
     }
   end
 end
 table.sort(machines,function(a,b) return a.name<b.name end)
+table.sort(belts,function(a,b) return a.name<b.name end)
 
 rcon.print(helpers.table_to_json({
   connected=true,
@@ -1041,10 +1075,12 @@ rcon.print(helpers.table_to_json({
   recipes=recipes,
   technologies=technologies,
   machines=machines,
+  belts=belts,
   counts={
     recipes=#recipes,
     technologies=#technologies,
-    machines=#machines
+    machines=#machines,
+    belts=#belts
   }
 }))
 """
@@ -1316,10 +1352,12 @@ local bottom=viewport_cy+viewport_radius
                     "recipes": [],
                     "technologies": [],
                     "machines": [],
+                    "belts": [],
                     "counts": {
                         "recipes": 0,
                         "technologies": 0,
                         "machines": 0,
+                        "belts": 0,
                     },
                     "error": f"{type(exc).__name__}: {exc}",
                 }

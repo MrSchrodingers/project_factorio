@@ -1444,6 +1444,35 @@ def _runtime_entity_footprints(instance: Any) -> dict[str, tuple[int, int]]:
         return {}
 
 
+def _runtime_crafting_speed(instance: Any, machine: str) -> float | None:
+    """Crafting speed of ``machine`` as the live prototypes report it.
+
+    Reuses the dashboard knowledge command over the RCON client this stage
+    already holds. Returns None when the runtime does not answer, or answers
+    that it has no measured speed for that machine. Callers must record that
+    absence instead of substituting a literal: a speed read off the wiki by
+    eye cannot size one machine against another.
+    """
+    try:
+        from factorio_ai_lab.dashboard.state import FactorioObserver
+        from factorio_ai_lab.planning.runtime_catalog import (
+            RuntimeFactorioCatalog,
+        )
+
+        raw = instance.rcon_client.send_command(
+            FactorioObserver._GAME_KNOWLEDGE_COMMAND
+        )
+        if not raw:
+            return None
+        reading = RuntimeFactorioCatalog(json.loads(raw)).machine_speed(machine)
+        if not reading.crafting_speed_measured:
+            return None
+        speed = reading.crafting_speed
+        return speed if speed is not None and speed > 0 else None
+    except (AttributeError, ImportError, OSError, TypeError, ValueError):
+        return None
+
+
 
 def _step_error_text(info: dict[str, Any] | None) -> str | None:
     """Human-readable failure text for a FLE step.
@@ -2321,15 +2350,28 @@ def stage_logistic_science(
             "copper_plate": copper_plate_budget,
         },
     }
+    assembler = "assembling-machine-2"
+    assembler_speed = _runtime_crafting_speed(env.unwrapped.instance, assembler)
     journal.event(
         "production_plan",
         "Rate-balanced production DAG generated for logistic science.",
         factorio_data_version=FACTORIO_DATA_VERSION,
         target_rate_per_s=target_rate,
         raw_requirements_per_s=dict(dag.raw_requirements_per_s),
-        minimum_machine_count=sum(
-            node.minimum_machines(crafting_speed=0.75)
-            for node in dag.nodes
+        crafting_machine=assembler,
+        crafting_speed=assembler_speed,
+        crafting_speed_source=(
+            "live_factorio_prototypes"
+            if assembler_speed is not None
+            else "runtime_speed_unavailable"
+        ),
+        minimum_machine_count=(
+            sum(
+                node.minimum_machines(crafting_speed=assembler_speed)
+                for node in dag.nodes
+            )
+            if assembler_speed is not None
+            else None
         ),
     )
     journal.set_stage(
