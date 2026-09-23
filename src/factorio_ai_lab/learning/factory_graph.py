@@ -178,6 +178,77 @@ def classify_halt_cause(
     return HALT_CAUSE_NONE_OBSERVED
 
 
+#: Statuses of a crafting machine that has nothing to consume. Kept apart from
+#: the power and fuel sets because the repair each one calls for is different:
+#: a machine short of ingredients is a supply problem upstream, a machine short
+#: of power is a grid problem.
+INGREDIENT_STARVED_STATUSES = frozenset(
+    {"no_ingredients", "item_ingredient_shortage"}
+)
+
+#: The machine has no recipe, so it could not craft whatever it was given.
+NO_RECIPE_STATUSES = frozenset({"no_recipe"})
+
+#: The machine reported itself able to work. On its own this says nothing about
+#: output: a machine can be working and still have produced nothing inside a
+#: window shorter than one craft.
+PRODUCING_STATUSES = frozenset({"working", "normal"})
+
+#: The machine produced inside the window, so nothing about it is stalled.
+STALL_CAUSE_PRODUCING = "producing"
+#: It is connected to no supply, or the supply could not carry it.
+STALL_CAUSE_POWER = "no_power"
+#: It burns fuel and ran dry.
+STALL_CAUSE_FUEL = "no_fuel"
+#: No recipe was set, or the one that was set did not survive.
+STALL_CAUSE_RECIPE = "no_recipe"
+#: The recipe is set and powered, and the ingredient never arrived.
+STALL_CAUSE_INGREDIENTS = "no_ingredients"
+#: Powered, fed and working, and the window closed before one craft finished.
+STALL_CAUSE_WINDOW = "window_too_short"
+
+
+def classify_assembler_stall(
+    *,
+    status: Any,
+    recipe: str | None,
+    input_count: float | None,
+    output_count: float | None,
+) -> str | None:
+    """Name why one crafting machine produced nothing, from its own readings.
+
+    This is a verdict about one machine over one window, taken from what the
+    machine reported rather than from what the stage around it expected. It
+    exists because ``cable: 0.0`` with no other reading was compatible with
+    four incompatible failures at once -- no power, no recipe, no ingredient,
+    too short a window -- and a correction chosen between them without
+    measuring is a guess.
+
+    Returns None when the readings do not decide: a status that was never taken
+    is not a machine that was found healthy, and an absent status has to stay
+    distinguishable from ``working``.
+    """
+    if output_count is not None and output_count > 0:
+        return STALL_CAUSE_PRODUCING
+    if status is None:
+        return None
+    state = normalize_status(status)
+    if state == UNKNOWN_STATUS:
+        return None
+    if state in POWER_STARVED_STATUSES:
+        return STALL_CAUSE_POWER
+    if state in FUEL_STARVED_STATUSES:
+        return STALL_CAUSE_FUEL
+    if state in NO_RECIPE_STATUSES or recipe == "":
+        return STALL_CAUSE_RECIPE
+    if state in INGREDIENT_STARVED_STATUSES:
+        return STALL_CAUSE_INGREDIENTS
+    if input_count is not None and input_count <= 0:
+        return STALL_CAUSE_INGREDIENTS
+    if state in PRODUCING_STATUSES:
+        return STALL_CAUSE_WINDOW
+    return state
+
 
 @dataclass(frozen=True)
 class GraphNode:

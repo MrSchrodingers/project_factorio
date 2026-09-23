@@ -23,7 +23,11 @@ from factorio_ai_lab.integrations.fle import (
 from factorio_ai_lab.learning.archive import ArchiveSchemaError, NicheArchive
 from factorio_ai_lab.learning.bandit import UCB1Bandit
 from factorio_ai_lab.learning.evolution import apply_advice, challenger_genome
-from factorio_ai_lab.learning.factory_graph import build_factory_graph
+from factorio_ai_lab.learning.factory_graph import (
+    build_factory_graph,
+    classify_assembler_stall,
+    normalize_status,
+)
 from factorio_ai_lab.learning.knowledge import (
     KnowledgeRecall,
     recall_not_consulted,
@@ -1031,6 +1035,93 @@ def _namespace_measure(namespace: Any, key: str) -> float | None:
     """
     raw = getattr(namespace, key, None)
     return None if raw is None else float(raw or 0.0)
+
+
+def _namespace_text(namespace: Any, key: str) -> str | None:
+    """Text the remote script assigned to `key`, or None when it never did.
+
+    Kept apart from `_namespace_measure` because an empty string is a reading:
+    an assembler whose recipe was never set reports one. None is the absence of
+    any reading at all.
+    """
+    raw = getattr(namespace, key, None)
+    return None if raw is None else str(raw)
+
+
+def _namespace_status(namespace: Any, key: str) -> str | None:
+    """Entity status the script read, reduced to the bare status key.
+
+    None means the script never took the reading. `unknown` means it took one
+    and the entity reported nothing -- the same distinction `normalize_status`
+    draws for the snapshot the physical graph is built from, kept here so a
+    status coming off a stage script and a status coming off the graph compare
+    as the same vocabulary.
+    """
+    raw = getattr(namespace, key, None)
+    return None if raw is None else normalize_status(raw)
+
+
+def _assembler_probe(
+    namespace: Any,
+    *,
+    prefix: str,
+    inputs: Mapping[str, str],
+    output_after: str,
+) -> dict[str, Any]:
+    """What one assembler reported on both sides of its production window.
+
+    A stage that reads only its own output cannot tell a machine with no power
+    from one with no recipe, one with no ingredient, or one whose window closed
+    before a single craft finished. Stage 13 reported `cable: 0.0` with
+    `error_occurred: false` for four generations, which was compatible with all
+    four, so the machine itself has to be asked.
+
+    `inputs` maps the name an ingredient is recorded under to the suffix the
+    script measured it with, so a two-ingredient machine is probed the same way
+    as a one-ingredient one.
+
+    Every field is None where the script never took that reading. A step that
+    aborted before placing the machine and a machine measured empty have to
+    stay apart: reading the second as the first is what cost this curriculum
+    eleven generations.
+    """
+    inputs_before = {
+        item: _namespace_measure(namespace, f"{prefix}_{suffix}_before")
+        for item, suffix in inputs.items()
+    }
+    inputs_after = {
+        item: _namespace_measure(namespace, f"{prefix}_{suffix}_after")
+        for item, suffix in inputs.items()
+    }
+    measured_inputs = [
+        value for value in inputs_before.values() if value is not None
+    ]
+    probe: dict[str, Any] = {
+        "machine_stock": _namespace_measure(namespace, f"{prefix}_machine_stock"),
+        "pole_stock": _namespace_measure(namespace, f"{prefix}_pole_stock"),
+        "engine_distance": _namespace_measure(
+            namespace,
+            f"{prefix}_engine_distance",
+        ),
+        "status_before": _namespace_status(namespace, f"{prefix}_status_before"),
+        "status_after": _namespace_status(namespace, f"{prefix}_status_after"),
+        "energy_before": _namespace_measure(namespace, f"{prefix}_energy_before"),
+        "energy_after": _namespace_measure(namespace, f"{prefix}_energy_after"),
+        "recipe": _namespace_text(namespace, f"{prefix}_recipe_after"),
+        "inputs_before": inputs_before,
+        "inputs_after": inputs_after,
+        "output_before": _namespace_measure(namespace, f"{prefix}_output_before"),
+        "output_after": _namespace_measure(namespace, output_after),
+    }
+    # The scarcest ingredient decides: a machine holding one of two inputs is
+    # as unable to craft as a machine holding neither.
+    probe["stall_cause"] = classify_assembler_stall(
+        status=probe["status_after"],
+        recipe=probe["recipe"],
+        input_count=min(measured_inputs) if measured_inputs else None,
+        output_count=probe["output_after"],
+    )
+    return probe
 
 
 def _measured_at_least(measured: dict[str, Any], key: str, threshold: float) -> bool:
@@ -4120,6 +4211,8 @@ if circuit_iron>0:
         quantity=min(24,circuit_iron),
     )
 
+cable_machine_stock=inspect_inventory()[Prototype.AssemblingMachine2]
+cable_pole_stock=inspect_inventory()[Prototype.MediumElectricPole]
 cable_area=nearest_buildable(
     Prototype.AssemblingMachine2,
     BuildingBox(width=9,height=9),
@@ -4142,7 +4235,30 @@ cable_power=connect_entities(
     cable_assembler,
     Prototype.MediumElectricPole,
 )
+circuit_boiler_status_before=''
+circuit_engine_status_before=''
+circuit_engine_energy_before=None
+circuit_power_note=''
+try:
+    boiler=get_entity(Prototype.Boiler,boiler.position)
+    steam_engine=get_entity(Prototype.SteamEngine,steam_engine.position)
+    circuit_boiler_status_before=str(getattr(boiler.status,'value',boiler.status))
+    circuit_engine_status_before=str(getattr(steam_engine.status,'value',steam_engine.status))
+    circuit_engine_energy_before=float(steam_engine.energy or 0)
+except Exception as circuit_power_exc:
+    circuit_power_note='power probe: '+str(circuit_power_exc)[:160].replace('rror','rr0r').replace('xception','xcepti0n')
+cable_assembler=get_entity(Prototype.AssemblingMachine2,cable_assembler.position)
+cable_engine_distance=((cable_assembler.position.x-steam_engine.position.x)**2+(cable_assembler.position.y-steam_engine.position.y)**2)**0.5
+cable_status_before=str(getattr(cable_assembler.status,'value',cable_assembler.status))
+cable_energy_before=float(cable_assembler.energy or 0)
+cable_input_plate_before=inspect_inventory(cable_assembler)[Prototype.CopperPlate]
+cable_output_before=inspect_inventory(cable_assembler)[Prototype.CopperCable]
 sleep({max(6, settle_seconds // 2)})
+cable_assembler=get_entity(Prototype.AssemblingMachine2,cable_assembler.position)
+cable_status_after=str(getattr(cable_assembler.status,'value',cable_assembler.status))
+cable_energy_after=float(cable_assembler.energy or 0)
+cable_recipe_after=str(getattr(cable_assembler.recipe,'name','') or '')
+cable_input_plate_after=inspect_inventory(cable_assembler)[Prototype.CopperPlate]
 cable_inventory=inspect_inventory(cable_assembler)[Prototype.CopperCable]
 cable_transfer=0
 if cable_inventory>0:
@@ -4152,6 +4268,8 @@ if cable_inventory>0:
         quantity=cable_inventory,
     )
 
+circuit_machine_stock=inspect_inventory()[Prototype.AssemblingMachine2]
+circuit_pole_stock=inspect_inventory()[Prototype.MediumElectricPole]
 circuit_area=nearest_buildable(
     Prototype.AssemblingMachine2,
     BuildingBox(width=9,height=9),
@@ -4183,7 +4301,31 @@ circuit_power=connect_entities(
     circuit_assembler,
     Prototype.MediumElectricPole,
 )
+circuit_assembler=get_entity(Prototype.AssemblingMachine2,circuit_assembler.position)
+circuit_engine_distance=((circuit_assembler.position.x-steam_engine.position.x)**2+(circuit_assembler.position.y-steam_engine.position.y)**2)**0.5
+circuit_status_before=str(getattr(circuit_assembler.status,'value',circuit_assembler.status))
+circuit_energy_before=float(circuit_assembler.energy or 0)
+circuit_input_cable_before=inspect_inventory(circuit_assembler)[Prototype.CopperCable]
+circuit_input_iron_before=inspect_inventory(circuit_assembler)[Prototype.IronPlate]
+circuit_output_before=inspect_inventory(circuit_assembler)[Prototype.ElectronicCircuit]
 sleep({settle_seconds})
+circuit_assembler=get_entity(Prototype.AssemblingMachine2,circuit_assembler.position)
+circuit_status_after=str(getattr(circuit_assembler.status,'value',circuit_assembler.status))
+circuit_energy_after=float(circuit_assembler.energy or 0)
+circuit_recipe_after=str(getattr(circuit_assembler.recipe,'name','') or '')
+circuit_input_cable_after=inspect_inventory(circuit_assembler)[Prototype.CopperCable]
+circuit_input_iron_after=inspect_inventory(circuit_assembler)[Prototype.IronPlate]
+circuit_boiler_status_after=''
+circuit_engine_status_after=''
+circuit_engine_energy_after=None
+try:
+    boiler=get_entity(Prototype.Boiler,boiler.position)
+    steam_engine=get_entity(Prototype.SteamEngine,steam_engine.position)
+    circuit_boiler_status_after=str(getattr(boiler.status,'value',boiler.status))
+    circuit_engine_status_after=str(getattr(steam_engine.status,'value',steam_engine.status))
+    circuit_engine_energy_after=float(steam_engine.energy or 0)
+except Exception as circuit_power_exc:
+    circuit_power_note=(circuit_power_note+' | ' if circuit_power_note else '')+'power probe: '+str(circuit_power_exc)[:160].replace('rror','rr0r').replace('xception','xcepti0n')
 circuit_inventory=inspect_inventory(
     circuit_assembler,
 )[Prototype.ElectronicCircuit]
@@ -4198,6 +4340,37 @@ print({{
     'circuit_iron':circuit_iron,
     'cable_transfer':cable_transfer,
     'circuit_inventory':circuit_inventory,
+    'cable_machine_stock':cable_machine_stock,
+    'cable_pole_stock':cable_pole_stock,
+    'cable_engine_distance':cable_engine_distance,
+    'cable_status_before':cable_status_before,
+    'cable_status_after':cable_status_after,
+    'cable_energy_before':cable_energy_before,
+    'cable_energy_after':cable_energy_after,
+    'cable_recipe_after':cable_recipe_after,
+    'cable_input_plate_before':cable_input_plate_before,
+    'cable_input_plate_after':cable_input_plate_after,
+    'cable_output_before':cable_output_before,
+    'circuit_machine_stock':circuit_machine_stock,
+    'circuit_pole_stock':circuit_pole_stock,
+    'circuit_engine_distance':circuit_engine_distance,
+    'circuit_status_before':circuit_status_before,
+    'circuit_status_after':circuit_status_after,
+    'circuit_energy_before':circuit_energy_before,
+    'circuit_energy_after':circuit_energy_after,
+    'circuit_recipe_after':circuit_recipe_after,
+    'circuit_input_cable_before':circuit_input_cable_before,
+    'circuit_input_cable_after':circuit_input_cable_after,
+    'circuit_input_iron_before':circuit_input_iron_before,
+    'circuit_input_iron_after':circuit_input_iron_after,
+    'circuit_output_before':circuit_output_before,
+    'circuit_boiler_status_before':circuit_boiler_status_before,
+    'circuit_boiler_status_after':circuit_boiler_status_after,
+    'circuit_engine_status_before':circuit_engine_status_before,
+    'circuit_engine_status_after':circuit_engine_status_after,
+    'circuit_engine_energy_before':circuit_engine_energy_before,
+    'circuit_engine_energy_after':circuit_engine_energy_after,
+    'circuit_power_note':circuit_power_note,
 }})
 """
 
@@ -4231,6 +4404,51 @@ print({{
             measured[key] = _namespace_measure(namespace, key)
         nav_error = getattr(namespace, "circuit_nav_note", "") or ""
         measured["circuit_nav_note"] = str(nav_error)[:400] or None
+        measured["cable_assembler"] = _assembler_probe(
+            namespace,
+            prefix="cable",
+            inputs={"copper_plate": "input_plate"},
+            output_after="cable_inventory",
+        )
+        measured["circuit_assembler"] = _assembler_probe(
+            namespace,
+            prefix="circuit",
+            inputs={
+                "copper_cable": "input_cable",
+                "iron_plate": "input_iron",
+            },
+            output_after="circuit_inventory",
+        )
+        power_note = _namespace_text(namespace, "circuit_power_note")
+        measured["power"] = {
+            "boiler_status_before": _namespace_status(
+                namespace,
+                "circuit_boiler_status_before",
+            ),
+            "boiler_status_after": _namespace_status(
+                namespace,
+                "circuit_boiler_status_after",
+            ),
+            "engine_status_before": _namespace_status(
+                namespace,
+                "circuit_engine_status_before",
+            ),
+            "engine_status_after": _namespace_status(
+                namespace,
+                "circuit_engine_status_after",
+            ),
+            "engine_energy_before": _namespace_measure(
+                namespace,
+                "circuit_engine_energy_before",
+            ),
+            "engine_energy_after": _namespace_measure(
+                namespace,
+                "circuit_engine_energy_after",
+            ),
+            # Only a probe that raised leaves text here, so an empty note and
+            # an unread one carry the same information: nothing to report.
+            "note": power_note[:400] if power_note else None,
+        }
         return (
             not bool(result.info.get("error_occurred"))
             and result.candidate_game_state is not None
@@ -4255,6 +4473,17 @@ print({{
         output,
         window,
     )
+    # Recorded whether the stage was accepted or rejected. A diagnostic that
+    # only exists on failure cannot be read against the run that worked, and
+    # the difference between those two runs is what names the defect.
+    journal.state["metrics"]["electronic_circuit_diagnostics"] = {
+        "accepted": step.accepted,
+        "error_occurred": bool(step.info.get("error_occurred")),
+        "error": _step_error_text(step.info),
+        "cable_assembler": measured.get("cable_assembler"),
+        "circuit_assembler": measured.get("circuit_assembler"),
+        "power": measured.get("power"),
+    }
     if not step.accepted:
         journal.state["metrics"]["electronic_circuit_counterexample"] = {
             **measured,
