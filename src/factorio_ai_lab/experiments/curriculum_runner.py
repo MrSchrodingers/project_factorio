@@ -34,6 +34,11 @@ from factorio_ai_lab.planning.factorio_catalog import (
     FACTORIO_DATA_VERSION,
 )
 from factorio_ai_lab.planning.footprints import blocked_tiles, prototype_footprints
+from factorio_ai_lab.planning.fuel import (
+    BURNER_MINING_DRILL,
+    STONE_FURNACE,
+    observed_window_seconds,
+)
 from factorio_ai_lab.planning.progression import (
     DEFAULT_ENGINEERING_PLANNER,
     EngineeringState,
@@ -503,6 +508,23 @@ def synthesize_lesson(
     }
     append_jsonl(KNOWLEDGE_LOG, record)
     return record
+
+
+
+# A stage spends far longer in the world than the literal it passes to
+# sleep(): the game keeps running through move_to, extract_item and
+# place_entity. Measured across the copper stage, the window was roughly 80
+# game seconds against a literal of 16. This is the overhead to budget fuel
+# for; the denominator itself is always the observed window, never this.
+STAGE_OVERHEAD_SECONDS = 90.0
+
+
+def _game_ticks(env: Any) -> int | None:
+    """Elapsed game ticks, or None when the counter is unavailable."""
+    try:
+        return int(env.unwrapped.instance.get_elapsed_ticks())
+    except (AttributeError, OSError, TypeError, ValueError):
+        return None
 
 
 def production_output(namespace: Any, item: str) -> float:
@@ -2967,7 +2989,18 @@ print({'copper': copper, 'patch': copper_patch})
 
     fast_reposition(env, x=center[0], y=center[1])
     output_before = production_output(namespace, "copper-ore")
+    ticks_before = _game_ticks(env)
     measured: dict[str, float] = {}
+
+    # The drill is fuelled once and never refuelled, so a charge that burns
+    # out mid-window turns this measurement into a fuel measurement: output
+    # was exactly floor(6.667 * coal), and the retention gate on copper was
+    # arithmetically the test `coal_budget >= 2`. Size the charge from the
+    # window instead, keeping the genome's budget as a floor so a challenger
+    # can still choose to carry more.
+    window_estimate = float(settle_seconds) + STAGE_OVERHEAD_SECONDS
+    required_fuel = BURNER_MINING_DRILL.coal_for_seconds(window_estimate)
+    fuel_budget = max(int(fuel_budget), required_fuel)
 
     def validate_copper(result: Any) -> bool:
         output_after = production_output(namespace, "copper-ore")
@@ -3035,11 +3068,23 @@ print({{'copper_inventory': inspect_inventory(copper_chest)}})
         return False, center
 
     output = measured["copper_ore_output"]
+    # Divide by the window that actually elapsed. Dividing by the sleep
+    # literal inflated every copper rate roughly five-fold, because the game
+    # ran through the whole step and not only through the sleep.
+    window = observed_window_seconds(
+        ticks_before,
+        _game_ticks(env),
+        float(settle_seconds),
+    )
     journal.state["metrics"]["copper_ore_output"] = output
-    journal.state["metrics"]["copper_mining_duration_s"] = float(settle_seconds)
+    journal.state["metrics"]["copper_mining_duration_s"] = window
+    journal.state["metrics"]["copper_mining_duration_source"] = (
+        "observed_game_ticks" if ticks_before is not None else "sleep_literal"
+    )
+    journal.state["metrics"]["copper_mining_fuel_required"] = float(required_fuel)
     journal.state["metrics"]["copper_ore_rate_per_s"] = rate_per_second(
         output,
-        settle_seconds,
+        window,
     )
     journal.state["metrics"]["copper_mining_reward"] = step.reward
     journal.state["metrics"]["copper_mining_internal_coal"] = measured.get(
@@ -3099,7 +3144,15 @@ def stage_copper_smelting(
         next_action="validate buffered copper plate production",
     )
     plate_before = production_output(namespace, "copper-plate")
+    ticks_before = _game_ticks(env)
     measured: dict[str, float] = {}
+
+    # Same defect as the drill: a furnace charged once burns out partway and
+    # the stage then reports fuel dose instead of smelting throughput. A
+    # stone furnace draws 90 kW, so one coal lasts ~44 s of game time.
+    window_estimate = float(settle_seconds) + STAGE_OVERHEAD_SECONDS
+    required_fuel = STONE_FURNACE.coal_for_seconds(window_estimate)
+    fuel_budget = max(int(fuel_budget), required_fuel)
 
     def validate_smelting(result: Any) -> bool:
         plate_after = production_output(namespace, "copper-plate")
@@ -3205,11 +3258,20 @@ print({{
         return False
 
     plates = measured["copper_plate_output"]
+    window = observed_window_seconds(
+        ticks_before,
+        _game_ticks(env),
+        float(settle_seconds),
+    )
     journal.state["metrics"]["copper_plate_output"] = plates
-    journal.state["metrics"]["copper_smelting_duration_s"] = float(settle_seconds)
+    journal.state["metrics"]["copper_smelting_duration_s"] = window
+    journal.state["metrics"]["copper_smelting_duration_source"] = (
+        "observed_game_ticks" if ticks_before is not None else "sleep_literal"
+    )
+    journal.state["metrics"]["copper_smelting_fuel_required"] = float(required_fuel)
     journal.state["metrics"]["copper_plate_rate_per_s"] = rate_per_second(
         plates,
-        settle_seconds,
+        window,
     )
     journal.state["metrics"]["copper_smelting_reward"] = step.reward
     journal.state["metrics"]["copper_smelting_internal_coal"] = measured.get(

@@ -4,6 +4,12 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+#: Rates divided by the literal argument of sleep().
+RATE_PROTOCOL_SLEEP_LITERAL = "sleep_literal_v1"
+
+#: Rates divided by the game time observed across the step.
+RATE_PROTOCOL_OBSERVED_WINDOW = "observed_window_v2"
+
 
 @dataclass(frozen=True)
 class FitnessVector:
@@ -22,6 +28,15 @@ class FitnessVector:
     isolated_producers: int | None = None
     fuel_starved_entities: int | None = None
     power_starved_entities: int | None = None
+    #: How rates_per_s was measured. Rates divided by the literal passed to
+    #: sleep() are not comparable with rates divided by the game window that
+    #: actually elapsed: the literal inflated them roughly five-fold, and a
+    #: floor derived from an inflated value can exceed what the machine is
+    #: physically able to produce. A burner mining drill mines 0.25 ore/s; the
+    #: generation-6 champion records 0.8125/s for copper ore, which is 3.25x
+    #: that. Comparing across protocols would make the incumbent unbeatable
+    #: for a reason that has nothing to do with the factory.
+    measurement_protocol: str = RATE_PROTOCOL_SLEEP_LITERAL
 
     @property
     def total_rate_per_s(self) -> float:
@@ -64,7 +79,14 @@ class FitnessVector:
         isolated_producers_raw = payload.get("isolated_producers")
         fuel_starved_raw = payload.get("fuel_starved_entities")
         power_starved_raw = payload.get("power_starved_entities")
+        # A fitness recorded before this field existed came from the
+        # sleep-literal denominator, so that is the honest default.
+        protocol = str(
+            payload.get("measurement_protocol")
+            or RATE_PROTOCOL_SLEEP_LITERAL
+        )
         return cls(
+            measurement_protocol=protocol,
             capabilities=capabilities,
             rates_per_s=rates,
             external_dependencies=int(payload.get("external_dependencies", 0) or 0),
@@ -183,6 +205,11 @@ def compare_challenger(
         if entry not in incommensurable_metrics:
             incommensurable_metrics.append(entry)
 
+    rate_protocols_match = (
+        champion is None
+        or champion.measurement_protocol == challenger.measurement_protocol
+    )
+
     def _commensurate(metric: str, challenger_value: Any) -> bool:
         """
         Report whether `metric` may carry the incumbent/challenger comparison.
@@ -277,7 +304,8 @@ def compare_challenger(
 
     # Present on every fitness vector, so always commensurate.
     _mark_compared("capabilities")
-    _mark_compared("rates_per_s")
+    if rate_protocols_match:
+        _mark_compared("rates_per_s")
     _mark_compared("external_dependencies")
     _mark_compared("failures")
 
@@ -287,20 +315,31 @@ def compare_challenger(
             "lost capabilities: " + ", ".join(lost_capabilities)
         )
 
-    for name, baseline in champion.rates_per_s.items():
-        baseline_value = max(0.0, float(baseline))
-        if baseline_value <= 0:
-            continue
-        challenger_value = max(
-            0.0,
-            float(challenger.rates_per_s.get(name, 0.0)),
+    if not rate_protocols_match:
+        # The incumbent's rates were produced by a different measurement, so
+        # its floors describe a quantity the challenger never reported. Say so
+        # and skip, rather than reject against a number that is not comparable.
+        _mark_incommensurable(
+            "rates_per_s",
+            f"incumbent measured by {champion.measurement_protocol}, "
+            f"challenger by {challenger.measurement_protocol}; floors from a "
+            "different instrument cannot be enforced",
         )
-        floor = baseline_value * retention_ratio
-        if challenger_value + 1e-12 < floor:
-            regressions.append(
-                f"{name} rate {challenger_value:.4g}/s below "
-                f"{retention_ratio:.0%} retention floor {floor:.4g}/s"
+    else:
+        for name, baseline in champion.rates_per_s.items():
+            baseline_value = max(0.0, float(baseline))
+            if baseline_value <= 0:
+                continue
+            challenger_value = max(
+                0.0,
+                float(challenger.rates_per_s.get(name, 0.0)),
             )
+            floor = baseline_value * retention_ratio
+            if challenger_value + 1e-12 < floor:
+                regressions.append(
+                    f"{name} rate {challenger_value:.4g}/s below "
+                    f"{retention_ratio:.0%} retention floor {floor:.4g}/s"
+                )
 
     if challenger.external_dependencies > champion.external_dependencies:
         regressions.append(
@@ -579,6 +618,8 @@ def fitness_from_research(
     )
 
     return FitnessVector(
+        # Built from the observed game window, not from the sleep literal.
+        measurement_protocol=RATE_PROTOCOL_OBSERVED_WINDOW,
         capabilities=frozenset(str(item) for item in achieved),
         rates_per_s=rates,
         external_dependencies=external_dependencies,
