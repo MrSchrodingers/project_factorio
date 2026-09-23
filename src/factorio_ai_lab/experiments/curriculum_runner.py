@@ -1066,7 +1066,7 @@ print({{'furnace_inventory': inspect_inventory(smelt_furnace)}})
             "accepted": False,
             "iron_plate_output": measured.get("iron_plate_output", 0.0),
             "engine_reward": step.reward,
-            "error": step.info.get("error"),
+            "error": _step_error_text(step.info),
             "result": str(step.info.get("result"))[:1200],
         },
         fallback_lesson=(
@@ -1153,6 +1153,24 @@ def _runtime_entity_footprints(instance: Any) -> dict[str, tuple[int, int]]:
     except (AttributeError, ImportError, OSError, TypeError, ValueError):
         return {}
 
+
+
+def _step_error_text(info: dict[str, Any] | None) -> str | None:
+    """Human-readable failure text for a FLE step.
+
+    The gym environment returns ``{"error_occurred": bool, "result": str, ...}``
+    (fle/env/gym_env/environment.py:504). There is no ``"error"`` key, so
+    reading one always yielded None and every counterexample was recorded with
+    ``"error": null`` -- which is why a stage that aborted mid-script looked
+    like a stage that measured zero. The message lives in ``result``.
+    """
+    if not info or not info.get("error_occurred"):
+        return None
+    result = info.get("result")
+    if result is None:
+        return None
+    text = str(result).strip()
+    return text[:1200] if text else None
 
 def stage_astar_logistics(
     executor: TransactionalFLEExecutor,
@@ -1707,16 +1725,25 @@ if circuit_coal>=4:
     scale_drill=insert_item(Prototype.Coal,scale_drill,quantity=1)
 sleep(14)
 
-move_to(copper_chest.position)
-circuit_copper_buffer_before=inspect_inventory(copper_chest)[Prototype.CopperOre]
+circuit_nav_error=''
+circuit_copper_buffer_before=0
 circuit_copper_ore=0
+circuit_iron_ore=0
+try:
+    move_to(copper_chest.position)
+except Exception as circuit_exc:
+    circuit_nav_error='copper_chest: '+str(circuit_exc)[:160]
+circuit_copper_buffer_before=inspect_inventory(copper_chest)[Prototype.CopperOre]
 if circuit_copper_buffer_before>0:
     circuit_copper_ore=extract_item(
         Prototype.CopperOre,
         copper_chest,
         quantity=min(24,circuit_copper_buffer_before),
     )
-move_to(chest.position)
+try:
+    move_to(chest.position)
+except Exception as circuit_exc:
+    circuit_nav_error=(circuit_nav_error+' | ' if circuit_nav_error else '')+'iron_chest: '+str(circuit_exc)[:160]
 circuit_iron_ore=inspect_inventory(chest)[Prototype.IronOre]
 if circuit_iron_ore>0:
     circuit_iron_ore=extract_item(
@@ -1841,6 +1868,7 @@ print({{
     'circuit_coal_available':circuit_coal_available,
     'circuit_coal':circuit_coal,
     'circuit_copper_buffer_before':circuit_copper_buffer_before,
+    'circuit_nav_error':circuit_nav_error,
     'circuit_copper_ore':circuit_copper_ore,
     'circuit_iron_ore':circuit_iron_ore,
     'circuit_copper':circuit_copper,
@@ -1862,6 +1890,11 @@ print({{
         measured["cable"] = float(
             getattr(namespace, "cable_transfer", 0.0) or 0.0
         )
+        # A missing attribute means the script aborted before assigning it.
+        # Defaulting that to 0.0 made an abort indistinguishable from a real
+        # measurement of zero, which is how an aborted stage was read for
+        # eleven generations as "the iron buffer was empty" while the buffer
+        # actually held ~137 ore.
         for key in (
             "circuit_coal_available",
             "circuit_coal",
@@ -1871,7 +1904,10 @@ print({{
             "circuit_copper",
             "circuit_iron",
         ):
-            measured[key] = float(getattr(namespace, key, 0.0) or 0.0)
+            raw = getattr(namespace, key, None)
+            measured[key] = None if raw is None else float(raw or 0.0)
+        nav_error = getattr(namespace, "circuit_nav_error", "") or ""
+        measured["circuit_nav_error"] = str(nav_error)[:400] or None
         return (
             not bool(result.info.get("error_occurred"))
             and result.candidate_game_state is not None
@@ -1894,7 +1930,7 @@ print({{
         journal.state["metrics"]["electronic_circuit_counterexample"] = {
             **measured,
             "error_occurred": bool(step.info.get("error_occurred")),
-            "error": step.info.get("error"),
+            "error": _step_error_text(step.info),
         }
         journal.fail_stage(
             13,
@@ -1904,7 +1940,7 @@ print({{
             "counterexample",
             "Electronic-circuit DAG rejected with causal buffer measurements.",
             measurements=measured,
-            error=step.info.get("error"),
+            error=_step_error_text(step.info),
         )
         return False
 

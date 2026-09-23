@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from factorio_ai_lab.experiments.curriculum_runner import _step_error_text
 from factorio_ai_lab.integrations.fle import (
     TransactionalFLEExecutor,
     fast_reposition,
@@ -200,7 +201,7 @@ print({{'final_drill': drill, 'chest_inventory': inspect_inventory(chest)}})
             record["stage"] = "rolled_back"
             record["failure"] = {
                 "error_occurred": step.info.get("error_occurred"),
-                "error": step.info.get("error"),
+                "error": _step_error_text(step.info),
                 "result": str(step.info.get("result"))[:4000],
             }
             record["finished_at"] = _utc_now()
