@@ -159,6 +159,19 @@ class FitnessVector:
     route_turns: int | None = None
     autonomy_score: float | None = None
     manual_logistics_calls: int | None = None
+    #: Hand calls the repair cycle spent answering a diagnosed failure, kept
+    #: out of manual_logistics_calls by the executor that books them (see
+    #: integrations/fle.py, execute(purpose="repair")). They are the same
+    #: physical act -- the agent carrying coal -- but they exist because a
+    #: machine was already measured as starved, so charging them to the
+    #: manual-logistics comparison rejects the challenger for the mechanism
+    #: that fixed it. Generation 70 is the measured case: the repair drove
+    #: fuel_starved_entities from 10 to 0 and the four calls it cost were the
+    #: whole difference between generations 69 and 70. Reclassified, never
+    #: hidden: the count is carried here and written to the record. `None`
+    #: means no repair accounting reached this vector, which is not the same
+    #: as a generation that repaired nothing.
+    repair_logistics_calls: int | None = None
     closed_loop_autonomy: bool | None = None
     physical_processing_coverage: float | None = None
     isolated_producers: int | None = None
@@ -339,6 +352,7 @@ class FitnessVector:
         route_turns_raw = payload.get("route_turns")
         autonomy_score_raw = payload.get("autonomy_score")
         manual_logistics_raw = payload.get("manual_logistics_calls")
+        repair_logistics_raw = payload.get("repair_logistics_calls")
         closed_loop_raw = payload.get("closed_loop_autonomy")
         physical_coverage_raw = payload.get("physical_processing_coverage")
         isolated_producers_raw = payload.get("isolated_producers")
@@ -415,6 +429,11 @@ class FitnessVector:
                 if isinstance(manual_logistics_raw, (int, float))
                 else None
             ),
+            repair_logistics_calls=(
+                int(repair_logistics_raw)
+                if isinstance(repair_logistics_raw, (int, float))
+                else None
+            ),
             closed_loop_autonomy=(
                 bool(closed_loop_raw)
                 if isinstance(closed_loop_raw, bool)
@@ -458,6 +477,14 @@ class PromotionDecision:
     retention_ratio: float
     compared_metrics: tuple[str, ...] = ()
     incommensurable_metrics: tuple[str, ...] = ()
+    #: Absolute floors that were not enforced because the incumbent does not
+    #: satisfy them either, one entry per floor with the incumbent's own
+    #: reading. Distinct from incommensurable_metrics: there the two sides
+    #: were measured by different instruments and no verdict exists; here both
+    #: were measured by the same instrument, the comparative verdict is still
+    #: drawn, and only the absolute floor steps back. Silence would leave no
+    #: way to tell a floor that held from one that was never applied.
+    withheld_gates: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -468,6 +495,7 @@ class PromotionDecision:
             "retention_ratio": self.retention_ratio,
             "compared_metrics": list(self.compared_metrics),
             "incommensurable_metrics": list(self.incommensurable_metrics),
+            "withheld_gates": list(self.withheld_gates),
         }
 
 
@@ -487,9 +515,11 @@ def compare_challenger(
     Only survivors are eligible for promotion.
 
     Constraints on optional metrics are only enforced against an incumbent that
-    was measured by the same instrument; see ``_commensurate`` below. The
-    decision reports which metrics carried the comparison and which were left
-    out as incommensurable.
+    was measured by the same instrument; see ``_commensurate`` below. Absolute
+    floors are only enforced against a challenger when the incumbent satisfies
+    them too; see ``_floor_enforceable``. The decision reports which metrics
+    carried the comparison, which were left out as incommensurable, and which
+    floors were withheld.
     """
     if not 0 < retention_ratio <= 1:
         raise ValueError("retention_ratio must be in (0, 1]")
@@ -499,6 +529,7 @@ def compare_challenger(
     regressions: list[str] = []
     compared_metrics: list[str] = []
     incommensurable_metrics: list[str] = []
+    withheld_gates: list[str] = []
 
     def _mark_compared(metric: str) -> None:
         if metric not in compared_metrics:
@@ -543,6 +574,65 @@ def compare_challenger(
         _mark_compared(metric)
         return True
 
+    def _floor_enforceable(
+        metric: str,
+        *,
+        incumbent_value: Any,
+        incumbent_satisfies: bool,
+        standard: str,
+    ) -> bool:
+        """
+        Report whether an absolute floor may reject the challenger.
+
+        The floors below state what a factory has to be, not what it has to
+        beat, which is why they read as absolute. An incumbent that does not
+        satisfy one of them was promoted without ever having to: enforcing it
+        against the challenger alone is a rule only one side was measured by,
+        the same shape as the `failures` count this module already stopped
+        comparing. Measured on the incumbent of generation 37: coverage 16.7%
+        against a 50% floor and one fuel-starved entity against a zero floor,
+        so the incumbent fails both floors it rejected generations 44 to 73
+        with, and thirty-six generations produced no promotion.
+
+        The floor is not removed. It is withheld only while the incumbent
+        fails it, and comes back the moment a promoted champion satisfies it
+        -- the same way `_commensurate` lets the first challenger promoted on
+        a new metric establish its floor. What still rejects a challenger in
+        the meantime is the comparative reading of the same metric: coverage
+        that drops below the incumbent's, starvation that rises above it.
+        A challenger that wrecks the factory is therefore still rejected, and
+        one that improves it while both sides remain short of the floor is
+        not.
+        """
+        if champion is None:
+            # No incumbent: the floors are the baseline survival gates and
+            # there is nobody they could be unfair to.
+            return True
+        if incumbent_satisfies:
+            return True
+        rendered = (
+            f"{incumbent_value:.4g}"
+            if isinstance(incumbent_value, float)
+            else str(incumbent_value)
+        )
+        entry = (
+            f"{metric}: absolute floor ({standard}) withheld; the incumbent "
+            f"does not satisfy it either (incumbent {rendered})"
+        )
+        if entry not in withheld_gates:
+            withheld_gates.append(entry)
+        return False
+
+    incumbent_coverage = (
+        None if champion is None else champion.physical_processing_coverage
+    )
+    incumbent_fuel_starved = (
+        None if champion is None else champion.fuel_starved_entities
+    )
+    incumbent_power_starved = (
+        None if champion is None else champion.power_starved_entities
+    )
+
     processing_capability = bool(
         {"iron_backbone", "copper_mining", "copper_smelting"}
         & set(challenger.capabilities)
@@ -554,6 +644,14 @@ def compare_challenger(
             challenger.physical_processing_coverage,
         )
         and challenger.physical_processing_coverage < 0.50
+        and _floor_enforceable(
+            "physical_processing_coverage",
+            incumbent_value=incumbent_coverage,
+            incumbent_satisfies=(
+                incumbent_coverage is not None and incumbent_coverage >= 0.50
+            ),
+            standard="physical processing coverage of at least 50%",
+        )
     ):
         regressions.append(
             "physical processing coverage below 50% "
@@ -563,6 +661,14 @@ def compare_challenger(
         "coal_mining" in challenger.capabilities
         and _commensurate("fuel_starved_entities", challenger.fuel_starved_entities)
         and challenger.fuel_starved_entities > 0
+        and _floor_enforceable(
+            "fuel_starved_entities",
+            incumbent_value=incumbent_fuel_starved,
+            incumbent_satisfies=(
+                incumbent_fuel_starved is not None and incumbent_fuel_starved == 0
+            ),
+            standard="no fuel-starved entity after the coal capability",
+        )
     ):
         regressions.append(
             "fuel starvation remains after coal capability "
@@ -572,6 +678,14 @@ def compare_challenger(
         "steam_power" in challenger.capabilities
         and _commensurate("power_starved_entities", challenger.power_starved_entities)
         and challenger.power_starved_entities > 0
+        and _floor_enforceable(
+            "power_starved_entities",
+            incumbent_value=incumbent_power_starved,
+            incumbent_satisfies=(
+                incumbent_power_starved is not None and incumbent_power_starved == 0
+            ),
+            standard="no power-starved entity after the steam-power capability",
+        )
     ):
         regressions.append(
             "power starvation remains after steam-power capability "
@@ -880,6 +994,7 @@ def compare_challenger(
             retention_ratio=retention_ratio,
             compared_metrics=tuple(compared_metrics),
             incommensurable_metrics=tuple(incommensurable_metrics),
+            withheld_gates=tuple(withheld_gates),
         )
 
     if improvements:
@@ -891,6 +1006,7 @@ def compare_challenger(
             retention_ratio=retention_ratio,
             compared_metrics=tuple(compared_metrics),
             incommensurable_metrics=tuple(incommensurable_metrics),
+            withheld_gates=tuple(withheld_gates),
         )
 
     return PromotionDecision(
@@ -901,6 +1017,7 @@ def compare_challenger(
         retention_ratio=retention_ratio,
         compared_metrics=tuple(compared_metrics),
         incommensurable_metrics=tuple(incommensurable_metrics),
+        withheld_gates=tuple(withheld_gates),
     )
 
 
@@ -1035,6 +1152,18 @@ def fitness_from_research(
         if isinstance(committed_raw, Mapping)
         else {}
     )
+    # The executor books repair steps in their own counter, so they are
+    # already absent from `committed` above and from the manual-logistics
+    # comparison. Read here so the count stays visible in the record: a
+    # reclassification that disappears from the evidence is indistinguishable
+    # from a number nobody measured.
+    repair_committed_raw = interventions.get("committed_repair")
+    repair_committed = (
+        repair_committed_raw
+        if isinstance(repair_committed_raw, Mapping)
+        else {}
+    )
+    repair_logistics_raw = repair_committed.get("manual_logistics_calls")
     soak_raw = metrics.get("autonomy_soak_runtime_s")
     soak_runtime_s = (
         float(soak_raw)
@@ -1158,6 +1287,11 @@ def fitness_from_research(
         manual_logistics_calls=(
             int(manual_logistics_raw)
             if isinstance(manual_logistics_raw, (int, float))
+            else None
+        ),
+        repair_logistics_calls=(
+            int(repair_logistics_raw)
+            if isinstance(repair_logistics_raw, (int, float))
             else None
         ),
         closed_loop_autonomy=(

@@ -170,6 +170,8 @@ class TransactionalFLEExecutor:
         # Counted apart from the above: see execute(purpose=...).
         self._attempted_infrastructure: dict[str, int] = {}
         self._committed_infrastructure: dict[str, int] = {}
+        self._attempted_repair: dict[str, int] = {}
+        self._committed_repair: dict[str, int] = {}
         self._action_runtime = (
             ActionRuntimeRecorder(context_provider=runtime_context)
             if runtime_context is not None
@@ -182,6 +184,8 @@ class TransactionalFLEExecutor:
         self._committed_interventions = {}
         self._attempted_infrastructure = {}
         self._committed_infrastructure = {}
+        self._attempted_repair = {}
+        self._committed_repair = {}
         return self.environment.reset(
             options={'game_state': game_state},
             seed=seed,
@@ -201,7 +205,17 @@ class TransactionalFLEExecutor:
             "committed": dict(self._committed_interventions),
             "attempted_infrastructure": dict(self._attempted_infrastructure),
             "committed_infrastructure": dict(self._committed_infrastructure),
+            "attempted_repair": dict(self._attempted_repair),
+            "committed_repair": dict(self._committed_repair),
         }
+
+    def _counters_for(self, purpose: str) -> tuple[dict[str, int], dict[str, int]]:
+        """The (attempted, committed) pair a purpose is booked into."""
+        if purpose == "infrastructure":
+            return self._attempted_infrastructure, self._committed_infrastructure
+        if purpose == "repair":
+            return self._attempted_repair, self._committed_repair
+        return self._attempted_interventions, self._committed_interventions
 
     def execute(
         self,
@@ -221,17 +235,28 @@ class TransactionalFLEExecutor:
         logistics would make building automation look like a regression, so
         infrastructure steps are counted separately and reported separately -
         reclassified, never hidden.
+
+        `repair` is the third case and it is not infrastructure: the agent
+        really is carrying material by hand, and nothing about the step
+        removes future carrying. What separates it is when it happens. A
+        repair only runs after the graph has measured a machine as broken, it
+        is answering that reading, and the repair budget bounds how many may
+        run in one generation. Booking it as operation charges the challenger
+        for the mechanism that fixed the factory: generation 70 drove
+        fuel_starved_entities from 10 to 0 and paid four hand calls for it,
+        which was the whole difference in manual logistics against generation
+        69. Kept apart it stays measurable as what it is -- the cost of
+        repairing -- instead of arriving as an increase in routine hand work.
         """
-        if purpose not in {"operation", "infrastructure"}:
+        if purpose not in {"operation", "infrastructure", "repair"}:
             raise ValueError(
-                f"purpose must be operation or infrastructure, got {purpose!r}"
+                "purpose must be operation, infrastructure or repair, "
+                f"got {purpose!r}"
             )
         checkpoint = self.game_state
         counts = intervention_counts_from_code(code)
-        if purpose == "infrastructure":
-            self._accumulate(self._attempted_infrastructure, counts)
-        else:
-            self._accumulate(self._attempted_interventions, counts)
+        attempted_counter, committed_counter = self._counters_for(purpose)
+        self._accumulate(attempted_counter, counts)
         action_state = checkpoint if use_checkpoint_for_action else None
         action = self.action_factory(self.agent_idx, code, action_state)
         runtime_token = (
@@ -281,10 +306,7 @@ class TransactionalFLEExecutor:
         )
 
         if accepted:
-            if purpose == "infrastructure":
-                self._accumulate(self._committed_infrastructure, counts)
-            else:
-                self._accumulate(self._committed_interventions, counts)
+            self._accumulate(committed_counter, counts)
             self.game_state = candidate_state
         else:
             # Restore the exact pre-action checkpoint. Passing None restores
