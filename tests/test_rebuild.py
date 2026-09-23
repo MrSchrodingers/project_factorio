@@ -91,7 +91,9 @@ def detour_world():
     return [
         entity("burner-mining-drill", 0, 0, direction=8, unit=1),
         *_belt_run(tiles, tail_direction=8, first_unit=10),
-        entity("inserter", -0.5, 10.5, direction=8, unit=90),
+        # Faces north, at the belt it lifts from: an inserter's direction
+        # is its pickup side. It drops south, into the furnace.
+        entity("inserter", -0.5, 10.5, direction=0, unit=90),
         entity("stone-furnace", 0, 12, unit=91),
     ]
 

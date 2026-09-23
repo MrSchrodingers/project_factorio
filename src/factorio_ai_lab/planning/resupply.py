@@ -346,6 +346,90 @@ def container_roles(
     )
 
 
+@dataclass(frozen=True)
+class ChainFeed:
+    """A container, and the machine an arm carries its contents into.
+
+    The graph states the chain in two hops: ``container -> inserter`` with
+    relation ``pickup``, then ``inserter -> machine`` with relation ``drop``.
+    Reading only the first hop answers "this container supplies something",
+    which is the question ``ContainerRole.supplies_chain`` already answers and
+    not enough to act on: what a feed chest has to keep in it depends on what
+    burns it, and a boiler burns a coal in 2.2 s against a drill's 26.7 s.
+    """
+
+    container: ContainerRole
+    machine_id: str
+    machine_name: str
+
+
+def chain_feeds(graph: Mapping[str, Any]) -> tuple[ChainFeed, ...]:
+    """Every container whose contents an arm carries into a machine.
+
+    Ordered by container position so the same world always answers the same
+    sequence. A container feeding two machines answers one row per machine,
+    sorted by machine id: the caller that sizes a reserve has to see the
+    hungriest of them, not whichever the edge set happened to yield first.
+
+    A container that supplies only another container, or an arm that drops
+    onto a belt, produces no row here. That is deliberate -- this answers
+    "what does emptying this chest stop", and the honest answer for a chest
+    at the head of a belt is that this function cannot tell.
+    """
+    containers = {role.node_id: role for role in container_roles(graph)}
+    if not containers:
+        return ()
+
+    names: dict[str, str] = {}
+    for node in graph.get("nodes", ()) or ():
+        if not isinstance(node, Mapping):
+            continue
+        identifier = node.get("id")
+        if isinstance(identifier, str):
+            names[identifier] = str(node.get("name", ""))
+
+    lifted: dict[str, set[str]] = {}
+    delivered: dict[str, set[str]] = {}
+    for edge in graph.get("edges", ()) or ():
+        if not isinstance(edge, Mapping):
+            continue
+        source = edge.get("source")
+        target = edge.get("target")
+        if not isinstance(source, str) or not isinstance(target, str):
+            continue
+        if edge.get("relation") == "pickup" and source in containers:
+            lifted.setdefault(source, set()).add(target)
+        elif edge.get("relation") == "drop":
+            delivered.setdefault(source, set()).add(target)
+
+    feeds: list[ChainFeed] = []
+    for node_id, arms in lifted.items():
+        role = containers[node_id]
+        machines: set[str] = set()
+        for arm in arms:
+            machines |= delivered.get(arm, set())
+        for machine in sorted(machines):
+            # A chest feeding a chest is not a machine this can size for.
+            if machine in containers:
+                continue
+            feeds.append(
+                ChainFeed(
+                    container=role,
+                    machine_id=machine,
+                    machine_name=names.get(machine, ""),
+                )
+            )
+    feeds.sort(
+        key=lambda feed: (
+            feed.container.position[1],
+            feed.container.position[0],
+            feed.container.node_id,
+            feed.machine_id,
+        )
+    )
+    return tuple(feeds)
+
+
 def unattached_containers(
     graph: Mapping[str, Any],
     *,

@@ -540,21 +540,46 @@ def build_factory_graph(
         direction = _cardinal_direction(raw.get("direction"))
         dx, dy = DIRECTION_VECTORS[direction]
         reach = 2.0 if inserter.name == "long-handed-inserter" else 1.15
+        # An inserter's direction points at its pickup side, not its drop
+        # side. Measured against the engine on 2026-09-23 through
+        # LuaEntity.pickup_position and LuaEntity.drop_position, which are
+        # the engine's own answer rather than a derivation: the inserter at
+        # (25.5, 7.5) with direction 0 picks up at (25.5, 6.5) and drops at
+        # (25.5, 8.7), and all eighteen inserters in that world agree.
+        #
+        # The signs were the other way round, so every chain running through
+        # an inserter was read in reverse: a feed chest came out as the end
+        # of a chain rather than its start, `supplies_chain` and
+        # `fed_by_chain` were swapped, and the fuel reserve that is keyed on
+        # `supplies_chain` protected the output chests while leaving the feed
+        # chests open to being drained.
         pickup = _nearest(
-            nodes,
-            inserter.x - dx * reach,
-            inserter.y - dy * reach,
-            exclude=inserter.node_id,
-            radius=1.15,
-            categories={"extraction", "transport", "processing", "buffer"},
-        )
-        drop = _nearest(
             nodes,
             inserter.x + dx * reach,
             inserter.y + dy * reach,
             exclude=inserter.node_id,
             radius=1.15,
-            categories={"transport", "processing", "buffer", "research"},
+            categories={"extraction", "transport", "processing", "buffer"},
+        )
+        # ``extraction`` and ``energy`` belong on the drop side: a burner
+        # drill and a boiler are both fed their coal by an inserter, which is
+        # exactly what the fuel feed builds. Both were absent while the signs
+        # were reversed, because the drop side was resolving to the chest and
+        # so nothing ever needed them.
+        drop = _nearest(
+            nodes,
+            inserter.x - dx * reach,
+            inserter.y - dy * reach,
+            exclude=inserter.node_id,
+            radius=1.15,
+            categories={
+                "extraction",
+                "energy",
+                "transport",
+                "processing",
+                "buffer",
+                "research",
+            },
         )
         if pickup is not None:
             edges.add(GraphEdge(pickup.node_id, inserter.node_id, "pickup"))

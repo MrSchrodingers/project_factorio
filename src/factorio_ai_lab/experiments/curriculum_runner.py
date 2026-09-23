@@ -63,6 +63,12 @@ from factorio_ai_lab.learning.survival import (
 )
 from factorio_ai_lab.metrics.rates import normalized_rate_ratio, rate_per_second
 from factorio_ai_lab.planning.astar import RouteResult, RoutingWeights, weighted_astar
+from factorio_ai_lab.planning.delivery import (
+    MODE_REFUSED,
+    DeliveryLink,
+    plan_delivery,
+    tile_centre,
+)
 from factorio_ai_lab.planning.factorio_catalog import (
     EARLY_GAME_PRODUCTION_PLANNER,
     FACTORIO_DATA_VERSION,
@@ -71,6 +77,7 @@ from factorio_ai_lab.planning.footprints import (
     blocked_tiles,
     entity_footprint,
     entity_name,
+    entity_tiles,
     prototype_footprints,
 )
 from factorio_ai_lab.planning.fuel import (
@@ -82,6 +89,7 @@ from factorio_ai_lab.planning.fuel import (
 )
 from factorio_ai_lab.planning.placement import (
     OUTCOME_BUILD,
+    RESOURCE_ENTITY_TYPE,
     PlacementPlan,
     WorldSurvey,
     entity_position,
@@ -101,6 +109,7 @@ from factorio_ai_lab.planning.resupply import (
     FuelSource,
     SmeltingOption,
     SupplyPlan,
+    chain_feeds,
     container_roles,
     plan_supply,
 )
@@ -1353,20 +1362,98 @@ BLOCKING_REFUSALS: frozenset[str] = frozenset(
 )
 
 
+#: Half-width, in tiles, of the box every world read covers, centred on the
+#: origin. Stated once because two reads make up one survey and
+#: ``ResourceSurvey.surveyed`` is a claim about where the survey looked: a
+#: distance that drifted between them would declare coverage one of the two
+#: never had, and the placement layer would read unsurveyed ground as bare.
+WORLD_SURVEY_DISTANCE = 500
+
+
+def resource_survey_command(distance: int) -> str:
+    """Read-only Lua listing the ore inside the survey window.
+
+    ``_save_entity_state`` answers what is standing; the ore under the tiles
+    is a separate query, and this loop has been planning without it since the
+    placement layer learned to price ground. The sweep is the one
+    ``learning.map_suite`` and ``dashboard.state`` already make, narrowed to
+    the two fields the price is derived from -- ``amount`` prices ore, and
+    this layer prices ground.
+
+    Measured against the live instance on 2026-09-23: 6702 rows, 345 kB and
+    1.86 s at this distance, against roughly seventeen surveys in a
+    generation that spans some 400 s. It creates, moves and destroys nothing.
+    """
+    span = max(1, int(distance))
+    return (
+        "/silent-command local s=game.surfaces[1] "
+        f"local d={span} "
+        "local a={left_top={x=-d,y=-d},right_bottom={x=d,y=d}} "
+        "local out={} "
+        'for _,e in pairs(s.find_entities_filtered{area=a,type="resource"}) do '
+        "if e.valid then "
+        "out[#out+1]={name=e.name,position={x=e.position.x,y=e.position.y}} "
+        "end end "
+        "rcon.print(helpers.table_to_json({resources=out}))"
+    )
+
+
+def survey_resource_rows(instance: Any, *, distance: int) -> list[dict[str, Any]] | None:
+    """The ore rows of one sweep, or None when the sweep answered nothing.
+
+    Best effort on the same terms as :func:`_runtime_entity_footprints`: an
+    RCON or payload failure answers None, and the caller records that the
+    ground was never read. None is the whole point of the return type -- a
+    sweep that did not happen and a world with no ore in it must not look
+    alike, because the second would price every tile of every patch as free
+    dirt.
+
+    Every row is stamped ``type="resource"`` because the sweep already
+    filtered on it. Letting ``WorldSurvey.from_entities`` match these rows by
+    name instead would file a resource this codebase never heard of as a
+    standing entity, and ``blocked_tiles`` would then mark its whole patch
+    taken.
+    """
+    try:
+        raw = instance.rcon_client.send_command(resource_survey_command(distance))
+        if not raw:
+            return None
+        payload = json.loads(raw)
+    except (AttributeError, OSError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, Mapping):
+        return None
+    rows = payload.get("resources")
+    if not isinstance(rows, list):
+        return None
+    return [
+        {**row, "type": RESOURCE_ENTITY_TYPE}
+        for row in rows
+        if isinstance(row, Mapping)
+    ]
+
+
 def survey_world(env: Any) -> WorldSurvey | None:
-    """Everything standing in the world, with its footprints resolved.
+    """Everything standing in the world, and the ground under it.
 
     One read serves every placement a stage plans, so all the arms of a stage
     are decided against the same world, and the same seed replays the same
     placements. Answers None when the world cannot be read: planning on a
     world nobody surveyed is not evidence that the tiles were free, and the
     caller has to record it as the blind build it is.
+
+    The ore is a second read over the same window. It is not folded into the
+    first one -- ``_save_entity_state`` is asked for player entities on
+    purpose -- because a resource row arriving in ``WorldSurvey.entities``
+    would be an obstacle to ``blocked_tiles``, and one patch of ore would
+    refuse every placement on the patch. ``WorldSurvey.from_entities`` is
+    what keeps the two apart.
     """
     unwrapped = getattr(env, "unwrapped", env)
     instance = getattr(unwrapped, "instance", None)
     try:
         entities = instance.namespace._save_entity_state(
-            distance=500,
+            distance=WORLD_SURVEY_DISTANCE,
             player_entities=True,
             resource_entities=False,
             items_on_ground=False,
@@ -1375,11 +1462,15 @@ def survey_world(env: Any) -> WorldSurvey | None:
         )
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
         return None
-    return WorldSurvey(
-        entities=tuple(
-            entity for entity in (entities or ()) if isinstance(entity, Mapping)
-        ),
+    standing = [
+        entity for entity in (entities or ()) if isinstance(entity, Mapping)
+    ]
+    ore = survey_resource_rows(instance, distance=WORLD_SURVEY_DISTANCE)
+    span = float(WORLD_SURVEY_DISTANCE)
+    return WorldSurvey.from_entities(
+        standing + list(ore or ()),
         footprints=_runtime_entity_footprints(instance),
+        surveyed=None if ore is None else (-span, -span, span, span),
     )
 
 
@@ -7156,6 +7247,464 @@ def _install_fuel_feeds(
     return payload
 
 
+#: Machines that stop when their coal runs out. A container feeding one of
+#: these is a fuel feed, and a container feeding anything else is not: coal
+#: tipped into a furnace's ore chest is coal spent on nothing.
+COAL_BURNING_NAMES = frozenset(
+    {"boiler", "burner-mining-drill", "stone-furnace", "steel-furnace"}
+)
+
+#: Belts one coal link may spend. The lane that matters is the one out of the
+#: coal cell's own output chest and around its drill, which is under ten; the
+#: budget is set above that so a feed chest a few tiles further out is still
+#: reachable, and far enough below a trunk line that the refusal stays
+#: readable rather than becoming a construction project nobody decided on.
+COAL_LINK_BELT_BUDGET = 24
+
+#: How the journal records one link, and why it was not built.
+COAL_LINK_NO_SOURCE = "no_coal_output_chest_in_the_world"
+COAL_LINK_WORLD_UNREAD = "world_not_surveyed"
+COAL_LINK_ALREADY_FED = "something_already_fills_it"
+COAL_LINK_NOT_COAL = "container_holds_something_other_than_coal"
+
+
+@dataclass(frozen=True)
+class CoalLink:
+    """One feed chest, the machine behind it, and how coal would reach it."""
+
+    machine: str
+    container: tuple[float, float]
+    link: DeliveryLink
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "machine": self.machine,
+            "container": {"x": self.container[0], "y": self.container[1]},
+            **self.link.to_dict(),
+        }
+
+
+def coal_delivery_targets(
+    graph: Mapping[str, Any],
+    instance: Any,
+) -> tuple[tuple[ContainerRole, str, str | None], ...]:
+    """Feed chests that burn coal and that nothing refills.
+
+    Three conditions, each one a reading rather than an assumption:
+
+    * an arm carries the container's contents into a machine, and that
+      machine is one that burns coal. ``chain_feeds`` states the two hops;
+      ``supplies_chain`` alone would also match the ore chest of a furnace.
+    * nothing drops into the container. A container already at the end of a
+      chain has a supplier, and a second lane into it would be a duplicate.
+    * what it holds is coal, or nothing. A chest holding ore is the input of
+      a furnace, and tipping coal into it spends the coal and jams the input.
+
+    The last one is measured over RCON, and a container that cannot be read
+    is skipped with the reason recorded: guessing that an unreadable chest is
+    a coal chest would pour coal into whatever it actually is.
+    """
+    targets: list[tuple[ContainerRole, str, str | None]] = []
+    seen: set[str] = set()
+    for feed in chain_feeds(graph):
+        role = feed.container
+        if role.node_id in seen:
+            continue
+        if feed.machine_name not in COAL_BURNING_NAMES:
+            continue
+        seen.add(role.node_id)
+        if role.fed_by_chain:
+            targets.append((role, feed.machine_name, COAL_LINK_ALREADY_FED))
+            continue
+        total = _chest_item_count(
+            instance,
+            x=role.position[0],
+            y=role.position[1],
+            item=None,
+            container=role.name,
+        )
+        coal = _chest_item_count(
+            instance,
+            x=role.position[0],
+            y=role.position[1],
+            item=MINING_CELL_FUEL_ITEM,
+            container=role.name,
+        )
+        if total > coal:
+            targets.append((role, feed.machine_name, COAL_LINK_NOT_COAL))
+            continue
+        targets.append((role, feed.machine_name, None))
+    return tuple(targets)
+
+
+def plan_coal_distribution(
+    survey: WorldSurvey | None,
+    *,
+    source: tuple[float, float] | None,
+    targets: Sequence[tuple[ContainerRole, str, str | None]],
+    belt_budget: int = COAL_LINK_BELT_BUDGET,
+) -> tuple[CoalLink, ...]:
+    """How the coal in one output chest reaches each feed chest.
+
+    Planned against one world read, so every link is decided against the same
+    standing world and the same seed replays the same lanes. Each link is
+    planned against what is standing *plus* the entities the links planned
+    before it would add: two lanes laid through the same tile is a placement
+    failure the engine reports one entity at a time.
+    """
+    if survey is None or source is None:
+        return ()
+    standing = list(survey.entities)
+    footprints = survey.footprints
+    source_tiles = _entity_tiles_at(standing, source, footprints)
+    if not source_tiles:
+        return ()
+    blocked = blocked_tiles(standing, footprints)
+    links: list[CoalLink] = []
+    for role, machine, refusal in targets:
+        if refusal is not None:
+            links.append(
+                CoalLink(
+                    machine=machine,
+                    container=role.position,
+                    link=DeliveryLink(mode=MODE_REFUSED, reason=refusal),
+                )
+            )
+            continue
+        target_tiles = _entity_tiles_at(standing, role.position, footprints)
+        if not target_tiles:
+            continue
+        link = plan_delivery(
+            source_tiles=source_tiles,
+            target_tiles=target_tiles,
+            blocked=blocked,
+            belt_budget=belt_budget,
+        )
+        links.append(
+            CoalLink(machine=machine, container=role.position, link=link)
+        )
+        if not link.builds:
+            continue
+        # What this link will occupy is an obstacle to the next one.
+        blocked |= set(link.path)
+        for arm in (link.lift, link.drop):
+            if arm is not None:
+                blocked.add(
+                    GridPoint(
+                        int(arm.position[0] - 0.5), int(arm.position[1] - 0.5)
+                    )
+                )
+    return tuple(links)
+
+
+def _entity_tiles_at(
+    standing: Sequence[Mapping[str, Any]],
+    position: tuple[float, float],
+    footprints: Mapping[str, tuple[int, int]] | None,
+) -> frozenset[GridPoint]:
+    """Tiles of the entity standing at ``position``, from the same read.
+
+    Derived from the entity the survey reported rather than from a name the
+    caller guessed: a 2x2 drill and a 1x1 chest at the same centre cover
+    different tiles, and an arm planned against the wrong footprint stands on
+    the thing it was supposed to reach into.
+    """
+    for entity in standing:
+        centre = entity_position(entity)
+        if centre is None:
+            continue
+        if abs(centre[0] - position[0]) < 0.1 and abs(centre[1] - position[1]) < 0.1:
+            return frozenset(entity_tiles(entity, footprints))
+    return frozenset()
+
+
+def _coal_link_code(index: int, item: CoalLink) -> str:
+    """FLE script building one link, and tearing it down if it cannot finish.
+
+    A half-built lane is worse than none: belts with no arm at the end pour
+    coal onto open ground, which spends the coal and leaves the map dirtier
+    than it was. Everything this block placed is picked back up when any part
+    of it refuses.
+
+    Each arm is primed with one coal, and the primer is drawn from the source
+    chest when the inventory has none -- which is the normal case, because
+    the fuel feed that runs just before this one spends the stock down to its
+    last unit. A burner inserter moving coal refuels itself from what it
+    carries, so one unit is the whole primer.
+    """
+    link = item.link
+    lines = ["coal_built=[]", "coal_primed=0", "try:"]
+    arms: list[str] = []
+    if link.lift is not None:
+        lines.append(f"    {_move_code(link.lift.position)}")
+        lines.append(f"    coal_arm={_arm_code(link.lift)}")
+        lines.append("    coal_built.append(coal_arm)")
+        arms.append("coal_arm")
+    for step, tile in enumerate(link.path):
+        nxt = (
+            link.path[step + 1]
+            if step + 1 < len(link.path)
+            else (
+                None
+                if link.drop is None
+                else GridPoint(
+                    int(link.drop.position[0] - 0.5),
+                    int(link.drop.position[1] - 0.5),
+                )
+            )
+        )
+        direction = "RIGHT" if nxt is None else _direction_name(tile, nxt)
+        centre = tile_centre(tile)
+        lines.append(f"    {_move_code(centre)}")
+        lines.append(f"    coal_belt={_belt_code(centre, direction)}")
+        lines.append("    coal_built.append(coal_belt)")
+    if link.drop is not None:
+        lines.append(f"    {_move_code(link.drop.position)}")
+        lines.append(f"    coal_arm_end={_arm_code(link.drop)}")
+        lines.append("    coal_built.append(coal_arm_end)")
+        arms.append("coal_arm_end")
+    for arm in arms:
+        # The feed that ran before this spends the stock down to its last
+        # unit, so the primer normally comes out of the source chest.
+        lines.append("    if inspect_inventory()[Prototype.Coal]<1:")
+        lines.append("        try:")
+        lines.append(
+            "            extract_item(Prototype.Coal,coal_chest,quantity=2)"
+        )
+        lines.append("        except Exception:")
+        lines.append("            pass")
+        lines.append("    if inspect_inventory()[Prototype.Coal]>0:")
+        lines.append(f"        {arm}=insert_item(Prototype.Coal,{arm},quantity=1)")
+        lines.append("        coal_primed+=1")
+    lines.append("    coal_links_built+=1")
+    lines.append(f"    coal_belts_built+={len(link.path)}")
+    lines.append(
+        f"    coal_link_log.append(('{item.machine}','{link.mode}',"
+        f"{len(link.path)},coal_primed,''))"
+    )
+    lines.append("except Exception as coal_exc:")
+    lines.append(
+        "    coal_note=str(coal_exc)[:120]"
+        ".replace('rror','rr0r').replace('xception','xcepti0n')"
+    )
+    lines.append("    for coal_orphan in coal_built:")
+    lines.append("        try:")
+    lines.append("            pickup_entity(coal_orphan)")
+    lines.append("        except Exception:")
+    lines.append("            pass")
+    lines.append(
+        f"    coal_link_log.append(('{item.machine}','{MODE_REFUSED}',0,0,"
+        "coal_note))"
+    )
+    return "\n".join(lines) + "\n"
+
+
+def _arm_code(arm: Any) -> str:
+    """The call placing one burner inserter at the tile the planner chose.
+
+    ``place_entity`` at an explicit position, never ``place_entity_next_to``:
+    that call scores the sides it was not asked for and answers a position on
+    a side the caller never requested, and deriving the drop tile from the
+    side that was *requested* is what left the fuel feed dropping coal onto
+    open ground with three AST tests asserting the wrong contract.
+
+    A call and not a statement, and ``Direction.X`` formatted in as one
+    field. That is not cosmetic: ``tests/test_fle_triggers.py`` and
+    ``tests/test_fuel_feed.py`` audit every script this module returns by
+    replacing each formatted field with ``0`` and parsing the result. A
+    formatted target would parse as ``0=place_entity(...)`` and a field
+    spanning ``Direction.`` would parse as ``Direction.0``; either one takes
+    the whole audit down with a SyntaxError, and the audit is what keeps a
+    script from tripping the engine's failure heuristic unnoticed.
+    """
+    return (
+        "place_entity("
+        "Prototype.BurnerInserter,"
+        f"position=Position(x={arm.position[0]},y={arm.position[1]}),"
+        f"direction={_direction_expression(arm.direction)}"
+        ")"
+    )
+
+
+def _belt_code(centre: tuple[float, float], direction: str) -> str:
+    """The call placing one transport belt on the tile the lane planner chose."""
+    return (
+        "place_entity("
+        "Prototype.TransportBelt,"
+        f"position=Position(x={centre[0]},y={centre[1]}),"
+        f"direction={_direction_expression(direction)}"
+        ")"
+    )
+
+
+def _move_code(position: tuple[float, float]) -> str:
+    """Walk to where the next entity goes, before placing it.
+
+    ``place_entity`` refuses anything outside the character's build reach
+    with ``The target position is too far away to place the entity``.
+    Generation 80 planned two coal lanes, committed the transaction and built
+    neither, for exactly that reason: the fuel feed that runs before it walks
+    to each machine, this step did not, and a lane eleven belts long leaves
+    reach long before its far end. Every placement here is preceded by its
+    own move, because the lane is laid tile by tile across the map.
+    """
+    return f"move_to(Position(x={position[0]},y={position[1]}))"
+
+
+def _direction_expression(name: str) -> str:
+    """``Direction.UP`` and friends, as one formattable expression."""
+    return f"Direction.{name}"
+
+
+def coal_distribution_script(links: Sequence[CoalLink]) -> str:
+    """The whole distribution step: build every link, report every one."""
+    blocks = "".join(
+        _coal_link_code(index, item)
+        for index, item in enumerate(links)
+        if item.link.builds
+    )
+    return f"""
+coal_link_log=[]
+coal_links_built=0
+coal_belts_built=0
+{blocks}
+print({{
+    'coal_links_built':coal_links_built,
+    'coal_belts_built':coal_belts_built,
+}})
+"""
+
+
+def _coal_link_rows(raw: Any) -> list[dict[str, Any]] | None:
+    """Per-link rows for the journal, or None when nothing was measured.
+
+    None rather than an empty list when the shape does not match, for the
+    reason ``_fuel_feed_rows`` states: a partially parsed log reads as a
+    complete census of the links that were built.
+    """
+    if not isinstance(raw, (list, tuple)):
+        return None
+    rows: list[dict[str, Any]] = []
+    for entry in raw:
+        if not isinstance(entry, (list, tuple)) or len(entry) != 5:
+            return None
+        machine, mode, belts, primed, note = entry
+        text = str(note).strip() if note is not None else ""
+        rows.append(
+            {
+                "machine": str(machine),
+                "mode": str(mode),
+                "belt_count": None if belts is None else float(belts),
+                "arms_primed": None if primed is None else float(primed),
+                "note": text[:200] if text else None,
+            }
+        )
+    return rows
+
+
+def _install_coal_distribution(
+    executor: TransactionalFLEExecutor,
+    env: Any,
+    namespace: Any,
+    journal: ResearchJournal,
+) -> dict[str, Any]:
+    """Make the coal this factory mined reach the machines that burn it.
+
+    The fuel feed that runs before this one gives every burner machine a
+    chest and an arm, and fills the chest once, out of a stock that is not
+    replaced. That is a battery, not a factory: generation 72 loaded 286 coal
+    into seven chests and ended with six machines at ``no_fuel``, because the
+    coal drill was mining into its own output chest the whole time and
+    nothing carried it across.
+
+    This is the carry. It runs as its own transaction after the feed has been
+    committed, so a lane that cannot be built rolls back only itself and the
+    chests the feed filled stay filled.
+    """
+    source = getattr(getattr(namespace, "coal_chest", None), "position", None)
+    anchor: tuple[float, float] | None = None
+    if source is not None:
+        try:
+            anchor = (float(source.x), float(source.y))
+        except (AttributeError, TypeError, ValueError):
+            anchor = None
+
+    survey = survey_world(env)
+    graph = None if survey is None else build_factory_graph(list(survey.entities))
+    unwrapped = getattr(env, "unwrapped", env)
+    instance = getattr(unwrapped, "instance", None)
+    targets = (
+        () if graph is None else coal_delivery_targets(graph, instance)
+    )
+    links = plan_coal_distribution(
+        survey,
+        source=anchor,
+        targets=targets,
+    )
+    buildable = [item for item in links if item.link.builds]
+
+    payload: dict[str, Any] = {
+        "source": None if anchor is None else {"x": anchor[0], "y": anchor[1]},
+        "belt_budget": COAL_LINK_BELT_BUDGET,
+        "targets_found": len(targets),
+        "links_planned": len(buildable),
+        "links": [item.to_dict() for item in links],
+    }
+    if survey is None:
+        payload["status"] = COAL_LINK_WORLD_UNREAD
+    elif anchor is None:
+        payload["status"] = COAL_LINK_NO_SOURCE
+
+    if not buildable:
+        payload.setdefault("status", "nothing_to_link")
+        payload["committed"] = False
+        journal.state["metrics"]["coal_distribution"] = payload
+        journal.event(
+            "refusal",
+            (
+                "No coal lane was built: "
+                f"{payload['status']}, {len(targets)} feed chest(s) read."
+            ),
+            coal_distribution=payload,
+        )
+        return payload
+
+    step = executor.execute(
+        coal_distribution_script(buildable),
+        accept=lambda result: (
+            not bool(result.info.get("error_occurred"))
+            and result.candidate_game_state is not None
+        ),
+        use_checkpoint_for_action=False,
+        # Laying the lane removes future carrying rather than performing it.
+        purpose="infrastructure",
+    )
+    payload.update(
+        {
+            "status": payload.get("status", "planned"),
+            "committed": bool(step.accepted),
+            "links_built": _namespace_measure(namespace, "coal_links_built"),
+            "belts_built": _namespace_measure(namespace, "coal_belts_built"),
+            "results": _coal_link_rows(
+                getattr(namespace, "coal_link_log", None)
+            ),
+            "step_result": _step_error_text(step.info),
+        }
+    )
+    journal.state["metrics"]["coal_distribution"] = payload
+    journal.event(
+        "coal_distribution",
+        (
+            "Coal lanes laid from the coal cell's output chest to the feed "
+            "chests that nothing was refilling."
+            if step.accepted
+            else "Coal distribution rolled back; the feed remains a one-off charge."
+        ),
+        coal_distribution=payload,
+    )
+    return payload
+
+
 def stage_steam_power(
     executor: TransactionalFLEExecutor,
     env: Any,
@@ -7296,6 +7845,11 @@ print({{
     # the arena gets its standing feed in the same transaction.
     feeds = _install_fuel_feeds(executor, env, namespace, journal)
 
+    # The feed fills each chest once, out of a stock nothing replaces. This
+    # is the other half: the coal the factory mines has to reach those
+    # chests, or the generation spends its inheritance and stops.
+    distribution = _install_coal_distribution(executor, env, namespace, journal)
+
     journal.complete_stage(
         10,
         f"Steam power accepted with {measured['energy']:.0f} J stored energy.",
@@ -7305,6 +7859,7 @@ print({{
         "Offshore pump, boiler and steam engine formed a working power system.",
         measurements=measured,
         fuel_feeds=feeds,
+        coal_distribution=distribution,
     )
     return True
 
@@ -8254,6 +8809,48 @@ def repair_entity_targets(
     return tuple(found)
 
 
+def fuel_chain_reserves(
+    graph: Mapping[str, Any],
+    *,
+    boiler_profile: BurnerProfile | None = None,
+) -> dict[str, int]:
+    """Coal each container that feeds a chain still owes the machine behind it.
+
+    Keyed by container node id. Derived from the machine the graph says the
+    container feeds, over the same profile and the same horizon the fuel feed
+    sized that machine's charge with -- which is the coupling the flat
+    ``FUEL_CHAIN_RESERVE_COAL`` got wrong. That constant is one drill over
+    the feed horizon, 33 coal; the feed puts 135 into a boiler's chest,
+    because a boiler burns a coal in 2.2 s against a drill's 26.7 s. A draw
+    that left 33 in the boiler's chest would leave it a quarter of what it
+    was measured to need, and every electric machine stops with it.
+
+    A container feeding two machines keeps the hungriest one's figure: the
+    reserve has to cover the worst outage it could cause, not the average.
+
+    Absent from the mapping means the graph could not say what emptying that
+    container would stop, and the caller keeps the figure it kept before.
+    A boiler whose draw nothing measured is the same case: sizing it off a
+    guess is what this module refuses everywhere else.
+    """
+    reserves: dict[str, int] = {}
+    for feed in chain_feeds(graph):
+        if feed.machine_name == "boiler":
+            if boiler_profile is None:
+                needed = int(FUEL_CHAIN_RESERVE_COAL)
+            else:
+                needed = boiler_profile.coal_for_seconds(
+                    BOILER_MEASURED_FULL_DRAW_SECONDS
+                )
+        elif feed.machine_name in {"stone-furnace", "steel-furnace"}:
+            needed = STONE_FURNACE.coal_for_seconds(LAB_FUEL_FEED_HORIZON_SECONDS)
+        else:
+            needed = int(FUEL_CHAIN_RESERVE_COAL)
+        node = feed.container.node_id
+        reserves[node] = max(reserves.get(node, 0), int(needed))
+    return reserves
+
+
 def repair_fuel_sources(
     observation: RepairObservation,
     instance: Any,
@@ -8262,12 +8859,21 @@ def repair_fuel_sources(
 ) -> tuple[tuple[float, float, int], ...]:
     """Containers that can spare coal, nearest to the starved machines first.
 
-    Only the surplus above ``FUEL_CHAIN_RESERVE_COAL`` is offered by a
-    container that feeds a chain, for the reason ``survey_stage_supply``
-    states: a draw is not a dismantling, but emptying the chest an inserter
-    pulls from stops the machine behind it, and that outage would be read as
-    this generation's own regression.
+    Only the surplus above what the chain behind a container still has to
+    burn is offered, for the reason ``survey_stage_supply`` states: a draw is
+    not a dismantling, but emptying the chest an inserter pulls from stops
+    the machine behind it, and that outage would be read as this generation's
+    own regression. The reserve is per container and derived from that
+    machine -- see :func:`fuel_chain_reserves` -- rather than one figure
+    taken off a drill and applied to the boiler as well.
     """
+    reserves = fuel_chain_reserves(
+        observation.graph,
+        boiler_profile=profile_from_energy_per_tick(
+            "boiler",
+            _runtime_fuel_feed_figures(instance).get("boiler_energy_per_tick"),
+        ),
+    )
     roles = sorted(
         container_roles(observation.graph),
         key=lambda role: (
@@ -8287,7 +8893,9 @@ def repair_fuel_sources(
         )
         spare = available
         if role.supplies_chain:
-            spare = available - int(FUEL_CHAIN_RESERVE_COAL)
+            spare = available - reserves.get(
+                role.node_id, int(FUEL_CHAIN_RESERVE_COAL)
+            )
         if spare > 0:
             sources.append((float(role.position[0]), float(role.position[1]), int(spare)))
     return tuple(sources)

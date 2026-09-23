@@ -112,12 +112,17 @@ def test_every_container_of_the_inherited_world_is_surveyed() -> None:
 
 
 def test_a_container_a_chain_drops_into_is_not_recoverable() -> None:
+    # The output chest of a mining cell: the drill mines into it, so it is
+    # the end of a chain. (27.5, 80.5) used to stand here, which the graph
+    # read as fed only while it had every inserter backwards; that chest is
+    # the cell's feed chest and it supplies the drill rather than receiving
+    # from it.
     roles = _roles_at(_graph())
-    fed = roles[(27.5, 80.5)]
+    fed = roles[(27.5, 84.5)]
 
-    assert fed.fed_by_chain, "o inserter que enche este bau nao foi lido como aresta"
+    assert fed.fed_by_chain, "a broca que enche este bau nao foi lida como aresta"
     assert not fed.unattached
-    assert (27.5, 80.5) not in {
+    assert (27.5, 84.5) not in {
         role.position for role in resupply.unattached_containers(_graph())
     }
 

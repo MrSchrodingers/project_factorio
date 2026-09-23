@@ -968,6 +968,13 @@ def _handover_slots(
     The approach tile is one step further out than the inserter so the last belt
     lands where `build_factory_graph` looks for an inserter's pickup: directly
     opposite its drop side.
+
+    The facing is the step *outward*, towards the approach tile, because an
+    inserter's direction points at the side it picks up from. Measured against
+    the engine on 2026-09-23 through ``LuaEntity.pickup_position``: the
+    inserter at (25.5, 7.5) with direction 0 picks up at (25.5, 6.5) and drops
+    at (25.5, 8.7). Facing the target instead would build every repair
+    backwards -- lifting out of the machine it was meant to feed.
     """
     tiles = entity_tiles(target, footprints)
     slots: list[tuple[GridPoint, GridPoint, int]] = []
@@ -979,7 +986,7 @@ def _handover_slots(
             approach = GridPoint(outside.x + step[0], outside.y + step[1])
             if approach in tiles:
                 continue
-            facing = DIRECTION_BY_VECTOR.get((-step[0], -step[1]))
+            facing = DIRECTION_BY_VECTOR.get((step[0], step[1]))
             if facing is None:
                 continue
             slots.append((outside, approach, facing))

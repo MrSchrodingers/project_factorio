@@ -28,7 +28,11 @@ def test_inserter_connects_belt_to_furnace():
     graph = build_factory_graph(
         [
             entity("transport-belt", -1, 0, direction=4, unit=1),
-            entity("inserter", 0, 0, direction=4, unit=2),
+            # An inserter's direction points at the side it picks up from,
+            # measured against LuaEntity.pickup_position on 2026-09-23. To
+            # lift off the belt to the west and drop into the furnace to the
+            # east, it faces west.
+            entity("inserter", 0, 0, direction=12, unit=2),
             entity("stone-furnace", 1, 0, unit=3),
         ]
     )

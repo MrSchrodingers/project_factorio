@@ -122,7 +122,10 @@ def test_producer_reaches_processor_through_a_splitter():
             entity("transport-belt", 1.5, 0.5, direction=EAST),
             entity("splitter", 2.5, 0.0, direction=EAST),
             entity("transport-belt", 3.5, 0.5, direction=EAST),
-            entity("inserter", 4.5, 0.5, direction=EAST),
+            # Faces west, at the belt it lifts from: an inserter's
+            # direction is its pickup side. It drops east, into the
+            # furnace.
+            entity("inserter", 4.5, 0.5, direction=WEST),
             entity("stone-furnace", 5.65, 0.5),
         ]
     )
@@ -138,7 +141,10 @@ def test_producer_reaches_processor_through_an_underground_pair():
             entity("underground-belt", 2.5, 0, direction=EAST),
             entity("underground-belt", 6.5, 0, direction=EAST),
             entity("transport-belt", 7.5, 0, direction=EAST),
-            entity("inserter", 8.5, 0, direction=EAST),
+            # Faces west, at the belt it lifts from: an inserter's
+            # direction is its pickup side. It drops east, into the
+            # furnace.
+            entity("inserter", 8.5, 0, direction=WEST),
             entity("stone-furnace", 9.65, 0),
         ]
     )
