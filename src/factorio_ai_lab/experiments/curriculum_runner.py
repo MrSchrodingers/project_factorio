@@ -936,15 +936,30 @@ def synthesize_lesson(
 # for; the denominator itself is always the observed window, never this.
 STAGE_OVERHEAD_SECONDS = 90.0
 
-# How long the world keeps running across a whole generation, in game seconds.
-# Generation 27 was measured live at roughly 4134 game seconds while still
-# mid-run at tick 4682161, and the arena runs at game speed 10
-# (fle/env/gym_env/registry.py:143), which is what turns the 415-443 s of
-# wall-clock duration recorded in runs/generation_reports into that figure.
-# Fuel that has to outlast the stage placing it is sized against this horizon
-# and never against a settle literal: 20 coal, the largest dose in the
-# curriculum, keep a burner drill alive for 533 s, an eighth of a generation.
-LAB_GENERATION_HORIZON_SECONDS = 4200.0
+# How long a standing fuel feed has to keep a burner machine alive, in game
+# seconds.
+#
+# The feed is installed at the end of `Steam power`; every stage before it
+# doses its own machine. What the charge has to carry is therefore the game
+# time from the feed to the end of the generation, and the reports measure
+# it. Summing the stage windows recorded with `observed_game_ticks` for the
+# stages that run after the feed -- `iron_gear_wheel`, `automation_science`,
+# `electronic_circuit`, `logistic_science` -- generations 47 to 72 in
+# runs/generation_reports span 373.2 s at the shortest, 538.2 s on average
+# and 699.7 s at the longest. The longest is the figure taken, and
+# `coal_for_seconds` puts its own 1.25 margin on top of it.
+#
+# The figure this replaces, 4200 s, was the calendar game time of a whole
+# generation: 415-443 s of wall clock at game speed 10
+# (fle/env/gym_env/registry.py:143). The world does keep running for that
+# long, but the machines do not spend it burning -- a burner drill with
+# nowhere to put its ore stops, and stops consuming. The same reports measure
+# what one of them does mine: 26 to 43 coal per generation through the coal
+# cell, which is 104 to 172 s of drilling at the prototype mining speed of
+# 0.25 items per second. Sized against the calendar figure the feed asked for
+# 1989 coal in a world holding about 300, recorded the refusal, and left five
+# of seven machines standing next to an empty chest.
+LAB_FUEL_FEED_HORIZON_SECONDS = 699.7
 
 #: Burner machines that must keep burning for the rest of the generation once
 #: they exist, paired with the label the journal reports them under. The left
@@ -975,15 +990,30 @@ FUEL_FEED_PRIMER_COAL = 1
 #: sized from its own draw rather than from the drill figure the others share.
 FUEL_FEED_BOILER_VARIABLE = "boiler"
 
+#: Seconds of full boiler draw that one generation was measured to consume.
+#:
+#: A boiler burns in proportion to the steam its engines are actually asked
+#: for, not at its 1.8 MW nameplate, so sizing its charge as if it ran flat
+#: out for the whole horizon asked for 2363 coal -- capped at the 800 a
+#: wooden chest holds, which was still every unit of coal in the world. The
+#: reports measure the other side of it: generations 53 to 72 gave the boiler
+#: between 82 and 108 coal, `boiler_covered_seconds` between 182.2 s and
+#: 240.0 s of full draw, and every one of those generations ended with
+#: `power_starved_entities` at 0 and `steam_path_live` true. None of those
+#: charges ran out before the generation did, so 240.0 s is the largest
+#: full-draw equivalent a boiler here was observed to need, and the charge is
+#: sized from it with the same margin every charge in this module carries.
+BOILER_MEASURED_FULL_DRAW_SECONDS = 240.0
+
 #: Coal left standing in a container that already feeds a chain. Taking fuel
 #: out of a container is not dismantling it -- stages 1, 2, 6 and 7 already do
 #: it and the container keeps standing -- but emptying the one an inserter
 #: pulls from stops the machine on the far end, and that outage would be read
 #: as this generation's regression. The reserve is one burner machine's charge
-#: for the rest of the generation, so only the surplus above what the standing
-#: chain still has to burn is offered to a draw.
+#: over the same window a standing feed is sized for, so only the surplus
+#: above what the standing chain still has to burn is offered to a draw.
 FUEL_CHAIN_RESERVE_COAL = BURNER_MINING_DRILL.coal_for_seconds(
-    LAB_GENERATION_HORIZON_SECONDS
+    LAB_FUEL_FEED_HORIZON_SECONDS
 )
 
 
@@ -6909,11 +6939,12 @@ def _install_fuel_feeds(
     """Convert the quarantined coal stock into standing fuel capacity.
 
     Runs as its own transaction after the stage that owns it has already been
-    validated, so a feed that cannot be built rolls back only itself. Each
-    machine's charge is sized from the generation horizon against its own
-    draw: the drill figures this module already carries, and for the boiler
-    the 1.8 MW the prototype reports, read here rather than written down.
-    That difference is the whole point -- a boiler burns a coal in 2.2 s
+    validated, so a feed that cannot be built rolls back only itself. A
+    drill's charge is sized from the measured window a feed has to carry
+    against the drill draw this module already carries. The boiler is sized
+    from the 1.8 MW the prototype reports, read here rather than written
+    down, over the full-draw seconds the reports measured it consuming --
+    that difference is the whole point, a boiler burns a coal in 2.2 s
     against a drill's 26.7 s -- and the charge it is finally given is capped
     by what one chest holds, because an insert that does not fit fails the
     transaction.
@@ -6926,7 +6957,7 @@ def _install_fuel_feeds(
     and a reserve left in every container that is feeding something.
     """
     coal_per_machine = BURNER_MINING_DRILL.coal_for_seconds(
-        LAB_GENERATION_HORIZON_SECONDS
+        LAB_FUEL_FEED_HORIZON_SECONDS
     )
     unwrapped = getattr(env, "unwrapped", env)
     instance = getattr(unwrapped, "instance", None)
@@ -6945,7 +6976,7 @@ def _install_fuel_feeds(
     boiler_horizon_charge = (
         None
         if boiler_profile is None
-        else boiler_profile.coal_for_seconds(LAB_GENERATION_HORIZON_SECONDS)
+        else boiler_profile.coal_for_seconds(BOILER_MEASURED_FULL_DRAW_SECONDS)
     )
     # What a chest can hold bounds what the feed may be given: insert_item
     # refuses more than fits and takes the whole transaction with it. The gap
@@ -7032,7 +7063,7 @@ def _install_fuel_feeds(
     vault_note = getattr(namespace, "fuel_vault_note", None)
     payload: dict[str, Any] = {
         "committed": bool(step.accepted),
-        "horizon_s": LAB_GENERATION_HORIZON_SECONDS,
+        "horizon_s": LAB_FUEL_FEED_HORIZON_SECONDS,
         "coal_target_per_machine": float(coal_per_machine),
         "coal_per_machine_effective": dose,
         "drill_covered_seconds": (
@@ -7102,21 +7133,23 @@ def _install_fuel_feeds(
         ),
         fuel_feeds=payload,
     )
-    # A charge that does not reach the end of the generation is said out
-    # loud, with the number: the boiler runs out mid-run, every electric
-    # machine stops with it, and the next generation reads that outage as its
-    # own regression unless this line is in the journal.
+    # A charge under what a generation was measured to burn is said out loud,
+    # with the number: the boiler runs out mid-run, every electric machine
+    # stops with it, and the next generation reads that outage as its own
+    # regression unless this line is in the journal. The comparison is against
+    # the measured draw, not against the standing horizon: a boiler that never
+    # runs flat out would otherwise be reported short in every generation.
     if (
         boiler_covered is not None
         and boiler_loaded is not None
-        and boiler_covered < LAB_GENERATION_HORIZON_SECONDS
+        and boiler_covered < BOILER_MEASURED_FULL_DRAW_SECONDS
     ):
         journal.event(
             "refusal",
             (
-                "Boiler fuel does not reach the end of the generation: "
+                "Boiler fuel is under what a generation was measured to burn: "
                 f"{boiler_loaded:.0f} coal cover {boiler_covered:.0f} s of "
-                f"{LAB_GENERATION_HORIZON_SECONDS:.0f} s at full draw."
+                f"{BOILER_MEASURED_FULL_DRAW_SECONDS:.0f} s at full draw."
             ),
             fuel_feeds=payload,
         )
@@ -7892,12 +7925,16 @@ REPAIR_EXPLORATION = 2.0
 REPAIR_FUEL_SOURCE_LIMIT = 6
 
 #: Coal one repair puts into one starved burner, sized from the burner profile
-#: over a tenth of the generation horizon. That lands inside the range of the
-#: curriculum's own doses (12 to 40 coal), which are sized to outlast a stage
-#: window: a repair has the same job, for the stage about to be retried. Every
-#: insert is clamped by what the agent actually holds, so a world short of coal
-#: feeds the machines it can and leaves the rest measured as still starved.
-REPAIR_FUEL_SECONDS = LAB_GENERATION_HORIZON_SECONDS / 10.0
+#: over the longest stage window measured. A repair exists to carry the stage
+#: that is about to be retried, and across generations 47 to 72 in
+#: runs/generation_reports the longest single window recorded with
+#: `observed_game_ticks` is 256.0 s, against a mean of 143.2 s. That keeps the
+#: dose inside the range of the curriculum's own doses, 12 to 40 coal, which
+#: are sized the same way. It used to be a tenth of the generation horizon,
+#: which tied it to a figure that measures something else. Every insert is
+#: clamped by what the agent actually holds, so a world short of coal feeds the
+#: machines it can and leaves the rest measured as still starved.
+REPAIR_FUEL_SECONDS = 256.0
 REPAIR_FUEL_DOSE = max(
     1,
     math.ceil(BURNER_MINING_DRILL.coal_for_seconds(REPAIR_FUEL_SECONDS)),

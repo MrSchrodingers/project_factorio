@@ -190,11 +190,43 @@ def _generated_scripts() -> list[tuple[int, str]]:
     return scripts
 
 
-def test_one_dose_cannot_cover_a_generation() -> None:
+def test_the_feed_horizon_is_the_window_the_reports_measured() -> None:
+    """The horizon is a measurement, and one dose still cannot cover it.
+
+    The feed is installed at the end of `Steam power`, so what its charge has
+    to carry is the game time from there to the end of the generation. Read
+    off runs/generation_reports for generations 47 to 72, with every stage
+    window in them measured by `observed_game_ticks`, the stages after the
+    feed span 373.2 s at the shortest and 699.7 s at the longest.
+
+    The figure this replaced, 4200 s, was the calendar game time of a whole
+    generation at game speed 10, which is not time the machines spend
+    burning: the same reports show a coal drill moving 26 to 43 coal into the
+    world per generation, 104 to 172 s of drilling at the prototype mining
+    speed.
+    """
+    horizon = curriculum_runner.LAB_FUEL_FEED_HORIZON_SECONDS
+    assert 373.2 <= horizon <= 699.7, (
+        "the fuel horizon is outside the window measured across generations "
+        "47 to 72 in runs/generation_reports"
+    )
     # The largest dose in the roteiro is 20 coal into the logistics drill.
-    horizon = curriculum_runner.LAB_GENERATION_HORIZON_SECONDS
-    assert horizon > 3600, "a lab generation runs for roughly 4134 game seconds"
     assert BURNER_MINING_DRILL.coal_for_seconds(horizon) > 20
+
+
+def test_a_repair_dose_outlasts_the_longest_stage_window() -> None:
+    """The repair dose is sized by the window it has to carry, measured.
+
+    It used to be a tenth of the generation horizon, which tied it to a
+    figure that means something else. The longest single stage window in
+    runs/generation_reports for generations 47 to 72 is 256.0 s, and a repair
+    exists to carry the stage that is about to be retried.
+    """
+    dose = curriculum_runner.REPAIR_FUEL_DOSE
+    assert BURNER_MINING_DRILL.coal_for_seconds(256.0) <= dose
+    assert 12 <= dose <= 40, (
+        "a repair dose outside the range of the doses the curriculum uses"
+    )
 
 
 def test_the_feed_script_compiles() -> None:
@@ -1368,6 +1400,11 @@ class _Journal:
         self.events.append((kind, message))
 
 
+#: Coal the standing world actually offered the feed, read from the world
+#: draws of generation 71: 20 coal at (25.5, 10.5) plus 288 at (27.5, 10.5),
+#: in runs/generation_reports/generation-0071-curriculum-20260923T165842Z.json.
+MEASURED_WORLD_COAL = 308
+
 #: What the live 2.0.73 runtime answered for the three figures the feed sizes
 #: itself from, read over RCON on 2026-09-23.
 RUNTIME_FIGURES = (
@@ -1431,22 +1468,69 @@ def test_the_installer_gives_the_boiler_its_own_charge(
 ) -> None:
     """The boiler is sized from its draw, not from the drill figure.
 
-    1.8 MW against 4 MJ of coal is 1890 coal for a 4200 s generation, 2363
-    with the margin every charge here carries, and one wooden chest holds
-    800. The charge that reaches the script is the capped one, and both
-    numbers are in the journal so the gap is readable.
+    1.8 MW against 4 MJ of coal is one coal every 2.2 s, so the 240 s of full
+    draw the reports measured comes to 135 coal with the margin every charge
+    here carries. Sized instead against a whole generation it was 2363,
+    capped at the 800 one wooden chest holds, and a charge of 800 took every
+    unit of coal the world had before any ore drill was reached.
     """
     payload, executor, _ = _run_installer(monkeypatch, rcon_answer=RUNTIME_FIGURES)
     assert payload["boiler_power_w"] == pytest.approx(1_800_000.0)
     assert payload["boiler_power_source"] == "runtime_prototype"
-    assert payload["boiler_coal_horizon_need"] == 2363.0
+    assert payload["boiler_coal_horizon_need"] == 135.0
     assert payload["boiler_feed_capacity_coal"] == 800.0
-    assert payload["boiler_coal_target"] == 800.0
-    assert payload["coal_target_per_machine"] == 197.0
+    assert payload["boiler_coal_target"] == 135.0
+    assert payload["coal_target_per_machine"] == 33.0
     assert executor.code is not None
-    assert "'boiler',800" in executor.code.replace(" ", ""), (
+    assert "'boiler',135" in executor.code.replace(" ", ""), (
         "the boiler charge never reached the remote script"
     )
+
+
+def test_the_boiler_charge_covers_every_charge_measured_to_last(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The charge is above every one that was observed to survive.
+
+    Generations 53 to 72 each gave the boiler between 82 and 108 coal, and
+    each ended with `power_starved_entities` at 0 and `steam_path_live` true,
+    so none of those charges ran out before the generation did. The charge
+    sized here is above the largest of them and below the 800 a wooden chest
+    holds, which is what keeps it from taking the whole stock.
+    """
+    payload, _, _ = _run_installer(monkeypatch, rcon_answer=RUNTIME_FIGURES)
+    assert payload["boiler_coal_target"] >= 108.0, (
+        "the charge is under one that was already measured to last"
+    )
+    assert payload["boiler_coal_target"] < payload["boiler_feed_capacity_coal"]
+
+
+def test_every_fed_machine_gets_a_charge_out_of_the_coal_that_exists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The sized charges have to fit the coal the world actually holds.
+
+    Generation 71 drew 308 coal -- everything two standing containers had --
+    against a need of 1989, and the split spent 197 of it on the coal drill
+    and 108 on the boiler. Five drills were built a chest, an inserter and no
+    fuel, and the repair loop had to put 200 coal back into ten starved
+    entities mid-run (runs/repairs.jsonl, generation 71). A need that cannot
+    be met is not a plan; it is the scarcity the sizing invented.
+    """
+    payload, _, _ = _run_installer(monkeypatch, rcon_answer=RUNTIME_FIGURES)
+    targets = {
+        variable: int(
+            payload["boiler_coal_target"]
+            if variable == curriculum_runner.FUEL_FEED_BOILER_VARIABLE
+            else payload["coal_target_per_machine"]
+        )
+        for variable, _ in curriculum_runner.FUEL_FED_MACHINES
+    }
+    _, scope = _run_feed(vault_coal=MEASURED_WORLD_COAL, machine_targets=targets)
+    rows = curriculum_runner._fuel_feed_rows(scope["fuel_feed_log"])
+    assert rows is not None
+    unfed = [row["machine"] for row in rows if not row["coal_loaded"]]
+    assert unfed == [], f"machines given a fuel feed with no fuel in it: {unfed}"
 
 
 def test_the_installer_measures_how_long_the_boiler_charge_lasts(
@@ -1454,11 +1538,11 @@ def test_the_installer_measures_how_long_the_boiler_charge_lasts(
 ) -> None:
     payload, _, journal = _run_installer(monkeypatch, rcon_answer=RUNTIME_FIGURES)
     assert payload["boiler_coal_loaded"] == 96.0
-    # 96 coal at 1.8 MW is 213 s of a 4200 s generation.
+    # 96 coal at 1.8 MW is 213 s against the 240 s of full draw measured.
     assert payload["boiler_covered_seconds"] == pytest.approx(213.3, abs=0.5)
     refusals = [message for kind, message in journal.events if kind == "refusal"]
     assert refusals, "a charge that runs out mid-generation was recorded silently"
-    assert "213" in refusals[0] and "4200" in refusals[0]
+    assert "213" in refusals[0] and "240" in refusals[0]
 
 
 def test_an_unanswered_prototype_read_leaves_the_boiler_unmeasured(
