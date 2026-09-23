@@ -20,12 +20,15 @@ import ast
 import pathlib
 import re
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, NamedTuple
 
 import pytest
 
 from factorio_ai_lab.experiments import curriculum_runner
-from factorio_ai_lab.planning.fuel import BURNER_MINING_DRILL
+from factorio_ai_lab.planning.fuel import (
+    BURNER_MINING_DRILL,
+    profile_from_energy_per_tick,
+)
 from factorio_ai_lab.planning.resupply import ContainerRole, FuelSource, plan_supply
 
 RUNNER = (
@@ -41,13 +44,6 @@ RUNNER_TREE = ast.parse(RUNNER.read_text(encoding="utf-8"))
 #: fle/env/gym_env/environment.py:451 marks a step as failed when the printed
 #: result contains either of these substrings.
 TRIGGERS = ("error", "exception: ")
-
-OPPOSITE_DIRECTION = {
-    "UP": "DOWN",
-    "DOWN": "UP",
-    "LEFT": "RIGHT",
-    "RIGHT": "LEFT",
-}
 
 # The UCB placement trials also build a burner drill, but their accept callback
 # returns False unconditionally (`reject_trial`), so every trial drill is rolled
@@ -137,27 +133,6 @@ def _trigger_offenders(source: str) -> list[str]:
     return sorted(offenders)
 
 
-def _direction_pairs(source: str) -> list[tuple[str, str]]:
-    """(placement side, rotation side) pairs the feed script iterates over."""
-    pairs: list[tuple[str, str]] = []
-    for node in ast.walk(ast.parse(source)):
-        if not isinstance(node, ast.For):
-            continue
-        if not isinstance(node.target, ast.Tuple) or not isinstance(node.iter, ast.Tuple):
-            continue
-        for element in node.iter.elts:
-            if not isinstance(element, ast.Tuple) or len(element.elts) != 2:
-                continue
-            sides = [
-                piece.attr
-                for piece in element.elts
-                if isinstance(piece, ast.Attribute)
-            ]
-            if len(sides) == 2:
-                pairs.append((sides[0], sides[1]))
-    return pairs
-
-
 def _placement_calls(source: str, prototype: str) -> list[ast.Call]:
     calls: list[ast.Call] = []
     for node in ast.walk(ast.parse(source)):
@@ -172,13 +147,6 @@ def _placement_calls(source: str, prototype: str) -> list[ast.Call]:
         if isinstance(first, ast.Attribute) and first.attr == prototype:
             calls.append(node)
     return calls
-
-
-def _keyword_name(call: ast.Call, keyword: str) -> str | None:
-    for entry in call.keywords:
-        if entry.arg == keyword and isinstance(entry.value, ast.Name):
-            return entry.value.id
-    return None
 
 
 def _feed_script() -> str:
@@ -245,50 +213,20 @@ def test_the_trigger_probe_catches_a_known_positive() -> None:
     assert any("exception: " in entry for entry in offenders)
 
 
-def test_the_inserter_is_rotated_back_towards_the_machine() -> None:
-    pairs = _direction_pairs(_feed_script())
-    assert pairs, "the feed script tries no placement side at all"
-    assert {side for side, _ in pairs} == set(OPPOSITE_DIRECTION)
-    for side, rotation in pairs:
-        assert rotation == OPPOSITE_DIRECTION[side], (
-            f"an inserter placed on the {side} side of the machine and rotated "
-            f"{rotation} drops its coal away from the machine"
-        )
-
-
-def test_the_rotation_probe_catches_a_known_positive() -> None:
-    # A feed that rotates the inserter to the side it was placed on delivers
-    # into empty ground; the predicate above must reject exactly that.
-    mutated = (
-        "for fuel_side,fuel_back in ("
-        "(Direction.UP,Direction.UP),"
-        "(Direction.DOWN,Direction.DOWN),"
-        "(Direction.LEFT,Direction.LEFT),"
-        "(Direction.RIGHT,Direction.RIGHT),"
-        "):\n    pass\n"
-    )
-    pairs = _direction_pairs(mutated)
-    assert pairs
-    assert any(rotation != OPPOSITE_DIRECTION[side] for side, rotation in pairs)
-
-
-def test_the_chest_sits_on_the_inserter_pickup_tile() -> None:
+def test_one_inserter_and_one_chest_are_placed_per_machine() -> None:
     source = _feed_script()
     inserters = _placement_calls(source, "BurnerInserter")
     chests = _placement_calls(source, "WoodenChest")
     assert len(inserters) == 1, "expected exactly one burner inserter placement"
     assert len(chests) == 1, "expected exactly one fuel chest placement"
-    inserter_side = _keyword_name(inserters[0], "direction")
-    chest_side = _keyword_name(chests[0], "direction")
-    assert inserter_side is not None and chest_side == inserter_side, (
-        "the chest must extend away from the machine along the same axis, "
-        "which is the tile a Factorio inserter picks up from"
-    )
     reference = chests[0].args[1]
     assert isinstance(reference, ast.Attribute)
     assert reference.attr == "position"
     assert isinstance(reference.value, ast.Name)
-    assert reference.value.id.endswith("_inserter")
+    assert reference.value.id.endswith("_inserter"), (
+        "the chest has to extend from the inserter, which is the only tile a "
+        "Factorio inserter picks up from"
+    )
 
 
 def test_the_feed_charge_is_sized_by_the_fuel_helper() -> None:
@@ -508,10 +446,57 @@ class _Direction:
     RIGHT = (1, 0)
 
 
+class _Position(NamedTuple):
+    """A tile centre that answers ``.x``/``.y`` and behaves like a tuple.
+
+    The FLE namespace hands a script a ``Position`` object, and the feed has
+    to read the position a placement call returned to know which side it
+    actually landed on. A stand-in whose positions were plain tuples could
+    not exercise that read at all.
+    """
+
+    x: float
+    y: float
+
+
+class _TileDimensions(NamedTuple):
+    """What ``Entity.tile_dimensions`` carries (fle/env/entities.py:479)."""
+
+    tile_width: float
+    tile_height: float
+
+
+def _covered_tiles(
+    position: tuple[float, float],
+    footprint: tuple[int, int],
+) -> list[_Position]:
+    """Every tile an entity of `footprint` centred at `position` stands on."""
+    width, height = int(footprint[0]), int(footprint[1])
+    left = position[0] - width / 2 + 0.5
+    top = position[1] - height / 2 + 0.5
+    return [
+        _Position(left + column, top + row)
+        for column in range(width)
+        for row in range(height)
+    ]
+
+
 class _Entity:
-    def __init__(self, name: str, position: tuple[int, int]) -> None:
+    def __init__(
+        self,
+        name: str,
+        position: tuple[float, float],
+        tile_dimensions: tuple[float, float] = (1, 1),
+        footprint: tuple[int, int] | None = None,
+    ) -> None:
         self.name = name
-        self.position = position
+        self.position = _Position(*position)
+        # What the entity reports and what it stands on are two different
+        # things: ``tile_dimensions`` comes from the unrotated prototype
+        # (fle/env/mods/serialize.lua:1108), so a 3x2 boiler facing west
+        # reports 3x2 while occupying 2x3 tiles.
+        self.tile_dimensions = _TileDimensions(*tile_dimensions)
+        self.tiles = _covered_tiles(position, footprint or (1, 1))
         self.direction: tuple[int, int] | None = None
         self.inventory: dict[str, int] = {}
 
@@ -534,9 +519,16 @@ class _World:
         self.placed: list[_Entity] = []
         self.picked_up: list[_Entity] = []
 
-    def spawn(self, name: str, position: tuple[int, int]) -> _Entity:
-        entity = _Entity(name, position)
-        self.entities[position] = entity
+    def spawn(
+        self,
+        name: str,
+        position: tuple[float, float],
+        tile_dimensions: tuple[float, float] = (1, 1),
+        footprint: tuple[int, int] | None = None,
+    ) -> _Entity:
+        entity = _Entity(name, position, tile_dimensions, footprint)
+        for tile in entity.tiles:
+            self.entities[tile] = entity
         return entity
 
     # -- tools ------------------------------------------------------------
@@ -550,27 +542,70 @@ class _World:
     def place_entity_next_to(
         self,
         prototype: _Proto,
-        position: tuple[int, int],
+        position: tuple[float, float],
         direction: tuple[int, int],
         spacing: int = 0,
     ) -> _Entity:
-        target = (
-            position[0] + direction[0] * (spacing + 1),
-            position[1] + direction[1] * (spacing + 1),
+        """Place next to `position`, moving to another side when it does not fit.
+
+        The fallback is FLE's, not an invention of this stand-in: when the
+        requested tile is taken, ``place_entity_next_to`` scores every other
+        side and every distance from one to three tiles and takes the best
+        one (fle/env/tools/agent/place_entity_next_to/server.lua:41-110,
+        ``find_alternative_position_smart``), preferring the closer
+        positions. The caller is told where the entity went and nothing else;
+        the side it asked for is not the side it got.
+        """
+        sides = [direction] + [
+            side
+            for side in (
+                _Direction.UP,
+                _Direction.DOWN,
+                _Direction.LEFT,
+                _Direction.RIGHT,
+            )
+            if side != direction
+        ]
+        reference = self.entities.get(_Position(*position))
+        footprint = (
+            list(reference.tiles) if reference is not None else [_Position(*position)]
         )
-        if target in self.blocked or target in self.entities:
-            raise ValueError(f"cannot place {prototype.name} at {target}")
-        entity = self.spawn(prototype.name, target)
-        entity.direction = direction
-        self.placed.append(entity)
-        return entity
+        for distance in range(spacing + 1, spacing + 4):
+            for side in sides:
+                candidates = sorted(
+                    {
+                        _Position(
+                            tile.x + side[0] * distance,
+                            tile.y + side[1] * distance,
+                        )
+                        for tile in footprint
+                    },
+                    key=lambda tile: (
+                        abs(tile.x - position[0]) + abs(tile.y - position[1]),
+                        tile.x,
+                        tile.y,
+                    ),
+                )
+                for target in candidates:
+                    if (
+                        target in footprint
+                        or target in self.blocked
+                        or target in self.entities
+                    ):
+                        continue
+                    entity = self.spawn(prototype.name, target)
+                    entity.direction = side
+                    self.placed.append(entity)
+                    return entity
+        raise ValueError(f"cannot place {prototype.name} next to {tuple(position)}")
 
     def rotate_entity(self, entity: _Entity, direction: tuple[int, int]) -> _Entity:
         entity.direction = direction
         return entity
 
     def pickup_entity(self, entity: _Entity) -> bool:
-        self.entities.pop(entity.position, None)
+        for tile in entity.tiles:
+            self.entities.pop(tile, None)
         if entity in self.placed:
             self.placed.remove(entity)
         self.picked_up.append(entity)
@@ -630,7 +665,7 @@ class _World:
             "pickup_entity": self.pickup_entity,
             "insert_item": self.insert_item,
             "extract_item": self.extract_item,
-            "Position": lambda x, y: (float(x), float(y)),
+            "Position": lambda x, y: _Position(float(x), float(y)),
         }
 
 
@@ -651,13 +686,16 @@ def _run_feed(
     quarantined: int | None = None,
     blocked: set[tuple[int, int]] | None = None,
     missing: set[str] | None = None,
+    machine_targets: dict[str, int] | None = None,
+    shapes: dict[str, tuple[tuple[int, int], tuple[int, int]]] | None = None,
 ) -> tuple[_World, dict[str, object]]:
     world = _World(blocked=blocked)
     scope = world.namespace()
     for variable, position in MACHINE_POSITIONS.items():
         if variable in (missing or set()):
             continue
-        scope[variable] = world.spawn(variable, position)
+        reported, footprint = (shapes or {}).get(variable, ((1, 1), (1, 1)))
+        scope[variable] = world.spawn(variable, position, reported, footprint)
     vault = world.spawn("bootstrap_vault", (-20, 0))
     vault.inventory["coal"] = vault_coal
     scope["bootstrap_vault"] = vault
@@ -671,6 +709,7 @@ def _run_feed(
         curriculum_runner._fuel_feed_script(
             machines=curriculum_runner.FUEL_FED_MACHINES,
             coal_per_machine=197,
+            machine_targets=machine_targets,
         )
     )
     exec(compile(script, "<feed>", "exec"), scope)  # noqa: S102
@@ -733,13 +772,20 @@ def test_every_machine_gets_an_inserter_that_drops_into_it() -> None:
         assert pickup in chest_tiles, "the inserter picks up from open ground"
 
 
-def test_the_charge_is_split_and_never_exceeds_the_stock() -> None:
+def test_the_charge_follows_the_priority_and_never_exceeds_the_stock() -> None:
+    """Each machine takes its own charge, in order, out of what is left.
+
+    Dividing equally is what generation 49 did with the 301 coal it drew:
+    43 each against a target of 197, which left the boiler -- the machine
+    every electric assembler waits on -- exactly as short as the drills it
+    powers, and the circuit assembler at ``no_power``. The order in
+    FUEL_FED_MACHINES is the priority, and the stock is spent along it.
+    """
     world, scope = _run_feed()
     chests = [e for e in world.placed if e.name == "wooden-chest"]
     loaded = [chest.inventory.get("coal", 0) for chest in chests]
-    assert all(amount > 0 for amount in loaded), (
-        "the first machine spent the whole stock and the rest got nothing"
-    )
+    assert loaded[0] == 197, "the head of the priority order was rationed"
+    assert loaded[1] > 0, "the boiler was left to the leftovers"
     assert sum(loaded) <= 359
     assert scope["fuel_coal_loaded_total"] == sum(loaded)
     assert scope["fuel_fed_count"] == len(MACHINE_POSITIONS)
@@ -747,6 +793,146 @@ def test_the_charge_is_split_and_never_exceeds_the_stock() -> None:
     assert all(entity.inventory.get("coal", 0) == 1 for entity in inserters), (
         "a burner inserter with no coal never makes its first swing"
     )
+
+
+def test_the_boiler_is_charged_before_the_ore_drills_under_scarcity() -> None:
+    """The defect, as arithmetic.
+
+    300 coal over seven machines is 41 each under an equal split. Under the
+    priority split the coal drill takes its whole 197 -- it is the only
+    machine that turns the stock back into a flow -- the boiler takes the 96
+    that are left above the primers, and the ore drills get nothing, which is
+    said out loud rather than spread thin.
+    """
+    _, scope = _run_feed(vault_coal=300)
+    rows = curriculum_runner._fuel_feed_rows(scope["fuel_feed_log"])
+    assert rows is not None
+    loaded = {row["machine"]: row["coal_loaded"] for row in rows}
+    assert loaded["coal_drill"] == 197.0
+    assert loaded["boiler"] == 96.0, (
+        f"the boiler got {loaded['boiler']} coal out of a 300 coal stock"
+    )
+    assert loaded["iron_logistics_drill"] == 0.0
+    # Every machine still keeps the one unit that starts its inserter, so a
+    # feed the coal drill refills later has a hand to move it.
+    assert [row["inserter_primer_coal"] for row in rows] == [1.0] * len(rows)
+    assert scope["fuel_coal_loaded_total"] == 293
+
+
+def test_the_boiler_charge_is_the_one_the_caller_sized() -> None:
+    """The boiler's own target reaches the remote script.
+
+    A boiler burns at 1.8 MW at full draw against a drill's 150 kW, so its
+    horizon charge is a different number from the drills'. With the two
+    targets equal the boiler would take 197 here; with its own it takes what
+    the stock can still cover.
+    """
+    _, scope = _run_feed(vault_coal=1000, machine_targets={"boiler": 800})
+    rows = curriculum_runner._fuel_feed_rows(scope["fuel_feed_log"])
+    assert rows is not None
+    loaded = {row["machine"]: row["coal_loaded"] for row in rows}
+    assert loaded["coal_drill"] == 197.0
+    assert loaded["boiler"] == 796.0
+
+
+def test_the_inserter_drops_into_the_machine_when_the_side_moves() -> None:
+    """The live defect of generation 50, reproduced.
+
+    Read off the arena at tick 25231279: the boiler at (-1, 9.5) sat at
+    ``no_fuel`` with 41 coal in a wooden chest 1.5 tiles away, and its burner
+    inserter at (0.5, 9.5) reported ``waiting_for_space_in_destination`` with
+    a drop position of (0.5, 10.7) -- open ground, not the boiler. FLE had
+    moved the inserter to the side that was free and the script rotated it
+    towards the side it had asked for.
+    """
+    world, scope = _run_feed(blocked={(40, -1), (40, 1)})
+    rows = curriculum_runner._fuel_feed_rows(scope["fuel_feed_log"])
+    assert rows is not None
+    by_machine = {row["machine"]: row for row in rows}
+    assert by_machine["boiler"]["coal_loaded"], "no feed was built for the boiler"
+    inserter = next(
+        entity
+        for entity in world.placed
+        if entity.name == "burner-inserter"
+        and abs(entity.position.x - 40) <= 3
+        and abs(entity.position.y) <= 3
+    )
+    assert inserter.direction is not None
+    drop = (
+        inserter.position.x + inserter.direction[0],
+        inserter.position.y + inserter.direction[1],
+    )
+    assert drop == (40, 0), f"the boiler's inserter drops at {drop}, on open ground"
+    pickup = (
+        inserter.position.x - inserter.direction[0],
+        inserter.position.y - inserter.direction[1],
+    )
+    chest = world.entities.get(pickup)
+    assert chest is not None and chest.name == "wooden-chest", (
+        "the inserter picks up from a tile no chest stands on"
+    )
+    assert chest.inventory.get("coal", 0) > 0
+
+
+#: A machine shaped like the boiler of generation 50: three tiles long, laid
+#: across the axis its prototype states (``tile_dimensions`` is the unrotated
+#: prototype, fle/env/mods/serialize.lua:1108), with pipes on three sides.
+#: The only free side is two tiles from the position the placement call is
+#: given, which is the distance a one-tile rule gets wrong.
+BOILER_SHAPE = {"boiler": ((1, 3), (3, 1))}
+BOILER_PIPES = {
+    (39, -1),
+    (40, -1),
+    (41, -1),
+    (39, 1),
+    (40, 1),
+    (41, 1),
+    (38, 0),
+}
+
+
+def test_the_inserter_drops_into_a_machine_larger_than_one_tile() -> None:
+    """The live defect, tile for tile.
+
+    Measured on the arena at tick 25231279: the boiler at (-1, 9.5) sat at
+    ``no_fuel`` with 41 coal in a wooden chest 1.5 tiles away, its burner
+    inserter at (0.5, 9.5) reporting ``waiting_for_space_in_destination``
+    with a drop position of (0.5, 10.7) -- open ground. The inserter had
+    landed on the only free side while the script rotated it towards the side
+    it had asked for, and no side of a machine three tiles long is one tile
+    from the position the call was given.
+    """
+    world, scope = _run_feed(blocked=BOILER_PIPES, shapes=BOILER_SHAPE)
+    rows = curriculum_runner._fuel_feed_rows(scope["fuel_feed_log"])
+    assert rows is not None
+    by_machine = {row["machine"]: row for row in rows}
+    assert by_machine["boiler"]["coal_loaded"], (
+        f"the boiler was left unfed: {by_machine['boiler']['placement_note']}"
+    )
+    inserter = next(
+        entity
+        for entity in world.placed
+        if entity.name == "burner-inserter"
+        and abs(entity.position.x - 40) <= 4
+        and abs(entity.position.y) <= 4
+    )
+    assert inserter.direction is not None
+    drop = _Position(
+        inserter.position.x + inserter.direction[0],
+        inserter.position.y + inserter.direction[1],
+    )
+    boiler = world.entities.get(_Position(41, 0))
+    assert boiler is not None and boiler.name == "boiler"
+    assert world.entities.get(drop) is boiler, (
+        f"the inserter drops at {tuple(drop)}, which is not a boiler tile"
+    )
+    pickup = _Position(
+        inserter.position.x - inserter.direction[0],
+        inserter.position.y - inserter.direction[1],
+    )
+    chest = world.entities.get(pickup)
+    assert chest is not None and chest.name == "wooden-chest"
+    assert chest.inventory.get("coal", 0) > 0
 
 
 def test_a_crowded_machine_does_not_take_the_other_feeds_down() -> None:
@@ -763,6 +949,14 @@ def test_a_crowded_machine_does_not_take_the_other_feeds_down() -> None:
     assert not [
         entity for entity in world.placed if entity.position in blocked
     ], "a failed side left an orphan entity behind"
+    # FLE answers a blocked side with a position further out rather than a
+    # refusal, and an inserter two tiles away drops on the ground. Nothing
+    # may be left standing around a machine that could not be fed.
+    assert [
+        entity
+        for entity in world.placed
+        if abs(entity.position.x - 40) <= 3 and abs(entity.position.y) <= 3
+    ] == []
     assert by_machine["coal_drill"]["coal_loaded"] > 0
 
 
@@ -854,6 +1048,7 @@ def _run_step(
     *,
     supply: Any,
     carried: int = HEIR_CARRIED_COAL,
+    machine_targets: dict[str, int] | None = None,
 ) -> tuple[_World, dict[str, object], dict[str, object]]:
     """The whole installer step, against the stand-in world.
 
@@ -878,6 +1073,7 @@ def _run_step(
         machines=curriculum_runner.FUEL_FED_MACHINES,
         coal_per_machine=197,
         fuel_needed=_machine_charge(),
+        machine_targets=machine_targets,
     )
     exec(compile(script, "<fuel-feed>", "exec"), scope)  # noqa: S102
     return world, scope, report
@@ -905,13 +1101,16 @@ def test_an_heir_fills_its_feed_out_of_the_world_it_inherited() -> None:
     then lost the electronic-circuits capability they had inherited.
     """
     world, scope, report = _run_step(supply=_world_plan())
-    assert scope["fuel_dose"] > 0, "the feed is still installed empty"
-    assert scope["fuel_coal_loaded_total"] > 0
+    assert scope["fuel_coal_loaded_total"] > 0, "the feed is still installed empty"
     assert report["fuel_supply_drawn"] > 0
     rows = curriculum_runner._fuel_feed_rows(scope["fuel_feed_log"])
     assert rows is not None
-    starved = [row["machine"] for row in rows if not row["coal_loaded"]]
-    assert starved == [], f"machines fed nothing: {starved}"
+    loaded = {row["machine"]: row["coal_loaded"] for row in rows}
+    # 629 coal drawn out of the world cover the first machines of the
+    # priority order in full; what the world does not hold is not invented
+    # for the rest.
+    assert loaded["coal_drill"] == 197.0
+    assert loaded["boiler"] == 197.0
     # The chests hold what the ledger says was loaded, and nothing was
     # invented: the draw cannot exceed what the containers held.
     chests = [entity for entity in world.placed if entity.name == "wooden-chest"]
@@ -1064,3 +1263,217 @@ def test_a_stage_that_asks_for_no_reserve_draws_as_it_always_did(
     )
     assert plan is not None
     assert [draw.quantity for draw in plan.fuel_draws] == [40]
+
+
+# --------------------------------------------------------------------------
+# The boiler: the one machine on the list whose outage stops every electric
+# machine, and the only one whose burn rate nothing in this lab had measured.
+# --------------------------------------------------------------------------
+
+
+def test_the_installer_sizes_the_boiler_from_the_runtime() -> None:
+    called = _called_function_names("_install_fuel_feeds")
+    assert "_runtime_fuel_feed_figures" in called, (
+        "the boiler charge is still sized from a literal instead of the draw "
+        "the prototype reports"
+    )
+    assert "profile_from_energy_per_tick" in called
+    assert "_boiler_covered_seconds" in called, (
+        "boiler_covered_seconds stays null, so nothing says whether the "
+        "charge outlasts the generation"
+    )
+
+
+def test_boiler_coverage_is_measured_from_the_charge_and_the_draw() -> None:
+    # 30000 J/tick is 1.8 MW, read over RCON from the live 2.0.73 runtime;
+    # 4 MJ of coal against it is 2.22 s of full draw per unit.
+    profile = profile_from_energy_per_tick("boiler", 30000)
+    assert profile is not None
+    covered = curriculum_runner._boiler_covered_seconds(
+        [{"machine": "boiler", "coal_loaded": 90.0}],
+        profile,
+        "boiler",
+    )
+    assert covered == pytest.approx(200.0, abs=0.5)
+
+
+def test_boiler_coverage_without_a_measured_draw_is_none() -> None:
+    # A probe that did not answer leaves the rate unknown. Reporting 0.0
+    # would say the charge covers nothing, which is a measurement nobody
+    # made.
+    assert (
+        curriculum_runner._boiler_covered_seconds(
+            [{"machine": "boiler", "coal_loaded": 90.0}],
+            None,
+            "boiler",
+        )
+        is None
+    )
+
+
+def test_boiler_coverage_without_a_measured_charge_is_none() -> None:
+    profile = profile_from_energy_per_tick("boiler", 30000)
+    assert curriculum_runner._boiler_covered_seconds(None, profile, "boiler") is None
+    assert curriculum_runner._boiler_covered_seconds([], profile, "boiler") is None
+    assert (
+        curriculum_runner._boiler_covered_seconds(
+            [{"machine": "boiler", "coal_loaded": None}],
+            profile,
+            "boiler",
+        )
+        is None
+    )
+
+
+def test_a_boiler_that_was_fed_nothing_covers_zero_seconds() -> None:
+    # A measured zero is not an absence: the feed was built and loaded
+    # nothing, and that reads as no coverage rather than as no measurement.
+    profile = profile_from_energy_per_tick("boiler", 30000)
+    assert (
+        curriculum_runner._boiler_covered_seconds(
+            [{"machine": "boiler", "coal_loaded": 0.0}],
+            profile,
+            "boiler",
+        )
+        == 0.0
+    )
+
+
+# --------------------------------------------------------------------------
+# The whole installer, from the prototype read to the line in the journal.
+# --------------------------------------------------------------------------
+
+
+class _RecordingExecutor:
+    """Runs nothing; keeps the script it was handed."""
+
+    def __init__(self) -> None:
+        self.code: str | None = None
+
+    def execute(self, code: str, **_: Any) -> Any:
+        self.code = code
+        return SimpleNamespace(
+            accepted=True,
+            info={"error_occurred": False},
+            candidate_game_state=object(),
+        )
+
+
+class _Journal:
+    def __init__(self) -> None:
+        self.state: dict[str, Any] = {"stage": "Steam power", "metrics": {}}
+        self.events: list[tuple[str, str]] = []
+
+    def event(self, kind: str, message: str, **_: Any) -> None:
+        self.events.append((kind, message))
+
+
+#: What the live 2.0.73 runtime answered for the three figures the feed sizes
+#: itself from, read over RCON on 2026-09-23.
+RUNTIME_FIGURES = (
+    '{"boiler_energy_per_tick":30000,"chest_slots":16,"coal_stack_size":50}'
+)
+
+
+def _installer_namespace() -> Any:
+    namespace = SimpleNamespace(
+        **{
+            variable: SimpleNamespace(
+                position=SimpleNamespace(x=float(x), y=float(y))
+            )
+            for variable, (x, y) in MACHINE_POSITIONS.items()
+        }
+    )
+    namespace.fuel_stock = 300
+    namespace.fuel_dose = 0
+    namespace.fuel_fed_count = 7
+    namespace.fuel_coal_loaded_total = 293
+    namespace.fuel_vault_stock = 0
+    namespace.fuel_vault_claim = 0
+    namespace.fuel_vault_released = 0
+    namespace.supply_fuel_drawn = 294
+    namespace.fuel_feed_log = [
+        ("coal_drill", 197, 1, ""),
+        ("boiler", 96, 1, ""),
+        ("copper_drill", 0, 1, ""),
+        ("iron_baseline_drill", 0, 1, ""),
+        ("iron_scale_drill", 0, 1, ""),
+        ("iron_smelt_drill", 0, 1, ""),
+        ("iron_logistics_drill", 0, 1, ""),
+    ]
+    return namespace
+
+
+def _run_installer(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    rcon_answer: str,
+) -> tuple[dict[str, Any], _RecordingExecutor, _Journal]:
+    monkeypatch.setattr(
+        curriculum_runner,
+        "survey_stage_supply",
+        lambda *args, **kwargs: None,
+    )
+    namespace = _installer_namespace()
+    instance = SimpleNamespace(
+        rcon_client=SimpleNamespace(send_command=lambda command: rcon_answer),
+        namespace=namespace,
+    )
+    env = SimpleNamespace(unwrapped=SimpleNamespace(instance=instance))
+    executor = _RecordingExecutor()
+    journal = _Journal()
+    payload = curriculum_runner._install_fuel_feeds(executor, env, namespace, journal)
+    return payload, executor, journal
+
+
+def test_the_installer_gives_the_boiler_its_own_charge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The boiler is sized from its draw, not from the drill figure.
+
+    1.8 MW against 4 MJ of coal is 1890 coal for a 4200 s generation, 2363
+    with the margin every charge here carries, and one wooden chest holds
+    800. The charge that reaches the script is the capped one, and both
+    numbers are in the journal so the gap is readable.
+    """
+    payload, executor, _ = _run_installer(monkeypatch, rcon_answer=RUNTIME_FIGURES)
+    assert payload["boiler_power_w"] == pytest.approx(1_800_000.0)
+    assert payload["boiler_power_source"] == "runtime_prototype"
+    assert payload["boiler_coal_horizon_need"] == 2363.0
+    assert payload["boiler_feed_capacity_coal"] == 800.0
+    assert payload["boiler_coal_target"] == 800.0
+    assert payload["coal_target_per_machine"] == 197.0
+    assert executor.code is not None
+    assert "'boiler',800" in executor.code.replace(" ", ""), (
+        "the boiler charge never reached the remote script"
+    )
+
+
+def test_the_installer_measures_how_long_the_boiler_charge_lasts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload, _, journal = _run_installer(monkeypatch, rcon_answer=RUNTIME_FIGURES)
+    assert payload["boiler_coal_loaded"] == 96.0
+    # 96 coal at 1.8 MW is 213 s of a 4200 s generation.
+    assert payload["boiler_covered_seconds"] == pytest.approx(213.3, abs=0.5)
+    refusals = [message for kind, message in journal.events if kind == "refusal"]
+    assert refusals, "a charge that runs out mid-generation was recorded silently"
+    assert "213" in refusals[0] and "4200" in refusals[0]
+
+
+def test_an_unanswered_prototype_read_leaves_the_boiler_unmeasured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No answer is not a zero, and not a literal either.
+
+    Without the draw there is no coverage to report and no charge to size,
+    so the boiler keeps the drill charge the split has always given it and
+    the journal says which of the two it got.
+    """
+    payload, _, journal = _run_installer(monkeypatch, rcon_answer="")
+    assert payload["boiler_power_w"] is None
+    assert payload["boiler_power_source"] == "unmeasured"
+    assert payload["boiler_coal_target"] is None
+    assert payload["boiler_covered_seconds"] is None
+    assert payload["boiler_coal_loaded"] == 96.0
+    assert [kind for kind, _ in journal.events] == ["fuel_feed"]

@@ -56,7 +56,9 @@ from factorio_ai_lab.planning.footprints import (
 from factorio_ai_lab.planning.fuel import (
     BURNER_MINING_DRILL,
     STONE_FURNACE,
+    BurnerProfile,
     observed_window_seconds,
+    profile_from_energy_per_tick,
 )
 from factorio_ai_lab.planning.placement import (
     OUTCOME_BUILD,
@@ -942,6 +944,12 @@ FUEL_FED_MACHINES: tuple[tuple[str, str], ...] = (
 #: goes on to move, so one unit is the whole primer and the rest of a
 #: machine's charge belongs in the chest behind it.
 FUEL_FEED_PRIMER_COAL = 1
+
+#: The machine on that list whose outage is not its own: a boiler with no coal
+#: stops the steam engine, and every electric machine on the network with it.
+#: It also burns an order of magnitude faster than a drill, so its charge is
+#: sized from its own draw rather than from the drill figure the others share.
+FUEL_FEED_BOILER_VARIABLE = "boiler"
 
 #: Coal left standing in a container that already feeds a chain. Taking fuel
 #: out of a container is not dismantling it -- stages 1, 2, 6 and 7 already do
@@ -3340,6 +3348,55 @@ def _runtime_crafting_speed(instance: Any, machine: str) -> float | None:
     except (AttributeError, ImportError, OSError, TypeError, ValueError):
         return None
 
+
+
+def _runtime_fuel_feed_figures(instance: Any) -> dict[str, float]:
+    """Prototype figures the fuel feed has to size itself from.
+
+    One read, three numbers: what a boiler draws at full load, how many slots
+    the feed chest has, and how many coal fit in one slot. Factorio 2.0.73
+    answers ``get_max_energy_usage()`` in joules per tick -- 30000 for the
+    boiler, which is the 1.8 MW its charge has to outlast -- while the
+    ``max_energy_usage`` property it replaced raises, the same accessor change
+    that once made every machine report "no crafting speed".
+
+    Whatever the runtime does not answer is simply absent from the mapping.
+    The caller has to read that absence as unmeasured: a chest capacity
+    defaulted to a guess overfills and fails the insert, and a burn rate
+    defaulted to a literal reports coverage nobody measured.
+    """
+    command = (
+        "/silent-command "
+        "local out={} "
+        "local b=prototypes.entity['boiler'] "
+        "if b then "
+        "local ok,value=pcall(function() return b.get_max_energy_usage() end) "
+        "if ok then out.boiler_energy_per_tick=value end end "
+        "local c=prototypes.entity['wooden-chest'] "
+        "if c then "
+        "local ok2,slots=pcall(function() "
+        "return c.get_inventory_size(defines.inventory.chest) end) "
+        "if ok2 then out.chest_slots=slots end end "
+        "local i=prototypes.item['coal'] "
+        "if i then out.coal_stack_size=i.stack_size end "
+        "rcon.print(helpers.table_to_json(out))"
+    )
+    try:
+        raw = instance.rcon_client.send_command(command)
+        payload = json.loads(str(raw)) if raw else None
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    figures: dict[str, float] = {}
+    for key in ("boiler_energy_per_tick", "chest_slots", "coal_stack_size"):
+        value = payload.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        number = float(value)
+        if math.isfinite(number) and number > 0:
+            figures[key] = number
+    return figures
 
 
 def _step_error_text(info: dict[str, Any] | None) -> str | None:
@@ -6387,6 +6444,7 @@ def _fuel_feed_script(
     *,
     machines: tuple[tuple[str, str], ...],
     coal_per_machine: int,
+    machine_targets: Mapping[str, int] | None = None,
 ) -> str:
     """FLE script giving each listed burner machine a chest and an inserter.
 
@@ -6398,47 +6456,57 @@ def _fuel_feed_script(
     inserter handling coal refuels itself from what it carries, so one primer
     unit is enough to start it.
 
-    Four placement sides are tried per machine because pipes, belts and fluid
-    connections make any fixed side unbuildable somewhere in this arena; a side
-    that fails leaves nothing behind before the next one is tried. A machine
-    that cannot be fed is recorded and skipped, never raised, so one crowded
-    machine cannot roll back the feeds that did get built. Each machine is also
-    resolved on its own, because naming them all in one tuple would let a
-    single variable that an earlier rollback left undefined take every feed
-    down with it.
+    Two things the script may not assume:
+
+    ``the side it asked for is not the side it got``
+        ``place_entity_next_to`` answers a blocked side by scoring every other
+        side and every distance up to three tiles, and returning the best one
+        (place_entity_next_to/server.lua:41-110). Generation 50's boiler sat
+        at ``no_fuel`` with 41 coal in a chest 1.5 tiles away because the
+        script rotated the inserter towards the side it had requested: the
+        inserter at (0.5, 9.5) dropped at (0.5, 10.7), open ground. The
+        rotation, the chest side and the reach check are all derived from the
+        position the call returned, and a placement the inserter cannot reach
+        into is torn down rather than left standing.
+
+    ``an equal split starves the machine everything else waits on``
+        the per-machine charge is the machine's own, spent in the order of
+        ``machines``: each takes what it needs out of what is still carried,
+        holding back one primer for itself and one for every machine still to
+        be fed. Generation 49 divided 301 coal seven ways, gave the boiler the
+        same 43 as the drills it powers, and the circuit assembler spent the
+        stage at ``no_power``.
+
+    Each machine is resolved on its own, because naming them all in one tuple
+    would let a single variable that an earlier rollback left undefined take
+    every feed down with it, and a machine that cannot be fed is recorded and
+    skipped rather than raised.
     """
+    targets = dict(machine_targets or {})
     resolution = "".join(
         f"""
 try:
-    fuel_machines.append(({variable},'{label}'))
+    fuel_machines.append(({variable},'{label}',{int(targets.get(variable, coal_per_machine))}))
 except Exception:
     fuel_feed_log.append(('{label}',None,None,'machine variable is undefined'))
 """
         for variable, label in machines
     )
-    machine_count = max(1, len(machines))
     return f"""
 fuel_feed_log=[]
 fuel_machines=[]
 fuel_fed_count=0
 fuel_coal_loaded_total=0
+fuel_dose=0
 fuel_stock=inspect_inventory()[Prototype.Coal]
-# Split what is carried evenly and hold one unit per machine back to prime its
-# inserter. The per-machine target is the horizon charge; the split is what
-# the released stock can actually cover.
-fuel_share=max(0,(fuel_stock//{machine_count})-1)
-fuel_dose=min({int(coal_per_machine)},fuel_share)
 {resolution}
-for fuel_machine,fuel_label in fuel_machines:
+fuel_pending=len(fuel_machines)
+for fuel_machine,fuel_label,fuel_target in fuel_machines:
+    fuel_pending=fuel_pending-1
     fuel_inserter=None
     fuel_chest=None
     fuel_note=''
-    for fuel_side,fuel_back in (
-        (Direction.UP,Direction.DOWN),
-        (Direction.DOWN,Direction.UP),
-        (Direction.LEFT,Direction.RIGHT),
-        (Direction.RIGHT,Direction.LEFT),
-    ):
+    for fuel_side in (Direction.UP,Direction.DOWN,Direction.LEFT,Direction.RIGHT):
         if fuel_chest is None:
             try:
                 move_to(fuel_machine.position)
@@ -6448,26 +6516,52 @@ for fuel_machine,fuel_label in fuel_machines:
                     direction=fuel_side,
                     spacing=0,
                 )
-                fuel_inserter=rotate_entity(fuel_inserter,fuel_back)
+                fuel_dx=fuel_machine.position.x-fuel_inserter.position.x
+                fuel_dy=fuel_machine.position.y-fuel_inserter.position.y
+                if abs(fuel_dx)>=abs(fuel_dy):
+                    fuel_step=1.0 if fuel_dx>0 else -1.0
+                    fuel_into=Direction.RIGHT if fuel_dx>0 else Direction.LEFT
+                    fuel_from=Direction.LEFT if fuel_dx>0 else Direction.RIGHT
+                    fuel_drop=(fuel_inserter.position.x+fuel_step,fuel_inserter.position.y)
+                    fuel_pick=(fuel_inserter.position.x-fuel_step,fuel_inserter.position.y)
+                else:
+                    fuel_step=1.0 if fuel_dy>0 else -1.0
+                    fuel_into=Direction.DOWN if fuel_dy>0 else Direction.UP
+                    fuel_from=Direction.UP if fuel_dy>0 else Direction.DOWN
+                    fuel_drop=(fuel_inserter.position.x,fuel_inserter.position.y+fuel_step)
+                    fuel_pick=(fuel_inserter.position.x,fuel_inserter.position.y-fuel_step)
+                fuel_reach=(max(
+                    fuel_machine.tile_dimensions.tile_width,
+                    fuel_machine.tile_dimensions.tile_height,
+                )-1)/2.0
+                if (abs(fuel_drop[0]-fuel_machine.position.x)>fuel_reach
+                        or abs(fuel_drop[1]-fuel_machine.position.y)>fuel_reach):
+                    raise Exception('inserter landed where it cannot reach the machine')
+                fuel_inserter=rotate_entity(fuel_inserter,fuel_into)
                 fuel_chest=place_entity_next_to(
                     Prototype.WoodenChest,
                     fuel_inserter.position,
-                    direction=fuel_side,
+                    direction=fuel_from,
                     spacing=0,
                 )
+                if (abs(fuel_chest.position.x-fuel_pick[0])>0.1
+                        or abs(fuel_chest.position.y-fuel_pick[1])>0.1):
+                    raise Exception('chest landed off the tile the inserter picks up from')
             except Exception as fuel_exc:
                 fuel_note=str(fuel_exc)[:120].replace('rror','rr0r').replace('xception','xcepti0n')
-                if fuel_inserter is not None:
-                    try:
-                        pickup_entity(fuel_inserter)
-                    except Exception:
-                        fuel_note=fuel_note+' | pickup refused'
+                for fuel_orphan in (fuel_chest,fuel_inserter):
+                    if fuel_orphan is not None:
+                        try:
+                            pickup_entity(fuel_orphan)
+                        except Exception:
+                            fuel_note=fuel_note+' | pickup refused'
                 fuel_inserter=None
                 fuel_chest=None
     fuel_loaded=0
     fuel_primer=0
     if fuel_chest is not None:
-        fuel_loaded=min(fuel_dose,inspect_inventory()[Prototype.Coal])
+        fuel_dose=max(0,min(fuel_target,inspect_inventory()[Prototype.Coal]-1-fuel_pending))
+        fuel_loaded=fuel_dose
         if fuel_loaded>0:
             fuel_chest=insert_item(
                 Prototype.Coal,
@@ -6517,6 +6611,45 @@ def _fuel_feed_rows(raw: Any) -> list[dict[str, Any]] | None:
     return rows
 
 
+def _feed_charge(rows: list[dict[str, Any]] | None, label: str) -> float | None:
+    """Coal the feed loaded into one machine's chest, or None if unmeasured.
+
+    A machine with no row was never reached by the feed, and a row whose
+    charge is None is one the remote script could not fill in. Neither is a
+    chest that was loaded with nothing.
+    """
+    for row in rows or ():
+        if row.get("machine") == label:
+            loaded = row.get("coal_loaded")
+            return None if loaded is None else float(loaded)
+    return None
+
+
+def _boiler_covered_seconds(
+    rows: list[dict[str, Any]] | None,
+    profile: BurnerProfile | None,
+    label: str,
+) -> float | None:
+    """Game seconds the boiler's charge covers at full draw.
+
+    Two readings have to exist for this number to: how much coal the feed
+    loaded, and how fast the boiler burns it. Either one missing leaves the
+    coverage unmeasured -- it was reported as ``null`` for eleven generations
+    because nothing read the second -- and answering 0.0 instead would claim
+    the charge covers nothing, which is a measurement nobody made.
+
+    Full draw is the floor and not the expectation: a boiler burns at
+    whatever the electric network pulls through it, so the charge lasts at
+    least this long and longer whenever the assemblers are idle.
+    """
+    if profile is None:
+        return None
+    loaded = _feed_charge(rows, label)
+    if loaded is None:
+        return None
+    return loaded * profile.seconds_per_coal()
+
+
 def _fuel_feed_anchor(
     namespace: Any,
     machines: tuple[tuple[str, str], ...],
@@ -6555,6 +6688,7 @@ def _fuel_feed_code(
     machines: tuple[tuple[str, str], ...],
     coal_per_machine: int,
     fuel_needed: int,
+    machine_targets: Mapping[str, int] | None = None,
 ) -> str:
     """The whole fuel-feed step: reopen, draw, build, report.
 
@@ -6575,6 +6709,7 @@ def _fuel_feed_code(
         + _fuel_feed_script(
             machines=machines,
             coal_per_machine=coal_per_machine,
+            machine_targets=machine_targets,
         )
         + """
 print({
@@ -6599,24 +6734,70 @@ def _install_fuel_feeds(
     """Convert the quarantined coal stock into standing fuel capacity.
 
     Runs as its own transaction after the stage that owns it has already been
-    validated, so a feed that cannot be built rolls back only itself. The
-    charge is sized from the generation horizon with the drill figures read
-    from the runtime; the boiler burns at whatever the electric network draws,
-    a rate not measured here, so the time its charge covers is reported as
-    unknown instead of being derived from a nominal number.
+    validated, so a feed that cannot be built rolls back only itself. Each
+    machine's charge is sized from the generation horizon against its own
+    draw: the drill figures this module already carries, and for the boiler
+    the 1.8 MW the prototype reports, read here rather than written down.
+    That difference is the whole point -- a boiler burns a coal in 2.2 s
+    against a drill's 26.7 s -- and the charge it is finally given is capped
+    by what one chest holds, because an insert that does not fit fails the
+    transaction.
 
-    The stock that charge is split from is the world's, not the inventory's.
-    An heir arrives carrying whatever its ancestor happened to hold and
-    quarantines nothing, so the vault release returns nothing and the split
-    has nothing to divide. The draw that fills the chests is the one stages 1,
-    2, 6 and 7 already make: the same plan, the same ordering, and a reserve
-    left in every container that is feeding something.
+    The stock those charges are spent from is the world's, not the
+    inventory's. An heir arrives carrying whatever its ancestor happened to
+    hold and quarantines nothing, so the vault release returns nothing and
+    the split has nothing to divide. The draw that fills the chests is the
+    one stages 1, 2, 6 and 7 already make: the same plan, the same ordering,
+    and a reserve left in every container that is feeding something.
     """
     coal_per_machine = BURNER_MINING_DRILL.coal_for_seconds(
         LAB_GENERATION_HORIZON_SECONDS
     )
-    # Every machine's horizon charge plus the unit that starts its inserter.
-    fuel_needed = len(machines) * (int(coal_per_machine) + FUEL_FEED_PRIMER_COAL)
+    unwrapped = getattr(env, "unwrapped", env)
+    instance = getattr(unwrapped, "instance", None)
+    figures = _runtime_fuel_feed_figures(instance)
+    boiler_profile = profile_from_energy_per_tick(
+        "boiler",
+        figures.get("boiler_energy_per_tick"),
+    )
+    chest_slots = figures.get("chest_slots")
+    coal_stack_size = figures.get("coal_stack_size")
+    chest_capacity = (
+        None
+        if chest_slots is None or coal_stack_size is None
+        else int(chest_slots * coal_stack_size)
+    )
+    boiler_horizon_charge = (
+        None
+        if boiler_profile is None
+        else boiler_profile.coal_for_seconds(LAB_GENERATION_HORIZON_SECONDS)
+    )
+    # What a chest can hold bounds what the feed may be given: insert_item
+    # refuses more than fits and takes the whole transaction with it. The gap
+    # between the horizon need and the charge is reported, not rounded away.
+    # With neither figure measured the boiler keeps the drill charge, which
+    # is the split this stage made before any of this was read.
+    boiler_charge = (
+        None
+        if boiler_horizon_charge is None or chest_capacity is None
+        else min(boiler_horizon_charge, chest_capacity)
+    )
+    boiler_label = next(
+        (label for variable, label in machines if variable == FUEL_FEED_BOILER_VARIABLE),
+        FUEL_FEED_BOILER_VARIABLE,
+    )
+    machine_targets = {
+        variable: (
+            boiler_charge
+            if variable == FUEL_FEED_BOILER_VARIABLE and boiler_charge is not None
+            else int(coal_per_machine)
+        )
+        for variable, _ in machines
+    }
+    # Every machine's charge plus the unit that starts its inserter.
+    fuel_needed = sum(
+        machine_targets[variable] + FUEL_FEED_PRIMER_COAL for variable, _ in machines
+    )
     anchor = _fuel_feed_anchor(namespace, machines)
     supply = (
         None
@@ -6634,6 +6815,7 @@ def _install_fuel_feeds(
         machines=machines,
         coal_per_machine=coal_per_machine,
         fuel_needed=fuel_needed,
+        machine_targets=machine_targets,
     )
     step = executor.execute(
         fuel_code,
@@ -6661,7 +6843,17 @@ def _install_fuel_feeds(
     ):
         value = getattr(namespace, key, None)
         measured[key] = None if value is None else float(value)
-    dose = measured["fuel_dose"]
+    feeds = _fuel_feed_rows(getattr(namespace, "fuel_feed_log", None))
+    # The tail of the priority order is what shows the scarcity. Under an
+    # equal split every machine carried the same charge and one number said
+    # it; under a priority split the smallest charge granted is the one that
+    # says how far down the order the stock reached.
+    charges = [
+        row["coal_loaded"] for row in (feeds or ()) if row["coal_loaded"] is not None
+    ]
+    dose = min(charges) if charges else None
+    boiler_loaded = _feed_charge(feeds, boiler_label)
+    boiler_covered = _boiler_covered_seconds(feeds, boiler_profile, boiler_label)
     vault_note = getattr(namespace, "fuel_vault_note", None)
     payload: dict[str, Any] = {
         "committed": bool(step.accepted),
@@ -6673,7 +6865,26 @@ def _install_fuel_feeds(
             if dose is None
             else dose * BURNER_MINING_DRILL.seconds_per_coal()
         ),
-        "boiler_covered_seconds": None,
+        # What the boiler was sized for, what it got, and how long that
+        # lasts at the draw the runtime reports. None anywhere here means the
+        # figure was not measured; 0.0 means it was, and was nothing.
+        "boiler_power_w": (
+            None if boiler_profile is None else boiler_profile.power_w
+        ),
+        "boiler_power_source": (
+            "unmeasured" if boiler_profile is None else "runtime_prototype"
+        ),
+        "boiler_coal_horizon_need": (
+            None if boiler_horizon_charge is None else float(boiler_horizon_charge)
+        ),
+        "boiler_feed_capacity_coal": (
+            None if chest_capacity is None else float(chest_capacity)
+        ),
+        "boiler_coal_target": (
+            None if boiler_charge is None else float(boiler_charge)
+        ),
+        "boiler_coal_loaded": boiler_loaded,
+        "boiler_covered_seconds": boiler_covered,
         "machines_planned": [label for _, label in machines],
         "machines_fed": measured["fuel_fed_count"],
         "coal_loaded_total": measured["fuel_coal_loaded_total"],
@@ -6699,7 +6910,7 @@ def _install_fuel_feeds(
         "vault_note": (
             str(vault_note)[:200] or None if vault_note is not None else None
         ),
-        "feeds": _fuel_feed_rows(getattr(namespace, "fuel_feed_log", None)),
+        "feeds": feeds,
         "step_result": _step_error_text(step.info),
     }
     # Keyed by stage so a second installation point cannot silently overwrite
@@ -6716,6 +6927,24 @@ def _install_fuel_feeds(
         ),
         fuel_feeds=payload,
     )
+    # A charge that does not reach the end of the generation is said out
+    # loud, with the number: the boiler runs out mid-run, every electric
+    # machine stops with it, and the next generation reads that outage as its
+    # own regression unless this line is in the journal.
+    if (
+        boiler_covered is not None
+        and boiler_loaded is not None
+        and boiler_covered < LAB_GENERATION_HORIZON_SECONDS
+    ):
+        journal.event(
+            "refusal",
+            (
+                "Boiler fuel does not reach the end of the generation: "
+                f"{boiler_loaded:.0f} coal cover {boiler_covered:.0f} s of "
+                f"{LAB_GENERATION_HORIZON_SECONDS:.0f} s at full draw."
+            ),
+            fuel_feeds=payload,
+        )
     return payload
 
 

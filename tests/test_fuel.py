@@ -13,6 +13,7 @@ from factorio_ai_lab.planning.fuel import (
     BURNER_MINING_DRILL,
     STONE_FURNACE,
     observed_window_seconds,
+    profile_from_energy_per_tick,
 )
 
 
@@ -66,3 +67,37 @@ def test_observed_window_is_not_the_literal_it_replaces() -> None:
     literal = 16.0
     observed = observed_window_seconds(0, 4800, literal)
     assert observed / literal == pytest.approx(5.0)
+
+
+def test_a_profile_is_built_from_the_runtime_energy_figure() -> None:
+    """The figures the constants above were read from, as a conversion.
+
+    ``LuaEntityPrototype.get_max_energy_usage()`` answers in joules per tick:
+    2500 for burner-mining-drill and 1500 for stone-furnace, which are the
+    two profiles stated in this module, and 30000 for boiler, which is not.
+    """
+    drill = profile_from_energy_per_tick("burner-mining-drill", 2500)
+    assert drill is not None
+    assert drill.power_w == pytest.approx(BURNER_MINING_DRILL.power_w)
+    furnace = profile_from_energy_per_tick("stone-furnace", 1500)
+    assert furnace is not None
+    assert furnace.power_w == pytest.approx(STONE_FURNACE.power_w)
+
+
+def test_the_boiler_burns_a_coal_in_seconds_not_minutes() -> None:
+    # 30000 J/tick is 1.8 MW: twelve burner drills' worth of draw, and 2.22 s
+    # of one coal. Sizing a boiler's charge from the drill figure overstates
+    # what it covers by that factor.
+    boiler = profile_from_energy_per_tick("boiler", 30000)
+    assert boiler is not None
+    assert boiler.seconds_per_coal() == pytest.approx(2.222, abs=0.001)
+    assert boiler.coal_for_seconds(4200) > BURNER_MINING_DRILL.coal_for_seconds(4200)
+
+
+def test_an_unanswered_probe_has_no_profile() -> None:
+    # None is not a machine that draws nothing. A caller with no profile has
+    # to report the charge it could not size as unmeasured.
+    assert profile_from_energy_per_tick("boiler", None) is None
+    assert profile_from_energy_per_tick("boiler", 0) is None
+    assert profile_from_energy_per_tick("boiler", -1) is None
+    assert profile_from_energy_per_tick("boiler", "nope") is None

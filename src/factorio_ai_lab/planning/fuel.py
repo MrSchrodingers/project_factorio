@@ -23,12 +23,19 @@ over RCON, not from documentation:
     burner-mining-drill  energy_usage 2500 J/tick -> 150 kW, mining_speed 0.25
     stone-furnace        energy_usage 1500 J/tick ->  90 kW, crafting_speed 1
     coal                 fuel_value 4 MJ
+
+A boiler is deliberately not among them. It draws 30000 J/tick, 1.8 MW, at
+full load -- twelve burner drills' worth, two and a quarter seconds of one
+coal -- and a charge sized from the drill figure overstates what it covers by
+that factor. The figure is read from the prototype at the moment the charge
+is sized, through :func:`profile_from_energy_per_tick`, so a runtime that
+answers differently is not silently overridden by a number typed here.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import ceil
+from math import ceil, isfinite
 
 #: Chemical energy of one coal, in joules.
 COAL_FUEL_VALUE_J = 4_000_000.0
@@ -66,6 +73,33 @@ class BurnerProfile:
 
 BURNER_MINING_DRILL = BurnerProfile("burner-mining-drill", BURNER_MINING_DRILL_W)
 STONE_FURNACE = BurnerProfile("stone-furnace", STONE_FURNACE_W)
+
+
+def profile_from_energy_per_tick(
+    name: str,
+    energy_per_tick_j: float | None,
+) -> BurnerProfile | None:
+    """Burner profile from the runtime's own per-tick energy figure.
+
+    ``LuaEntityPrototype.get_max_energy_usage()`` answers in joules per tick,
+    which is the unit the two constants above were read in. The property
+    ``max_energy_usage`` it replaced raises on Factorio 2.0.73 -- the same
+    accessor change that once made every machine report "no crafting speed"
+    -- so a caller that gets no answer gets no profile here either.
+
+    None is the whole point of the return type: a machine whose draw nothing
+    measured has no charge that can be sized, and the caller reports that as
+    unmeasured instead of falling back to a literal.
+    """
+    if energy_per_tick_j is None:
+        return None
+    try:
+        power = float(energy_per_tick_j) * TICKS_PER_SECOND
+    except (TypeError, ValueError):
+        return None
+    if not isfinite(power) or power <= 0:
+        return None
+    return BurnerProfile(name, power)
 
 
 def observed_window_seconds(
