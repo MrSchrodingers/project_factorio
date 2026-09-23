@@ -1740,17 +1740,24 @@ if circuit_copper_buffer_before>0:
         copper_chest,
         quantity=min(24,circuit_copper_buffer_before),
     )
-try:
-    move_to(chest.position)
-except Exception as circuit_exc:
-    circuit_nav_error=(circuit_nav_error+' | ' if circuit_nav_error else '')+'iron_chest: '+str(circuit_exc)[:160]
-circuit_iron_ore=inspect_inventory(chest)[Prototype.IronOre]
-if circuit_iron_ore>0:
-    circuit_iron_ore=extract_item(
-        Prototype.IronOre,
-        chest,
-        quantity=min(24,circuit_iron_ore),
-    )
+if chest is None:
+    for circuit_candidate in get_entities(Prototype.WoodenChest):
+        if inspect_inventory(circuit_candidate)[Prototype.IronOre]>0:
+            chest=circuit_candidate
+            break
+    circuit_nav_error=(circuit_nav_error+' | ' if circuit_nav_error else '')+('iron_chest recovered by scan' if chest is not None else 'iron_chest missing and no chest holds iron ore')
+if chest is not None:
+    try:
+        move_to(chest.position)
+    except Exception as circuit_exc:
+        circuit_nav_error=(circuit_nav_error+' | ' if circuit_nav_error else '')+'iron_chest move: '+str(circuit_exc)[:160]
+    circuit_iron_ore=inspect_inventory(chest)[Prototype.IronOre]
+    if circuit_iron_ore>0:
+        circuit_iron_ore=extract_item(
+            Prototype.IronOre,
+            chest,
+            quantity=min(24,circuit_iron_ore),
+        )
 
 move_to(copper_furnace.position)
 if circuit_coal>=5:
