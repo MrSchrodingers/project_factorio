@@ -259,9 +259,15 @@ Rupturas esperadas ao trocar `default_lab_scenario` por `open_world`:
    trocar o config compartilhado, que hoje é um bind mount de
    `.venv-fle/.../fle/cluster/config` (fora do versionamento) — o caminho limpo
    é copiar o diretório para dentro do repositório e remontar.
-3. Toda posição fixa que o campeão decorou (ferro em (27, 83) etc.) deixa de
-   valer. Queda de fitness na primeira geração é o resultado esperado, não uma
-   regressão.
+3. Queda de fitness na primeira geração é o resultado esperado, não uma
+   regressão. Precisão que a primeira versão deste documento não tinha: o
+   campeão não decorou coordenada absoluta. Um grep por `Position(x=<literal>)`
+   devolve zero nos dois runners; as posições nascem de `patch_center()` lido
+   do runtime mais um offset relativo, seja um dos seis braços de
+   `PLACEMENT_ARMS` (`curriculum_runner.py:63-70`, escolhidos por bandit UCB1),
+   seja um offset literal avulso, seja `nearest_buildable`, que delega o tile
+   ao FLE. O que não sobrevive a um mapa novo são os offsets e o braço
+   aprendido, não uma coordenada gravada.
 4. **Não verificado nesta máquina**: que `--map-gen-seed` combinado com
    `--start-server-load-scenario open_world` produza terrenos distintos. É o
    caminho que o próprio FLE usa para esse cenário, mas a prova é o passo 3.
