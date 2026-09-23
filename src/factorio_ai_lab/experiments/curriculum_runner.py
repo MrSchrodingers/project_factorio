@@ -71,6 +71,7 @@ from factorio_ai_lab.planning.progression import (
 from factorio_ai_lab.planning.resupply import (
     REFUSAL_NO_FUEL_IN_WORLD,
     REFUSAL_NO_SPARE_CONTAINER,
+    ContainerRole,
     ContainerSalvage,
     FuelSource,
     SmeltingOption,
@@ -148,6 +149,15 @@ PLACEMENT_SCAN_REACH = 6
 #: drill an ancestor left on the arm would hand this genome the ancestor's
 #: flow as if it were its own reading.
 TRIAL_ADOPTS_NOTHING: frozenset[str] = frozenset()
+
+#: How far above a cell's drill the supply step aims the furnace it smelts a
+#: container in. The furnace is planned against a world the cell is not
+#: standing in yet, so a plan anchored on the cell resolves to the cell's own
+#: tiles; the engine is then asked for ``exact=False`` and puts the furnace
+#: on whatever is free nearest to them, which includes the tile the chest
+#: needs and fails the cell one line later. Five tiles clears the 2x2 drill,
+#: the 2x2 furnace and the chest row below the drill.
+SUPPLY_FURNACE_CLEARANCE = 5
 
 
 def utc_now() -> str:
@@ -258,6 +268,21 @@ TRIAL_OUTPUT_BASIS = "trial_cell_chest_contents"
 #: taken off the global counter would credit this generation with whatever
 #: they happen to smelt during the window.
 SMELTING_OUTPUT_BASIS = "probe_furnace_contents"
+
+#: What the resource stages count as their output. The same reasoning, for
+#: the three cells built after the iron backbone: the inherited factory mines
+#: coal at (27, 9), mines copper at (-58, 83) and smelts in furnaces of its
+#: own, and all of that moves the world counters while these stages run. Each
+#: stage reads the container or furnace it placed itself instead.
+COAL_OUTPUT_BASIS = "coal_cell_chest_contents"
+COPPER_ORE_OUTPUT_BASIS = "copper_cell_chest_contents"
+COPPER_PLATE_OUTPUT_BASIS = "copper_cell_furnace_contents"
+
+#: The stage carries bootstrap coal it may not let the new drill burn, and
+#: the standing world offered nowhere to park it. Named rather than silently
+#: skipped: quarantine is what makes the endogenous-fuel claim a measurement,
+#: so a window run without it would prove nothing about the cell.
+NO_QUARANTINE_IN_WORLD = "no_container_to_quarantine_bootstrap_coal"
 
 
 class PlacementNotMeasured(RuntimeError):
@@ -1005,6 +1030,37 @@ def _measured_above(
     return isinstance(value, (int, float)) and float(value) > threshold
 
 
+def _cell_total(measured: dict[str, Any], *keys: str) -> float | None:
+    """Sum of readings taken off the cell this generation built, or None.
+
+    One unread key makes the whole sum unmeasured. A step that aborted
+    halfway through its window did not produce the part it managed to
+    report, and summing what survives would turn an abort into a smaller
+    measurement instead of an absent one.
+    """
+    total = 0.0
+    for key in keys:
+        value = measured.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        total += float(value)
+    return total
+
+
+def _recorded_metric(journal: Any, key: str) -> float | None:
+    """A number an earlier stage recorded, or None when no stage recorded it.
+
+    ``metrics.get(key, 0.0)`` is the substitution this project has paid for
+    repeatedly: a baseline that was never measured became a baseline of zero,
+    and ``rate_per_second`` then raised ``duration_s must be positive`` from
+    inside a stage that had already done its work.
+    """
+    value = journal.state.get("metrics", {}).get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
 def _measured_text(measured: dict[str, Any], key: str, spec: str = ".0f") -> str:
     """Measurement rendered for prose, or a marker when it was never taken."""
     value = measured.get(key)
@@ -1617,6 +1673,52 @@ def supply_report(plan: SupplyPlan | None) -> dict[str, Any]:
     }
 
 
+def quarantine_container(
+    survey: WorldSurvey | None,
+    *,
+    anchor: tuple[float, float],
+    exclude: Collection[tuple[float, float]] = (),
+) -> ContainerRole | None:
+    """Where this stage may park the bootstrap coal it is still carrying.
+
+    The coal stage claims the cell it builds runs on coal that cell mined, and
+    the claim is only a measurement if the coal the heir arrived with is out
+    of the drill's reach first. Until now the quarantine was a chest this
+    stage placed, and an heir carries none: generation 41 aborted at
+    ``place_entity(Prototype.WoodenChest, ...)`` with ``bootstrap_total``
+    0.0 and every later reading unmeasured.
+
+    A container the world already holds serves the same purpose and costs no
+    game time to make. Ordered by ``(supplies a chain, distance, position)``,
+    so coal is parked in a container no machine is waiting on before one that
+    feeds something, and among equals the nearest wins. ``exclude`` drops the
+    container the supply plan means to carry off, because a chest filled here
+    and picked up two lines later hands its contents straight back.
+
+    Nothing is taken and nothing is emptied. The stage only inserts, so no
+    standing chain loses the supply it was built around.
+    """
+    if survey is None:
+        return None
+    skip = {(float(x), float(y)) for x, y in exclude}
+    roles = [
+        role
+        for role in container_roles(build_factory_graph(list(survey.entities)))
+        if role.position not in skip
+    ]
+    if not roles:
+        return None
+    return min(
+        roles,
+        key=lambda role: (
+            role.supplies_chain,
+            math.hypot(role.position[0] - anchor[0], role.position[1] - anchor[1]),
+            role.position[1],
+            role.position[0],
+        ),
+    )
+
+
 def mining_cell_supply_script(
     plan: SupplyPlan | None,
     *,
@@ -1720,6 +1822,61 @@ def mining_cell_supply_script(
             "quantity=1)\n"
             "except Exception as supply_exc:\n" + note
         )
+    return "\n".join(lines)
+
+
+def coal_quarantine_script(
+    vault: ContainerRole | None,
+    *,
+    keep: int,
+) -> str:
+    """FLE script that puts the bootstrap coal this stage may not burn away.
+
+    ``keep`` is everything the step still has to spend, not the seed alone:
+    smelting the cell's container burns a charge of its own, so a quarantine
+    sized to the seed would leave the furnace and the drill bidding for the
+    same single coal and the drill would stand unfuelled through a window
+    already paid for. Only the drill ever receives the seed, and it receives
+    it by a line that asks for exactly one.
+
+    Belongs after the cell's drill is placed and before any fuel is drawn: a
+    placement the engine refuses then costs the world nothing, and the draw
+    that follows sizes itself against an inventory the quarantine has already
+    emptied, so the stage never draws coal it is about to park.
+
+    The counters are declared even when there is nowhere to park anything,
+    so the payload never reads a name the script never bound. The vault name
+    is bound to the container only when coal really went into it: the release
+    script downstream must not reopen a quarantine that never happened.
+
+    Whatever the engine says about a refused call is neutralised before it
+    travels: FLE marks a step failed on the substring ``error`` anywhere in
+    what the script printed (fle/env/gym_env/environment.py:451).
+    """
+    lines = [
+        "bootstrap_total=inspect_inventory()[Prototype.Coal]",
+        f"bootstrap_surplus=max(0,bootstrap_total-{max(0, int(keep))})",
+        "bootstrap_quarantine=0",
+        "bootstrap_vault=None",
+        "bootstrap_note=''",
+    ]
+    if vault is None:
+        return "\n".join(lines)
+    x, y = vault.position
+    prototype = container_prototype(vault.name)
+    lines.append(
+        "try:\n"
+        "    if bootstrap_surplus>0:\n"
+        f"        bootstrap_vault=get_entity(Prototype.{prototype},"
+        f"Position(x={x},y={y}))\n"
+        "        if bootstrap_vault is not None:\n"
+        "            bootstrap_vault=insert_item(Prototype.Coal,bootstrap_vault,"
+        "quantity=bootstrap_surplus)\n"
+        "            bootstrap_quarantine=bootstrap_surplus\n"
+        "except Exception as coal_setup_exc:\n"
+        "    bootstrap_note=str(coal_setup_exc)[:80]"
+        ".replace('rror','rr0r').replace('xception','xcepti0n')"
+    )
     return "\n".join(lines)
 
 
@@ -3537,16 +3694,17 @@ print({{
         return False
 
     plates = measured["iron_plate_output"]
-    direct = float(journal.state["metrics"].get("iron_plate_output", 0.0))
-    direct_duration = float(
-        journal.state["metrics"].get("direct_smelting_duration_s", 0.0)
-    )
-    direct_rate = float(
-        journal.state["metrics"].get(
-            "direct_smelting_plate_rate_per_s",
-            direct / direct_duration if direct_duration > 0 else 0.0,
-        )
-    )
+    # The direct-feed baseline is a reading stage 3 either took or did not,
+    # and ``metrics.get(key, 0.0)`` made the second case look like the first:
+    # a baseline window of 0.0 seconds reaches rate_per_second, which raises
+    # "duration_s must be positive" from inside a stage whose own window was
+    # measured perfectly well. Absent stays absent, and a comparison with no
+    # baseline is reported as no comparison.
+    direct = _recorded_metric(journal, "iron_plate_output")
+    direct_duration = _recorded_metric(journal, "direct_smelting_duration_s")
+    direct_rate = _recorded_metric(journal, "direct_smelting_plate_rate_per_s")
+    if direct_rate is None and direct is not None and direct_duration:
+        direct_rate = direct / direct_duration
     belt_count = max(1, int(logistics["belt_count"]))
     window = _record_observed_window(
         journal,
@@ -3555,11 +3713,15 @@ print({{
         fallback_seconds=float(settle_seconds),
     )
     belt_rate = rate_per_second(plates, window)
-    ratio = normalized_rate_ratio(
-        candidate_count=plates,
-        candidate_duration_s=window,
-        baseline_count=direct,
-        baseline_duration_s=direct_duration,
+    ratio = (
+        None
+        if direct is None or not direct_duration
+        else normalized_rate_ratio(
+            candidate_count=plates,
+            candidate_duration_s=window,
+            baseline_count=direct,
+            baseline_duration_s=direct_duration,
+        )
     )
     plate_rate_per_belt = belt_rate / belt_count
 
@@ -4638,6 +4800,7 @@ print({'coal': coal, 'patch': coal_patch})
 
     patch = namespace.coal_patch
     center = patch_center(patch)
+    region = patch_bounds(patch)
     journal.state.setdefault("world", {})["coal_patch"] = {
         "size": patch.size,
         "center": {"x": center[0], "y": center[1]},
@@ -4659,27 +4822,125 @@ print({'coal': coal, 'patch': coal_patch})
         patch_size=patch.size,
     )
 
-    fast_reposition(env, x=center[0], y=center[1])
-    output_before = production_output(namespace, "coal")
-    clock = _StageClock(env)
-    measured: dict[str, Any] = {}
     # One external coal lasts roughly one burner-drill fuel cycle. We wait
     # beyond that cycle before transferring mined coal back into the drill, so
     # the second production window is causally powered by endogenous fuel.
     bootstrap_seed = 1
     seed_seconds = max(30, settle_seconds)
 
+    # ``patch_center`` is deterministic on a fixed map, so an heir aims its
+    # drill at the tiles the ancestor's own coal cell stands on: the promoted
+    # checkpoint holds a drill at (27, 9) with its chest at (27.5, 10.5),
+    # which is exactly where this anchor snaps. Nothing is adopted -- the
+    # claim of this stage is that the cell it built survived on coal that
+    # cell mined, and an inherited drill is no evidence of that.
+    survey = survey_world(env)
+    drill_plan = plan_mining_cell(
+        survey,
+        center,
+        adopt_names=TRIAL_ADOPTS_NOTHING,
+        reach=PLACEMENT_SCAN_REACH,
+        region=region,
+    )
+    journal.state["metrics"]["coal_placement"] = drill_plan.to_dict()
+    if drill_plan.position is None:
+        journal.fail_stage(
+            6,
+            f"Coal self-sufficiency found no free tiles on the patch: {drill_plan.reason}.",
+        )
+        journal.event(
+            "refusal",
+            "Coal self-sufficiency refused: the standing factory occupies the patch.",
+            placement=drill_plan.to_dict(),
+        )
+        return False, center
+    target = drill_plan.position
+
+    # The cell is assembled out of the standing world. An heir carries the
+    # kit its ancestor happened to hold, which for the promoted checkpoint is
+    # no chest and no coal at all, and the seed this stage burns first has to
+    # come from somewhere the world was measured to have it.
+    supply = survey_stage_supply(
+        env,
+        anchor=(target[0], target[1] - SUPPLY_FURNACE_CLEARANCE),
+        fuel_needed=bootstrap_seed,
+        container_needed=True,
+    )
+    journal.state["metrics"]["coal_supply"] = supply_report(supply)
+    journal.state["metrics"]["coal_bootstrap_seed"] = float(bootstrap_seed)
+    blocked = blocking_refusals(supply)
+    if blocked:
+        journal.fail_stage(
+            6,
+            "Coal self-sufficiency refused: the standing world holds no kit for "
+            f"its cell ({', '.join(blocked)}).",
+        )
+        journal.event(
+            "refusal",
+            "Coal self-sufficiency refused: no fuel or container in the world.",
+            supply=journal.state["metrics"]["coal_supply"],
+        )
+        return False, center
+
+    vault = quarantine_container(
+        survey,
+        anchor=target,
+        exclude=(
+            ()
+            if supply is None or supply.salvage is None
+            else (supply.salvage.position,)
+        ),
+    )
+    journal.state["metrics"]["coal_quarantine_target"] = (
+        None if vault is None else vault.to_dict()
+    )
+    # Everything the step still spends stays in the inventory: the seed, and
+    # the charge the container smelt burns when the world had no spare chest.
+    quarantine_keep = (
+        bootstrap_seed
+        if supply is None
+        else max(bootstrap_seed, int(supply.fuel_needed))
+    )
+    journal.state["metrics"]["coal_quarantine_keeps"] = float(quarantine_keep)
+    surplus = None if supply is None else max(0, supply.fuel_carried - quarantine_keep)
+    if vault is None and surplus:
+        journal.fail_stage(
+            6,
+            f"Coal self-sufficiency refused: {surplus} bootstrap coal and "
+            f"{NO_QUARANTINE_IN_WORLD}.",
+        )
+        journal.event(
+            "refusal",
+            "Coal self-sufficiency refused: nowhere to quarantine bootstrap coal.",
+            bootstrap_carried=surplus,
+            reason=NO_QUARANTINE_IN_WORLD,
+        )
+        return False, center
+
+    quarantine_prelude = coal_quarantine_script(vault, keep=quarantine_keep)
+    supply_prelude = mining_cell_supply_script(supply, fuel_needed=bootstrap_seed)
+    coal_container = cell_container(supply)
+    container_binding = (
+        f"coal_container_type = Prototype.{container_prototype(coal_container)}"
+    )
+    journal.state["metrics"]["coal_container"] = coal_container
+
+    fast_reposition(env, x=target[0], y=target[1])
+    output_before = production_output(namespace, "coal")
+    clock = _StageClock(env)
+    measured: dict[str, Any] = {}
+
     def validate_coal(result: Any) -> bool:
         clock.stop()
-        output_after = production_output(namespace, "coal")
-        delta = max(0.0, output_after - output_before)
-        measured["coal_output"] = delta
+        measured["coal_world_before"] = output_before
+        measured["coal_world_after"] = production_output(namespace, "coal")
         # An attribute the script never assigned is an abort, not a zero:
         # keep it unmeasured so the gate below refuses it instead of reading
         # it as a measured failure.
         for key in (
             "bootstrap_total",
             "bootstrap_quarantine",
+            "coal_seed",
             "seed_phase_count",
             "transfer_1",
             "internal_stock_before",
@@ -4687,44 +4948,48 @@ print({'coal': coal, 'patch': coal_patch})
             "endogenous_growth",
             "endogenous_stockpile",
             "operational_refuel",
+            "supply_fuel_drawn",
         ):
             measured[key] = _namespace_measure(namespace, key)
+        measured["supply_draws"] = _supply_log_rows(
+            getattr(namespace, "supply_fuel_log", None)
+        )
+        # Read off the chest this cell drops into. The world coal counter
+        # over the same window also carries the inherited coal drill, which
+        # keeps mining whatever this stage does, so a stage that took its
+        # number from there would report the ancestor's flow as its own.
+        measured["coal_output"] = _cell_total(
+            measured,
+            "seed_phase_count",
+            "endogenous_growth",
+        )
         return (
             not bool(result.info.get("error_occurred"))
             and result.candidate_game_state is not None
-            and delta > 0
+            and _measured_above(measured, "coal_output")
             and _measured_at_least(measured, "transfer_1", 1)
             and _measured_above(measured, "endogenous_growth")
             and _measured_above(measured, "endogenous_stockpile")
         )
 
     code = f"""
-bootstrap_total=inspect_inventory()[Prototype.Coal]
-bootstrap_quarantine=max(0,bootstrap_total-{bootstrap_seed})
-bootstrap_vault=place_entity(
-    Prototype.WoodenChest,
-    position=Position(x={center[0] + 5.5},y={center[1]}),
-    exact=False,
-)
-if bootstrap_quarantine>0:
-    bootstrap_vault=insert_item(
-        Prototype.Coal,
-        bootstrap_vault,
-        quantity=bootstrap_quarantine,
-    )
-
+{container_binding}
 coal_drill=place_entity(
     Prototype.BurnerMiningDrill,
-    position=Position(x={center[0]},y={center[1]}),
+    position=Position(x={target[0]},y={target[1]}),
     direction=Direction.DOWN,
 )
-coal_drill=insert_item(
-    Prototype.Coal,
-    coal_drill,
-    quantity={bootstrap_seed},
-)
+{quarantine_prelude}
+{supply_prelude}
+coal_seed=min({bootstrap_seed},inspect_inventory()[Prototype.Coal])
+if coal_seed>0:
+    coal_drill=insert_item(
+        Prototype.Coal,
+        coal_drill,
+        quantity=coal_seed,
+    )
 coal_chest=place_entity_next_to(
-    Prototype.WoodenChest,
+    coal_container_type,
     coal_drill.position,
     direction=Direction.DOWN,
 )
@@ -4782,6 +5047,7 @@ endogenous_stockpile=inspect_inventory(coal_chest)[Prototype.Coal]
 print({{
     'bootstrap_total':bootstrap_total,
     'bootstrap_quarantine':bootstrap_quarantine,
+    'coal_seed':coal_seed,
     'seed_phase_count':seed_phase_count,
     'transfer_1':transfer_1,
     'internal_stock_before':internal_stock_before,
@@ -4789,6 +5055,7 @@ print({{
     'endogenous_growth':endogenous_growth,
     'endogenous_stockpile':endogenous_stockpile,
     'operational_refuel':operational_refuel,
+    'supply_fuel_drawn':supply_fuel_drawn,
     'player_coal_after':inspect_inventory()[Prototype.Coal],
 }})
 """
@@ -4797,6 +5064,14 @@ print({{
         accept=validate_coal,
         use_checkpoint_for_action=False,
     )
+    drawn = {
+        "coal_seed": measured.get("coal_seed"),
+        "bootstrap_quarantined": measured.get("bootstrap_quarantine"),
+        "supply_fuel_drawn": measured.get("supply_fuel_drawn"),
+        "supply_draws": measured.get("supply_draws"),
+    }
+    journal.state["metrics"]["coal_supply_drawn"] = drawn
+
     if not step.accepted:
         journal.fail_stage(
             6,
@@ -4809,23 +5084,32 @@ print({{
             "reject",
             "Coal self-sufficiency challenger rejected.",
             measurements=measured,
+            placement=drill_plan.to_dict(),
         )
         return False, center
 
-    output = measured["coal_output"]
+    output = float(measured["coal_output"] or 0.0)
     coal_chest = namespace.coal_chest
-    bootstrap_vault = namespace.bootstrap_vault
     duration = _record_observed_window(
         journal,
         clock,
         metric_prefix="coal_mining",
         fallback_seconds=float(seed_seconds + settle_seconds),
     )
+    world_flow = max(
+        0.0,
+        float(measured["coal_world_after"]) - float(measured["coal_world_before"]),
+    )
     journal.state["metrics"].update(
         {
             "coal_output": output,
+            "coal_output_basis": COAL_OUTPUT_BASIS,
+            # The whole surface over the same window, the ancestor's coal
+            # drill included. Recorded beside the attributed reading so the
+            # two are never confused for one another.
+            "coal_world_flow": world_flow,
             "coal_rate_per_s": rate_per_second(output, duration),
-            "coal_bootstrap_seed": float(bootstrap_seed),
+            "coal_bootstrap_seed": measured["coal_seed"],
             "coal_bootstrap_quarantined": measured["bootstrap_quarantine"],
             "coal_endogenous_transfer": measured["transfer_1"],
             "coal_endogenous_growth": measured["endogenous_growth"],
@@ -4840,17 +5124,21 @@ print({{
         "x": float(coal_chest.position.x),
         "y": float(coal_chest.position.y),
     }
-    coal_world["bootstrap_vault"] = {
-        "x": float(bootstrap_vault.position.x),
-        "y": float(bootstrap_vault.position.y),
-    }
+    # The container this stage parked its bootstrap coal in was standing
+    # before the stage ran; recording where it is keeps it apart from the
+    # chest above, which this generation placed.
+    coal_world["bootstrap_vault"] = (
+        None
+        if vault is None
+        else {"x": vault.position[0], "y": vault.position[1], "origin": "adopted"}
+    )
 
     accounting = journal.state["resource_accounting"]["exogenous_inputs"]["coal"]
     accounting.update(
         {
             "status": "self_sufficient",
             "validated_internal_production": output,
-            "bootstrap_seed_used": bootstrap_seed,
+            "bootstrap_seed_used": measured["coal_seed"],
             "bootstrap_quarantined": measured["bootstrap_quarantine"],
             "endogenous_transfer": measured["transfer_1"],
             "endogenous_growth": measured["endogenous_growth"],
@@ -4863,8 +5151,8 @@ print({{
     journal.complete_stage(
         6,
         (
-            f"Coal survived endogenous refueling: {output:.0f} produced, "
-            f"{_measured_text(measured, 'endogenous_stockpile')} buffered "
+            f"Coal survived endogenous refueling: {output:.0f} produced by this "
+            f"cell, {_measured_text(measured, 'endogenous_stockpile')} buffered "
             f"internally, with {_measured_text(measured, 'bootstrap_quarantine')} "
             "bootstrap coal quarantined."
         ),
@@ -4873,10 +5161,12 @@ print({{
         "accept",
         "Coal extraction survived a second window using internally mined fuel.",
         coal_output=output,
-        bootstrap_seed=bootstrap_seed,
+        output_basis=COAL_OUTPUT_BASIS,
+        bootstrap_seed=measured["coal_seed"],
         bootstrap_quarantined=measured["bootstrap_quarantine"],
         endogenous_transfer=measured["transfer_1"],
         endogenous_growth=measured["endogenous_growth"],
+        placement=drill_plan.to_dict(),
         center={"x": center[0], "y": center[1]},
     )
     lesson = synthesize_lesson(
@@ -4884,7 +5174,8 @@ print({{
         facts={
             "accepted": True,
             "coal_output": output,
-            "bootstrap_seed": bootstrap_seed,
+            "output_basis": COAL_OUTPUT_BASIS,
+            "bootstrap_seed": measured["coal_seed"],
             "bootstrap_quarantined": measured["bootstrap_quarantine"],
             "endogenous_transfer": measured["transfer_1"],
             "endogenous_growth": measured["endogenous_growth"],
@@ -4938,6 +5229,7 @@ print({'copper': copper, 'patch': copper_patch})
 
     patch = namespace.copper_patch
     center = patch_center(patch)
+    region = patch_bounds(patch)
     journal.state.setdefault("world", {})["copper_patch"] = {
         "size": patch.size,
         "center": {"x": center[0], "y": center[1]},
@@ -4959,10 +5251,31 @@ print({'copper': copper, 'patch': copper_patch})
         patch_size=patch.size,
     )
 
-    fast_reposition(env, x=center[0], y=center[1])
-    output_before = production_output(namespace, "copper-ore")
-    clock = _StageClock(env)
-    measured: dict[str, float] = {}
+    # The same collision the coal stage has: the promoted checkpoint holds a
+    # copper drill at (-58, 83) with its chest at (-57.5, 84.5), and the exact
+    # centre of this patch snaps onto it. Nothing is adopted -- the ore in the
+    # ancestor's chest is not this generation's expansion.
+    survey = survey_world(env)
+    drill_plan = plan_mining_cell(
+        survey,
+        center,
+        adopt_names=TRIAL_ADOPTS_NOTHING,
+        reach=PLACEMENT_SCAN_REACH,
+        region=region,
+    )
+    journal.state["metrics"]["copper_placement"] = drill_plan.to_dict()
+    if drill_plan.position is None:
+        journal.fail_stage(
+            7,
+            f"Copper expansion found no free tiles on the patch: {drill_plan.reason}.",
+        )
+        journal.event(
+            "refusal",
+            "Copper expansion refused: the standing factory occupies the patch.",
+            placement=drill_plan.to_dict(),
+        )
+        return False, center
+    target = drill_plan.position
 
     # The drill is fuelled once and never refuelled, so a charge that burns
     # out mid-window turns this measurement into a fuel measurement: output
@@ -4974,22 +5287,67 @@ print({'copper': copper, 'patch': copper_patch})
     required_fuel = BURNER_MINING_DRILL.coal_for_seconds(window_estimate)
     fuel_budget = max(int(fuel_budget), required_fuel)
 
+    # The cell's container comes from the world, like every other cell this
+    # curriculum builds inside an inherited factory. The fuel does not: this
+    # stage burns coal the previous one mined, which is the whole claim it
+    # makes, so nothing here is drawn from the world for the drill.
+    supply = survey_stage_supply(
+        env,
+        anchor=(target[0], target[1] - SUPPLY_FURNACE_CLEARANCE),
+        fuel_needed=0,
+        container_needed=True,
+    )
+    journal.state["metrics"]["copper_supply"] = supply_report(supply)
+    blocked = blocking_refusals(supply)
+    if blocked:
+        journal.fail_stage(
+            7,
+            "Copper expansion refused: the standing world holds no container for "
+            f"its cell ({', '.join(blocked)}).",
+        )
+        journal.event(
+            "refusal",
+            "Copper expansion refused: no container in the standing world.",
+            supply=journal.state["metrics"]["copper_supply"],
+        )
+        return False, center
+    supply_prelude = mining_cell_supply_script(supply, fuel_needed=0)
+    copper_container = cell_container(supply)
+    container_binding = (
+        f"copper_container_type = Prototype.{container_prototype(copper_container)}"
+    )
+    journal.state["metrics"]["copper_container"] = copper_container
+
+    fast_reposition(env, x=target[0], y=target[1])
+    output_before = production_output(namespace, "copper-ore")
+    clock = _StageClock(env)
+    measured: dict[str, Any] = {}
+
     def validate_copper(result: Any) -> bool:
         clock.stop()
-        output_after = production_output(namespace, "copper-ore")
-        delta = max(0.0, output_after - output_before)
-        measured["copper_ore_output"] = delta
-        measured["internal_fuel"] = float(
-            getattr(namespace, "copper_mining_fuel", 0.0) or 0.0
+        measured["copper_world_before"] = output_before
+        measured["copper_world_after"] = production_output(namespace, "copper-ore")
+        # An attribute the script never assigned is an abort, not a zero.
+        for key in (
+            "copper_mining_fuel",
+            "copper_drill_fuel",
+            "copper_cell_output",
+            "supply_fuel_drawn",
+        ):
+            measured[key] = _namespace_measure(namespace, key)
+        measured["supply_draws"] = _supply_log_rows(
+            getattr(namespace, "supply_fuel_log", None)
         )
         return (
             not bool(result.info.get("error_occurred"))
             and result.candidate_game_state is not None
-            and measured["internal_fuel"] > 0
-            and delta > 0
+            and _measured_above(measured, "copper_mining_fuel")
+            and _measured_above(measured, "copper_drill_fuel")
+            and _measured_above(measured, "copper_cell_output")
         )
 
     code = f"""
+{container_binding}
 move_to(coal_chest.position)
 copper_mining_fuel=0
 for _ in range(6):
@@ -5007,40 +5365,62 @@ if spendable>0:
         quantity=min({fuel_budget},spendable),
     )
 
-move_to(Position(x={center[0]},y={center[1]}))
+move_to(Position(x={target[0]},y={target[1]}))
 copper_drill=place_entity(
     Prototype.BurnerMiningDrill,
-    position=Position(x={center[0]},y={center[1]}),
+    position=Position(x={target[0]},y={target[1]}),
     direction=Direction.DOWN,
 )
-if copper_mining_fuel>0:
+{supply_prelude}
+copper_drill_fuel=min(copper_mining_fuel,inspect_inventory()[Prototype.Coal])
+if copper_drill_fuel>0:
     copper_drill=insert_item(
         Prototype.Coal,
         copper_drill,
-        quantity=copper_mining_fuel,
+        quantity=copper_drill_fuel,
     )
 copper_chest=place_entity_next_to(
-    Prototype.WoodenChest,
+    copper_container_type,
     copper_drill.position,
     direction=Direction.DOWN,
 )
 sleep({settle_seconds})
-print({{'copper_inventory': inspect_inventory(copper_chest)}})
+copper_cell_output=inspect_inventory(copper_chest)[Prototype.CopperOre]
+print({{
+    'copper_cell_output':copper_cell_output,
+    'copper_mining_fuel':copper_mining_fuel,
+    'copper_drill_fuel':copper_drill_fuel,
+    'supply_fuel_drawn':supply_fuel_drawn,
+}})
 """
     step = executor.execute(
         code,
         accept=validate_copper,
         use_checkpoint_for_action=False,
     )
+    journal.state["metrics"]["copper_supply_drawn"] = {
+        "drill_coal_inserted": measured.get("copper_drill_fuel"),
+        "endogenous_coal_extracted": measured.get("copper_mining_fuel"),
+        "supply_fuel_drawn": measured.get("supply_fuel_drawn"),
+        "supply_draws": measured.get("supply_draws"),
+    }
     if not step.accepted:
         journal.fail_stage(
             7,
             "Copper mining produced no validated output; transaction rolled back.",
         )
-        journal.event("reject", "Copper expansion rejected and rolled back.")
+        journal.event(
+            "reject",
+            "Copper expansion rejected and rolled back.",
+            measurements=measured,
+            placement=drill_plan.to_dict(),
+        )
         return False, center
 
-    output = measured["copper_ore_output"]
+    # Read off the chest this cell drops into, never off the world counter:
+    # the inherited copper drill keeps mining through the window, and its ore
+    # would otherwise be counted as this generation's expansion.
+    output = float(measured["copper_cell_output"] or 0.0)
     # Divide by the window that actually elapsed. Dividing by the sleep
     # literal inflated every copper rate roughly five-fold, because the game
     # ran through the whole step and not only through the sleep.
@@ -5051,24 +5431,30 @@ print({{'copper_inventory': inspect_inventory(copper_chest)}})
         fallback_seconds=float(settle_seconds),
     )
     journal.state["metrics"]["copper_ore_output"] = output
+    journal.state["metrics"]["copper_ore_output_basis"] = COPPER_ORE_OUTPUT_BASIS
+    journal.state["metrics"]["copper_ore_world_flow"] = max(
+        0.0,
+        float(measured["copper_world_after"]) - float(measured["copper_world_before"]),
+    )
     journal.state["metrics"]["copper_mining_fuel_required"] = float(required_fuel)
     journal.state["metrics"]["copper_ore_rate_per_s"] = rate_per_second(
         output,
         window,
     )
     journal.state["metrics"]["copper_mining_reward"] = step.reward
-    journal.state["metrics"]["copper_mining_internal_coal"] = measured.get(
-        "internal_fuel",
-        0.0,
-    )
+    journal.state["metrics"]["copper_mining_internal_coal"] = measured[
+        "copper_mining_fuel"
+    ]
     journal.complete_stage(
         7,
-        f"Copper mining accepted with {output:.0f} copper ore produced.",
+        f"Copper mining accepted with {output:.0f} copper ore in its own chest.",
     )
     journal.event(
         "accept",
         "First persistent copper mining cell accepted.",
         copper_ore_output=output,
+        output_basis=COPPER_ORE_OUTPUT_BASIS,
+        placement=drill_plan.to_dict(),
         center={"x": center[0], "y": center[1]},
     )
     lesson = synthesize_lesson(
@@ -5076,6 +5462,8 @@ print({{'copper_inventory': inspect_inventory(copper_chest)}})
         facts={
             "accepted": True,
             "copper_ore_output": output,
+            "output_basis": COPPER_ORE_OUTPUT_BASIS,
+            "endogenous_coal": measured["copper_mining_fuel"],
             "patch_size": patch.size,
         },
         fallback_lesson=(
@@ -5126,9 +5514,11 @@ def stage_copper_smelting(
 
     def validate_smelting(result: Any) -> bool:
         clock.stop()
-        plate_after = production_output(namespace, "copper-plate")
-        delta = max(0.0, plate_after - plate_before)
-        measured["copper_plate_output"] = delta
+        measured["copper_plate_world_before"] = plate_before
+        measured["copper_plate_world_after"] = production_output(
+            namespace,
+            "copper-plate",
+        )
         # An attribute the script never assigned is an abort, not a zero.
         for key in (
             "copper_ore_transfer",
@@ -5136,12 +5526,17 @@ def stage_copper_smelting(
             "copper_furnace_inventory",
         ):
             measured[key] = _namespace_measure(namespace, key)
+        # Read off the furnace this stage placed. The inherited factory
+        # smelts copper of its own -- the promoted checkpoint carries a
+        # furnace at (-52, 89) -- and the world counter moves with it
+        # whatever this stage does.
+        measured["copper_plate_output"] = measured["copper_furnace_inventory"]
         return (
             not bool(result.info.get("error_occurred"))
             and result.candidate_game_state is not None
             and _measured_above(measured, "copper_ore_transfer")
             and _measured_above(measured, "copper_smelting_fuel")
-            and delta > 0
+            and _measured_above(measured, "copper_plate_output")
         )
 
     code = f"""
@@ -5229,7 +5624,7 @@ print({{
         )
         return False
 
-    plates = measured["copper_plate_output"]
+    plates = float(measured["copper_plate_output"] or 0.0)
     window = _record_observed_window(
         journal,
         clock,
@@ -5237,6 +5632,12 @@ print({{
         fallback_seconds=float(settle_seconds),
     )
     journal.state["metrics"]["copper_plate_output"] = plates
+    journal.state["metrics"]["copper_plate_output_basis"] = COPPER_PLATE_OUTPUT_BASIS
+    journal.state["metrics"]["copper_plate_world_flow"] = max(
+        0.0,
+        float(measured["copper_plate_world_after"])
+        - float(measured["copper_plate_world_before"]),
+    )
     journal.state["metrics"]["copper_smelting_fuel_required"] = float(required_fuel)
     journal.state["metrics"]["copper_plate_rate_per_s"] = rate_per_second(
         plates,
@@ -5259,6 +5660,7 @@ print({{
         "accept",
         "Buffered copper furnace accepted using endogenous coal.",
         copper_plate_output=plates,
+        output_basis=COPPER_PLATE_OUTPUT_BASIS,
         copper_ore_transfer=measured.get("copper_ore_transfer", 0.0),
         endogenous_coal=measured.get("copper_smelting_fuel", 0.0),
     )
@@ -5267,6 +5669,7 @@ print({{
         facts={
             "accepted": True,
             "copper_plate_output": plates,
+            "output_basis": COPPER_PLATE_OUTPUT_BASIS,
             "buffered_copper_ore": measured.get("copper_ore_transfer", 0.0),
             "endogenous_coal": measured.get("copper_smelting_fuel", 0.0),
             "engine_reward": step.reward,

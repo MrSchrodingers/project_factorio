@@ -943,3 +943,55 @@ def test_the_belt_smelting_script_trips_no_fle_failure_trigger() -> None:
     _, executor, _ = _belt_smelting()
 
     assert _no_triggers(_belt_script(executor)) == []
+
+
+def test_belt_smelting_without_a_direct_feed_baseline_reports_no_comparison() -> None:
+    """A baseline no stage measured is not a baseline of zero.
+
+    ``metrics.get("direct_smelting_duration_s", 0.0)`` handed
+    ``normalized_rate_ratio`` a zero-second window, and ``rate_per_second``
+    raises ``duration_s must be positive`` from inside a stage whose own
+    window was measured perfectly well. The stage now reports the absence as
+    no comparison and keeps the window it did measure.
+    """
+    world = _FakeWorld()
+    env = _FakeEnv(world)
+    executor = _FakeExecutor(env)
+    journal = _FakeJournal()
+    assert curriculum_runner.stage_smelting_probe(
+        executor,
+        env,
+        journal,
+        center=CENTRE,
+        settle_seconds=24,
+        region=PATCH_BOUNDS,
+    )
+    logistics = curriculum_runner.stage_astar_logistics(
+        executor,
+        env,
+        journal,
+        center=CENTRE,
+        settle_seconds=20,
+        turn_penalty=0.5,
+        region=PATCH_BOUNDS,
+    )
+    assert logistics is not None
+    for key in (
+        "iron_plate_output",
+        "direct_smelting_duration_s",
+        "direct_smelting_plate_rate_per_s",
+    ):
+        journal.state["metrics"].pop(key, None)
+
+    accepted = curriculum_runner.stage_belt_smelting(
+        executor,
+        env,
+        journal,
+        logistics=logistics,
+        settle_seconds=20,
+    )
+
+    assert accepted
+    metrics = journal.state["metrics"]
+    assert metrics["belt_smelting_vs_direct_rate_ratio"] is None
+    assert metrics["belt_smelting_plate_rate_per_s"] > 0
