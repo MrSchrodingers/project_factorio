@@ -7,84 +7,163 @@ from typing import Any
 from factorio_ai_lab.agents.llm_router import default_free_router
 
 
-def _compact_llm_context(value: Any, depth: int = 0) -> Any:
-    """Bound advisor context so local 8k models receive only decision evidence."""
-    if depth >= 4:
-        if isinstance(value, (dict, list, tuple)):
-            return "<truncated>"
-        return value
+def _budget_key(key: str, budget: int) -> str:
+    """Shorten a key to its share, keeping it distinguishable.
+
+    A key carries meaning, so it degrades rather than disappearing; the tail
+    is kept because the distinguishing part of these keys is at the end
+    (`..._rate_per_s`, `..._output`).
+    """
+    limit = max(_MIN_KEY_CHARS, min(len(key), budget))
+    if len(key) <= limit:
+        return key
+    head = (limit - 3) // 2
+    tail = limit - 3 - head
+    return key[:head] + "..." + key[len(key) - tail :]
+
+
+def _budget_json(value: Any, budget: int, depth: int = 0) -> Any:
+    """Shrink a structure to fit a character budget without emptying it.
+
+    The previous compactor dropped every dict or list whose key was not in a
+    hardcoded preference list. The contexts the loop actually builds are keyed
+    `previous_run`, `champion`, `history` - none of which were listed - so the
+    evidence was discarded and the model received `{}`. Measured on the real
+    context: a 2-character payload. An advisor with no evidence cannot advise,
+    which is why the mutation had been purely stochastic for 15 generations.
+
+    Budgeting instead of listing keeps the shape of whatever it is handed:
+    unknown keys survive, lists keep their most recent entries, and long
+    strings are cut rather than dropped. Nothing disappears silently.
+    """
+    if budget <= 0:
+        return "<omitted>"
     if value is None or isinstance(value, (bool, int, float)):
         return value
     if isinstance(value, str):
-        return value if len(value) <= 480 else value[:477] + "..."
+        limit = max(24, min(len(value), budget))
+        return value if len(value) <= limit else value[: limit - 3] + "..."
+    if depth >= 6:
+        return "<deep>"
+
     if isinstance(value, dict):
-        preferred = (
-            "run_id",
-            "status",
-            "stage",
-            "detail",
-            "next_action",
-            "phase",
-            "reason",
-            "promoted",
-            "regressions",
-            "improvements",
-            "configuration",
-            "fitness",
-            "metrics",
-            "counterexample",
-            "recent_counterexamples",
-            "candidate_before_advice",
-            "previous_validation_strategy",
-            "champion_configuration",
-        )
-        ordered: list[tuple[str, Any]] = []
-        seen: set[str] = set()
-        for key in preferred:
-            if key in value:
-                ordered.append((key, value[key]))
-                seen.add(key)
-        for key in sorted(value):
-            if key in seen:
-                continue
-            item = value[key]
-            if isinstance(item, (str, int, float, bool, type(None))):
-                ordered.append((str(key), item))
-            if len(ordered) >= 24:
-                break
+        if not value:
+            return {}
+        # Preferred keys go first and get a larger share; the rest still get a
+        # share, so a field added later is never invisible.
+        ordered = [k for k in _PREFERRED_KEYS if k in value]
+        ordered += [k for k in sorted(value) if k not in _PREFERRED_KEYS]
+        # How many fit is a budget question, not a fixed number. A constant cap
+        # drops fields the budget could have carried, which is the same defect
+        # as the preference list it replaced: a rule unrelated to the
+        # constraint decides what the model gets to see.
+        ordered = ordered[: _fits(budget, len(ordered))]
+        if not ordered:
+            return {}
+        share = max(_MIN_SHARE, budget // len(ordered))
+        # Keys were counted but never shrunk, so a context whose keys are long
+        # could not be brought under the budget by any number of rounds and
+        # the payload fell back to slicing the serialised string, which cuts
+        # mid-token and yields JSON the advisor cannot parse.
         return {
-            str(key): _compact_llm_context(item, depth + 1)
-            for key, item in ordered[:24]
+            _budget_key(str(key), share): _budget_json(
+                value[key], share, depth + 1
+            )
+            for key in ordered
         }
+
     if isinstance(value, (list, tuple)):
         rows = list(value)
-        if len(rows) > 8:
-            rows = rows[-8:]
-        return [_compact_llm_context(item, depth + 1) for item in rows]
-    return str(value)[:480]
+        if not rows:
+            return []
+        # Recency decides which rows to lose, but only when the budget forces
+        # a loss: rows that fit are kept, and what is kept is always a
+        # contiguous tail, never a sample.
+        rows = rows[-_fits(budget, len(rows)) :]
+        share = max(_MIN_SHARE, budget // len(rows))
+        return [_budget_json(item, share, depth + 1) for item in rows]
+
+    return _budget_json(str(value), budget, depth)
+
+
+#: Fields that carry the most decision weight; they are ordered first, never
+#: used to exclude anything.
+_PREFERRED_KEYS = (
+    "arena",
+    "stage",
+    "status",
+    "detail",
+    "next_action",
+    "reason",
+    "promoted",
+    "regressions",
+    "improvements",
+    "counterexample",
+    "metrics",
+    "fitness",
+    "configuration",
+    "champion_configuration",
+    "previous_validation_strategy",
+    "previous_run",
+    "recent_counterexamples",
+)
+
+#: Seconds allowed for one advisory call. A generation takes about 17
+#: minutes, so a minute of advice is cheap; timing out and silently reverting
+#: to random mutation is what was expensive.
+_ADVISOR_TIMEOUT_S = 150.0
+
+#: Enough for the schema-constrained answer plus slack. At 220 the model hit
+#: `finish_reason: length` before completing the object.
+_ADVISOR_MAX_TOKENS = 420
+
+#: Smallest share of the budget worth giving one entry. Below this an entry
+#: degrades to an ellipsis and carries no evidence, so the budget is spent on
+#: fewer entries instead of on more unreadable ones.
+_MIN_SHARE = 48
+
+#: Shortest a key may be cut to and still tell two fields apart.
+_MIN_KEY_CHARS = 24
+
+
+def _fits(budget: int, available: int) -> int:
+    """How many entries this budget can carry, at least one."""
+    return max(1, min(available, budget // _MIN_SHARE))
+
+#: Characters, not tokens. The local model runs with an 8k context and the
+#: prompt and completion share it, so the evidence is held well under that.
+_CONTEXT_BUDGET_CHARS = 2600
 
 
 def _advisor_payload(context: dict[str, Any]) -> str:
-    compact = _compact_llm_context(context)
-    payload = json.dumps(compact, sort_keys=True, separators=(",", ":"), default=str)
-    if len(payload) <= 6200:
-        return payload
-    # Last-resort deterministic envelope keeps the most relevant decision fields.
-    fallback = {
-        "champion_configuration": compact.get("champion_configuration")
-        if isinstance(compact, dict)
-        else None,
-        "previous_validation_strategy": compact.get("previous_validation_strategy")
-        if isinstance(compact, dict)
-        else None,
-        "counterexample": compact.get("counterexample")
-        if isinstance(compact, dict)
-        else None,
-        "candidate_before_advice": compact.get("candidate_before_advice")
-        if isinstance(compact, dict)
-        else None,
-    }
-    return json.dumps(fallback, sort_keys=True, separators=(",", ":"), default=str)
+    """Serialise the advisor context, shrinking until it fits the budget.
+
+    Returns a payload that still contains evidence: shrinking is by budget, so
+    the result degrades in detail rather than collapsing to an empty object.
+    """
+    budget = _CONTEXT_BUDGET_CHARS
+    for _ in range(6):
+        compact = _budget_json(context, budget)
+        payload = json.dumps(
+            compact, sort_keys=True, separators=(",", ":"), default=str
+        )
+        if len(payload) <= _CONTEXT_BUDGET_CHARS:
+            return payload
+        budget = int(budget * 0.7)
+    # Six rounds did not converge. Slicing the serialised string would cut
+    # mid-token and hand the model something it cannot parse, which is worse
+    # than handing it less: a payload that fails to parse carries no evidence
+    # at all. The last resort is therefore a well-formed envelope that still
+    # names what was dropped.
+    return json.dumps(
+        {
+            "truncated": True,
+            "reason": "context did not fit the budget after six rounds",
+            "keys": sorted(str(key)[:40] for key in context)[:12],
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )[:_CONTEXT_BUDGET_CHARS]
 
 
 PARAMETERS = (
@@ -169,7 +248,7 @@ def propose_evolution_advice(context: dict[str, Any]) -> EvolutionAdvice:
         bounded_router = type(base_router)(
             replace(
                 provider,
-                timeout_s=min(float(provider.timeout_s), 15.0),
+                timeout_s=max(float(provider.timeout_s), _ADVISOR_TIMEOUT_S),
             )
             for provider in base_router.providers
         )
@@ -190,7 +269,7 @@ def propose_evolution_advice(context: dict[str, Any]) -> EvolutionAdvice:
                 },
             ],
             temperature=0.1,
-            max_tokens=220,
+            max_tokens=_ADVISOR_MAX_TOKENS,
             response_format=schema,
         )
         parsed = json.loads(result["choices"][0]["message"]["content"])
