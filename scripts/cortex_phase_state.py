@@ -193,6 +193,14 @@ def build_phase_state(
         state_root / "docs" / "CORTEX_PHASE2_STRUCTURAL_PREPARATION.md"
     )
     phase2_preparation=phase2_preparation_path.exists()
+    phase2_execution_path=(
+        state_root / "docs" / "CORTEX_PHASE2_TRANSACTIONAL_EXECUTION.md"
+    )
+    phase2_execution=phase2_execution_path.exists()
+    phase2_canary_path=(
+        state_root / "runs" / "audits" / "cortex_f2e_structural_canary.json"
+    )
+    phase2_canary=phase2_canary_path.exists()
 
     if blocked_running:
         action=f"monitor seed {exploratory['running'][0]}"
@@ -246,12 +254,24 @@ def build_phase_state(
             "exists":phase2_started,
         },
         "phase2_checkpoint":(
-            "F2-D"
-            if phase2_preparation
+            "F2-E2"
+            if phase2_canary
             else (
-                "F2-C"
-                if phase2_structural
-                else ("F2-B" if phase2_parity else ("F2-A" if phase2_started else None))
+                "F2-E1"
+                if phase2_execution
+                else (
+                    "F2-D"
+                    if phase2_preparation
+                    else (
+                        "F2-C"
+                        if phase2_structural
+                        else (
+                            "F2-B"
+                            if phase2_parity
+                            else ("F2-A" if phase2_started else None)
+                        )
+                    )
+                )
             )
         ),
         "phase2_parity":{
@@ -265,6 +285,14 @@ def build_phase_state(
         "phase2_preparation":{
             "path":str(phase2_preparation_path),
             "exists":phase2_preparation,
+        },
+        "phase2_execution":{
+            "path":str(phase2_execution_path),
+            "exists":phase2_execution,
+        },
+        "phase2_canary":{
+            "path":str(phase2_canary_path),
+            "exists":phase2_canary,
         },
         "modes":modes,
         "resume":{

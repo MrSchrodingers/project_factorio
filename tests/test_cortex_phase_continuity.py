@@ -423,3 +423,46 @@ def test_phase_state_marks_f2d_when_structural_preparation_document_exists(tmp_p
     assert state["phase2_checkpoint"] == "F2-D"
     assert state["phase2_preparation"]["exists"] is True
     assert state["resume"]["action"] == "F2 active; follow docs/CORTEX_HANDOFF.md"
+
+def test_phase_state_tracks_f2e1_and_f2e2_from_persisted_artifacts(tmp_path) -> None:
+    module=_module("cortex_phase_state.py")
+    protocol=tmp_path/"protocol.json"
+    _protocol(protocol)
+
+    for seed in (11,12):
+        seed_dir=tmp_path/"baseline_runs"/"p1"/"exploratory"/str(seed)
+        seed_dir.mkdir(parents=True)
+        (seed_dir/"manifest.json").write_text(json.dumps({
+            "status":"completed",
+            "returncode":0,
+            "release":{"commit":"abc"},
+        })+"\n")
+        (seed_dir/"result.json").write_text(json.dumps({
+            "code_revision":{"commit":"abc","dirty":False},
+            "challenger":{"fitness":{}},
+        })+"\n")
+
+    docs=tmp_path/"docs"
+    docs.mkdir()
+    for name in (
+        "CORTEX_PHASE1_BASELINE_STATISTICAL_REPORT.md",
+        "CORTEX_PHASE2_ACTION_ONTOLOGY.md",
+        "CORTEX_PHASE2_LEGACY_PARITY.md",
+        "CORTEX_PHASE2_STRUCTURAL_PLANNING.md",
+        "CORTEX_PHASE2_STRUCTURAL_PREPARATION.md",
+        "CORTEX_PHASE2_TRANSACTIONAL_EXECUTION.md",
+    ):
+        (docs/name).write_text("# checkpoint\n")
+
+    state=module.build_phase_state(state_root=tmp_path,protocol_path=protocol)
+    assert state["phase2_checkpoint"] == "F2-E1"
+    assert state["phase2_execution"]["exists"] is True
+    assert state["phase2_canary"]["exists"] is False
+
+    audit=tmp_path/"runs"/"audits"
+    audit.mkdir(parents=True)
+    (audit/"cortex_f2e_structural_canary.json").write_text("{}\n")
+
+    state=module.build_phase_state(state_root=tmp_path,protocol_path=protocol)
+    assert state["phase2_checkpoint"] == "F2-E2"
+    assert state["phase2_canary"]["exists"] is True

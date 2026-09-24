@@ -32,6 +32,13 @@ from factorio_ai_lab.cortex.structural import (
     StructuralProcessingPlan,
     plan_processing_for_buffered_output,
 )
+from factorio_ai_lab.cortex.structural_execute import (
+    CompiledStructuralAction,
+    StructuralCompilationResult,
+    StructuralTransactionalAdapter,
+    compile_structural_action,
+    execution_guard_conditions,
+)
 from factorio_ai_lab.cortex.structural_prepare import (
     PreparedStructuralAction,
     StructuralOperation,
@@ -48,6 +55,7 @@ __all__ = [
     "ActionRequest",
     "ActionResult",
     "ActionStatus",
+    "CompiledStructuralAction",
     "ConditionOperator",
     "ConditionState",
     "EvidenceRef",
@@ -57,10 +65,14 @@ __all__ = [
     "PreparedStructuralAction",
     "ProcessingBranch",
     "Refusal",
+    "StructuralCompilationResult",
     "StructuralOperation",
     "StructuralPreparationResult",
     "StructuralProcessingPlan",
+    "StructuralTransactionalAdapter",
     "UniversalExecutor",
+    "compile_structural_action",
+    "execution_guard_conditions",
     "plan_processing_for_buffered_output",
     "prepare_structural_branch",
     "request_from_repair_action",

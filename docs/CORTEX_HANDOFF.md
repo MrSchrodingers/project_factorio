@@ -6,12 +6,12 @@
 ## Estado atual
 
 - Programa: Cortex Research Architecture v0.1
-- Fase: **F2-D concluída — F2-E autorizada; authority live contínua ainda bloqueada**
+- Fase: **F2-E1 ativa — adapter validado; F2-E2 canário pendente; authority contínua bloqueada**
 - Branch: `research/cortex-v1`
 - Baseline imutável de origem: `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 - Tag baseline publicada: `cortex-pre-research-baseline-20260923`
 - Handoff histórico: `docs/HANDOFF-CORTEX.md`
-- Runtime: arquitetura herdada ainda controla o jogo; UniversalExecutor Cortex está em SHADOW e não possui nova autoridade live.
+- Runtime: F2-E possui EXECUTE apenas por chamada explícita no adapter; não há scheduler/grant contínuo. Evolution está disabled após reboot.
 
 ## Regra de retomada
 
@@ -46,41 +46,37 @@ silenciosamente pelo commit da F0**.
 
 ## Próxima ação
 
-**F2-E — controlled transactional execution de PreparedStructuralAction.**
+**Fechar F2-E1 em commit limpo; depois executar F2-E2 canário isolado.**
 
-F2-D está formalmente concluída.
+Estado F2-E1 comprovado:
 
-Evidência:
-
-- implementation commit: 19e0c4fb57f7aa8dbd34c272324383617f7916d1;
-- 44 focused PASS;
-- 1340 core/FLE PASS;
-- 2 PyTorch PASS;
-- frontend TypeScript/Vite build PASS;
-- live shadow audit: runs/audits/cortex_f2d_live_structural_shadow.json;
-- u1778 identificado causalmente como coal mesmo com buffer vazio;
-- u1838 desambiguado de coal + iron-ore para iron-ore por ResourceSurvey;
-- u1839 identificado como iron-ore;
-- branch agregado iron-ore -> iron-plate / stone-furnace;
-- PreparedStructuralAction ready=true;
-- world_mutation=false;
-- scientific runtime F1 continua 95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac, dirty=false.
+- StructuralTransactionalAdapter exige ActionAuthority.EXECUTE explícita;
+- utiliza exclusivamente TransactionalFLEExecutor para commit/rollback;
+- Prototype names são validados contra o enum FLE real;
+- direct-inserter é o único delivery mode autorizado neste checkpoint;
+- hard guards: producers_reaching_processor aumenta, processor_exists == true e processor_output aumenta;
+- engine, measurement e postcondition failures têm refusals distintas;
+- rollback foi provado em replay/fake com checkpoint serializado;
+- 35 focused continuity/execution tests PASS neste checkpoint;
+- dry-run do canário sem --execute retorna world_mutation=false;
+- confirmatory seeds 20261101–20261110 são recusadas no runner;
+- factorio-ai-evolution está inactive e disabled após o reboot;
+- runtime F1 segue 95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac, dirty=false.
 
 Documento canônico:
-docs/CORTEX_PHASE2_STRUCTURAL_PREPARATION.md
+docs/CORTEX_PHASE2_TRANSACTIONAL_EXECUTION.md
 
-Primeiro bloco seguro de F2-E:
+Sequência obrigatória:
 
-1. criar adapter que consome PreparedStructuralAction;
-2. exigir ActionAuthority.EXECUTE explicitamente;
-3. compilar operações semânticas para FLE usando TransactionalFLEExecutor;
-4. medir todas hard postconditions;
-5. rollback em postcondition failure;
-6. executar primeiro somente em canary/replay isolado;
-7. comparar com shadow plan e registrar ActionResult;
-8. não conceder continuous autonomous authority.
+1. full gate;
+2. commit/push F2-E1;
+3. confirmar árvore clean + evolution inactive;
+4. executar uma única vez scripts/run_cortex_structural_canary.py --execute --seed 424242;
+5. analisar runs/audits/cortex_f2e_structural_canary.json;
+6. documentar accepted ou rejected sem alterar o gate para fabricar sucesso;
+7. somente depois decidir próximo checkpoint.
 
-Não executar seeds confirmatórias 20261101–20261110. Não criar handler específico de green science.
+F3 NÃO está autorizada. Continuous autonomous authority NÃO está autorizada.
 
 ## Protocolo de retomada após interrupção
 

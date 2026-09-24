@@ -938,7 +938,7 @@ script, purpose e refusal semantics dos handlers legados, sem world mutation. Ev
 
 **Decision F2-C:** **PASS parcial de F2.** O gap replicado da F1 deixou de ser unbound quando há evidence material suficiente. Transactional execution universal continua aberta; buffer contaminado permanece refusal até ResourceSurvey/mining-target evidence.
 
-**F2-D progress:** **IMPLEMENTADO / gate integral pendente.** ResourceSurvey sobre o footprint do
+**F2-D progress:** **PASS.** ResourceSurvey sobre o footprint do
 producer agora tem precedência causal sobre downstream buffer contents. Buffer contaminado não
 destrói identidade quando o recurso minerado é observado; mixed-resource footprint permanece
 refusal e não há majority heuristic. ProcessingBranch compila para PreparedStructuralAction
@@ -962,7 +962,25 @@ tests/test_cortex_structural.py; phase-state/dashboard context atualizados.
 
 **Decision F2-D:** **PASS parcial de F2.** Resource identity causal e PreparedStructuralAction estão validados em SHADOW. F2-E está autorizada somente para controlled transactional execution com authority explícita, rollback e hard postconditions medidas.
 
-**Next:** F2-E — controlled transactional execution de PreparedStructuralAction via TransactionalFLEExecutor, com postconditions verificadas e rollback. Sem autonomous continuous authority.
+**F2-E1 progress:** **IMPLEMENTADO / canário real pendente.** StructuralTransactionalAdapter
+compila PreparedStructuralAction para FLE validado, exige EXECUTE explícito e usa
+TransactionalFLEExecutor como única fronteira de commit/rollback. Hard guards exigem aumento de
+producers_reaching_processor, processor_exists == true e processor_output crescente. Engine,
+measurement e hypothesis failures permanecem causalmente distintos.
+
+**Evidence F2-E1:** docs/CORTEX_PHASE2_TRANSACTIONAL_EXECUTION.md;
+src/factorio_ai_lab/cortex/structural_execute.py;
+scripts/run_cortex_structural_canary.py;
+tests/test_cortex_structural_execute.py;
+tests/test_cortex_structural_canary_contract.py.
+
+**Tests F2-E1 focused:** 35 continuity/execution PASS neste checkpoint; dry-run do canário
+fail-closed com world_mutation=false. Full gate ainda obrigatório antes do canário real.
+
+**Decision F2-E1:** **PENDENTE DE FULL GATE/COMMIT.** F2-E2 não pode executar de working tree dirty.
+
+**Next:** após commit limpo, F2-E2 — one-shot controlled Factorio canary em seed 424242.
+Continuous autonomous authority continua proibida.
 
 **Exit Gate F2:** o agente pode montar uma cadeia funcional escolhendo primitivas/options por uma
 API genérica, sem caminho codificado por estágio.

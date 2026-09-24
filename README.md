@@ -23,6 +23,7 @@ com experiência sem receber do programador a sequência de ações que constitu
 > **F2-B — Legacy parity:** [docs/CORTEX_PHASE2_LEGACY_PARITY.md](docs/CORTEX_PHASE2_LEGACY_PARITY.md)
 > **F2-C — Structural planning:** [docs/CORTEX_PHASE2_STRUCTURAL_PLANNING.md](docs/CORTEX_PHASE2_STRUCTURAL_PLANNING.md)
 > **F2-D — Resource identity / preparation:** [docs/CORTEX_PHASE2_STRUCTURAL_PREPARATION.md](docs/CORTEX_PHASE2_STRUCTURAL_PREPARATION.md)
+> **F2-E — Controlled transactional execution:** [docs/CORTEX_PHASE2_TRANSACTIONAL_EXECUTION.md](docs/CORTEX_PHASE2_TRANSACTIONAL_EXECUTION.md)
 > **F1-B — storage hardening:** [docs/CORTEX_F1_STORAGE_HARDENING.md](docs/CORTEX_F1_STORAGE_HARDENING.md)
 > **Dashboard / evidence scope:** [docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md](docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md)
 > **Dashboard / tmp hardening:** [docs/CORTEX_DASHBOARD_TMP_HARDENING.md](docs/CORTEX_DASHBOARD_TMP_HARDENING.md)
@@ -30,9 +31,9 @@ com experiência sem receber do programador a sequência de ações que constitu
 
 ## Estado do programa
 
-**Cortex Research Architecture v0.1 — F2-D concluída em SHADOW. ResourceSurvey fornece material
-identity causal e ProcessingBranch compila para PreparedStructuralAction inerte. F2-E está
-autorizada apenas como controlled transactional execution; continuous autonomous authority continua bloqueada.**
+**Cortex Research Architecture v0.1 — F2-E1 ativa. O adapter transacional controlado já está
+validado contra TransactionalFLEExecutor com commit/rollback e hard functional guards; o canário
+Factorio F2-E2 ainda não foi executado. Continuous autonomous authority permanece bloqueada.**
 
 As seeds confirmatórias 20261101–20261110 permanecem congeladas e não executadas; serão usadas
 posteriormente para avaliação pareada do Cortex, sem tuning nelas.
