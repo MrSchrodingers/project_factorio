@@ -105,6 +105,43 @@ def test_latest_completed_seed_is_selected_when_idle(tmp_path) -> None:
     assert first.exists()
 
 
+def test_series_progress_uses_frozen_protocol_seed_count(tmp_path) -> None:
+    protocol = tmp_path / "protocol.json"
+    protocol.write_text(
+        json.dumps(
+            {
+                "schema_version": "p1",
+                "exploratory_seeds": [1, 2, 3, 4, 5],
+            }
+        )
+        + "\n"
+    )
+    for seed, finished in ((1, "2026-01-01T01:00:00+00:00"), (2, "2026-01-02T01:00:00+00:00")):
+        path = _seed(
+            tmp_path,
+            seed=seed,
+            status="completed",
+            started=finished,
+            finished=finished,
+        )
+        manifest = json.loads((path / "manifest.json").read_text())
+        manifest["protocol_path"] = str(protocol)
+        (path / "manifest.json").write_text(json.dumps(manifest) + "\n")
+        (path / "result.json").write_text("{}\n")
+
+    ctx = discover_experiment_context(
+        tmp_path,
+        scope="baseline:p1:exploratory:auto",
+    )
+
+    assert ctx["series_progress"] == {
+        "completed": 2,
+        "configured": 5,
+        "running": 0,
+        "pending": 3,
+    }
+
+
 def test_missing_baseline_does_not_fall_back_silently(tmp_path) -> None:
     ctx=discover_experiment_context(
         tmp_path,

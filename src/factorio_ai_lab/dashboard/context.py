@@ -133,6 +133,33 @@ def discover_experiment_context(
     )
     selected.pop("_sort_time",None)
 
+    configured_seeds: list[int] = []
+    protocol_path = (selected.get("manifest") or {}).get("protocol_path")
+    if isinstance(protocol_path, str):
+        protocol_payload = _load_object(Path(protocol_path)) or {}
+        raw_seeds = protocol_payload.get(f"{mode}_seeds", [])
+        if isinstance(raw_seeds, list):
+            configured_seeds = [
+                int(value)
+                for value in raw_seeds
+                if isinstance(value, (int, float))
+            ]
+    completed_count = sum(
+        row.get("status") == "completed" and isinstance(row.get("result"), dict)
+        for row in candidates
+    )
+    selected["series_progress"] = {
+        "completed": completed_count,
+        "configured": len(configured_seeds) or len(candidates),
+        "running": sum(row.get("status") == "running" for row in candidates),
+        "pending": max(
+            0,
+            (len(configured_seeds) or len(candidates))
+            - completed_count
+            - sum(row.get("status") == "running" for row in candidates),
+        ),
+    }
+
     result=selected.get("result")
     challenger=(result or {}).get("challenger") if isinstance(result,dict) else None
     fitness=(challenger or {}).get("fitness") if isinstance(challenger,dict) else None

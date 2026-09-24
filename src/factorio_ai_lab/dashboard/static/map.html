@@ -37,6 +37,7 @@
         "<b>WORLD · LIVE RCON</b> · " + (ctx.label || ctx.scope || "--")
         + " · " + (world.entity_count || 0) + " entities"
         + " · " + scienceText
+        + (ctx.status === "completed" ? " · post-run world keeps ticking" : "")
         + " · evidence ≠ global legacy state";
     }).catch(() => {});
   </script>

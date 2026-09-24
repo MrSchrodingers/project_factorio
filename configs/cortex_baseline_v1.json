@@ -27,5 +27,7 @@
     "code_revision_must_be_clean": true,
     "runtime_release_must_have_build_info": true,
     "g37_is_excluded_from_confirmatory_baseline": true
-  }
+  },
+  "scientific_release_commit": "95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac",
+  "scientific_release_root": "/srv/factorio-ai-runtime/releases/95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac"
 }

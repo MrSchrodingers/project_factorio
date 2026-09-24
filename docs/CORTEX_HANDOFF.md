@@ -6,7 +6,7 @@
 ## Estado atual
 
 - Programa: Cortex Research Architecture v0.1
-- Fase: **F1-A concluída; F1-B é a próxima subfase autorizada**
+- Fase: **F1-A concluída; F1-B ativa — 2/5 seeds exploratórias válidas**
 - Branch: `research/cortex-v1`
 - Baseline imutável de origem: `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 - Tag baseline publicada: `cortex-pre-research-baseline-20260923`
@@ -46,46 +46,32 @@ silenciosamente pelo commit da F0**.
 
 ## Próxima ação
 
-**F1-B — baseline corrigida independente por seed: executar 20261002.**
+**F1-B — executar seed exploratória 20261003.**
 
-Seed 20261001: **VALID / partial_success**.
+Seeds concluídas e válidas:
 
-- release: 95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac, dirty=false;
-- run: curriculum-20260924T043932Z;
-- completed stages: 14;
-- bottleneck: Logistic science;
-- autonomy score: 0.5;
-- closed-loop: false;
-- physical processing coverage: 33.3%;
-- manual logistics calls: 53;
-- fuel/power starvation final: 0/0;
-- isolation global: PASS;
-- logistic science output: 0;
-- root limitation: producer outputs buffered without processor reach; proposed placement repair
-  was not executable because the inherited runner has no_runner_binding_for_intent.
+- 20261001: partial_success, Logistic science, autonomy 0.50, coverage 33.3%, fuel-starved 0;
+- 20261002: partial_success, Logistic science, autonomy 0.375, coverage 50.0%, fuel-starved 1.
 
-Do not fix gameplay/repair/planning code before finishing the five exploratory seeds. The
-baseline runtime remains pinned to 95c34a53, even if analysis/docs commits advance the source
-branch.
+Padrão comum 2/2:
 
-Next run: seed 20261002, mode exploratory, using the same explicit release root and PYTHONPATH.
-Validate result and isolation before 20261003.
+- logistic_science_output = 0;
+- closed_loop_autonomy = false;
+- manual_logistics_calls = 53;
+- endogenous_rate_per_s = 0.60628371;
+- placement repair place_processing_for_buffered_output não executa por no_runner_binding_for_intent;
+- isolation global = PASS;
+- scientific runtime = 95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac.
 
-Dashboard deploy validado:
+Dashboard:
 
-- dashboard release: 8ce05ba3a4eb48ed681fcaba1103913aa7505708;
-- agent/baseline release: 95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac;
-- responsive preview: 1366x768, 1600x900 e 1920x1080 gerados;
-- bundle hash app.js: d9f75008e955;
-- runner ativo: false após seed 20261001.
+- runtime separado = 8ce05ba3a4eb48ed681fcaba1103913aa7505708;
+- scope = baseline:cortex_baseline_protocol_v1:exploratory:auto;
+- após 20261002, /api/context resolve seed 20261002 completed;
+- world continua live RCON; evidence continua sandbox da seed.
 
-Dashboard contract for F1-B:
-
-- scope: baseline:cortex_baseline_protocol_v1:exploratory:auto;
-- /api/context must resolve current/latest baseline seed;
-- world source remains live RCON;
-- no G37/G97 global selection may appear as current baseline evidence;
-- dashboard runtime is independent from the frozen scientific runtime.
+Não corrigir gameplay/planning/repair antes de terminar 20261003–20261005.
+Próxima execução autorizada: somente 20261003, seguida por validation + isolation + diagnóstico.
 
 ## Protocolo de retomada após interrupção
 
@@ -102,6 +88,11 @@ Não inferir continuidade pela tela. Executar na ordem:
 
 Durante a série exploratória o runtime científico deve permanecer em
 95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac mesmo que source e dashboard avancem.
+
+Checkpoint mecânico: executar `scripts/cortex_phase_state.py --write` e obedecer `resume.action`.
+Novas seeds devem ser iniciadas por `scripts/launch_corrected_baseline_seed.py`, que desacopla a
+execução da sessão SentinelX e recusa SHA incorreto, seed duplicada e evolution concorrente.
+Detalhes: docs/CORTEX_CONTINUITY_PROTOCOL.md.
 
 ## Evidência de fechamento da F0
 

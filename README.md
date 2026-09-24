@@ -14,12 +14,14 @@ com experiência sem receber do programador a sequência de ações que constitu
 > **F1 — integridade e isolamento:** [docs/CORTEX_PHASE1_INTEGRITY.md](docs/CORTEX_PHASE1_INTEGRITY.md)
 > **F1-B — protocolo da baseline:** [docs/CORTEX_PHASE1_BASELINE_PROTOCOL.md](docs/CORTEX_PHASE1_BASELINE_PROTOCOL.md)
 > **F1-B — seed 20261001:** [docs/CORTEX_PHASE1_BASELINE_SEED_20261001.md](docs/CORTEX_PHASE1_BASELINE_SEED_20261001.md)
+> **F1-B — seed 20261002:** [docs/CORTEX_PHASE1_BASELINE_SEED_20261002.md](docs/CORTEX_PHASE1_BASELINE_SEED_20261002.md)
 > **Dashboard / evidence scope:** [docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md](docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md)
+> **Continuidade / retomada:** [docs/CORTEX_CONTINUITY_PROTOCOL.md](docs/CORTEX_CONTINUITY_PROTOCOL.md)
 
 ## Estado do programa
 
 **Cortex Research Architecture v0.1 — F1-A concluída; G37 aposentada. F1-B está em execução:
-1/5 seeds exploratórias válidas (20261001 concluída), com runtime da baseline congelado em
+2/5 seeds exploratórias válidas (20261001–20261002), com runtime científico congelado em
 95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac.**
 
 A arquitetura anterior permanece disponível como baseline. Ela possui excelente instrumentação,

@@ -1,6 +1,6 @@
 # Cortex Research — F1-B Baseline Corrigida
 
-**Status:** PRE-REGISTERED / READY TO RUN.
+**Status:** RUNNING — 2/5 exploratory observations valid.
 **Pré-condição:** F1-A PASS e G37 aposentada de forma reversível.
 **Objetivo:** medir a arquitetura pré-Cortex corrigida sob execução limpa, sem herança entre seeds.
 
@@ -64,12 +64,11 @@ Fonte canônica: configs/cortex_baseline_v1.json.
 
 ### Exploratory
 
-**Progress:** 1/5 valid observations. Seed 20261001 is documented in
-[docs/CORTEX_PHASE1_BASELINE_SEED_20261001.md](CORTEX_PHASE1_BASELINE_SEED_20261001.md) and is retained as a valid partial-success result.
+**Progress:** 2/5 valid observations. Seeds 20261001 and 20261002 are retained as valid partial-success results. Both stop at Logistic science with zero green-science output; detailed per-seed evidence is versioned separately.
 
 
 - [x] 20261001
-- [ ] 20261002
+- [x] 20261002
 - [ ] 20261003
 - [ ] 20261004
 - [ ] 20261005
@@ -204,6 +203,11 @@ Execução:
     python scripts/run_corrected_baseline_seed.py --seed 20261001 --mode exploratory
 
 O runner recusa automaticamente repetir um sandbox que já contenha evidência.
+
+Para execuções tolerantes à perda de conexão, usar o launcher detached versionado em
+`scripts/launch_corrected_baseline_seed.py` com release-root e expected-commit explícitos. O estado
+reconstruível da fase é `runs/cortex_phase_state.json`, gerado por
+`scripts/cortex_phase_state.py --write`.
 
 ## 12. Checklist de encerramento F1-B
 

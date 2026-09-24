@@ -1724,6 +1724,9 @@ function renderExperimentContext() {
         + (science !== null && science !== undefined
           ? " · logistic science output " + formatNumber(science, 0)
           : "")
+        + (context.status === "completed"
+          ? " · mundo continua tickando após o snapshot final"
+          : "")
       : "estado global legado; não confundir com uma seed isolada"
   );
   setClassText(
@@ -1739,9 +1742,14 @@ function renderExperimentContext() {
       "F1-B · baseline corrigida em execução · "
         + (context.mode === "exploratory" ? "exploratória" : String(context.mode || ""))
     );
+    const series = context.series_progress || {};
+    const completed = Number(series.completed || 0);
+    const configured = Number(series.configured || 0);
     setClassText(
       "cortexPhaseBadge",
-      "F1-B · seed " + seed,
+      configured
+        ? "F1-B · " + completed + "/" + configured
+        : "F1-B · seed " + seed,
       context.status === "completed" ? "badge good" : "badge live"
     );
     setClassText(
