@@ -272,7 +272,11 @@ The focused gate proves:
 - non-burner energy source remains a named refusal;
 - carried-fuel v2 compiles to fuel_processor insertion.
 
-## 14. Current authority decision
+## 14. Decision
+
+**PASS.**
+
+Implementation commit: `95ec3dfc23c3d39a88fc6b5abe64e9042902a413`.
 
 F2-F2 adds planning/composition capability only.
 

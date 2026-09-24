@@ -1068,10 +1068,14 @@ tests/test_fuel.py.
 
 **Tests F2-F2:** 83 focused PASS; 1386 core/FLE PASS + 2 PyTorch PASS; Ruff/compileall/frontend TypeScript/Vite/node/diff check PASS; runtime F1 unchanged; evolution inactive+disabled.
 
-**Decision F2-F2:** **PASS técnico, publicação pendente.** A composição causal de fuel está validada; F2-F3 permanece bloqueada até commit/push clean + deploy/validação do dashboard.
+**F2-F2 commit:** `95ec3dfc23c3d39a88fc6b5abe64e9042902a413` — `feat: compõe dependência funcional de combustível`.
 
-**Next after PASS:** F2-F3 — repetir um único canário seed 424242 com a dependency-completed v2
-option. A hard postcondition processor_output INCREASE permanece inalterada.
+**Decision F2-F2:** **PASS.** A composição causal de fuel está validada e publicada. F2-F3 está
+autorizada somente como one-shot isolated canary em seed 424242, com runner versionado e árvore
+clean. Continuous authority permanece proibida.
+
+**Next:** F2-F3 — repetir um único canário seed 424242 com a dependency-completed v2 option. A hard
+postcondition processor_output INCREASE permanece inalterada.
 
 **Exit Gate F2:** o agente pode montar uma cadeia funcional escolhendo primitivas/options por uma
 API genérica, sem caminho codificado por estágio.

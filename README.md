@@ -33,10 +33,10 @@ com experiência sem receber do programador a sequência de ações que constitu
 
 ## Estado do programa
 
-**Cortex Research Architecture v0.1 — F2-F2 validada. O counterexample no_fuel de F2-E agora
+**Cortex Research Architecture v0.1 — F2-F2 concluída. O counterexample no_fuel de F2-E agora
 é tratado como dependência tipada: consumo e fuel compatibility são medidos, plan_supply decide
-cobertura real e carried fuel vira operação semântica fuel_processor. F2-F3 será autorizado somente
-após publicação do commit clean; continuous authority e F3 seguem proibidas.**
+cobertura real e carried fuel vira operação semântica fuel_processor. F2-F3 está autorizada como
+um único canário isolado; continuous authority e F3 seguem proibidas.**
 
 As seeds confirmatórias 20261101–20261110 permanecem congeladas e não executadas; serão usadas
 posteriormente para avaliação pareada do Cortex, sem tuning nelas.

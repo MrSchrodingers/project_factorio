@@ -6,7 +6,7 @@
 ## Estado atual
 
 - Programa: Cortex Research Architecture v0.1
-- Fase: **F2-F2 validada — publicação pendente; F2-F3 ainda bloqueada até commit clean**
+- Fase: **F2-F2 concluída — F2-F3 one-shot canary autorizada; F3 ainda bloqueada**
 - Branch: `research/cortex-v1`
 - Baseline imutável de origem: `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 - Tag baseline publicada: `cortex-pre-research-baseline-20260923`
@@ -46,37 +46,44 @@ silenciosamente pelo commit da F0**.
 
 ## Próxima ação
 
-**Fechar F2-F2 antes de qualquer novo canário.**
+**F2-F3 — um único canário funcional isolado na seed 424242.**
 
-Estado já comprovado:
+F2-F2 está formalmente concluída.
 
-- BurnerProfile generalizado para fuel_value_j medido;
-- demand = energy_usage_per_tick_j × 60 × horizon × margin;
-- fuels filtrados por categoria medida no runtime;
-- cada candidato é validado contra inventory/FuelSource via plan_supply;
-- fuel indisponível não é selecionado por densidade energética;
-- carried fuel vira child dependency tipada + operação fuel_processor;
-- contract version v2 preserva v1;
-- world fuel draws são planejáveis, porém recusados no compiler até adapter de provenance existir;
-- processor_output continua hard postcondition;
-- focused gate F2-F2: 83 PASS;
-- full gate: 1386 core/FLE + 2 PyTorch PASS;
+Evidence:
+
+- implementation commit: 95ec3dfc23c3d39a88fc6b5abe64e9042902a413;
+- 83 focused PASS;
+- 1386 core/FLE PASS;
+- 2 PyTorch PASS;
 - Ruff/compileall/frontend TypeScript/Vite/node/diff check PASS;
-- runtime F1 permanece 95c34a53... dirty=false;
-- evolution permanece inactive + disabled;
-- continuity: phase_state = F2-F2.
+- phase_state = F2-F2;
+- runtime científico F1 permanece 95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac, dirty=false;
+- evolution permanece inactive + disabled.
+
+Capability F2-F2:
+
+- MachineEnergy -> bounded fuel demand;
+- compatibility medida por fuel categories;
+- availability validada por plan_supply;
+- carried fuel -> typed FuelDependency + fuel_processor;
+- world fuel draw planejável, mas execution recusada sem adapter próprio;
+- processor_output INCREASE permanece hard gate.
 
 Documentos:
 docs/CORTEX_PHASE2_FUNCTIONAL_DEPENDENCY.md
 docs/CORTEX_PHASE2_FUNCTIONAL_DEPENDENCY_COMPOSITION.md
 
-Próximo passo obrigatório:
+Próximo bloco seguro:
 
-1. commit/push da implementação F2-F2;
-2. atualizar Commit/Decision definitivos com SHA real;
-3. deployar somente dashboard;
-4. validar /api/context + UI F2-F2;
-5. só então reaplicar/versionar o runner F2-F3 e executar um único canário seed 424242.
+1. reaplicar o runner F2-F3 preservado em runs/wip/run_cortex_structural_canary_f2f3.py;
+2. validar lint/compile + canary contract;
+3. commit/push do runner F2-F3 em árvore clean;
+4. confirmar evolution inactive+disabled;
+5. executar exatamente um canário seed 424242;
+6. comparar causalmente com F2-E2 attempt2;
+7. preservar artifact e atualizar docs/UI;
+8. não repetir automaticamente em caso de reject.
 
 Não executar seeds 20261101–20261110.
 Não conceder continuous autonomous authority.
