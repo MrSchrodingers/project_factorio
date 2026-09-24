@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import subprocess
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -58,10 +57,17 @@ from factorio_ai_lab.learning.spatial_policy import SpatialPolicy, route_cost
 from factorio_ai_lab.learning.survival import (
     FitnessVector,
     InheritedCapabilities,
+    PromotionDecision,
     compare_challenger,
     fitness_from_research,
 )
 from factorio_ai_lab.metrics.rates import normalized_rate_ratio, rate_per_second
+from factorio_ai_lab.paths import (
+    RUNS_DIR,
+    clean_promotion_required,
+    code_revision,
+    revision_is_promotable,
+)
 from factorio_ai_lab.planning.astar import RouteResult, RoutingWeights, weighted_astar
 from factorio_ai_lab.planning.delivery import (
     MODE_BELT,
@@ -118,8 +124,6 @@ from factorio_ai_lab.planning.resupply import (
 )
 from factorio_ai_lab.runtime import FactorioWorldLease
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-RUNS_DIR = PROJECT_ROOT / "runs"
 RESEARCH_STATE = RUNS_DIR / "research_state.json"
 KNOWLEDGE_LOG = RUNS_DIR / "knowledge.jsonl"
 ACTIVE_RUN = RUNS_DIR / "active_run.json"
@@ -229,60 +233,6 @@ def read_json_object(path: Path) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         return {}
     return loaded if isinstance(loaded, dict) else {}
-
-
-def code_revision(*, root: Path | None = None) -> dict[str, Any]:
-    """Which revision of this repository produced the generation.
-
-    The loop runs for hours while the repository is still being worked on, so
-    a series of generations can span several versions of the selection rule,
-    the factory graph and the runtime catalogue. Without the revision in the
-    record, a change in the numbers cannot be attributed: an improvement that
-    came from a code change and one that came from evolution read the same.
-
-    A dirty tree is part of the fact, not an embarrassment to omit --
-    generation 37 was promoted under uncommitted code and its report says
-    nothing about it. When the revision cannot be read at all, every field
-    answers None with a stated reason; a plausible-looking string would be
-    worse than no answer.
-    """
-    directory = Path(root) if root is not None else Path(__file__).resolve().parents[3]
-
-    def _git(*args: str) -> str | None:
-        try:
-            done = subprocess.run(
-                ["git", "-C", str(directory), *args],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            _git.reason = f"git unavailable: {type(exc).__name__}"
-            return None
-        if done.returncode != 0:
-            _git.reason = (done.stderr or "").strip().splitlines()[:1] or ["git refused"]
-            _git.reason = _git.reason[0] if isinstance(_git.reason, list) else _git.reason
-            return None
-        return done.stdout.strip()
-
-    _git.reason = None
-    commit = _git("rev-parse", "HEAD")
-    if commit is None:
-        return {
-            "commit": None,
-            "branch": None,
-            "dirty": None,
-            "reason": _git.reason or "no repository at this path",
-        }
-    status = _git("status", "--porcelain")
-    return {
-        "commit": commit,
-        "branch": _git("rev-parse", "--abbrev-ref", "HEAD"),
-        # None when the tree could not be inspected: unknown is not clean.
-        "dirty": None if status is None else bool(status),
-        "reason": None,
-    }
 
 
 #: No placement episode was marked valid, so no arm carries a measurement.
@@ -9016,6 +8966,31 @@ def build_advisor_context(
     }
 
 
+def enforce_clean_revision(
+    decision: PromotionDecision,
+    revision: dict[str, Any],
+    *,
+    required: bool | None = None,
+) -> PromotionDecision:
+    """Withhold champion mutation when clean-build policy is active."""
+    enforce = clean_promotion_required() if required is None else bool(required)
+    if not enforce or not decision.promoted or revision_is_promotable(revision):
+        return decision
+    return PromotionDecision(
+        promoted=False,
+        reason="promotion withheld: generation code revision is not a known clean build",
+        regressions=decision.regressions,
+        improvements=decision.improvements,
+        retention_ratio=decision.retention_ratio,
+        compared_metrics=decision.compared_metrics,
+        incommensurable_metrics=decision.incommensurable_metrics,
+        withheld_gates=(
+            *decision.withheld_gates,
+            "clean_code_revision_required",
+        ),
+    )
+
+
 def finalize_evolution_selection(
     journal: ResearchJournal,
     *,
@@ -9075,6 +9050,8 @@ def finalize_evolution_selection(
         challenger,
         retention_ratio=retention_ratio,
     )
+    revision = code_revision()
+    decision = enforce_clean_revision(decision, revision)
 
     metrics = journal.state.get("metrics", {})
     configuration = dict(
@@ -9093,6 +9070,7 @@ def finalize_evolution_selection(
         "selected_at": utc_now(),
         "fitness": challenger.to_dict(),
         "configuration": configuration,
+        "code_revision": revision,
         "knowledge_count_at_selection": sum(
             1
             for _ in KNOWLEDGE_LOG.open(encoding="utf-8")
@@ -9151,7 +9129,7 @@ def finalize_evolution_selection(
     report = {
         "at": selected_at,
         "generation": generation,
-        "code_revision": code_revision(),
+        "code_revision": revision,
         "run_id": journal.run_id,
         "challenger": candidate_record,
         "incumbent_run_id": incumbent.get("run_id") if incumbent else None,

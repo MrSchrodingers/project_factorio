@@ -4,7 +4,6 @@ import argparse
 import json
 import math
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 from factorio_ai_lab.experiments.curriculum_runner import _step_error_text
@@ -13,9 +12,8 @@ from factorio_ai_lab.integrations.fle import (
     fast_reposition,
     list_environments,
 )
+from factorio_ai_lab.paths import RUNS_DIR
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-RUNS_DIR = PROJECT_ROOT / "runs"
 ACTIVE_RUN = RUNS_DIR / "active_run.json"
 RUN_HISTORY_DIR = RUNS_DIR / "construction"
 

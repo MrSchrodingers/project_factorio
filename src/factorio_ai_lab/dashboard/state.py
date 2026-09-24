@@ -36,6 +36,8 @@ from factorio_ai_lab.learning.telemetry import (
     append_jsonl as append_telemetry_jsonl,
 )
 from factorio_ai_lab.learning.telemetry import compact_telemetry_sample
+from factorio_ai_lab.paths import CODE_ROOT as PROJECT_ROOT
+from factorio_ai_lab.paths import RUNS_DIR
 from factorio_ai_lab.planning.dependency_plan import (
     CapacityRequirement,
     DependencyPlan,
@@ -52,8 +54,6 @@ from factorio_ai_lab.planning.progression import (
 from factorio_ai_lab.planning.runtime_catalog import RuntimeFactorioCatalog
 from factorio_ai_lab.runtime import runtime_status
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-RUNS_DIR = PROJECT_ROOT / "runs"
 RUNTIME_CONFIG = RUNS_DIR / "runtime_config.json"
 TELEMETRY_LOG = RUNS_DIR / "telemetry" / "world_samples.jsonl"
 GENERATION_REPORTS_DIR = RUNS_DIR / "generation_reports"

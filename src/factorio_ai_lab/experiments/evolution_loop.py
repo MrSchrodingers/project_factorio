@@ -40,12 +40,12 @@ from factorio_ai_lab.learning.lifelong import (
 )
 from factorio_ai_lab.learning.robustness import OpenPlayRobustnessGate
 from factorio_ai_lab.learning.survival import InheritedCapabilities
+from factorio_ai_lab.paths import CODE_ROOT as PROJECT_ROOT
+from factorio_ai_lab.paths import RUNS_DIR
 from factorio_ai_lab.planning.factorio_catalog import (
     EARLY_GAME_PRODUCTION_PLANNER,
 )
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-RUNS_DIR = PROJECT_ROOT / "runs"
 LOOP_STATE = RUNS_DIR / "evolution_loop_state.json"
 LOOP_HISTORY = RUNS_DIR / "evolution_loop_history.jsonl"
 LOOP_LOCK = RUNS_DIR / "evolution_loop.lock"

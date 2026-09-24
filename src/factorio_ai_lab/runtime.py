@@ -14,8 +14,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Self, TextIO
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-RUNS_DIR = PROJECT_ROOT / "runs"
+from factorio_ai_lab.paths import RUNS_DIR
+
 WORLD_LOCK = RUNS_DIR / "factorio_world.lock"
 WORLD_LEASE_STATE = RUNS_DIR / "factorio_world_lease.json"
 RUNTIME_HEARTBEAT = RUNS_DIR / "runtime_heartbeat.json"

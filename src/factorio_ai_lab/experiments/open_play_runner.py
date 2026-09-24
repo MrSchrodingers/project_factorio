@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 from factorio_ai_lab.experiments.curriculum_runner import (
@@ -24,14 +23,13 @@ from factorio_ai_lab.integrations.fle import (
 from factorio_ai_lab.learning.autonomy import evaluate_factory_autonomy
 from factorio_ai_lab.learning.checkpoints import save_game_state
 from factorio_ai_lab.learning.robustness import OpenPlayRobustnessGate
+from factorio_ai_lab.paths import RUNS_DIR
 from factorio_ai_lab.planning.factorio_catalog import (
     EARLY_GAME_PRODUCTION_PLANNER,
 )
 from factorio_ai_lab.planning.materials import MaterialLedger
 from factorio_ai_lab.runtime import FactorioWorldLease
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-RUNS_DIR = PROJECT_ROOT / "runs"
 VALIDATED_CHAMPION = RUNS_DIR / "open_play_validated_champion.json"
 OPEN_PLAY_HISTORY = RUNS_DIR / "open_play_validation_history.jsonl"
 OPEN_PLAY_ROBUSTNESS_STATE = RUNS_DIR / "open_play_robustness_state.json"

@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -17,9 +16,9 @@ from factorio_ai_lab.learning.spatial_policy import (
     route_cost,
 )
 from factorio_ai_lab.learning.torch_spatial_policy import TorchSpatialPolicy
+from factorio_ai_lab.paths import CODE_ROOT as PROJECT_ROOT
+from factorio_ai_lab.paths import RUNS_DIR
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-RUNS_DIR = PROJECT_ROOT / "runs"
 REAL_DEMOS = RUNS_DIR / "datasets" / "spatial_demonstrations.jsonl"
 MODEL_DIR = RUNS_DIR / "models"
 MLP_MODEL_PATH = MODEL_DIR / "spatial_policy_mlp.npz"

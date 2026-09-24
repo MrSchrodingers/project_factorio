@@ -16,9 +16,9 @@ from factorio_ai_lab.learning.recurrent_world_model import (
 )
 from factorio_ai_lab.learning.telemetry import FEATURE_NAMES, feature_vector
 from factorio_ai_lab.learning.torch_world_model import TorchGRUWorldModel
+from factorio_ai_lab.paths import CODE_ROOT as PROJECT_ROOT
+from factorio_ai_lab.paths import RUNS_DIR
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-RUNS_DIR = PROJECT_ROOT / "runs"
 DEFAULT_TELEMETRY = RUNS_DIR / "telemetry" / "world_samples.jsonl"
 MODEL_DIR = RUNS_DIR / "models"
 ESN_MODEL_PATH = MODEL_DIR / "echo_state_world_model.npz"
