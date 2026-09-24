@@ -1747,8 +1747,9 @@ function renderExperimentContext() {
     const cortexPhase = context.cortex_phase || {};
     const phase2Checkpoint = String(cortexPhase.phase2_checkpoint || "F2");
     const functionalCanary = phase2Checkpoint === "F2-F3";
-    const deliveryActuatorShadow = phase2Checkpoint === "F2-F4";
-    const useFunctionalCanaryEvidence = functionalCanary || deliveryActuatorShadow;
+    const deliveryActuatorPhase = phase2Checkpoint.startsWith("F2-F4");
+    const deliveryActuatorRunner = phase2Checkpoint === "F2-F4B";
+    const useFunctionalCanaryEvidence = functionalCanary || deliveryActuatorPhase;
     const canary = useFunctionalCanaryEvidence
       ? (cortexPhase.phase2_functional_canary || {})
       : (cortexPhase.phase2_canary || {});
@@ -1763,28 +1764,32 @@ function renderExperimentContext() {
     setText(
       "cortexPhaseTitle",
       seriesComplete
-        ? (deliveryActuatorShadow
-          ? "F2-F4 · delivery actuator dependency · SHADOW"
-          : (functionalCanary
+        ? (deliveryActuatorRunner
+          ? "F2-F4B · runner integrado · NO LIVE EXECUTE"
+          : (deliveryActuatorPhase
+            ? "F2-F4A · delivery actuator dependency · SHADOW"
+            : (functionalCanary
             ? "F2-F3 · dependency-complete canary evidence"
             : (controlledExecution
             ? phase2Checkpoint + " · controlled transaction evidence"
             : (dependencyComposed
             ? "F2-F2 · fuel dependency composed · canary pending"
-            : phase2Checkpoint + " · Cortex research · SHADOW"))))
+            : phase2Checkpoint + " · Cortex research · SHADOW")))))
         : "F1-B · baseline corrigida em execução · "
           + (context.mode === "exploratory" ? "exploratória" : String(context.mode || ""))
     );
     setClassText(
       "cortexPhaseBadge",
       seriesComplete
-        ? (deliveryActuatorShadow
-          ? "F2-F4 · actuator energy · v3"
-          : (functionalCanary
+        ? (deliveryActuatorRunner
+          ? "F2-F4B · v3 runner · dry-run only"
+          : (deliveryActuatorPhase
+            ? "F2-F4A · actuator energy · v3"
+            : (functionalCanary
             ? "F2-F3 · rollback evidence"
             : (dependencyComposed
             ? "F2-F2 · typed fuel · v2"
-            : phase2Checkpoint + (controlledExecution ? " · evidence" : " · shadow"))))
+            : phase2Checkpoint + (controlledExecution ? " · evidence" : " · shadow")))))
         : (configured
           ? "F1-B · " + completed + "/" + configured
           : "F1-B · seed " + seed),
