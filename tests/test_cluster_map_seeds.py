@@ -108,3 +108,10 @@ def test_generated_factorio_services_restart_unless_stopped(tmp_path) -> None:
         service["restart"] == "unless-stopped"
         for service in data["services"].values()
     )
+    assert all(
+        service["logging"] == {
+            "driver": "json-file",
+            "options": {"max-size": "50m", "max-file": "3"},
+        }
+        for service in data["services"].values()
+    )

@@ -6,7 +6,7 @@
 ## Estado atual
 
 - Programa: Cortex Research Architecture v0.1
-- Fase: **F1-A concluída; F1-B ativa — 2/5 seeds exploratórias válidas**
+- Fase: **F1-A concluída; F1-B ativa — 3/5 seeds exploratórias válidas**
 - Branch: `research/cortex-v1`
 - Baseline imutável de origem: `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 - Tag baseline publicada: `cortex-pre-research-baseline-20260923`
@@ -46,32 +46,31 @@ silenciosamente pelo commit da F0**.
 
 ## Próxima ação
 
-**F1-B — executar seed exploratória 20261003.**
+**F1-B — executar seed exploratória 20261004.**
 
-Seeds concluídas e válidas:
+Seeds válidas:
 
-- 20261001: partial_success, Logistic science, autonomy 0.50, coverage 33.3%, fuel-starved 0;
-- 20261002: partial_success, Logistic science, autonomy 0.375, coverage 50.0%, fuel-starved 1.
+- 20261001: partial_success · Logistic science · autonomy 0.50 · coverage 33.3% · manual 53 · fuel-starved 0;
+- 20261002: partial_success · Logistic science · autonomy 0.375 · coverage 50% · manual 53 · fuel-starved 1;
+- 20261003: partial_success · Logistic science · autonomy 0.375 · coverage 50% · manual 55 · fuel-starved 5.
 
-Padrão comum 2/2:
+Padrão replicado 3/3:
 
 - logistic_science_output = 0;
 - closed_loop_autonomy = false;
-- manual_logistics_calls = 53;
+- bottleneck = Logistic science;
 - endogenous_rate_per_s = 0.60628371;
-- placement repair place_processing_for_buffered_output não executa por no_runner_binding_for_intent;
-- isolation global = PASS;
-- scientific runtime = 95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac.
+- scientific runtime = 95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac;
+- global isolation = PASS.
 
-Dashboard:
+Infraestrutura antes da próxima seed:
 
-- runtime separado = 8ce05ba3a4eb48ed681fcaba1103913aa7505708;
-- scope = baseline:cortex_baseline_protocol_v1:exploratory:auto;
-- após 20261002, /api/context resolve seed 20261002 completed;
-- world continua live RCON; evidence continua sandbox da seed.
+- /var chegou a 95% e foi tratado antes de avançar;
+- Factorio Docker log agora possui rotação 50m × 3;
+- launcher possui gate de pelo menos 1 GiB livre em /var;
+- playit permanece fora do escopo e não foi alterado.
 
-Não corrigir gameplay/planning/repair antes de terminar 20261003–20261005.
-Próxima execução autorizada: somente 20261003, seguida por validation + isolation + diagnóstico.
+Próxima execução autorizável: somente 20261004, após commit/push deste checkpoint e phase-state regenerado.
 
 ## Protocolo de retomada após interrupção
 

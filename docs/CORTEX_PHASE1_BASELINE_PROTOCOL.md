@@ -64,12 +64,12 @@ Fonte canônica: configs/cortex_baseline_v1.json.
 
 ### Exploratory
 
-**Progress:** 2/5 valid observations. Seeds 20261001 and 20261002 are retained as valid partial-success results. Both stop at Logistic science with zero green-science output; detailed per-seed evidence is versioned separately.
+**Progress:** 3/5 valid observations. Seeds 20261001–20261003 are retained as valid partial-success results. All three stop at Logistic science with zero green-science output; detailed per-seed evidence is versioned separately.
 
 
 - [x] 20261001
 - [x] 20261002
-- [ ] 20261003
+- [x] 20261003
 - [ ] 20261004
 - [ ] 20261005
 

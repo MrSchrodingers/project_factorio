@@ -76,6 +76,7 @@ Ele recusa:
 - champion global reaparecido durante F1-B;
 - factorio-ai-evolution ativo;
 - runner ausente.
+- armazenamento insuficiente em /var (mínimo padrão: 1 GiB livre).
 
 Antes de criar o processo, o launcher grava automaticamente:
 
@@ -83,6 +84,9 @@ Antes de criar o processo, o launcher grava automaticamente:
 
 Esse snapshot contém SHA-256, tamanho e mtime dos artefatos globais críticos e confirma que
 evolution_champion.json continua ausente. A validação pós-run compara contra esse snapshot.
+
+O launcher também grava storage_preflight no record persistente e recusa a seed antes da
+execução quando /var não possui o headroom mínimo.
 
 Exemplo F1-B:
 
@@ -155,8 +159,10 @@ Uma divergência temporal entre ambos não é automaticamente corrupção.
 
 ## 9. Estado atual
 
-Seeds exploratórias válidas: 20261001 e 20261002.
+Seeds exploratórias válidas: 20261001, 20261002 e 20261003.
 
-Próxima seed autorizável após fechamento deste checkpoint: 20261003.
+Próxima seed autorizável após fechamento deste checkpoint: 20261004.
 
-Ambas as seeds concluídas falharam em Logistic science com logistic_science_output=0 e closed_loop_autonomy=false. O padrão compartilhado inclui ausência de binding executável para place_processing_for_buffered_output.
+As três seeds concluídas falharam em Logistic science com logistic_science_output=0 e closed_loop_autonomy=false. O padrão estrutural se repete; a severidade de fuel starvation varia entre seeds.
+
+Storage hardening: docs/CORTEX_F1_STORAGE_HARDENING.md.

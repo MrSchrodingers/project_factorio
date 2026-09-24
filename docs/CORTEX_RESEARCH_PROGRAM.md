@@ -823,6 +823,8 @@ a baseline corrigida e o isolamento operacional estarem concluídos.
 - [x] criar phase state legível por máquina para retomada;
 - [x] criar launcher detached com pin explícito de release/commit;
 - [x] impedir avanço para nova seed quando uma seed estiver running;
+- [x] bloquear launch com armazenamento crítico;
+- [x] limitar logs Docker do cluster Factorio;
 - [ ] produzir relatório estatístico da baseline.
 
 **Status F1-A:** **PASS — integridade e isolamento concluídos.** Evidência técnica em
@@ -830,17 +832,21 @@ docs/CORTEX_PHASE1_INTEGRITY.md. G37 já foi aposentada; permanecem abertos a ex
 baseline corrigida e o relatório estatístico. Protocolo pré-registrado em
 docs/CORTEX_PHASE1_BASELINE_PROTOCOL.md.
 
-**F1-B progress:** 2/5 exploratory seeds valid. Both seeds are partial_success and fail at
-Logistic science with zero green-science output; coverage varies from 33.3% to 50%, while
-manual logistics remains 53 calls and closed-loop autonomy remains false. Isolation PASS in both.
+**F1-B progress:** 3/5 exploratory seeds valid. All three are partial_success and fail at
+Logistic science with zero green-science output. Coverage ranges from 33.3% to 50%; manual
+logistics is 53–55 calls; closed-loop autonomy remains false. Isolation PASS in all three.
 Evidence: docs/CORTEX_PHASE1_BASELINE_SEED_20261001.md,
-docs/CORTEX_PHASE1_BASELINE_SEED_20261002.md and docs/CORTEX_PHASE1_BASELINE_RESULTS.md.
+docs/CORTEX_PHASE1_BASELINE_SEED_20261002.md, docs/CORTEX_PHASE1_BASELINE_SEED_20261003.md
+and docs/CORTEX_PHASE1_BASELINE_RESULTS.md.
 
 **Observability hardening:** dashboard evidence scope, map truth labels and component-isolated
 deployment are specified in docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md.
 
 **Continuity hardening:** detached seed launch, machine-readable phase reconstruction and
 anti-duplication resume protocol are specified in docs/CORTEX_CONTINUITY_PROTOCOL.md.
+
+**Storage hardening:** launch headroom gate and Factorio Docker log rotation are specified in
+docs/CORTEX_F1_STORAGE_HARDENING.md.
 
 **Evidence F1-A:** commits a3a50b5, f8437d5 e e5cd102; snapshot
 backups/cortex-f1-pre-20260924T031901Z; docs/audits/NUMERIC_DEFAULT_AUDIT_F1.md; artefatos de

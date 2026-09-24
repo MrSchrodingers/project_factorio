@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import time
 from datetime import UTC, datetime
@@ -134,6 +135,26 @@ def build_launch_plan(
     }
 
 
+def storage_headroom(
+    path: Path,
+    *,
+    minimum_free_bytes: int = 1024 * 1024 * 1024,
+) -> dict[str, int | str]:
+    usage=shutil.disk_usage(path)
+    if usage.free < minimum_free_bytes:
+        raise RuntimeError(
+            f"insufficient free space on {path}: "
+            f"{usage.free} bytes < {minimum_free_bytes} required"
+        )
+    return {
+        "path":str(path),
+        "total_bytes":int(usage.total),
+        "used_bytes":int(usage.used),
+        "free_bytes":int(usage.free),
+        "minimum_free_bytes":int(minimum_free_bytes),
+    }
+
+
 def _sha256(path: Path) -> str:
     digest=hashlib.sha256()
     with path.open("rb") as handle:
@@ -193,6 +214,7 @@ def launch(plan: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError("factorio-ai-evolution.service must remain inactive during baseline")
 
     state_root=Path(str(plan["state_root"]))
+    storage_preflight=storage_headroom(Path("/var"))
     isolation_snapshot=capture_global_isolation_snapshot(
         state_root=state_root,
         seed=int(plan["seed"]),
@@ -235,6 +257,7 @@ def launch(plan: dict[str, Any]) -> dict[str, Any]:
         "log_path":str(log_path),
         "record_path":str(record_path),
         "isolation_snapshot":str(isolation_snapshot),
+        "storage_preflight":storage_preflight,
     }
     record_path.write_text(
         json.dumps(record,indent=2,sort_keys=True)+"\n",

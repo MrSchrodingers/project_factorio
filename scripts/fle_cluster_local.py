@@ -19,6 +19,9 @@ from fle.cluster.run_envs import ComposeGenerator
 GENERATING_SCENARIOS = frozenset({"open_world"})
 CANNED_MAP_SCENARIOS = frozenset({"default_lab_scenario"})
 
+DOCKER_LOG_MAX_SIZE = "50m"
+DOCKER_LOG_MAX_FILE = "3"
+
 _MAP_GEN_SEED_FLAG = re.compile(r"--map-gen-seed\s+\d+")
 
 
@@ -106,6 +109,13 @@ def generate_compose(
             local_ports.append(f"127.0.0.1:{host}:{container_proto}")
         service["ports"] = local_ports
         service["restart"] = "unless-stopped"
+        service["logging"] = {
+            "driver": "json-file",
+            "options": {
+                "max-size": DOCKER_LOG_MAX_SIZE,
+                "max-file": DOCKER_LOG_MAX_FILE,
+            },
+        }
 
     if seeds:
         apply_map_gen_seeds(data, seeds, scenario=scenario)

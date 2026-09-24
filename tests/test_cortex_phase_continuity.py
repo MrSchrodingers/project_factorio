@@ -60,6 +60,25 @@ def test_detached_launch_plan_pins_exact_release(tmp_path) -> None:
     assert str(release/"scripts"/"run_corrected_baseline_seed.py") in plan["command"]
 
 
+def test_storage_headroom_reports_space_and_rejects_impossible_threshold(tmp_path) -> None:
+    module=_module("launch_corrected_baseline_seed.py")
+
+    measured=module.storage_headroom(tmp_path,minimum_free_bytes=1)
+    assert measured["path"] == str(tmp_path)
+    assert measured["free_bytes"] >= 1
+    assert measured["minimum_free_bytes"] == 1
+
+    try:
+        module.storage_headroom(
+            tmp_path,
+            minimum_free_bytes=measured["total_bytes"] + 1,
+        )
+    except RuntimeError as exc:
+        assert "insufficient free space" in str(exc)
+    else:
+        raise AssertionError("storage gate accepted impossible free-space threshold")
+
+
 def test_isolation_snapshot_captures_global_hashes_and_refuses_champion(tmp_path) -> None:
     module=_module("launch_corrected_baseline_seed.py")
     runs=tmp_path/"runs"
