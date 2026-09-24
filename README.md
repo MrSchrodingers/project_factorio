@@ -11,11 +11,12 @@ com experiência sem receber do programador a sequência de ações que constitu
 > **Documento canônico:** [docs/CORTEX_RESEARCH_PROGRAM.md](docs/CORTEX_RESEARCH_PROGRAM.md)
 > **Handoff operacional:** [docs/CORTEX_HANDOFF.md](docs/CORTEX_HANDOFF.md)
 > **Diagnóstico da arquitetura anterior:** [docs/HANDOFF-CORTEX.md](docs/HANDOFF-CORTEX.md)
+> **F1 — integridade e isolamento:** [docs/CORTEX_PHASE1_INTEGRITY.md](docs/CORTEX_PHASE1_INTEGRITY.md)
 
 ## Estado do programa
 
-**Cortex Research Architecture v0.1 — Fase 0 concluída. Próxima fase: F1, instrumentação,
-isolamento e baseline corrigida.**
+**Cortex Research Architecture v0.1 — F1-A concluída. F1-B está autorizada para aposentar G37
+de forma controlada e produzir a baseline corrigida multi-seed.**
 
 A arquitetura anterior permanece disponível como baseline. Ela possui excelente instrumentação,
 solvers e mecanismos de segurança, mas o caminho de decisão principal ainda é dominado por
@@ -110,6 +111,10 @@ Baseline de software:
 A baseline pré-Cortex foi marcada no commit
 `74a1bf9c0f8792a68d7252b11d477835ec93d508`.
 
+O runtime científico não executa mais diretamente o checkout de desenvolvimento. Releases limpas
+são materializadas por SHA em /srv/factorio-ai-runtime/releases/<sha> e o symlink current é
+trocado atomicamente; estado mutável permanece em /srv/factorio-ai-lab/runs.
+
 ## Estrutura
 
 ```text
@@ -130,21 +135,18 @@ docs/
 
 ## Testes
 
-```bash
-cd /srv/factorio-ai-lab
+O projeto possui dois perfis porque runtime FLE e ambiente ML têm dependências distintas:
 
-PYTHONPATH=src python3 -m pytest -q
-python3 -m ruff check src tests
-python3 -m compileall -q src
-```
+    cd /srv/factorio-ai-lab
+    ./scripts/test_profiles.sh
+
+Na F1-A o gate registrou 1283 testes core/FLE e 2 testes PyTorch aprovados, além de Ruff e compileall.
 
 Para frontend:
 
-```bash
-cd frontend
-npm run typecheck
-npm run build
-```
+    cd frontend
+    npm run typecheck
+    npm run build
 
 ## Continuidade
 

@@ -1,0 +1,31 @@
+{
+  "schema_version": "cortex_baseline_protocol_v1",
+  "description": "Frozen seeds for the corrected pre-Cortex baseline. Exploratory seeds are for debugging; confirmatory seeds are not to be tuned against.",
+  "environment": "Factorio 2.0.73 + FLE 0.4.3",
+  "exploratory_seeds": [
+    20261001,
+    20261002,
+    20261003,
+    20261004,
+    20261005
+  ],
+  "confirmatory_seeds": [
+    20261101,
+    20261102,
+    20261103,
+    20261104,
+    20261105,
+    20261106,
+    20261107,
+    20261108,
+    20261109,
+    20261110
+  ],
+  "rules": {
+    "no_seed_replacement_after_first_confirmatory_run": true,
+    "no_parameter_tuning_on_confirmatory_seeds": true,
+    "code_revision_must_be_clean": true,
+    "runtime_release_must_have_build_info": true,
+    "g37_is_excluded_from_confirmatory_baseline": true
+  }
+}

@@ -6,12 +6,12 @@
 ## Estado atual
 
 - Programa: Cortex Research Architecture v0.1
-- Fase: **F0 concluída; F1 é a próxima fase autorizada**
+- Fase: **F1-A concluída; F1-B é a próxima subfase autorizada**
 - Branch: `research/cortex-v1`
 - Baseline imutável de origem: `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 - Tag baseline publicada: `cortex-pre-research-baseline-20260923`
 - Handoff histórico: `docs/HANDOFF-CORTEX.md`
-- Runtime existente: ainda é o sistema herdado; Cortex não tem autoridade de controle.
+- Runtime: arquitetura herdada ainda controla o jogo, mas executa somente releases imutáveis por SHA; Cortex continua sem autoridade de controle.
 
 ## Regra de retomada
 
@@ -46,10 +46,13 @@ silenciosamente pelo commit da F0**.
 
 ## Próxima ação
 
-**F1 — Instrumentação, isolamento e baseline corrigida**.
+**F1-B — retirement controlado de G37 e baseline corrigida.**
 
-Não começar F2 enquanto a baseline científica não estiver reexecutada sob instrumentação
-corrigida e o deploy não estiver desacoplado da edição live.
+Já concluído: alterações logísticas em a3a50b5; provenance/state-root em f8437d5; runtime imutável/systemd em e5cd102; release ativa verificada; evolution parado; backup em backups/cortex-f1-pre-20260924T031901Z; 1283 testes core/FLE + 2 PyTorch verdes; audit numérico 487/141 após duas correções críticas; Qwen limitado por cgroup com soak medido; seeds congeladas; backup/reset fail-closed.
+
+Ainda NÃO feito: G37 continua em runs/evolution_champion.json; baseline corrigida ainda não foi executada; relatório estatístico F1 ainda não existe.
+
+Retomada: conferir git status, fechar/implantar o commit F1-A e só então aplicar reset_selection_state.py --apply.
 
 ## Evidência de fechamento da F0
 

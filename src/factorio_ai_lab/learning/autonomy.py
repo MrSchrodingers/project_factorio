@@ -50,6 +50,31 @@ def _all_true(*values: bool | None) -> bool | None:
     return True
 
 
+def _positive_rate(rates: Mapping[str, float], item: str) -> bool | None:
+    """Positive measured rate, measured zero, or no measurement."""
+    if item not in rates:
+        return None
+    return float(rates[item]) > 0.0
+
+
+def _any_positive_rate(
+    rates: Mapping[str, float],
+    items: Sequence[str],
+) -> bool | None:
+    """Three-valued OR over rate measurements.
+
+    A positive observed member proves True. False requires every requested
+    member to have been measured and non-positive. Any missing member keeps a
+    non-positive set unknown.
+    """
+    states = [_positive_rate(rates, item) for item in items]
+    if any(state is True for state in states):
+        return True
+    if any(state is None for state in states):
+        return None
+    return False
+
+
 @dataclass(frozen=True)
 class AutonomyEvidence:
     """
@@ -336,19 +361,19 @@ def evaluate_factory_autonomy(
     # compatible physical topology, a healthy energy state and a full
     # zero-manual soak window in addition to positive production.
     coal_chain_live = _all_true(
-        rates.get("coal", 0.0) > 0,
+        _positive_rate(rates, "coal"),
         fuel_distribution,
         healthy_fuel,
         zero_manual_logistics,
     )
     iron_chain_live = _all_true(
-        rates.get("iron-plate", 0.0) > 0,
+        _positive_rate(rates, "iron-plate"),
         smelting_distribution,
         healthy_fuel,
         zero_manual_logistics,
     )
     copper_chain_live = _all_true(
-        rates.get("copper-plate", 0.0) > 0,
+        _positive_rate(rates, "copper-plate"),
         smelting_distribution,
         healthy_fuel,
         zero_manual_logistics,
@@ -362,14 +387,14 @@ def evaluate_factory_autonomy(
         electric_distribution,
         healthy_power,
         zero_manual_logistics,
-        any(
-            rates.get(item, 0.0) > 0
-            for item in (
+        _any_positive_rate(
+            rates,
+            (
                 "iron-gear-wheel",
                 "electronic-circuit",
                 "automation-science-pack",
                 "logistic-science-pack",
-            )
+            ),
         ),
     )
 

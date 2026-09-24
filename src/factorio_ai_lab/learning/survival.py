@@ -752,9 +752,14 @@ def compare_challenger(
             baseline_value = max(0.0, float(baseline))
             if baseline_value <= 0:
                 continue
+            if name not in challenger.rates_per_s:
+                regressions.append(
+                    f"{name} rate was not measured; retention cannot be demonstrated"
+                )
+                continue
             challenger_value = max(
                 0.0,
-                float(challenger.rates_per_s.get(name, 0.0)),
+                float(challenger.rates_per_s[name]),
             )
             floor = baseline_value * retention_ratio
             if challenger_value + 1e-12 < floor:

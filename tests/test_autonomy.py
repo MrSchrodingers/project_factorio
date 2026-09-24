@@ -333,6 +333,43 @@ class AutonomyEvaluationTests(unittest.TestCase):
         self.assertGreater(report.no_fuel_entities, 0)
         self.assertGreater(report.manual_logistics_calls, 0)
 
+    def test_missing_flow_is_unknown_not_measured_zero(self) -> None:
+        rows = [
+            entity("electric-mining-drill", 0, 0),
+            entity("transport-belt", 2, 0),
+            entity("transport-belt", 3, 0),
+            entity("inserter", 4, 0),
+            entity("boiler", 5, 0),
+            entity("offshore-pump", 5, -4),
+            entity("steam-engine", 8, 0),
+            entity("small-electric-pole", 7, 2),
+            entity("lab", 9, 2),
+            entity("stone-furnace", 3, 6),
+            entity("transport-belt", 1, 6),
+            entity("inserter", 2, 6),
+            entity("inserter", 3, 5),
+            entity("inserter", 3, 7),
+            entity("wooden-chest", 3, 8),
+            entity("stone-furnace", 12, 6),
+            entity("transport-belt", 10, 6),
+            entity("inserter", 11, 6),
+            entity("inserter", 12, 5),
+            entity("inserter", 12, 7),
+            entity("wooden-chest", 12, 8),
+        ]
+        report = evaluate_factory_autonomy(
+            entities=rows,
+            interventions={},
+            production_rates_per_s={
+                "iron-plate": 1.0,
+                "copper-plate": 1.0,
+            },
+            soak_runtime_s=120,
+        )
+
+        self.assertIsNone(report.topology["coal_chain_live"])
+        self.assertIsNone(report.topology["producing_material"])
+
     def test_stale_flow_spike_does_not_create_live_chain(self) -> None:
         report = evaluate_factory_autonomy(
             entities=[

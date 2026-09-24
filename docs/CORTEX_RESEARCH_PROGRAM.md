@@ -803,20 +803,31 @@ a baseline corrigida e o isolamento operacional estarem concluídos.
 
 **Objetivo:** produzir uma baseline cientificamente válida antes de comparar o Cortex.
 
-- [ ] finalizar/validar mudanças logísticas já não commitadas;
-- [ ] snapshot de runs e artefatos históricos;
+- [x] finalizar/validar mudanças logísticas já não commitadas;
+- [x] snapshot de runs e artefatos históricos;
 - [ ] desativar G37 como baseline confirmatória;
 - [ ] reexecutar baseline com factory graph corrigido;
-- [ ] separar código “deployed” de edição live;
-- [ ] impedir geração com working tree suja de ser promoted;
-- [ ] declarar build/revision no relatório de toda geração;
-- [ ] criar esquema de Missing/Observed/Derived/Estimated;
-- [ ] auditoria sistemática de defaults que transformam missing em número;
-- [ ] hardening do serviço LLM: investigar RSS, MemoryMax/limite, restart policy e soak;
-- [ ] garantir restart do container Factorio;
-- [ ] protocolo de backup/reset versionado;
-- [ ] congelar conjunto de seeds de baseline;
+- [x] separar código “deployed” de edição live;
+- [x] impedir geração com working tree suja de ser promoted;
+- [x] declarar build/revision no relatório de toda geração;
+- [x] criar esquema de Missing/Observed/Derived/Estimated;
+- [x] auditoria sistemática de defaults que transformam missing em número;
+- [x] hardening do serviço LLM: investigar RSS, MemoryMax/limite, restart policy e soak;
+- [x] garantir restart do container Factorio;
+- [x] protocolo de backup/reset versionado;
+- [x] congelar conjunto de seeds de baseline;
 - [ ] produzir relatório estatístico da baseline.
+
+**Status F1-A:** **PASS — integridade e isolamento concluídos.** Evidência técnica em
+docs/CORTEX_PHASE1_INTEGRITY.md. Permanecem abertos apenas o retirement de G37, a execução da
+baseline corrigida e o relatório estatístico.
+
+**Evidence F1-A:** commits a3a50b5, f8437d5 e e5cd102; snapshot
+backups/cortex-f1-pre-20260924T031901Z; docs/audits/NUMERIC_DEFAULT_AUDIT_F1.md; artefatos de
+soak em runs/audits; release imutável sob /srv/factorio-ai-runtime/current.
+
+**Tests F1-A:** 1283 testes core/FLE + 2 testes PyTorch; 56 testes focados de semântica/provenance;
+Ruff, compileall, bash -n e diff-check aprovados.
 
 **Exit Gate F1:** baseline reproduzível, instrumentação válida e nenhuma promoção dependente de
 código não identificado.

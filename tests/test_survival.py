@@ -40,6 +40,26 @@ class SurvivalSelectionTests(unittest.TestCase):
             any("iron-plate rate" in value for value in decision.regressions)
         )
 
+    def test_missing_incumbent_rate_measurement_rejects_without_inventing_zero(self) -> None:
+        champion = FitnessVector(
+            capabilities=frozenset({"iron_backbone"}),
+            rates_per_s={"iron-plate": 2.0},
+        )
+        challenger = FitnessVector(
+            capabilities=champion.capabilities,
+            rates_per_s={},
+        )
+
+        decision = compare_challenger(champion, challenger)
+
+        self.assertFalse(decision.promoted)
+        self.assertTrue(
+            any(
+                "rate was not measured" in value
+                for value in decision.regressions
+            )
+        )
+
     def test_new_capability_promotes_when_baseline_survives(self) -> None:
         champion = FitnessVector(
             capabilities=frozenset({"iron_backbone"}),
