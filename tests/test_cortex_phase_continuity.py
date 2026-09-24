@@ -780,9 +780,21 @@ def test_phase_state_advances_to_f2f3_and_exposes_functional_canary(tmp_path) ->
         "# F2-F4\n"
     )
     f2f4=module.build_phase_state(state_root=tmp_path,protocol_path=protocol)
-    assert f2f4["phase2_checkpoint"] == "F2-F4"
+    assert f2f4["phase2_checkpoint"] == "F2-F4A"
     assert f2f4["phase2_delivery_actuator"]["exists"] is True
+    assert f2f4["phase2_delivery_actuator_runner"]["exists"] is False
     assert (
         f2f4["phase2_functional_canary"]["classification"]
         == "processor_input_missing_with_rollback"
     )
+
+
+    (docs/"CORTEX_PHASE2_DELIVERY_ACTUATOR_RUNNER.md").write_text(
+        "# F2-F4B\n"
+    )
+    f2f4b=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert f2f4b["phase2_checkpoint"] == "F2-F4B"
+    assert f2f4b["phase2_delivery_actuator_runner"]["exists"] is True

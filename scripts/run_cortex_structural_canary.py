@@ -18,6 +18,9 @@ from pathlib import Path
 from typing import Any
 
 from factorio_ai_lab.cortex.actions import ActionAuthority, ActionProvenance
+from factorio_ai_lab.cortex.delivery_actuator_dependency import (
+    complete_delivery_actuator_dependency,
+)
 from factorio_ai_lab.cortex.executor import request_from_repair_action
 from factorio_ai_lab.cortex.functional_dependency import (
     complete_structural_dependencies,
@@ -65,8 +68,81 @@ def validate_canary_seed(seed: int) -> None:
     if seed in CONFIRMATORY_SEEDS:
         raise ValueError(
             f"seed {seed} is reserved for confirmatory evaluation and cannot "
-            "be used by the F2-E canary"
+            "be used by the Cortex structural canary"
         )
+
+
+def delivery_power_capability(
+    graph_metrics: dict[str, Any],
+    *,
+    fixture_power_operation: bool | None,
+) -> dict[str, Any]:
+    """Return a fail-closed tri-state power capability for delivery planning.
+
+    Zero observed power edges is only converted to unavailable when the
+    canary fixture also declares that it performed no power operation.
+    Positive topology never proves that the planned actuator tile is powered.
+    """
+
+    raw = graph_metrics.get("power_edge_count")
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return {
+            "available": None,
+            "status": "missing",
+            "evidence": {
+                "path": "factory_graph.metrics.power_edge_count",
+                "value": raw,
+                "fixture_power_operation": fixture_power_operation,
+            },
+        }
+    value = int(raw)
+    if value == 0 and fixture_power_operation is False:
+        return {
+            "available": False,
+            "status": "derived_unavailable",
+            "evidence": {
+                "path": "factory_graph.metrics.power_edge_count",
+                "value": value,
+                "fixture_power_operation": fixture_power_operation,
+            },
+        }
+    return {
+        "available": None,
+        "status": (
+            "network_exists_actuator_position_unmeasured"
+            if value > 0
+            else "power_capability_unmeasured"
+        ),
+        "evidence": {
+            "path": "factory_graph.metrics.power_edge_count",
+            "value": value,
+            "fixture_power_operation": fixture_power_operation,
+        },
+    }
+
+
+def complete_canary_delivery_dependency(
+    prepared: Any,
+    *,
+    graph_metrics: dict[str, Any],
+    catalog: RuntimeFactorioCatalog,
+    inventory: dict[str, float],
+    horizon_s: float,
+):
+    """Compose the runner's delivery dependency without mutating the world."""
+
+    power = delivery_power_capability(
+        graph_metrics,
+        fixture_power_operation=False,
+    )
+    actuator = complete_delivery_actuator_dependency(
+        prepared,
+        catalog=catalog,
+        inventory=inventory,
+        electric_power_available=power["available"],
+        horizon_s=horizon_s,
+    )
+    return power, actuator
 
 
 def patch_center(patch: Any) -> tuple[float, float]:
@@ -556,6 +632,43 @@ print({{
                 )
             prepared = functional.prepared
 
+            power_capability, actuator = complete_canary_delivery_dependency(
+                prepared,
+                graph_metrics=dict(graph.get("metrics", {})),
+                catalog=catalog,
+                inventory=available,
+                horizon_s=float(structural_settle_seconds),
+            )
+            record["delivery_power_capability"] = power_capability
+            record["delivery_actuator_dependency"] = {
+                "ready": actuator.ready,
+                "dependency": (
+                    None
+                    if actuator.dependency is None
+                    else actuator.dependency.to_dict()
+                ),
+                "evaluations": [
+                    evaluation.to_dict()
+                    for evaluation in actuator.evaluations
+                ],
+                "refusal": (
+                    None
+                    if actuator.refusal is None
+                    else actuator.refusal.to_dict()
+                ),
+            }
+            if not actuator.ready or actuator.prepared is None:
+                code = (
+                    "unknown"
+                    if actuator.refusal is None
+                    else actuator.refusal.code
+                )
+                raise RuntimeError(
+                    f"delivery actuator dependency completion refused: {code}"
+                )
+            prepared = actuator.prepared
+            record["prepared_v3"] = prepared.to_dict()
+
             placement = prepared.preflight.get("placement")
             position = placement.get("position") if isinstance(placement, dict) else None
             if not isinstance(position, dict):
@@ -652,17 +765,17 @@ def main() -> int:
 
     validate_canary_seed(args.seed)
     if not args.execute:
-        print(
-            json.dumps(
-                {
-                    "status": "refused",
-                    "reason": "pass --execute for the one-shot F2-F canary",
-                    "seed": args.seed,
-                    "world_mutation": False,
-                },
-                indent=2,
-            )
-        )
+        record = {
+            "status": "refused",
+            "reason": "pass --execute for the one-shot Cortex structural canary",
+            "seed": args.seed,
+            "world_mutation": False,
+            "authority": None,
+            "continuous_authority": False,
+            "recorded_at": utc_now(),
+        }
+        write_artifact(args.artifact, record)
+        print(json.dumps(record, indent=2, sort_keys=True))
         return 2
 
     record = run_canary(

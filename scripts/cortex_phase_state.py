@@ -213,6 +213,14 @@ def build_phase_state(
         / "CORTEX_PHASE2_DELIVERY_ACTUATOR_DEPENDENCY.md"
     )
     phase2_delivery_actuator=phase2_delivery_actuator_path.exists()
+    phase2_delivery_actuator_runner_path=(
+        state_root
+        / "docs"
+        / "CORTEX_PHASE2_DELIVERY_ACTUATOR_RUNNER.md"
+    )
+    phase2_delivery_actuator_runner=(
+        phase2_delivery_actuator_runner_path.exists()
+    )
     phase2_functional_canary_path=(
         state_root / "runs" / "audits" / "cortex_f2f_structural_canary.json"
     )
@@ -351,7 +359,8 @@ def build_phase_state(
 
     phase2_checkpoint=None
     for checkpoint,enabled in (
-        ("F2-F4",phase2_delivery_actuator),
+        ("F2-F4B",phase2_delivery_actuator_runner),
+        ("F2-F4A",phase2_delivery_actuator),
         ("F2-F3",phase2_functional_canary),
         ("F2-F2",phase2_functional_composition),
         ("F2-F1",phase2_functional),
@@ -428,6 +437,10 @@ def build_phase_state(
         "phase2_delivery_actuator":{
             "path":str(phase2_delivery_actuator_path),
             "exists":phase2_delivery_actuator,
+        },
+        "phase2_delivery_actuator_runner":{
+            "path":str(phase2_delivery_actuator_runner_path),
+            "exists":phase2_delivery_actuator_runner,
         },
         "phase2_functional_canary":{
             "path":str(phase2_functional_canary_path),

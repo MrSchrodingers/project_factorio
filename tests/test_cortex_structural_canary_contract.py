@@ -8,7 +8,9 @@ from scripts.run_cortex_structural_canary import (
     DEFAULT_BOOTSTRAP_SETTLE_SECONDS,
     DEFAULT_SEED,
     available_inventory,
+    complete_canary_delivery_dependency,
     craft_output_count,
+    delivery_power_capability,
     resource_survey_from_overview,
     validate_canary_seed,
 )
@@ -87,3 +89,78 @@ def test_bootstrap_deadline_has_margin_beyond_previous_boundary() -> None:
     # F2-E2 produced exactly one ore at the old fixed 5 s boundary.
     # F2-F3 uses bounded polling with explicit headroom instead.
     assert DEFAULT_BOOTSTRAP_SETTLE_SECONDS == 12
+
+def test_delivery_power_zero_edges_plus_fixture_contract_derives_unavailable() -> None:
+    capability = delivery_power_capability(
+        {"power_edge_count": 0},
+        fixture_power_operation=False,
+    )
+
+    assert capability["available"] is False
+    assert capability["status"] == "derived_unavailable"
+    assert capability["evidence"]["value"] == 0
+    assert capability["evidence"]["fixture_power_operation"] is False
+
+
+def test_delivery_power_existing_network_does_not_prove_actuator_power() -> None:
+    capability = delivery_power_capability(
+        {"power_edge_count": 3},
+        fixture_power_operation=False,
+    )
+
+    assert capability["available"] is None
+    assert capability["status"] == "network_exists_actuator_position_unmeasured"
+    assert capability["evidence"]["value"] == 3
+
+
+def test_delivery_power_missing_metric_stays_unmeasured() -> None:
+    capability = delivery_power_capability(
+        {},
+        fixture_power_operation=False,
+    )
+
+    assert capability["available"] is None
+    assert capability["status"] == "missing"
+    assert capability["evidence"]["value"] is None
+
+def test_zero_edges_without_fixture_contract_remains_unmeasured() -> None:
+    capability = delivery_power_capability(
+        {"power_edge_count": 0},
+        fixture_power_operation=None,
+    )
+
+    assert capability["available"] is None
+    assert capability["status"] == "power_capability_unmeasured"
+    assert capability["evidence"]["fixture_power_operation"] is None
+
+def test_runner_delivery_glue_passes_fail_closed_power_to_planner(monkeypatch) -> None:
+    calls = {}
+    sentinel = object()
+
+    def fake_complete(prepared, **kwargs):
+        calls["prepared"] = prepared
+        calls.update(kwargs)
+        return sentinel
+
+    monkeypatch.setattr(
+        "scripts.run_cortex_structural_canary.complete_delivery_actuator_dependency",
+        fake_complete,
+    )
+
+    prepared = object()
+    catalog = object()
+    power, result = complete_canary_delivery_dependency(
+        prepared,
+        graph_metrics={"power_edge_count": 0},
+        catalog=catalog,
+        inventory={"burner-inserter": 50.0, "coal": 480.0},
+        horizon_s=10.0,
+    )
+
+    assert power["available"] is False
+    assert power["status"] == "derived_unavailable"
+    assert calls["prepared"] is prepared
+    assert calls["catalog"] is catalog
+    assert calls["electric_power_available"] is False
+    assert calls["horizon_s"] == 10.0
+    assert result is sentinel
