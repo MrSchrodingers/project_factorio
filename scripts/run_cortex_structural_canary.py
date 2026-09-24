@@ -52,7 +52,7 @@ from factorio_ai_lab.runtime import FactorioWorldLease
 
 DEFAULT_SEED = 424242
 CONFIRMATORY_SEEDS = frozenset(range(20261101, 20261111))
-DEFAULT_BOOTSTRAP_SETTLE_SECONDS = 5
+DEFAULT_BOOTSTRAP_SETTLE_SECONDS = 12
 DEFAULT_STRUCTURAL_SETTLE_SECONDS = 10
 DEFAULT_ARTIFACT = RUNS_DIR / "audits" / "cortex_f2f_structural_canary.json"
 
@@ -388,9 +388,20 @@ chest=place_entity_next_to(
     drill.position,
     direction=Direction.DOWN,
 )
-sleep({int(bootstrap_settle_seconds)})
-canary_iron=inspect_inventory(chest)[Prototype.IronOre]
-print({{'canary_iron':canary_iron}})
+canary_iron=0
+canary_bootstrap_polls=0
+for _ in range({int(bootstrap_settle_seconds)}):
+    sleep(1)
+    canary_bootstrap_polls += 1
+    canary_iron=inspect_inventory(chest)[Prototype.IronOre]
+    if canary_iron > 0:
+        break
+canary_bootstrap_elapsed_s=canary_bootstrap_polls
+print({{
+    'canary_iron':canary_iron,
+    'bootstrap_polls':canary_bootstrap_polls,
+    'bootstrap_elapsed_s':canary_bootstrap_elapsed_s,
+}})
 """
             bootstrap = executor.execute(
                 bootstrap_code,
@@ -402,6 +413,20 @@ print({{'canary_iron':canary_iron}})
                 use_checkpoint_for_action=False,
                 purpose="infrastructure",
             )
+            record["bootstrap"] = {
+                "accepted": bootstrap.accepted,
+                "iron_buffered": float(
+                    getattr(namespace, "canary_iron", 0) or 0
+                ),
+                "poll_count": int(
+                    getattr(namespace, "canary_bootstrap_polls", 0) or 0
+                ),
+                "elapsed_s": float(
+                    getattr(namespace, "canary_bootstrap_elapsed_s", 0) or 0
+                ),
+                "deadline_s": int(bootstrap_settle_seconds),
+                "patch_center": {"x": x, "y": y},
+            }
             if not bootstrap.accepted:
                 raise RuntimeError("producer+buffer bootstrap was rejected")
 
@@ -469,11 +494,7 @@ print({{'canary_iron':canary_iron}})
             )
             record.update(
                 {
-                    "bootstrap": {
-                        "accepted": bootstrap.accepted,
-                        "iron_buffered": float(namespace.canary_iron or 0),
-                        "patch_center": {"x": x, "y": y},
-                    },
+                    "bootstrap": dict(record["bootstrap"]),
                     "planning_instruments": {
                         "world": "FactorioObserver.snapshot",
                         "resources": "FactorioObserver.resource_overview",

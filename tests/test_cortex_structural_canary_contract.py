@@ -5,6 +5,7 @@ import pytest
 from factorio_ai_lab.domain.state import GridPoint
 from scripts.run_cortex_structural_canary import (
     CONFIRMATORY_SEEDS,
+    DEFAULT_BOOTSTRAP_SETTLE_SECONDS,
     DEFAULT_SEED,
     available_inventory,
     craft_output_count,
@@ -81,3 +82,8 @@ def test_craft_output_count_reads_observed_processor_output() -> None:
     assert craft_output_count(row, "iron-plate") == 7.0
     assert craft_output_count(row, "copper-plate") == 0.0
     assert craft_output_count(None, "iron-plate") == 0.0
+
+def test_bootstrap_deadline_has_margin_beyond_previous_boundary() -> None:
+    # F2-E2 produced exactly one ore at the old fixed 5 s boundary.
+    # F2-F3 uses bounded polling with explicit headroom instead.
+    assert DEFAULT_BOOTSTRAP_SETTLE_SECONDS == 12
