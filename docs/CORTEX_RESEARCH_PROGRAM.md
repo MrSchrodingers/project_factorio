@@ -1157,8 +1157,48 @@ dry-run fail-closed PASS.
 **Decision F2-F4B:** **PASS parcial de F2.** Runner integration está versionada e o caminho v3
 foi validado em replay sem mutação. Nenhum novo canário real foi executado por F2-F4B.
 
-**Next:** F2-F4C — após clean publication, revalidar HEAD/isolation/runtime F1/artifact único e
-executar no máximo um canário one-shot não-confirmatório. F3 permanece bloqueada.
+**F2-F4C result:** **FUNCTIONAL ACCEPT / bounded operation.** O canário one-shot seed 424242 foi
+executado em árvore clean no commit `20aac7f8eb0c3b71c8017b632892f37624b79fd0`.
+
+Observed:
+
+- delivery dependency ready=true;
+- electric inserter recusado por power unavailable;
+- burner-inserter selecionado por type/energy runtime;
+- actuator fuel=coal;
+- processor fuel=coal;
+- producers_reaching_processor: 0 -> 1;
+- physical_processing_coverage: 0.0 -> 1.0;
+- processor_exists: false -> true;
+- processor_output: 0.0 -> 13.0;
+- todas as hard postconditions satisfied;
+- ActionResult=accepted;
+- transaction_committed=true;
+- rollback_observed=false.
+
+Artifact: `runs/audits/cortex_f2f4c_structural_canary.json`; SHA-256
+`2c074e8ec312a5119c59487ee25acae5f1cab7f2ca7e2a2c95cedffada955d37`.
+
+**Sustainability boundary:** o estado final observado do processor foi `no_fuel`. Portanto
+`functional_accept=true`, mas sustained autonomous operation não foi provada. O resultado demonstra
+uma cadeia funcional bounded na janela experimental, não produção contínua.
+
+**Safety:** confirmatory seeds intactas; runtime F1 unchanged; evolution inactive+disabled;
+continuous_authority=false; WorldLease bloqueou tentativa concorrente duplicada antes de mutação.
+
+**Decision F2-F4C:** **PASS parcial de F2.** A cadeia v3 produziu output real e foi commitada somente
+após hard postconditions medidas. F2 ainda não fecha porque os requisitos originais de options,
+runner independence e universal transactional execution permanecem abertos.
+
+**Closure gate F2-F4C:** 41 focused continuity/dashboard PASS; 1401 core/FLE PASS + 2 PyTorch
+PASS; Ruff/compileall/JavaScript/TypeScript/Vite/diff checks PASS; runtime F1 unchanged; evolution
+inactive+disabled.
+
+**F2-F4C mechanical state commit:** `01c4390d1668631722dcef8d33c980e7e704247e` — `feat: registra aceite funcional F2-F4C`.
+
+**Next:** F2-G — Option composition + runner independence. Remover qualquer dependência Cortex de
+`curriculum_runner`, formalizar a primeira option temporally extended e provar cadeia funcional por
+API genérica sem stage handler. F3 permanece bloqueada.
 
 **Exit Gate F2:** o agente pode montar uma cadeia funcional escolhendo primitivas/options por uma
 API genérica, sem caminho codificado por estágio.

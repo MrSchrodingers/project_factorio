@@ -6,7 +6,7 @@
 ## Estado atual
 
 - Programa: Cortex Research Architecture v0.1
-- Fase: **F2-F4B full gate PASS — implementação/UI publicadas; verificação pós-publicação pendente; F3 bloqueada**
+- Fase: **F2-F4C functional accept concluído — F2-G autorizada; F3 bloqueada**
 - Branch: `research/cortex-v1`
 - Baseline imutável de origem: `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 - Tag baseline publicada: `cortex-pre-research-baseline-20260923`
@@ -46,50 +46,74 @@ silenciosamente pelo commit da F0**.
 
 ## Próxima ação
 
-**F2-F4C — revalidar isolamento e, somente se todos os gates permanecerem verdes, executar exatamente um canário não-confirmatório.**
+**F2-G — Option composition + runner independence.**
 
-F2-F4B está concluída.
+F2-F4C terminou com functional accept real em Factorio.
 
-Publicação:
+Evidence principal:
 
-- runner integration: `0607d1286b3a0c885e03c11c23e51935e2a16aa1`;
-- dashboard state: `beb96a6a5fd7142cb6d6d1a3bfaa48d380f9ed65`;
-- documentação de fechamento: commit posterior a estes dois.
+- source commit: `20aac7f8eb0c3b71c8017b632892f37624b79fd0`;
+- seed 424242;
+- artifact: `runs/audits/cortex_f2f4c_structural_canary.json`;
+- SHA-256: `2c074e8ec312a5119c59487ee25acae5f1cab7f2ca7e2a2c95cedffada955d37`;
+- action_status=accepted;
+- transaction_committed=true;
+- rollback_observed=false;
+- producers_reaching_processor: 0 -> 1;
+- physical_processing_coverage: 0.0 -> 1.0;
+- processor_output: 0.0 -> 13.0;
+- all hard postconditions satisfied;
+- actuator selecionado=burner-inserter;
+- actuator fuel=coal;
+- processor fuel=coal;
+- continuous_authority=false.
 
-Evidence final:
+Limitação científica:
 
-- 60 focused PASS;
-- 76 continuity/dashboard PASS;
-- 1400 core/FLE PASS;
+- final processor_status=no_fuel;
+- portanto functional_accept=true, mas sustained_operation=false/not proven;
+- F2-F4C prova operação funcional bounded, não produção sustentável contínua.
+
+Segurança:
+
+- confirmatory seeds 20261101–20261110 seguem intactas;
+- runtime F1 continua 95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac;
+- evolution permanece inactive+disabled;
+- FactorioWorldLease bloqueou uma tentativa concorrente duplicada antes de qualquer mutação.
+
+Documento canônico:
+`docs/CORTEX_PHASE2_DELIVERY_ACTUATOR_CANARY.md`
+
+Closure gate:
+
+- 41 focused continuity/dashboard PASS;
+- 1401 core/FLE PASS;
 - 2 PyTorch PASS;
-- Ruff/compileall/TypeScript/Vite PASS;
-- dry-run artifact `runs/audits/cortex_f2f4b_dryrun.json`, `world_mutation=false`;
-- replay `runs/audits/cortex_f2f4b_runner_replay.json`, `world_mutation=false`;
-- replay selecionou `burner-inserter` + coal e compilou contract v3.
+- Ruff/compileall/JavaScript/TypeScript/Vite PASS;
+- mechanical state/UI commit: `01c4390d1668631722dcef8d33c980e7e704247e`.
 
-Power contract:
+F2 NÃO está encerrada.
 
-- zero power edges + fixture sem power operation => `derived_unavailable`;
-- zero edges sem fixture contract => unknown;
-- rede existente sem medição posicional => unknown;
-- missing nunca vira false/zero por default.
+Checklist original ainda aberto:
 
-Antes de F2-F4C:
+- transactional execution universal;
+- options iniciais;
+- cadeia funcional sem curriculum_runner;
+- runner antigo baseline-only.
 
-1. confirmar HEAD local == origin/research/cortex-v1;
-2. árvore Git limpa;
-3. evolution inactive+disabled;
-4. runtime científico F1 intacto em `95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac`;
-5. confirmar seed 424242 fora do holdout;
-6. confirmar inexistência do artifact F2-F4C;
-7. executar exatamente uma vez;
-8. não repetir automaticamente se alcançar a capability e resultar em reject;
-9. classificar o resultado antes de qualquer nova alteração.
+Próximo bloco seguro F2-G:
 
-Não executar seeds 20261101–20261110.
-Não conceder continuous autonomous authority.
+1. remover dependência Cortex -> curriculum_runner para runtime footprints;
+2. mover essa instrumentação para interface genérica de planning/runtime;
+3. formalizar uma option temporally extended para estabelecer processing chain funcional;
+4. compor essa option por primitives/typed dependencies já existentes;
+5. executá-la pelo boundary transacional genérico, sem stage handler;
+6. adicionar integration test sem import de curriculum_runner;
+7. só então avaliar os quatro checkboxes de fechamento da F2;
+8. manter continuous autonomous authority bloqueada.
+
+Não executar confirmatory seeds.
 F3 permanece bloqueada.
-
 ## Protocolo de retomada após interrupção
 
 Não inferir continuidade pela tela. Executar na ordem:

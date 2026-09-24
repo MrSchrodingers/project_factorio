@@ -29,6 +29,7 @@ com experiência sem receber do programador a sequência de ações que constitu
 > **F2-F3 — Functional canary:** [docs/CORTEX_PHASE2_FUNCTIONAL_CANARY.md](docs/CORTEX_PHASE2_FUNCTIONAL_CANARY.md)
 > **F2-F4 — Delivery actuator dependency:** [docs/CORTEX_PHASE2_DELIVERY_ACTUATOR_DEPENDENCY.md](docs/CORTEX_PHASE2_DELIVERY_ACTUATOR_DEPENDENCY.md)
 > **F2-F4B — Runner integration:** [docs/CORTEX_PHASE2_DELIVERY_ACTUATOR_RUNNER.md](docs/CORTEX_PHASE2_DELIVERY_ACTUATOR_RUNNER.md)
+> **F2-F4C — Functional delivery canary:** [docs/CORTEX_PHASE2_DELIVERY_ACTUATOR_CANARY.md](docs/CORTEX_PHASE2_DELIVERY_ACTUATOR_CANARY.md)
 > **F1-B — storage hardening:** [docs/CORTEX_F1_STORAGE_HARDENING.md](docs/CORTEX_F1_STORAGE_HARDENING.md)
 > **Dashboard / evidence scope:** [docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md](docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md)
 > **Dashboard / tmp hardening:** [docs/CORTEX_DASHBOARD_TMP_HARDENING.md](docs/CORTEX_DASHBOARD_TMP_HARDENING.md)
@@ -36,10 +37,10 @@ com experiência sem receber do programador a sequência de ações que constitu
 
 ## Estado do programa
 
-**Cortex Research Architecture v0.1 — F2-F4B concluída e publicada. O runner aplica processor
-dependency v2, deriva power fail-closed, compõe delivery actuator dependency v3 e persiste toda a
-evidência antes de EXECUTE. Gate final: 1400 core/FLE + 2 PyTorch, Ruff/compileall/TypeScript/Vite
-verdes. F2-F4C pode executar no máximo um canário não-confirmatório após revalidação live.**
+**Cortex Research Architecture v0.1 — F2-F4C concluiu functional accept real. A cadeia v3
+selecionou burner-inserter + coal por capability runtime, produziu 13 iron plates e foi commitada
+após todas as hard postconditions. O processor terminou no_fuel: sustentabilidade contínua não foi
+provada. F2-G fecha options + runner independence; F3 e continuous authority seguem bloqueadas.**
 
 As seeds confirmatórias 20261101–20261110 permanecem congeladas e não executadas; serão usadas
 posteriormente para avaliação pareada do Cortex, sem tuning nelas.
