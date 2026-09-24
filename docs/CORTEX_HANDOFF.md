@@ -6,7 +6,7 @@
 ## Estado atual
 
 - Programa: Cortex Research Architecture v0.1
-- Fase: **F2-E concluída para controlled execution; F2-F ativa — dependency-complete structural option**
+- Fase: **F2-F1 concluída — energy/fuel observability; F2-F2 é a próxima ação**
 - Branch: `research/cortex-v1`
 - Baseline imutável de origem: `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 - Tag baseline publicada: `cortex-pre-research-baseline-20260923`
@@ -46,47 +46,35 @@ silenciosamente pelo commit da F0**.
 
 ## Próxima ação
 
-**F2-F — tornar a opção estrutural dependency-complete.**
+**F2-F2 — compor fuel/energy como dependência tipada da structural option.**
 
-F2-E2 attempt 2 foi executado em seed 424242 a partir do commit limpo
-4a0558e3a4c6b7795d618f4cdcda3a22e53074d8.
+F2-F1 mediu e validou no runtime Factorio 2.0.73:
 
-Resultado observado:
+- stone-furnace energy_source_type = burner;
+- energy_usage_per_tick_j = 1500.0;
+- fuel_categories = chemical;
+- 6 fuels runtime detectados;
+- chemical fuels compatíveis medidos: nuclear-fuel, rocket-fuel, solid-fuel, coal e wood;
+- item.fuel_categories não existe no 2.0.73; fallback medido item.fuel_category normaliza o schema;
+- 35 focused tests PASS;
+- live read-only game_knowledge probe PASS.
 
-- ActionResult = rejected;
-- refusal = structural_postcondition_failed;
-- producers_reaching_processor: 0 -> 1 no candidate;
-- physical_processing_coverage: 0.0 -> 1.0 no candidate;
-- processor_exists: false -> true;
-- processor_status = no_fuel;
-- processor_output = 0.0;
-- transaction_committed = false;
-- rollback_observed = true;
-- estado final voltou aos valores before.
-
-Artifact canônico:
-runs/audits/cortex_f2e_structural_canary.json
-
-F2-E2 closure snapshot commit: b61f199febd83a5c4aa9a1187f5f15eaecfe25e6
-
-Cópia preservada:
-runs/audits/cortex_f2e_structural_canary_attempt2.json
-
-Interpretation:
-a camada F2-E de controlled transactional execution funcionou corretamente; a opção estrutural
-atual é causalmente incompleta porque não satisfaz a dependência de fuel/energy do processor.
+Documento canônico:
+docs/CORTEX_PHASE2_FUNCTIONAL_DEPENDENCY.md
 
 Próximo bloco seguro:
 
-1. mapear energy/fuel requirements do processor;
-2. reutilizar planning/fuel.py + planning/resupply.py;
-3. representar fuel como child dependency/precondition da opção;
-4. compor processor + material delivery + fuel delivery;
-5. manter um único rollback em TransactionalFLEExecutor;
-6. repetir somente um canário isolado após novo gate/commit clean;
-7. exigir processor_output > 0; não relaxar o hard gate.
+1. generalizar BurnerProfile para fuel_value arbitrário preservando wrappers de coal;
+2. derivar demanda do processor a partir de MachineEnergy;
+3. filtrar fuels por categoria medida;
+4. combinar cada candidato com inventory/sources reais via plan_supply;
+5. escolher apenas plano coberto; fuel indisponível é refusal, não fallback nominal;
+6. representar o resultado como child dependency/semantic operation fuel_processor;
+7. compilar inicialmente somente carried-fuel path;
+8. manter world-draw não suportado como refusal nomeada até existir adapter próprio;
+9. gate + commit clean antes de qualquer novo canário.
 
-Não usar seeds 20261101–20261110.
+Não executar seeds 20261101–20261110.
 Não conceder continuous autonomous authority.
 F3 permanece bloqueada.
 

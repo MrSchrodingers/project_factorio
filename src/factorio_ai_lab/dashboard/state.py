@@ -1905,6 +1905,57 @@ for name,entity in pairs(prototypes.entity) do
   local mining_speed,mining_speed_status=probe(function()
     return entity.mining_speed
   end)
+  local energy_usage,energy_usage_status=probe(function()
+    return entity.get_max_energy_usage()
+  end)
+  local burner,burner_status=probe(function()
+    return entity.burner_prototype
+  end)
+  local electric,electric_status=probe(function()
+    return entity.electric_energy_source_prototype
+  end)
+  local heat,heat_status=probe(function()
+    return entity.heat_energy_source_prototype
+  end)
+  local fluid,fluid_status=probe(function()
+    return entity.fluid_energy_source_prototype
+  end)
+  local void_source,void_status=probe(function()
+    return entity.void_energy_source_prototype
+  end)
+
+  local energy_source_type=nil
+  local energy_source_status="absent"
+  local fuel_categories={}
+  local fuel_categories_status="absent"
+  if burner_status=="measured" and burner then
+    energy_source_type="burner"
+    energy_source_status="measured"
+    fuel_categories=names_from_dictionary(burner.fuel_categories)
+    fuel_categories_status="measured"
+  elseif electric_status=="measured" and electric then
+    energy_source_type="electric"
+    energy_source_status="measured"
+  elseif heat_status=="measured" and heat then
+    energy_source_type="heat"
+    energy_source_status="measured"
+  elseif fluid_status=="measured" and fluid then
+    energy_source_type="fluid"
+    energy_source_status="measured"
+  elseif void_status=="measured" and void_source then
+    energy_source_type="void"
+    energy_source_status="measured"
+  elseif burner_status=="probe_failed"
+      or electric_status=="probe_failed"
+      or heat_status=="probe_failed"
+      or fluid_status=="probe_failed"
+      or void_status=="probe_failed" then
+    energy_source_status="probe_failed"
+    if burner_status=="probe_failed" then
+      fuel_categories_status="probe_failed"
+    end
+  end
+
   local crafting=ok_categories and categories and next(categories)~=nil
   local mining=ok_resources and resource_categories and next(resource_categories)~=nil
   if crafting or mining then
@@ -1916,7 +1967,13 @@ for name,entity in pairs(prototypes.entity) do
       crafting_speed_status=crafting_speed_status,
       resource_categories=mining and string_array(resource_categories) or {},
       mining_speed=mining_speed,
-      mining_speed_status=mining_speed_status
+      mining_speed_status=mining_speed_status,
+      energy_source_type=energy_source_type,
+      energy_source_status=energy_source_status,
+      energy_usage_per_tick_j=energy_usage,
+      energy_usage_status=energy_usage_status,
+      fuel_categories=fuel_categories,
+      fuel_categories_status=fuel_categories_status
     }
   end
   local belt_speed,belt_speed_status=probe(function()
@@ -1940,6 +1997,38 @@ end
 table.sort(machines,function(a,b) return a.name<b.name end)
 table.sort(belts,function(a,b) return a.name<b.name end)
 
+local fuels={}
+for name,item in pairs(prototypes.item) do
+  local fuel_value,fuel_value_status=probe(function()
+    return item.fuel_value
+  end)
+  local fuel_categories,fuel_categories_status=probe(function()
+    return item.fuel_categories
+  end)
+  local normalized_fuel_categories={}
+  if fuel_categories_status=="measured" and fuel_categories then
+    normalized_fuel_categories=string_array(fuel_categories)
+  elseif fuel_categories_status=="probe_failed" then
+    local legacy_category,legacy_status=probe(function()
+      return item.fuel_category
+    end)
+    if legacy_status=="measured" and legacy_category then
+      normalized_fuel_categories={tostring(legacy_category)}
+      fuel_categories_status="measured"
+    end
+  end
+  if fuel_value_status=="measured" and fuel_value and fuel_value>0 then
+    fuels[#fuels+1]={
+      name=name,
+      fuel_value_j=fuel_value,
+      fuel_value_status=fuel_value_status,
+      fuel_categories=normalized_fuel_categories,
+      fuel_categories_status=fuel_categories_status
+    }
+  end
+end
+table.sort(fuels,function(a,b) return a.name<b.name end)
+
 rcon.print(helpers.table_to_json({
   connected=true,
   factorio_version=script.active_mods.base or "base",
@@ -1947,11 +2036,13 @@ rcon.print(helpers.table_to_json({
   technologies=technologies,
   machines=machines,
   belts=belts,
+  fuels=fuels,
   counts={
     recipes=#recipes,
     technologies=#technologies,
     machines=#machines,
-    belts=#belts
+    belts=#belts,
+    fuels=#fuels
   }
 }))
 """

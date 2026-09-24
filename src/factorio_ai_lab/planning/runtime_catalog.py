@@ -42,6 +42,8 @@ __all__ = [
     "PROBE_UNKNOWN",
     "TICKS_PER_SECOND",
     "BeltSpeed",
+    "FuelSpec",
+    "MachineEnergy",
     "MachineSpeed",
     "RecipeProduct",
     "RuntimeFactorioCatalog",
@@ -71,6 +73,74 @@ class RuntimeRecipeChoice:
     @property
     def byproducts(self) -> tuple[RecipeProduct, ...]:
         return self.spec.byproducts
+
+
+@dataclass(frozen=True)
+class MachineEnergy:
+    """Energy-source facts for one machine prototype."""
+
+    machine: str
+    source_type: str | None
+    source_type_status: str
+    energy_usage_per_tick_j: float | None
+    energy_usage_status: str
+    fuel_categories: tuple[str, ...] = ()
+    fuel_categories_status: str = PROBE_UNKNOWN
+
+    @property
+    def source_measured(self) -> bool:
+        return self.source_type_status == PROBE_MEASURED
+
+    @property
+    def energy_usage_measured(self) -> bool:
+        return self.energy_usage_status == PROBE_MEASURED
+
+    @property
+    def burner(self) -> bool:
+        return self.source_measured and self.source_type == "burner"
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "machine": self.machine,
+            "source_type": self.source_type,
+            "source_type_status": self.source_type_status,
+            "energy_usage_per_tick_j": self.energy_usage_per_tick_j,
+            "energy_usage_status": self.energy_usage_status,
+            "fuel_categories": list(self.fuel_categories),
+            "fuel_categories_status": self.fuel_categories_status,
+        }
+
+
+@dataclass(frozen=True)
+class FuelSpec:
+    """One runtime item that can act as fuel."""
+
+    name: str
+    fuel_value_j: float | None
+    fuel_value_status: str
+    fuel_categories: tuple[str, ...]
+    fuel_categories_status: str
+
+    @property
+    def measured(self) -> bool:
+        return (
+            self.fuel_value_status == PROBE_MEASURED
+            and self.fuel_value_j is not None
+            and self.fuel_value_j > 0
+        )
+
+    def compatible_with(self, categories: Sequence[str]) -> bool:
+        wanted = frozenset(str(value) for value in categories)
+        return bool(wanted.intersection(self.fuel_categories))
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "fuel_value_j": self.fuel_value_j,
+            "fuel_value_status": self.fuel_value_status,
+            "fuel_categories": list(self.fuel_categories),
+            "fuel_categories_status": self.fuel_categories_status,
+        }
 
 
 @dataclass(frozen=True)
@@ -170,6 +240,96 @@ def _probe_number(
     if status != PROBE_MEASURED:
         value = None
     return value, status
+
+
+def _probe_status(
+    row: Mapping[str, Any],
+    status_key: str,
+    *,
+    measured_if: bool = False,
+) -> str:
+    raw = row.get(status_key)
+    if isinstance(raw, str) and raw in PROBE_STATUSES:
+        return raw
+    return PROBE_MEASURED if measured_if else PROBE_UNKNOWN
+
+
+def _machine_energy_from_row(row: Mapping[str, Any]) -> MachineEnergy | None:
+    name = str(row.get("name") or "")
+    if not name:
+        return None
+    source_raw = row.get("energy_source_type")
+    source_type = str(source_raw) if isinstance(source_raw, str) and source_raw else None
+    source_status = _probe_status(
+        row,
+        "energy_source_status",
+        measured_if=source_type is not None,
+    )
+    if source_status != PROBE_MEASURED:
+        source_type = None
+
+    usage, usage_status = _probe_number(
+        row,
+        "energy_usage_per_tick_j",
+        "energy_usage_status",
+    )
+
+    raw_categories = row.get("fuel_categories")
+    categories = (
+        tuple(sorted(str(value) for value in raw_categories if isinstance(value, str)))
+        if isinstance(raw_categories, Sequence)
+        and not isinstance(raw_categories, (str, bytes))
+        else ()
+    )
+    categories_status = _probe_status(
+        row,
+        "fuel_categories_status",
+        measured_if=bool(categories),
+    )
+    if categories_status != PROBE_MEASURED:
+        categories = ()
+
+    return MachineEnergy(
+        machine=name,
+        source_type=source_type,
+        source_type_status=source_status,
+        energy_usage_per_tick_j=usage,
+        energy_usage_status=usage_status,
+        fuel_categories=categories,
+        fuel_categories_status=categories_status,
+    )
+
+
+def _fuel_spec_from_row(row: Mapping[str, Any]) -> FuelSpec | None:
+    name = str(row.get("name") or "")
+    if not name:
+        return None
+    value, value_status = _probe_number(
+        row,
+        "fuel_value_j",
+        "fuel_value_status",
+    )
+    raw_categories = row.get("fuel_categories")
+    categories = (
+        tuple(sorted(str(item) for item in raw_categories if isinstance(item, str)))
+        if isinstance(raw_categories, Sequence)
+        and not isinstance(raw_categories, (str, bytes))
+        else ()
+    )
+    categories_status = _probe_status(
+        row,
+        "fuel_categories_status",
+        measured_if=bool(categories),
+    )
+    if categories_status != PROBE_MEASURED:
+        categories = ()
+    return FuelSpec(
+        name=name,
+        fuel_value_j=value,
+        fuel_value_status=value_status,
+        fuel_categories=categories,
+        fuel_categories_status=categories_status,
+    )
 
 
 def _machine_speed_from_row(row: Mapping[str, Any]) -> MachineSpeed | None:
@@ -285,12 +445,15 @@ class RuntimeFactorioCatalog:
         self.technology_rows = _rows(payload, "technologies")
         self.machine_rows = _rows(payload, "machines")
         self.belt_rows = _rows(payload, "belts")
+        self.fuel_rows = _rows(payload, "fuels")
         self._recipes_by_product: dict[str, list[RuntimeRecipeChoice]] = (
             defaultdict(list)
         )
         self._unlock_by_recipe: dict[str, list[str]] = defaultdict(list)
         self._machine_speeds: dict[str, MachineSpeed] = {}
+        self._machine_energy: dict[str, MachineEnergy] = {}
         self._belt_speeds: dict[str, BeltSpeed] = {}
+        self._fuels: dict[str, FuelSpec] = {}
         self._build_indexes()
 
     def _build_indexes(self) -> None:
@@ -349,11 +512,19 @@ class RuntimeFactorioCatalog:
             machine_speed = _machine_speed_from_row(row)
             if machine_speed is not None:
                 self._machine_speeds[machine_speed.machine] = machine_speed
+            machine_energy = _machine_energy_from_row(row)
+            if machine_energy is not None:
+                self._machine_energy[machine_energy.machine] = machine_energy
 
         for row in self.belt_rows:
             belt_speed = _belt_speed_from_row(row)
             if belt_speed is not None:
                 self._belt_speeds[belt_speed.name] = belt_speed
+
+        for row in self.fuel_rows:
+            fuel = _fuel_spec_from_row(row)
+            if fuel is not None:
+                self._fuels[fuel.name] = fuel
 
     def recipe_choices(self, item: str) -> tuple[RuntimeRecipeChoice, ...]:
         """Every recipe that yields ``item``, in payload order.
@@ -406,6 +577,44 @@ class RuntimeFactorioCatalog:
 
     def machine_speeds(self) -> tuple[MachineSpeed, ...]:
         return tuple(self._machine_speeds.values())
+
+    def machine_energy(self, machine: str) -> MachineEnergy:
+        known = self._machine_energy.get(machine)
+        if known is not None:
+            return known
+        return MachineEnergy(
+            machine=machine,
+            source_type=None,
+            source_type_status=PROBE_UNKNOWN,
+            energy_usage_per_tick_j=None,
+            energy_usage_status=PROBE_UNKNOWN,
+            fuel_categories=(),
+            fuel_categories_status=PROBE_UNKNOWN,
+        )
+
+    def machine_energies(self) -> tuple[MachineEnergy, ...]:
+        return tuple(self._machine_energy.values())
+
+    def fuel(self, name: str) -> FuelSpec | None:
+        return self._fuels.get(name)
+
+    def fuels(self) -> tuple[FuelSpec, ...]:
+        return tuple(self._fuels.values())
+
+    def compatible_fuels(self, categories: Sequence[str]) -> tuple[FuelSpec, ...]:
+        return tuple(
+            sorted(
+                (
+                    fuel
+                    for fuel in self._fuels.values()
+                    if fuel.measured and fuel.compatible_with(categories)
+                ),
+                key=lambda fuel: (
+                    -(fuel.fuel_value_j or 0.0),
+                    fuel.name,
+                ),
+            )
+        )
 
     def belt_speed(self, name: str) -> BeltSpeed | None:
         return self._belt_speeds.get(name)
@@ -495,6 +704,7 @@ class RuntimeFactorioCatalog:
             "technology_count": len(self.technology_rows),
             "machine_count": len(self.machine_rows),
             "belt_count": len(self.belt_rows),
+            "fuel_count": len(self.fuel_rows),
             "measured_crafting_speed_count": sum(
                 speed.crafting_speed_measured
                 for speed in self._machine_speeds.values()

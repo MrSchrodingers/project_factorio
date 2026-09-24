@@ -197,6 +197,10 @@ def build_phase_state(
         state_root / "docs" / "CORTEX_PHASE2_TRANSACTIONAL_EXECUTION.md"
     )
     phase2_execution=phase2_execution_path.exists()
+    phase2_functional_path=(
+        state_root / "docs" / "CORTEX_PHASE2_FUNCTIONAL_DEPENDENCY.md"
+    )
+    phase2_functional=phase2_functional_path.exists()
     phase2_canary_path=(
         state_root / "runs" / "audits" / "cortex_f2e_structural_canary.json"
     )
@@ -301,21 +305,25 @@ def build_phase_state(
             "exists":phase2_started,
         },
         "phase2_checkpoint":(
-            "F2-E2"
-            if phase2_canary
+            "F2-F1"
+            if phase2_functional
             else (
-                "F2-E1"
-                if phase2_execution
+                "F2-E2"
+                if phase2_canary
                 else (
-                    "F2-D"
-                    if phase2_preparation
+                    "F2-E1"
+                    if phase2_execution
                     else (
-                        "F2-C"
-                        if phase2_structural
+                        "F2-D"
+                        if phase2_preparation
                         else (
-                            "F2-B"
-                            if phase2_parity
-                            else ("F2-A" if phase2_started else None)
+                            "F2-C"
+                            if phase2_structural
+                            else (
+                                "F2-B"
+                                if phase2_parity
+                                else ("F2-A" if phase2_started else None)
+                            )
                         )
                     )
                 )
@@ -336,6 +344,10 @@ def build_phase_state(
         "phase2_execution":{
             "path":str(phase2_execution_path),
             "exists":phase2_execution,
+        },
+        "phase2_functional":{
+            "path":str(phase2_functional_path),
+            "exists":phase2_functional,
         },
         "phase2_canary":{
             "path":str(phase2_canary_path),

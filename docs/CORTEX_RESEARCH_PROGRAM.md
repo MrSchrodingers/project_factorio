@@ -1021,10 +1021,31 @@ inactive+disabled; rollback exactness PASS.
 **F2-E2 closure snapshot commit:** b61f199febd83a5c4aa9a1187f5f15eaecfe25e6 — feat: fecha canário transacional F2-E2.
 
 
-**Next:** F2-F — dependency-complete structural option. Compor fuel/energy usando planners
-existentes, mantendo TransactionalFLEExecutor como única fronteira de rollback. Repetir um canário
-isolado apenas após novo gate/commit clean. Continuous autonomous authority e F3 permanecem
-bloqueadas.
+**F2-F1 progress:** **PASS.** O runtime catalog agora mede
+energy_source_type, max energy usage por tick e fuel categories de máquinas, além de FuelSpec
+runtime com fuel value/category. O observer mantém compatibilidade com Factorio 2.0.73: tenta
+fuel_categories e, quando o accessor não existe, mede o legado fuel_category sem converter absence
+em default.
+
+**Live evidence F2-F1:** stone-furnace = burner, 1500 J/tick, category chemical. O runtime expôs
+6 fuels totais e cinco fuels chemical compatíveis: nuclear-fuel, rocket-fuel, solid-fuel, coal e
+wood. Essa ordenação é factual/determinística por densidade energética; não é ainda uma policy de
+seleção.
+
+**Evidence F2-F1:** docs/CORTEX_PHASE2_FUNCTIONAL_DEPENDENCY.md;
+src/factorio_ai_lab/dashboard/state.py;
+src/factorio_ai_lab/planning/runtime_catalog.py;
+tests/test_runtime_machine_data.py.
+
+**Tests F2-F1:** 53 focused PASS; 1373 core/FLE PASS + 2 PyTorch PASS; Ruff/static,
+py_compile, frontend TypeScript/Vite e diff check PASS; live read-only game_knowledge probe PASS.
+
+**Decision F2-F1:** **PASS.** O runtime agora fornece o substrato energético necessário para
+F2-F2 sem hardcodes de machine/fuel. Nenhuma nova authority de escrita foi criada.
+
+**Next after publication:** F2-F2 — compor fuel/energy como child dependency tipada usando
+planning/fuel.py + planning/resupply.py. O próximo canário continua proibido até novo gate/commit
+clean. Continuous autonomous authority e F3 permanecem bloqueadas.
 
 **Exit Gate F2:** o agente pode montar uma cadeia funcional escolhendo primitivas/options por uma
 API genérica, sem caminho codificado por estágio.

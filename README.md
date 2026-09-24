@@ -24,6 +24,7 @@ com experiência sem receber do programador a sequência de ações que constitu
 > **F2-C — Structural planning:** [docs/CORTEX_PHASE2_STRUCTURAL_PLANNING.md](docs/CORTEX_PHASE2_STRUCTURAL_PLANNING.md)
 > **F2-D — Resource identity / preparation:** [docs/CORTEX_PHASE2_STRUCTURAL_PREPARATION.md](docs/CORTEX_PHASE2_STRUCTURAL_PREPARATION.md)
 > **F2-E — Controlled transactional execution:** [docs/CORTEX_PHASE2_TRANSACTIONAL_EXECUTION.md](docs/CORTEX_PHASE2_TRANSACTIONAL_EXECUTION.md)
+> **F2-F — Functional dependency completion:** [docs/CORTEX_PHASE2_FUNCTIONAL_DEPENDENCY.md](docs/CORTEX_PHASE2_FUNCTIONAL_DEPENDENCY.md)
 > **F1-B — storage hardening:** [docs/CORTEX_F1_STORAGE_HARDENING.md](docs/CORTEX_F1_STORAGE_HARDENING.md)
 > **Dashboard / evidence scope:** [docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md](docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md)
 > **Dashboard / tmp hardening:** [docs/CORTEX_DASHBOARD_TMP_HARDENING.md](docs/CORTEX_DASHBOARD_TMP_HARDENING.md)
@@ -31,10 +32,10 @@ com experiência sem receber do programador a sequência de ações que constitu
 
 ## Estado do programa
 
-**Cortex Research Architecture v0.1 — F2-E concluída para execução transacional controlada.
-O retry real chegou a EXECUTE, alterou corretamente a topologia, falhou no hard gate funcional
-porque o stone-furnace ficou no_fuel e foi integralmente revertido. F2-F está ativa para tornar a
-opção estrutural dependency-complete. Continuous authority e F3 seguem bloqueadas.**
+**Cortex Research Architecture v0.1 — F2-F1 concluída em observabilidade. O counterexample
+no_fuel de F2-E agora possui suporte factual no runtime: source type, consumo e fuel categories
+são medidos, e fuels compatíveis são catalogados por dados do jogo. F2-F2 comporá essa dependência
+na opção estrutural; continuous authority e F3 seguem bloqueadas.**
 
 As seeds confirmatórias 20261101–20261110 permanecem congeladas e não executadas; serão usadas
 posteriormente para avaliação pareada do Cortex, sem tuning nelas.

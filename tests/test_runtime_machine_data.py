@@ -43,6 +43,12 @@ PAYLOAD = {
             "crafting_speed_status": PROBE_MEASURED,
             "resource_categories": [],
             "mining_speed_status": PROBE_ABSENT,
+            "energy_source_type": "electric",
+            "energy_source_status": PROBE_MEASURED,
+            "energy_usage_per_tick_j": 2500,
+            "energy_usage_status": PROBE_MEASURED,
+            "fuel_categories": [],
+            "fuel_categories_status": PROBE_ABSENT,
         },
         {
             "name": "stone-furnace",
@@ -52,6 +58,12 @@ PAYLOAD = {
             "crafting_speed_status": PROBE_MEASURED,
             "resource_categories": [],
             "mining_speed_status": PROBE_ABSENT,
+            "energy_source_type": "burner",
+            "energy_source_status": PROBE_MEASURED,
+            "energy_usage_per_tick_j": 1500,
+            "energy_usage_status": PROBE_MEASURED,
+            "fuel_categories": ["chemical"],
+            "fuel_categories_status": PROBE_MEASURED,
         },
         {
             "name": "electric-mining-drill",
@@ -74,6 +86,29 @@ PAYLOAD = {
             "name": "legacy-machine",
             "type": "assembling-machine",
             "crafting_categories": ["crafting"],
+        },
+    ],
+    "fuels": [
+        {
+            "name": "coal",
+            "fuel_value_j": 4_000_000,
+            "fuel_value_status": PROBE_MEASURED,
+            "fuel_categories": ["chemical"],
+            "fuel_categories_status": PROBE_MEASURED,
+        },
+        {
+            "name": "wood",
+            "fuel_value_j": 2_000_000,
+            "fuel_value_status": PROBE_MEASURED,
+            "fuel_categories": ["chemical"],
+            "fuel_categories_status": PROBE_MEASURED,
+        },
+        {
+            "name": "uranium-fuel-cell",
+            "fuel_value_j": 8_000_000_000,
+            "fuel_value_status": PROBE_MEASURED,
+            "fuel_categories": ["nuclear"],
+            "fuel_categories_status": PROBE_MEASURED,
         },
     ],
     "belts": [
@@ -110,7 +145,13 @@ PAYLOAD = {
             "max_underground_distance_status": PROBE_FAILED,
         },
     ],
-    "counts": {"recipes": 0, "technologies": 0, "machines": 5, "belts": 4},
+    "counts": {
+        "recipes": 0,
+        "technologies": 0,
+        "machines": 5,
+        "belts": 4,
+        "fuels": 3,
+    },
 }
 
 
@@ -130,6 +171,49 @@ def test_knowledge_command_probes_belt_speed_and_underground_reach():
     assert "belt_speed" in command
     assert "max_underground_distance" in command
 
+
+
+
+def test_knowledge_command_probes_machine_energy_and_fuels():
+    command = FactorioObserver._GAME_KNOWLEDGE_COMMAND
+    assert "get_max_energy_usage()" in command
+    assert "burner_prototype" in command
+    assert "electric_energy_source_prototype" in command
+    assert "fuel_categories" in command
+    assert "item.fuel_category" in command
+    assert "fuel_value" in command
+
+
+def test_machine_energy_distinguishes_burner_and_electric(catalog):
+    furnace = catalog.machine_energy("stone-furnace")
+    assembler = catalog.machine_energy("assembling-machine-2")
+
+    assert furnace.source_type == "burner"
+    assert furnace.source_measured is True
+    assert furnace.energy_usage_per_tick_j == 1500
+    assert furnace.energy_usage_measured is True
+    assert furnace.fuel_categories == ("chemical",)
+
+    assert assembler.source_type == "electric"
+    assert assembler.source_measured is True
+    assert assembler.energy_usage_per_tick_j == 2500
+    assert assembler.fuel_categories == ()
+
+
+def test_unknown_machine_energy_stays_unknown(catalog):
+    energy = catalog.machine_energy("no-such-machine")
+    assert energy.source_type is None
+    assert energy.source_type_status == PROBE_UNKNOWN
+    assert energy.energy_usage_per_tick_j is None
+    assert energy.energy_usage_status == PROBE_UNKNOWN
+
+
+def test_compatible_fuels_use_runtime_category_and_energy_density(catalog):
+    fuels = catalog.compatible_fuels(("chemical",))
+
+    assert [fuel.name for fuel in fuels] == ["coal", "wood"]
+    assert fuels[0].fuel_value_j == 4_000_000
+    assert catalog.compatible_fuels(("nuclear",))[0].name == "uranium-fuel-cell"
 
 def test_crafting_speed_arrives_for_machines_that_have_one(catalog):
     assembler = catalog.machine_speed("assembling-machine-2")
