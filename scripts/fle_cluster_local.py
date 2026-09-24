@@ -105,7 +105,7 @@ def generate_compose(
             host, container_proto = mapping.split(":", 1)
             local_ports.append(f"127.0.0.1:{host}:{container_proto}")
         service["ports"] = local_ports
-        service["restart"] = "no"
+        service["restart"] = "unless-stopped"
 
     if seeds:
         apply_map_gen_seeds(data, seeds, scenario=scenario)

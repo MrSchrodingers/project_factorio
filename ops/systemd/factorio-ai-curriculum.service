@@ -2,6 +2,7 @@
 Description=Factorio AI Lab autonomous curriculum runner
 After=docker.service factorio-ai-dashboard.service factorio-ai-llm.service
 Wants=docker.service factorio-ai-dashboard.service factorio-ai-llm.service
+Conflicts=factorio-ai-evolution.service
 
 [Service]
 Type=oneshot
@@ -9,7 +10,10 @@ User=ti
 Group=devs
 WorkingDirectory=/srv/factorio-ai-lab
 Environment=HOME=/home/ti
-ExecStart=/srv/factorio-ai-lab/scripts/run_curriculum.sh
+Environment=FACTORIO_AI_STATE_ROOT=/srv/factorio-ai-lab
+Environment=FACTORIO_AI_VENV_FLE=/srv/factorio-ai-lab/.venv-fle
+Environment=FACTORIO_AI_REQUIRE_CLEAN_PROMOTION=1
+ExecStart=/srv/factorio-ai-runtime/current/scripts/run_curriculum.sh
 TimeoutStartSec=1800
 NoNewPrivileges=true
 PrivateTmp=true

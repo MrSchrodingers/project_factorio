@@ -8,9 +8,14 @@ User=ti
 Group=devs
 WorkingDirectory=/srv/factorio-ai-lab
 Environment=HOME=/home/ti
-ExecStart=/srv/factorio-ai-lab/scripts/run_llm_server.sh
+Environment=FACTORIO_AI_LLM_CTX=4096
+ExecStart=/srv/factorio-ai-runtime/current/scripts/run_llm_server.sh
 Restart=on-failure
 RestartSec=5
+MemoryHigh=6G
+MemoryMax=9G
+MemorySwapMax=512M
+TasksMax=64
 NoNewPrivileges=true
 PrivateTmp=true
 Nice=5

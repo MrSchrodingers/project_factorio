@@ -9,7 +9,9 @@ User=ti
 Group=devs
 WorkingDirectory=/srv/factorio-ai-lab
 Environment=HOME=/home/ti
-ExecStart=/srv/factorio-ai-lab/scripts/run_dashboard.sh
+Environment=FACTORIO_AI_STATE_ROOT=/srv/factorio-ai-lab
+Environment=FACTORIO_AI_VENV_FLE=/srv/factorio-ai-lab/.venv-fle
+ExecStart=/srv/factorio-ai-runtime/current/scripts/run_dashboard.sh
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true

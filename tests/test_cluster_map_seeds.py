@@ -13,6 +13,7 @@ import pathlib
 from typing import Any
 
 import pytest
+import yaml
 
 pytest.importorskip("yaml")
 pytest.importorskip("fle.cluster.run_envs")
@@ -93,3 +94,17 @@ def test_repeated_seeds_are_refused() -> None:
 def test_seed_count_must_match_instance_count() -> None:
     with pytest.raises(ValueError, match="one distinct seed per instance"):
         CLUSTER.apply_map_gen_seeds(_compose(3), [11, 12], scenario="open_world")
+
+def test_generated_factorio_services_restart_unless_stopped(tmp_path) -> None:
+    path = CLUSTER.generate_compose(
+        tmp_path,
+        instances=1,
+        scenario="default_lab_scenario",
+    )
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+
+    assert data["services"]
+    assert all(
+        service["restart"] == "unless-stopped"
+        for service in data["services"].values()
+    )

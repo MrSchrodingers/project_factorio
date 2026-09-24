@@ -10,10 +10,13 @@ User=ti
 Group=devs
 WorkingDirectory=/srv/factorio-ai-lab
 Environment=HOME=/home/ti
+Environment=FACTORIO_AI_STATE_ROOT=/srv/factorio-ai-lab
+Environment=FACTORIO_AI_VENV_FLE=/srv/factorio-ai-lab/.venv-fle
+Environment=FACTORIO_AI_REQUIRE_CLEAN_PROMOTION=1
 Environment=PYTHONUNBUFFERED=1
 Environment=OMP_NUM_THREADS=8
 Environment=MKL_NUM_THREADS=8
-ExecStart=/srv/factorio-ai-lab/scripts/run_evolution_loop.sh --generations 1 --continue-after-validated
+ExecStart=/srv/factorio-ai-runtime/current/scripts/run_evolution_loop.sh --generations 1 --continue-after-validated
 Restart=always
 RestartSec=20
 Nice=5
