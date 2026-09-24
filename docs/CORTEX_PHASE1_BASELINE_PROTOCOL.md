@@ -64,7 +64,11 @@ Fonte canônica: configs/cortex_baseline_v1.json.
 
 ### Exploratory
 
-- [ ] 20261001
+**Progress:** 1/5 valid observations. Seed 20261001 is documented in
+[docs/CORTEX_PHASE1_BASELINE_SEED_20261001.md](CORTEX_PHASE1_BASELINE_SEED_20261001.md) and is retained as a valid partial-success result.
+
+
+- [x] 20261001
 - [ ] 20261002
 - [ ] 20261003
 - [ ] 20261004

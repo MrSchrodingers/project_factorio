@@ -823,6 +823,10 @@ docs/CORTEX_PHASE1_INTEGRITY.md. G37 já foi aposentada; permanecem abertos a ex
 baseline corrigida e o relatório estatístico. Protocolo pré-registrado em
 docs/CORTEX_PHASE1_BASELINE_PROTOCOL.md.
 
+**F1-B progress:** 1/5 exploratory seeds valid. Seed 20261001 = partial_success;
+Logistic science failed with 33.3% physical processing coverage and no global-state leakage.
+Detailed evidence: docs/CORTEX_PHASE1_BASELINE_SEED_20261001.md.
+
 **Evidence F1-A:** commits a3a50b5, f8437d5 e e5cd102; snapshot
 backups/cortex-f1-pre-20260924T031901Z; docs/audits/NUMERIC_DEFAULT_AUDIT_F1.md; artefatos de
 soak em runs/audits; release imutável sob /srv/factorio-ai-runtime/current.

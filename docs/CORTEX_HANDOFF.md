@@ -46,13 +46,30 @@ silenciosamente pelo commit da F0**.
 
 ## Próxima ação
 
-**F1-B — baseline corrigida independente por seed.**
+**F1-B — baseline corrigida independente por seed: executar 20261002.**
 
-Já concluído: alterações logísticas em a3a50b5; provenance/state-root em f8437d5; runtime imutável/systemd em e5cd102; release ativa verificada; evolution parado; backup em backups/cortex-f1-pre-20260924T031901Z; 1283 testes core/FLE + 2 PyTorch verdes; audit numérico 487/141 após duas correções críticas; Qwen limitado por cgroup com soak medido; seeds congeladas; backup/reset fail-closed.
+Seed 20261001: **VALID / partial_success**.
 
-G37 foi aposentada em backups/selection-reset-20260924T040637Z; runs/evolution_champion.json não existe mais. Baseline corrigida ainda não foi executada e o relatório estatístico F1 ainda não existe.
+- release: 95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac, dirty=false;
+- run: curriculum-20260924T043932Z;
+- completed stages: 14;
+- bottleneck: Logistic science;
+- autonomy score: 0.5;
+- closed-loop: false;
+- physical processing coverage: 33.3%;
+- manual logistics calls: 53;
+- fuel/power starvation final: 0/0;
+- isolation global: PASS;
+- logistic science output: 0;
+- root limitation: producer outputs buffered without processor reach; proposed placement repair
+  was not executable because the inherited runner has no_runner_binding_for_intent.
 
-Retomada: conferir git status e release ativa; ler docs/CORTEX_PHASE1_BASELINE_PROTOCOL.md; validar dry-run; iniciar pela seed exploratória 20261001. Não iniciar confirmatory antes do relatório exploratório.
+Do not fix gameplay/repair/planning code before finishing the five exploratory seeds. The
+baseline runtime remains pinned to 95c34a53, even if analysis/docs commits advance the source
+branch.
+
+Next run: seed 20261002, mode exploratory, using the same explicit release root and PYTHONPATH.
+Validate result and isolation before 20261003.
 
 ## Evidência de fechamento da F0
 
