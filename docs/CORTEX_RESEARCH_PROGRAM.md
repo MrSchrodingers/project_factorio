@@ -7,7 +7,7 @@
 **Branch de transição:** `research/cortex-v1`
 **Baseline pré-Cortex:** `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 **Tag de baseline:** `cortex-pre-research-baseline-20260923`
-**Status:** Fase 0 — Constituição científica e baseline reprodutível
+**Status:** Fase 0 concluída — próxima: Fase 1, Instrumentação, isolamento e baseline corrigida
 
 > Este arquivo é o contrato científico e operacional do Factorio AI Lab. Em caso de perda de
 > contexto de conversa, troca de operador, troca de modelo ou reinício do host, a continuidade
@@ -780,9 +780,9 @@ entre automação herdada e arquitetura-alvo.
 - [x] registrar árvore suja pré-existente sem incorporá-la silenciosamente;
 - [x] expor no frontend “Programa Cortex”, fase e duas vertentes;
 - [x] validar documentação e frontend;
-- [ ] commit separado da infraestrutura científica;
-- [ ] push da branch e tag;
-- [ ] registrar checkpoint no SentinelX.
+- [x] commit separado da infraestrutura científica;
+- [x] push da branch e tag;
+- [x] registrar checkpoint no SentinelX.
 
 **Exit Gate F0:** alguém sem contexto de chat consegue identificar estado, princípios, fases,
 baseline, próximos passos e evidência necessária apenas pelo repositório.
@@ -791,8 +791,11 @@ baseline, próximos passos e evidência necessária apenas pelo repositório.
 `docs/baselines/CORTEX_PHASE0_BASELINE.md`, `README.md` e bloco Cortex servido pelo dashboard.
 **Tests:** 50 testes de dashboard aprovados; `compileall` do dashboard; `node --check app.js`;
 probes HTTP confirmaram as duas vertentes no frontend vivo.
-**Commit:** pendente até o gate de staging.
-**Decision:** documentação/observabilidade aprovadas; publicação ainda pendente.
+**Commit:** `767b9238202b021ff1c5679eeca4d19f72b39f12` — `feat: institui programa científico Cortex`.
+**Publication:** `origin/research/cortex-v1` e tag `cortex-pre-research-baseline-20260923` publicadas.
+**Continuity:** SentinelX `sxc_4557STHZ`, revisão 5.
+**Decision:** **PASS — F0 concluída.** A próxima fase autorizada é F1; F2 permanece bloqueada até
+a baseline corrigida e o isolamento operacional estarem concluídos.
 
 ---
 

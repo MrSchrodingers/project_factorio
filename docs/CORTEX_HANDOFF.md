@@ -6,10 +6,10 @@
 ## Estado atual
 
 - Programa: Cortex Research Architecture v0.1
-- Fase: **F0 — Constituição científica e baseline reprodutível**
+- Fase: **F0 concluída; F1 é a próxima fase autorizada**
 - Branch: `research/cortex-v1`
 - Baseline imutável de origem: `74a1bf9c0f8792a68d7252b11d477835ec93d508`
-- Tag planejada/criada nesta fase: `cortex-pre-research-baseline-20260923`
+- Tag baseline publicada: `cortex-pre-research-baseline-20260923`
 - Handoff histórico: `docs/HANDOFF-CORTEX.md`
 - Runtime existente: ainda é o sistema herdado; Cortex não tem autoridade de controle.
 
@@ -44,21 +44,26 @@ silenciosamente pelo commit da F0**.
 - LLM local: Qwen3-4B via llama.cpp :18081
 - RSS reportado do serviço LLM: ~8 GB — risco de memória a tratar na F1.
 
-## Próxima ação após fechar F0
+## Próxima ação
 
 **F1 — Instrumentação, isolamento e baseline corrigida**.
 
 Não começar F2 enquanto a baseline científica não estiver reexecutada sob instrumentação
 corrigida e o deploy não estiver desacoplado da edição live.
 
-## O que significa “fechar F0”
+## Evidência de fechamento da F0
 
-A F0 só fecha quando:
+F0: **PASS**.
 
-- documento canônico e handoff existem;
-- README aponta para eles;
-- frontend mostra programa/fase/trilhas;
-- validações passam;
-- commit/push existem;
-- tag de baseline está publicada;
-- checkpoint SentinelX registra SHA e evidências.
+- commit científico: `767b9238202b021ff1c5679eeca4d19f72b39f12`;
+- branch publicada: `origin/research/cortex-v1`;
+- tag publicada: `cortex-pre-research-baseline-20260923`;
+- 50 testes de dashboard: PASS;
+- compileall dashboard: PASS;
+- node --check: PASS;
+- probes HTTP das duas vertentes: PASS;
+- diff --check: PASS;
+- SentinelX: `sxc_4557STHZ` revisão 5.
+
+A F1 deve preservar as mudanças logísticas pré-existentes registradas no manifest e tratá-las
+explicitamente antes de resetar qualquer baseline.

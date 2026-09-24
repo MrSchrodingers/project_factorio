@@ -14,8 +14,8 @@ com experiência sem receber do programador a sequência de ações que constitu
 
 ## Estado do programa
 
-**Cortex Research Architecture v0.1 — Fase 0: Constituição científica e baseline
-reprodutível.**
+**Cortex Research Architecture v0.1 — Fase 0 concluída. Próxima fase: F1, instrumentação,
+isolamento e baseline corrigida.**
 
 A arquitetura anterior permanece disponível como baseline. Ela possui excelente instrumentação,
 solvers e mecanismos de segurança, mas o caminho de decisão principal ainda é dominado por
