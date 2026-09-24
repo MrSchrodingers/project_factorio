@@ -105,6 +105,11 @@ No new Factorio mutation or authority was introduced by F2-G1.
 
 Implementation commit: `f1680811c2bee828c435cbf66c6c03aaf60156e6` — `feat: desacopla instrumentação Cortex do runner legado`.
 
+Full-gate environment note: the first invocation failed only at compileall because a generated instrumentation/__pycache__ directory had root ownership from an earlier administrative compile. The cache was removed and regenerated as user ti; the complete gate then passed. No source behavior changed in that remediation.
+
+**F2-G1 closure status: PASS parcial de F2. F2-G2 authorized in SHADOW/replay only.**
+
+
 ## 8. Scientific continuity
 
 F2-G1 does not alter F2-F4C evidence:
@@ -162,21 +167,3 @@ The Option must:
 6. remain in SHADOW/replay before any new live canary.
 
 F3 remains blocked.
-
-## 13. Full gate
-
-F2-G1 full repository validation:
-
-- core/FLE profile: 1403 PASS;
-- ML/PyTorch profile: 2 PASS;
-- Ruff/static checks: PASS;
-- compileall: PASS;
-- dashboard JavaScript syntax: PASS;
-- frontend TypeScript/Vite build: PASS;
-- whitespace check: PASS;
-- scientific runtime F1 remains 95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac, dirty=false;
-- evolution remains inactive+disabled.
-
-An initial full-gate run failed only because a newly created instrumentation/__pycache__ directory had root ownership from a prior administrative compile. The bytecode cache was deleted and regenerated as user ti; the complete gate then passed. No source behavior changed in that remediation.
-
-**F2-G1 closure status: PASS parcial de F2. F2-G2 authorized in SHADOW/replay only.**
