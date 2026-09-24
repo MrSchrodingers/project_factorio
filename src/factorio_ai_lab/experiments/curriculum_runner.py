@@ -64,9 +64,12 @@ from factorio_ai_lab.learning.survival import (
 from factorio_ai_lab.metrics.rates import normalized_rate_ratio, rate_per_second
 from factorio_ai_lab.planning.astar import RouteResult, RoutingWeights, weighted_astar
 from factorio_ai_lab.planning.delivery import (
+    MODE_BELT,
     MODE_REFUSED,
+    REFUSAL_OVER_BUDGET,
+    BeltStep,
     DeliveryLink,
-    plan_delivery,
+    plan_trunk,
     tile_centre,
 )
 from factorio_ai_lab.planning.factorio_catalog import (
@@ -7254,12 +7257,15 @@ COAL_BURNING_NAMES = frozenset(
     {"boiler", "burner-mining-drill", "stone-furnace", "steel-furnace"}
 )
 
-#: Belts one coal link may spend. The lane that matters is the one out of the
-#: coal cell's own output chest and around its drill, which is under ten; the
-#: budget is set above that so a feed chest a few tiles further out is still
-#: reachable, and far enough below a trunk line that the refusal stays
-#: readable rather than becoming a construction project nobody decided on.
-COAL_LINK_BELT_BUDGET = 24
+#: Belts the whole coal trunk may spend, over every feed chest it serves.
+#: One line replaces the independent links: the world read of 2026-09-23
+#: refused thirteen of fifteen targets ``no_free_tile_beside_the_source``,
+#: because a 1x1 chest has four sides and each link spent one of them on its
+#: own lifting arm. The budget is a line long enough to run past the feed
+#: chests of one cell and back, and short enough that it stays a lane rather
+#: than a construction project nobody decided on: every tile of it is walked
+#: to, and the walking is game time the generation was going to smelt in.
+COAL_LINK_BELT_BUDGET = 48
 
 #: How the journal records one link, and why it was not built.
 COAL_LINK_NO_SOURCE = "no_coal_output_chest_in_the_world"
@@ -7269,19 +7275,37 @@ COAL_LINK_NOT_COAL = "container_holds_something_other_than_coal"
 
 
 @dataclass(frozen=True)
-class CoalLink:
-    """One feed chest, the machine behind it, and how coal would reach it."""
+class HandoffLink:
+    """One target, the machine behind it, and how material would reach it.
+
+    The same shape serves coal reaching the machines that burn it and ore
+    reaching the furnaces that smelt it: what differs between the two is the
+    choice of source and target and what primes the arms, not the link.
+
+    ``steps`` is the stretch of trunk this link adds, in flow order and with
+    the direction each belt finally carries in. The direction belongs to the
+    finished line and not to the block that lays it: a tile pointed at the
+    arm beside it stops the material at the first branch, and every branch
+    after it starves with a belt full of it two tiles away.
+    """
 
     machine: str
     container: tuple[float, float]
     link: DeliveryLink
+    steps: tuple[BeltStep, ...] = ()
+    source: tuple[float, float] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "machine": self.machine,
             "container": {"x": self.container[0], "y": self.container[1]},
             **self.link.to_dict(),
         }
+        if self.steps:
+            payload["path"] = [step.to_dict() for step in self.steps]
+        if self.source is not None:
+            payload["source"] = {"x": self.source[0], "y": self.source[1]}
+        return payload
 
 
 def coal_delivery_targets(
@@ -7343,14 +7367,26 @@ def plan_coal_distribution(
     source: tuple[float, float] | None,
     targets: Sequence[tuple[ContainerRole, str, str | None]],
     belt_budget: int = COAL_LINK_BELT_BUDGET,
-) -> tuple[CoalLink, ...]:
-    """How the coal in one output chest reaches each feed chest.
+) -> tuple[HandoffLink, ...]:
+    """How the coal in one output chest reaches every feed chest.
 
-    Planned against one world read, so every link is decided against the same
-    standing world and the same seed replays the same lanes. Each link is
-    planned against what is standing *plus* the entities the links planned
-    before it would add: two lanes laid through the same tile is a placement
-    failure the engine reports one entity at a time.
+    One trunk and not one link per chest. The output chest is 1x1, a lane
+    spends one of its four sides on its own lifting arm, and generation 81
+    therefore built two lanes and refused the other thirteen targets
+    ``no_free_tile_beside_the_source`` against a map with room to spare. The
+    line is lifted out of the source once and each feed chest gets an arm
+    that takes coal off it.
+
+    Planned against one world read, so every branch is decided against the
+    same standing world and the same seed replays the same line. Targets are
+    served nearest first, measured tile to tile: the line grows from its own
+    tail, so a furthest-first order pays for the walk back in belt nobody
+    decided to spend.
+
+    The links come back in build order, with the targets refused before any
+    planning happened after them. The script builds them in the order it is
+    handed, and a branch laid before the stretch of trunk it hangs off is an
+    arm picking up from open ground.
     """
     if survey is None or source is None:
         return ()
@@ -7360,11 +7396,13 @@ def plan_coal_distribution(
     if not source_tiles:
         return ()
     blocked = blocked_tiles(standing, footprints)
-    links: list[CoalLink] = []
+
+    refused: list[HandoffLink] = []
+    wanted: list[tuple[ContainerRole, str, frozenset[GridPoint]]] = []
     for role, machine, refusal in targets:
         if refusal is not None:
-            links.append(
-                CoalLink(
+            refused.append(
+                HandoffLink(
                     machine=machine,
                     container=role.position,
                     link=DeliveryLink(mode=MODE_REFUSED, reason=refusal),
@@ -7374,27 +7412,72 @@ def plan_coal_distribution(
         target_tiles = _entity_tiles_at(standing, role.position, footprints)
         if not target_tiles:
             continue
-        link = plan_delivery(
-            source_tiles=source_tiles,
-            target_tiles=target_tiles,
-            blocked=blocked,
-            belt_budget=belt_budget,
+        wanted.append((role, machine, target_tiles))
+    if not wanted:
+        return tuple(refused)
+
+    wanted.sort(
+        key=lambda item: (
+            _tile_gap(source_tiles, item[2]),
+            item[0].position[1],
+            item[0].position[0],
         )
-        links.append(
-            CoalLink(machine=machine, container=role.position, link=link)
+    )
+    plan = plan_trunk(
+        source_tiles=source_tiles,
+        targets=[tiles for _, _, tiles in wanted],
+        blocked=blocked,
+        belt_budget=belt_budget,
+        costly=_resource_tiles(survey),
+    )
+    links = [
+        HandoffLink(
+            machine=machine,
+            container=role.position,
+            link=DeliveryLink(
+                mode=branch.mode,
+                lift=branch.lift,
+                drop=branch.drop,
+                path=tuple(step.tile for step in branch.steps),
+                reason=branch.reason,
+            ),
+            steps=branch.steps,
         )
-        if not link.builds:
-            continue
-        # What this link will occupy is an obstacle to the next one.
-        blocked |= set(link.path)
-        for arm in (link.lift, link.drop):
-            if arm is not None:
-                blocked.add(
-                    GridPoint(
-                        int(arm.position[0] - 0.5), int(arm.position[1] - 0.5)
-                    )
-                )
-    return tuple(links)
+        for (role, machine, _), branch in zip(wanted, plan.branches, strict=True)
+    ]
+    return tuple(links) + tuple(refused)
+
+
+def _resource_tiles(survey: WorldSurvey | None) -> frozenset[GridPoint]:
+    """Tiles one world read found ore under, or nothing when it read none.
+
+    An empty set here means "no ore was reported", which for the trunk is
+    the same decision as bare ground everywhere: the price is a preference,
+    so an unread ground costs a lane nothing rather than refusing it. What
+    it must not do is invent ore, and ``ResourceSurvey`` is the only thing
+    that answers where ore is.
+    """
+    resources = None if survey is None else survey.resources
+    if resources is None:
+        return frozenset()
+    return frozenset(resources.tiles)
+
+
+def _tile_gap(
+    first: frozenset[GridPoint],
+    second: frozenset[GridPoint],
+) -> int:
+    """Tiles between the two footprints, measured tile to tile.
+
+    Centre to centre would answer a different order for a 2x2 drill than for
+    the 1x1 chest flush against it, and the order decides which target the
+    trunk is grown towards first.
+    """
+    return min(
+        abs(here.x - there.x) + abs(here.y - there.y)
+        for here in first
+        for there in second
+    )
 
 
 def _entity_tiles_at(
@@ -7418,84 +7501,114 @@ def _entity_tiles_at(
     return frozenset()
 
 
-def _coal_link_code(index: int, item: CoalLink) -> str:
-    """FLE script building one link, and tearing it down if it cannot finish.
+def _coal_link_code(index: int, item: HandoffLink) -> str:
+    """One block of the coal trunk.
+
+    Each arm is primed with one coal, and the primer is drawn from the
+    source chest when the inventory has none -- which is the normal case,
+    because the fuel feed that runs just before this one spends the stock
+    down to its last unit. A burner inserter moving coal refuels itself from
+    what it carries, so one unit is the whole primer, and the chest it comes
+    out of is the one the arm is standing next to.
+    """
+    return _handoff_block(item, prefix="coal", primer=_coal_primer)
+
+
+def _coal_primer(arm: str) -> list[str]:
+    return [
+        "    if inspect_inventory()[Prototype.Coal]<1:",
+        "        try:",
+        "            extract_item(Prototype.Coal,coal_chest,quantity=2)",
+        "        except Exception:",
+        "            pass",
+        "    if inspect_inventory()[Prototype.Coal]>0:",
+        f"        {arm}=insert_item(Prototype.Coal,{arm},quantity=1)",
+        "        coal_primed+=1",
+    ]
+
+
+def _handoff_block(
+    item: HandoffLink,
+    *,
+    prefix: str,
+    primer: Callable[[str], list[str]],
+) -> str:
+    """FLE script building one branch, and tearing it down if it cannot finish.
 
     A half-built lane is worse than none: belts with no arm at the end pour
-    coal onto open ground, which spends the coal and leaves the map dirtier
+    material onto open ground, which spends it and leaves the map dirtier
     than it was. Everything this block placed is picked back up when any part
-    of it refuses.
+    of it refuses, and a block that laid part of the line marks the line
+    broken so the branches after it are skipped rather than built onto belt
+    that was rolled back.
 
-    Each arm is primed with one coal, and the primer is drawn from the source
-    chest when the inventory has none -- which is the normal case, because
-    the fuel feed that runs just before this one spends the stock down to its
-    last unit. A burner inserter moving coal refuels itself from what it
-    carries, so one unit is the whole primer.
+    ``prefix`` names every variable the block writes, so two trunks in two
+    transactions never read each other's counters, and ``primer`` is what
+    gives one arm its first fuel: a burner inserter moving coal refuels
+    itself out of what it carries, and one moving ore does not.
     """
     link = item.link
-    lines = ["coal_built=[]", "coal_primed=0", "try:"]
+    lines = [f"{prefix}_built=[]", f"{prefix}_primed=0", "try:"]
     arms: list[str] = []
     if link.lift is not None:
         lines.append(f"    {_move_code(link.lift.position)}")
-        lines.append(f"    coal_arm={_arm_code(link.lift)}")
-        lines.append("    coal_built.append(coal_arm)")
-        arms.append("coal_arm")
-    for step, tile in enumerate(link.path):
-        nxt = (
-            link.path[step + 1]
-            if step + 1 < len(link.path)
-            else (
-                None
-                if link.drop is None
-                else GridPoint(
-                    int(link.drop.position[0] - 0.5),
-                    int(link.drop.position[1] - 0.5),
-                )
-            )
-        )
-        direction = "RIGHT" if nxt is None else _direction_name(tile, nxt)
-        centre = tile_centre(tile)
+        lines.append(f"    {prefix}_arm={_arm_code(link.lift)}")
+        lines.append(f"    {prefix}_built.append({prefix}_arm)")
+        arms.append(f"{prefix}_arm")
+    for step in item.steps:
+        centre = tile_centre(step.tile)
         lines.append(f"    {_move_code(centre)}")
-        lines.append(f"    coal_belt={_belt_code(centre, direction)}")
-        lines.append("    coal_built.append(coal_belt)")
+        lines.append(f"    {prefix}_belt={_belt_code(centre, step.direction)}")
+        lines.append(f"    {prefix}_built.append({prefix}_belt)")
     if link.drop is not None:
         lines.append(f"    {_move_code(link.drop.position)}")
-        lines.append(f"    coal_arm_end={_arm_code(link.drop)}")
-        lines.append("    coal_built.append(coal_arm_end)")
-        arms.append("coal_arm_end")
+        lines.append(f"    {prefix}_arm_end={_arm_code(link.drop)}")
+        lines.append(f"    {prefix}_built.append({prefix}_arm_end)")
+        arms.append(f"{prefix}_arm_end")
     for arm in arms:
-        # The feed that ran before this spends the stock down to its last
-        # unit, so the primer normally comes out of the source chest.
-        lines.append("    if inspect_inventory()[Prototype.Coal]<1:")
-        lines.append("        try:")
-        lines.append(
-            "            extract_item(Prototype.Coal,coal_chest,quantity=2)"
-        )
-        lines.append("        except Exception:")
-        lines.append("            pass")
-        lines.append("    if inspect_inventory()[Prototype.Coal]>0:")
-        lines.append(f"        {arm}=insert_item(Prototype.Coal,{arm},quantity=1)")
-        lines.append("        coal_primed+=1")
-    lines.append("    coal_links_built+=1")
-    lines.append(f"    coal_belts_built+={len(link.path)}")
+        lines.extend(primer(arm))
+    lines.append(f"    {prefix}_links_built+=1")
+    lines.append(f"    {prefix}_belts_built+={len(item.steps)}")
     lines.append(
-        f"    coal_link_log.append(('{item.machine}','{link.mode}',"
-        f"{len(link.path)},coal_primed,''))"
+        f"    {prefix}_link_log.append(('{item.machine}','{link.mode}',"
+        f"{len(item.steps)},{prefix}_primed,''))"
     )
-    lines.append("except Exception as coal_exc:")
+    lines.append(f"except Exception as {prefix}_exc:")
     lines.append(
-        "    coal_note=str(coal_exc)[:120]"
+        f"    {prefix}_note=str({prefix}_exc)[:120]"
         ".replace('rror','rr0r').replace('xception','xcepti0n')"
     )
-    lines.append("    for coal_orphan in coal_built:")
+    lines.append(f"    for {prefix}_orphan in {prefix}_built:")
     lines.append("        try:")
-    lines.append("            pickup_entity(coal_orphan)")
+    lines.append(f"            pickup_entity({prefix}_orphan)")
     lines.append("        except Exception:")
     lines.append("            pass")
     lines.append(
-        f"    coal_link_log.append(('{item.machine}','{MODE_REFUSED}',0,0,"
-        "coal_note))"
+        f"    {prefix}_link_log.append(('{item.machine}','{MODE_REFUSED}',0,0,"
+        f"{prefix}_note))"
     )
+    if link.mode == MODE_BELT and (item.steps or link.lift is not None):
+        # This block laid part of the line itself, so a failure here breaks
+        # the line: every branch after it would pick up from a tile no belt
+        # reaches. An arm that failed on its own leaves the line intact, and
+        # so does a single arm spanning source and target -- that one is not
+        # part of the line at all, and marking the line broken over it would
+        # refuse branches nothing is wrong with.
+        lines.append(f"    {prefix}_trunk_ok=False")
+    if link.mode == MODE_BELT and link.lift is not None:
+        # The block that lifts out of a source starts a line of its own, so
+        # it depends on nothing before it and it is what decides the state
+        # the branches after it read. A step that runs trunks out of several
+        # sources would otherwise skip the whole second line because the
+        # first one refused.
+        lines = [f"{prefix}_trunk_ok=True", *lines]
+    elif link.mode == MODE_BELT:
+        # A branch of the trunk, and the trunk is built block by block in
+        # flow order. Skipped whole when the stretch before it refused.
+        lines = [
+            f"if {prefix}_trunk_ok:",
+            *(f"    {line}" for line in lines),
+        ]
     return "\n".join(lines) + "\n"
 
 
@@ -7556,8 +7669,31 @@ def _direction_expression(name: str) -> str:
     return f"Direction.{name}"
 
 
-def coal_distribution_script(links: Sequence[CoalLink]) -> str:
-    """The whole distribution step: build every link, report every one."""
+def _prototype_expression(name: str) -> str:
+    """``Prototype.WoodenChest`` and friends, as one formattable expression.
+
+    One field and not a suffix, for the reason ``_arm_code`` states: the
+    audits in ``test_fle_triggers`` and ``test_fuel_feed`` replace every
+    formatted field with ``0`` and parse the result, and a field spanning
+    only the part after the dot parses as ``Prototype.0``, which takes the
+    whole audit down with a SyntaxError.
+
+    Concatenated and not formatted, because those same audits collect every
+    f-string holding ``Prototype.`` as a script to parse, and this fragment
+    is a name rather than a script.
+    """
+    return "Prototype." + name
+
+
+def coal_distribution_script(links: Sequence[HandoffLink]) -> str:
+    """The whole distribution step: build every link, report every one.
+
+    The blocks run in the order they arrive, which is the order the trunk
+    grows in: each one lays its own stretch of belt and the arm that takes
+    coal off the end of it. ``coal_trunk_ok`` carries the failure forward --
+    a branch built onto a stretch that refused is an arm picking up from
+    open ground, and it would report itself as a link that was built.
+    """
     blocks = "".join(
         _coal_link_code(index, item)
         for index, item in enumerate(links)
@@ -7567,6 +7703,7 @@ def coal_distribution_script(links: Sequence[CoalLink]) -> str:
 coal_link_log=[]
 coal_links_built=0
 coal_belts_built=0
+coal_trunk_ok=True
 {blocks}
 print({{
     'coal_links_built':coal_links_built,
@@ -7575,7 +7712,7 @@ print({{
 """
 
 
-def _coal_link_rows(raw: Any) -> list[dict[str, Any]] | None:
+def _handoff_link_rows(raw: Any) -> list[dict[str, Any]] | None:
     """Per-link rows for the journal, or None when nothing was measured.
 
     None rather than an empty list when the shape does not match, for the
@@ -7685,7 +7822,7 @@ def _install_coal_distribution(
             "committed": bool(step.accepted),
             "links_built": _namespace_measure(namespace, "coal_links_built"),
             "belts_built": _namespace_measure(namespace, "coal_belts_built"),
-            "results": _coal_link_rows(
+            "results": _handoff_link_rows(
                 getattr(namespace, "coal_link_log", None)
             ),
             "step_result": _step_error_text(step.info),
@@ -7701,6 +7838,621 @@ def _install_coal_distribution(
             else "Coal distribution rolled back; the feed remains a one-off charge."
         ),
         coal_distribution=payload,
+    )
+    return payload
+
+
+#: Machines that turn ore into plates. A trunk that ends in one of these is
+#: carrying ore; one that ends in a chest beside it is not, which is why the
+#: target is read as a machine and never as the container next to it.
+ORE_SMELTING_NAMES = frozenset({"stone-furnace", "steel-furnace"})
+
+#: What a furnace of this curriculum smelts. Ordered, because the order
+#: decides which ore a container holding two of them is filed under, and the
+#: same world has to answer the same trunk.
+ORE_ITEMS: tuple[str, ...] = ("iron-ore", "copper-ore")
+
+#: The engine's own word for a machine standing idle with nothing to work
+#: on. Read from the survey rather than inferred from the graph: a furnace
+#: with an arm already dropping into it is not short of ore, whatever the
+#: edges say, and a furnace the engine calls empty is empty.
+ORE_TARGET_STATUS = "no_ingredients"
+
+#: Ore a container has to hold before a trunk is run out of it. A chest with
+#: a handful in it is a chest a drill has barely started filling, and the
+#: belt spent reaching it buys nothing.
+ORE_SOURCE_MINIMUM = 20
+
+#: Belts one ore trunk may spend. The furnaces of a smelting cell stand
+#: within a dozen tiles of the chest the drill fills; a budget past that
+#: starts crossing the map to reach a furnace another cell can serve.
+ORE_LINK_BELT_BUDGET = 24
+
+#: How many sources one pass runs a trunk out of. Each trunk is walked tile
+#: by tile, so the third one is already paying more game time than the ore
+#: it carries is worth inside one generation.
+ORE_TRUNK_LIMIT = 3
+
+#: Coal each arm of an ore trunk is primed with. A burner inserter carrying
+#: ore cannot refuel itself from what it carries -- that is true only of the
+#: coal trunk -- so the primer is the whole fuel it has until something else
+#: feeds it, and four coal is roughly three minutes of moving ore.
+ORE_ARM_PRIMER_COAL = 4
+
+#: Coal left behind in a container something draws from. A chest an arm
+#: empties into a drill is that drill's whole fuel supply, and a step that
+#: took it to prime its own inserters would stop the machine whose output it
+#: is there to carry away. The reserve is what the fuel feed hands one
+#: machine at a time, so what leaves is surplus rather than the charge.
+ORE_PRIMER_RESERVE = 10
+
+#: Container prototypes a primer may be drawn out of, by the name the survey
+#: reports. A container this does not name is skipped rather than guessed:
+#: ``get_entity`` takes a prototype, and the wrong one answers nothing.
+ORE_CONTAINER_PROTOTYPES: Mapping[str, str] = {
+    "wooden-chest": "WoodenChest",
+    "iron-chest": "IronChest",
+    "steel-chest": "SteelChest",
+}
+
+#: Why an ore trunk was not built. One string per cause.
+ORE_LINK_NO_SOURCE = "no_container_holds_ore_to_carry"
+ORE_LINK_NO_TARGET = "no_furnace_is_short_of_ore"
+ORE_LINK_NO_PRIMER = "no_coal_within_reach_to_prime_the_arms"
+ORE_LINK_WORLD_UNREAD = "world_not_surveyed"
+
+
+@dataclass(frozen=True)
+class OreSource:
+    """A container a chain fills with ore, and what one read found in it."""
+
+    position: tuple[float, float]
+    name: str
+    item: str
+    amount: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "position": {"x": self.position[0], "y": self.position[1]},
+            "name": self.name,
+            "item": self.item,
+            "amount": self.amount,
+        }
+
+
+@dataclass(frozen=True)
+class OreTarget:
+    """A smelter the engine reported standing idle with no ingredients."""
+
+    position: tuple[float, float]
+    name: str
+
+
+@dataclass(frozen=True)
+class PrimerSource:
+    """The container an ore trunk's arms are given their first coal from."""
+
+    position: tuple[float, float]
+    prototype: str
+    amount: int
+
+
+def container_contents_command(distance: int) -> str:
+    """One RCON read of what every container within ``distance`` holds.
+
+    One sweep and not one read per chest: the sources are compared against
+    each other, and two chests read seconds apart are two different worlds.
+    Factorio 2.0 answers ``get_contents`` as a list of ``{name, quality,
+    count}``, and older saves answer a name-keyed table; both shapes are
+    flattened here so the caller sees one.
+    """
+    span = max(1, int(distance))
+    return (
+        "/silent-command local s=game.surfaces[1] "
+        f"local d={span} "
+        "local a={left_top={x=-d,y=-d},right_bottom={x=d,y=d}} "
+        "local out={} "
+        "for _,e in pairs(s.find_entities_filtered{area=a,type='container'}) do "
+        "if e.valid then "
+        "local inv=e.get_inventory(defines.inventory.chest) "
+        "local held={} "
+        "if inv then for k,v in pairs(inv.get_contents() or {}) do "
+        "if type(v)=='table' then held[#held+1]={name=v.name,count=v.count} "
+        "else held[#held+1]={name=k,count=v} end end end "
+        "out[#out+1]={name=e.name,"
+        "position={x=e.position.x,y=e.position.y},held=held} "
+        "end end "
+        "rcon.print(helpers.table_to_json({containers=out}))"
+    )
+
+
+def survey_container_contents(
+    instance: Any,
+    *,
+    distance: int = WORLD_SURVEY_DISTANCE,
+) -> list[dict[str, Any]] | None:
+    """What every standing container holds, or None when nothing answered.
+
+    None is not an empty world, on the same terms as every other read in
+    this module: a sweep that did not happen must not read as a world whose
+    chests are empty, because that is the reading that would refuse the step
+    and call it a measurement.
+    """
+    try:
+        raw = instance.rcon_client.send_command(container_contents_command(distance))
+        if not raw:
+            return None
+        payload = json.loads(raw)
+    except (AttributeError, OSError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, Mapping):
+        return None
+    rows = payload.get("containers")
+    if not isinstance(rows, list):
+        return None
+    contents: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        held: dict[str, int] = {}
+        for entry in row.get("held") or ():
+            if not isinstance(entry, Mapping):
+                continue
+            name = str(entry.get("name", "")).strip().strip('"')
+            try:
+                count = int(float(entry.get("count", 0)))
+            except (TypeError, ValueError):
+                continue
+            if name:
+                held[name] = held.get(name, 0) + count
+        contents.append(
+            {
+                "name": str(row.get("name", "")).strip().strip('"'),
+                "position": row.get("position"),
+                "contents": held,
+            }
+        )
+    return contents
+
+
+def _contents_index(
+    contents: Sequence[Mapping[str, Any]] | None,
+) -> dict[tuple[float, float], tuple[str, Mapping[str, int]]]:
+    """One read of the containers, keyed by the tile centre they stand on."""
+    index: dict[tuple[float, float], tuple[str, Mapping[str, int]]] = {}
+    for row in contents or ():
+        if not isinstance(row, Mapping):
+            continue
+        position = entity_position(row)
+        if position is None:
+            continue
+        held = row.get("contents")
+        if not isinstance(held, Mapping):
+            continue
+        index[position] = (
+            str(row.get("name", "")).strip().strip('"'),
+            {str(item): int(count) for item, count in held.items()},
+        )
+    return index
+
+
+def ore_sources(
+    graph: Mapping[str, Any] | None,
+    contents: Sequence[Mapping[str, Any]] | None,
+) -> tuple[OreSource, ...]:
+    """Containers a chain fills with ore, richest first.
+
+    Two readings, and neither is an assumption. The graph says something
+    drops into the container, which is what makes it a production output
+    rather than the input of a machine: emptying an input starves what it
+    feeds, and the invariant of this lab is that nothing feeding a live
+    chain is taken away. The RCON sweep says what is actually in it.
+
+    A container nobody read produces no source at all. An unread chest is
+    not an empty chest, and a trunk planned out of a guess spends belt on
+    ore that may not be there.
+    """
+    if graph is None or contents is None:
+        return ()
+    index = _contents_index(contents)
+    if not index:
+        return ()
+    sources: list[OreSource] = []
+    for role in container_roles(graph):
+        if not role.fed_by_chain:
+            continue
+        read = index.get(role.position)
+        if read is None:
+            continue
+        name, held = read
+        for item in ORE_ITEMS:
+            amount = int(held.get(item, 0))
+            if amount < ORE_SOURCE_MINIMUM:
+                continue
+            sources.append(
+                OreSource(
+                    position=role.position,
+                    name=name or role.name,
+                    item=item,
+                    amount=amount,
+                )
+            )
+            break
+    sources.sort(key=lambda source: (-source.amount, source.position[1], source.position[0]))
+    return tuple(sources)
+
+
+def ore_delivery_targets(survey: WorldSurvey | None) -> tuple[OreTarget, ...]:
+    """Smelters the engine reported out of ingredients, in scan order.
+
+    Read from the same survey the placement is planned against, so the
+    furnace that answered the status and the footprint the arm is planned
+    around come from one world. A furnace with any status other than this
+    one is smelting or is short of fuel, and neither is fixed by a second
+    arm dropping ore into it.
+    """
+    if survey is None:
+        return ()
+    targets: list[OreTarget] = []
+    for entity in survey.entities:
+        name = entity_name(entity)
+        if name not in ORE_SMELTING_NAMES:
+            continue
+        if normalize_status(entity.get("status")) != ORE_TARGET_STATUS:
+            continue
+        position = entity_position(entity)
+        if position is None:
+            continue
+        targets.append(OreTarget(position=position, name=name))
+    targets.sort(key=lambda target: (target.position[1], target.position[0]))
+    return tuple(targets)
+
+
+def ore_primer_source(
+    contents: Sequence[Mapping[str, Any]] | None,
+    survey: WorldSurvey | None,
+    *,
+    near: tuple[float, float] | None = None,
+    graph: Mapping[str, Any] | None = None,
+) -> PrimerSource | None:
+    """The container the arms of an ore trunk draw their first coal from.
+
+    A chest nothing draws from first, however far it is, and only then one
+    that feeds a machine: the feed chest of a drill is that drill's whole
+    fuel supply, and taking it to prime inserters stops the machine whose
+    output this trunk exists to carry away. What may leave a feeding chest
+    is the surplus over ``ORE_PRIMER_RESERVE`` and never the charge itself.
+
+    Nearest after that, because the agent walks to it: a chest on the other
+    side of the map costs the step more game time than the trunk it primes.
+
+    Answers None when no container this codebase can name holds coal it may
+    spend, and the caller refuses the step rather than building arms that
+    will never turn.
+    """
+    index = _contents_index(contents)
+    standing = {} if survey is None else {
+        entity_position(entity): entity_name(entity) for entity in survey.entities
+    }
+    feeding = {
+        role.position
+        for role in container_roles(graph or {})
+        if role.supplies_chain
+    }
+    candidates: list[tuple[tuple[int, float, float, float], PrimerSource]] = []
+    for position, (name, held) in index.items():
+        coal = int(held.get(MINING_CELL_FUEL_ITEM, 0))
+        spare = coal - ORE_PRIMER_RESERVE if position in feeding else coal
+        if spare < 1:
+            continue
+        prototype = ORE_CONTAINER_PROTOTYPES.get(
+            name or str(standing.get(position, ""))
+        )
+        if prototype is None:
+            continue
+        distance = (
+            0.0
+            if near is None
+            else abs(position[0] - near[0]) + abs(position[1] - near[1])
+        )
+        candidates.append(
+            (
+                (1 if position in feeding else 0, distance, position[1], position[0]),
+                PrimerSource(position=position, prototype=prototype, amount=spare),
+            )
+        )
+    if not candidates:
+        return None
+    candidates.sort(key=lambda entry: entry[0])
+    return candidates[0][1]
+
+
+def plan_ore_distribution(
+    survey: WorldSurvey | None,
+    *,
+    sources: Sequence[OreSource],
+    targets: Sequence[OreTarget],
+    primer: PrimerSource | None = None,
+    belt_budget: int = ORE_LINK_BELT_BUDGET,
+) -> tuple[HandoffLink, ...]:
+    """How the ore in the output chests reaches the furnaces standing empty.
+
+    One trunk per source, richest source first, each of them serving the
+    targets no earlier trunk reached. What the trunks planned before will
+    occupy is an obstacle to the ones after: two belts planned through one
+    tile is a placement failure the engine reports one entity at a time.
+
+    Without a primer nothing is planned at all. A burner inserter moving ore
+    does not refuel itself out of what it carries, so an unprimed arm is an
+    entity that will never turn, and the belt behind it is material spent on
+    a line that cannot carry.
+    """
+    if survey is None or not sources or not targets:
+        return ()
+    standing = list(survey.entities)
+    footprints = survey.footprints
+    if primer is None:
+        return tuple(
+            HandoffLink(
+                machine=target.name,
+                container=target.position,
+                link=DeliveryLink(mode=MODE_REFUSED, reason=ORE_LINK_NO_PRIMER),
+            )
+            for target in targets
+        )
+
+    blocked = blocked_tiles(standing, footprints)
+    ground = _resource_tiles(survey)
+    pending = list(targets)
+    links: list[HandoffLink] = []
+    for source in sources[:ORE_TRUNK_LIMIT]:
+        if not pending:
+            break
+        source_tiles = _entity_tiles_at(standing, source.position, footprints)
+        if not source_tiles:
+            continue
+        wanted: list[tuple[OreTarget, frozenset[GridPoint]]] = []
+        for target in pending:
+            tiles = _entity_tiles_at(standing, target.position, footprints)
+            if tiles:
+                wanted.append((target, tiles))
+        if not wanted:
+            break
+        wanted.sort(
+            key=lambda entry: (
+                _tile_gap(source_tiles, entry[1]),
+                entry[0].position[1],
+                entry[0].position[0],
+            )
+        )
+        plan = plan_trunk(
+            source_tiles=source_tiles,
+            targets=[tiles for _, tiles in wanted],
+            blocked=blocked,
+            belt_budget=belt_budget,
+            costly=ground,
+        )
+        for (target, _), branch in zip(wanted, plan.branches, strict=True):
+            if not branch.builds:
+                continue
+            links.append(
+                HandoffLink(
+                    machine=target.name,
+                    container=target.position,
+                    link=DeliveryLink(
+                        mode=branch.mode,
+                        lift=branch.lift,
+                        drop=branch.drop,
+                        path=tuple(step.tile for step in branch.steps),
+                        reason=branch.reason,
+                    ),
+                    steps=branch.steps,
+                    source=source.position,
+                )
+            )
+            pending = [
+                item for item in pending if item.position != target.position
+            ]
+            blocked |= {step.tile for step in branch.steps}
+            for arm in (branch.lift, branch.drop):
+                if arm is not None:
+                    blocked.add(
+                        GridPoint(
+                            int(arm.position[0] - 0.5),
+                            int(arm.position[1] - 0.5),
+                        )
+                    )
+    for target in pending:
+        links.append(
+            HandoffLink(
+                machine=target.name,
+                container=target.position,
+                link=DeliveryLink(
+                    mode=MODE_REFUSED, reason=REFUSAL_OVER_BUDGET
+                ),
+            )
+        )
+    return tuple(links)
+
+
+def _ore_primer(arm: str) -> list[str]:
+    """Give one arm of an ore trunk the coal it will run on.
+
+    Out of the inventory, which the step filled from the container the
+    planner measured before the first block ran. An arm that gets nothing is
+    reported as unprimed rather than silently counted as a link that works.
+    """
+    return [
+        "    if inspect_inventory()[Prototype.Coal]>0:",
+        (
+            f"        {arm}=insert_item(Prototype.Coal,{arm},"
+            f"quantity=min({ORE_ARM_PRIMER_COAL},"
+            "inspect_inventory()[Prototype.Coal]))"
+        ),
+        "        ore_primed+=1",
+    ]
+
+
+def _ore_primer_draw(primer: PrimerSource | None, arms: int) -> str:
+    """Walk to the coal the planner measured and carry the primers away.
+
+    Drawn once, before any block runs, because every block after it is a
+    walk to a different tile: a draw spliced between them would walk back
+    for each arm. Failure here is not fatal on its own -- the blocks check
+    the inventory before priming and report an arm they could not prime.
+    """
+    if primer is None or arms < 1:
+        return ""
+    quantity = min(primer.amount, max(1, arms) * ORE_ARM_PRIMER_COAL)
+    return (
+        "try:\n"
+        f"    {_move_code(primer.position)}\n"
+        f"    ore_fuel_chest=get_entity({_prototype_expression(primer.prototype)},"
+        f"Position(x={primer.position[0]},y={primer.position[1]}))\n"
+        "    if ore_fuel_chest is not None:\n"
+        f"        extract_item(Prototype.Coal,ore_fuel_chest,quantity={quantity})\n"
+        "except Exception:\n"
+        "    pass\n"
+    )
+
+
+def ore_distribution_script(
+    links: Sequence[HandoffLink],
+    *,
+    primer: PrimerSource | None,
+) -> str:
+    """The whole ore handoff: draw the primers, build every branch, report."""
+    buildable = [item for item in links if item.link.builds]
+    arms = sum(
+        1
+        for item in buildable
+        for arm in (item.link.lift, item.link.drop)
+        if arm is not None
+    )
+    draw = _ore_primer_draw(primer, arms)
+    blocks = "".join(
+        _handoff_block(item, prefix="ore", primer=_ore_primer)
+        for item in buildable
+    )
+    return f"""
+ore_link_log=[]
+ore_links_built=0
+ore_belts_built=0
+ore_trunk_ok=True
+{draw}
+{blocks}
+print({{
+    'ore_links_built':ore_links_built,
+    'ore_belts_built':ore_belts_built,
+}})
+"""
+
+
+def _install_ore_distribution(
+    executor: TransactionalFLEExecutor,
+    env: Any,
+    namespace: Any,
+    journal: ResearchJournal,
+) -> dict[str, Any]:
+    """Carry the ore the drills mined into the furnaces standing empty.
+
+    The same defect as the coal one, one material over: the drill fills its
+    output chest, nothing takes the contents out, and the furnace four tiles
+    away reports ``no_ingredients`` while the chest beside it holds four
+    hundred ore. Runs as its own transaction after the coal trunk, so a line
+    that cannot be built rolls back only itself.
+    """
+    survey = survey_world(env)
+    unwrapped = getattr(env, "unwrapped", env)
+    instance = getattr(unwrapped, "instance", None)
+    contents = (
+        None if instance is None else survey_container_contents(instance)
+    )
+    graph = None if survey is None else build_factory_graph(list(survey.entities))
+    sources = ore_sources(graph, contents)
+    targets = ore_delivery_targets(survey)
+    primer = ore_primer_source(
+        contents,
+        survey,
+        near=None if not sources else sources[0].position,
+        graph=graph,
+    )
+    links = plan_ore_distribution(
+        survey,
+        sources=sources,
+        targets=targets,
+        primer=primer,
+    )
+    buildable = [item for item in links if item.link.builds]
+
+    payload: dict[str, Any] = {
+        "belt_budget": ORE_LINK_BELT_BUDGET,
+        "sources_found": len(sources),
+        "targets_found": len(targets),
+        "links_planned": len(buildable),
+        "sources": [source.to_dict() for source in sources[:ORE_TRUNK_LIMIT]],
+        "primer": (
+            None
+            if primer is None
+            else {"x": primer.position[0], "y": primer.position[1]}
+        ),
+        "links": [item.to_dict() for item in links],
+    }
+    if survey is None:
+        payload["status"] = ORE_LINK_WORLD_UNREAD
+    elif not sources:
+        payload["status"] = ORE_LINK_NO_SOURCE
+    elif not targets:
+        payload["status"] = ORE_LINK_NO_TARGET
+    elif primer is None:
+        payload["status"] = ORE_LINK_NO_PRIMER
+
+    if not buildable:
+        payload.setdefault("status", "nothing_to_link")
+        payload["committed"] = False
+        journal.state["metrics"]["ore_distribution"] = payload
+        journal.event(
+            "refusal",
+            (
+                "No ore lane was built: "
+                f"{payload['status']}, {len(targets)} idle furnace(s) read."
+            ),
+            ore_distribution=payload,
+        )
+        return payload
+
+    step = executor.execute(
+        ore_distribution_script(buildable, primer=primer),
+        accept=lambda result: (
+            not bool(result.info.get("error_occurred"))
+            and result.candidate_game_state is not None
+        ),
+        use_checkpoint_for_action=False,
+        # Laying the lane removes future carrying rather than performing it.
+        purpose="infrastructure",
+    )
+    payload.update(
+        {
+            "status": payload.get("status", "planned"),
+            "committed": bool(step.accepted),
+            "links_built": _namespace_measure(namespace, "ore_links_built"),
+            "belts_built": _namespace_measure(namespace, "ore_belts_built"),
+            "results": _handoff_link_rows(
+                getattr(namespace, "ore_link_log", None)
+            ),
+            "step_result": _step_error_text(step.info),
+        }
+    )
+    journal.state["metrics"]["ore_distribution"] = payload
+    journal.event(
+        "ore_distribution",
+        (
+            "Ore lanes laid from the drills' output chests to the furnaces "
+            "that were standing idle with nothing to smelt."
+            if step.accepted
+            else "Ore distribution rolled back; the furnaces stay empty."
+        ),
+        ore_distribution=payload,
     )
     return payload
 
@@ -7850,6 +8602,12 @@ print({{
     # chests, or the generation spends its inheritance and stops.
     distribution = _install_coal_distribution(executor, env, namespace, journal)
 
+    # The same carry, one material over. The drills mine into their output
+    # chests and the furnaces beside them report ``no_ingredients``; its own
+    # transaction, so an ore lane that cannot be built leaves the coal one
+    # standing.
+    ore_handoff = _install_ore_distribution(executor, env, namespace, journal)
+
     journal.complete_stage(
         10,
         f"Steam power accepted with {measured['energy']:.0f} J stored energy.",
@@ -7860,6 +8618,7 @@ print({{
         measurements=measured,
         fuel_feeds=feeds,
         coal_distribution=distribution,
+        ore_distribution=ore_handoff,
     )
     return True
 
