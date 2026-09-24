@@ -926,6 +926,20 @@ script, purpose e refusal semantics dos handlers legados, sem world mutation. Ev
 **Decision F2-B:** **PASS parcial de F2.** Transactional execution continua aberta. O gap
 `place_processing_for_buffered_output` permanece deliberadamente unbound e passa a ser F2-C.
 
+**F2-C progress:** **PASS parcial.** O intent estrutural place_processing_for_buffered_output agora possui planner puro/shadow genérico. Ele infere material por nearest-buffer evidence, escolhe transformação direta não ambígua via runtime catalog, resolve processor via DependencyPlanner e procura conjuntamente placement + delivery. Não há world mutation.
+
+**Live shadow evidence F2-C:** mundo com 125 entidades, 6 producers, coverage físico 0.5. Targets automáticos: u1778/u1838/u1839. Para u1839 foi produzido branch iron-ore -> iron-plate, stone-furnace, placement (35,85), delivery por um inserter e hard structural preconditions satisfeitas. u1778 recusado por buffer vazio; u1838 recusado por buffer contaminado com coal + iron-ore. Artifact: runs/audits/cortex_f2c_live_structural_shadow.json.
+
+**Evidence F2-C:** docs/CORTEX_PHASE2_STRUCTURAL_PLANNING.md; src/factorio_ai_lab/cortex/structural.py; tests/test_cortex_structural.py; phase-state/dashboard atualizados.
+
+**Tests F2-C:** 116 focused PASS; full gate 1333 core/FLE PASS + 2 PyTorch PASS; Ruff/static checks e frontend TypeScript/Vite build PASS.
+
+**Commit F2-C:** `cacf3b7eae8e8a3a8c6b9e5471ec942ba7548e0f` — `feat: adiciona planejamento estrutural do Cortex`.
+
+**Decision F2-C:** **PASS parcial de F2.** O gap replicado da F1 deixou de ser unbound quando há evidence material suficiente. Transactional execution universal continua aberta; buffer contaminado permanece refusal até ResourceSurvey/mining-target evidence.
+
+**Next:** F2-D — integrar ResourceSurvey para material identity e compilar ProcessingBranch em Prepared structural action. Ainda sem autonomous live authority.
+
 **Exit Gate F2:** o agente pode montar uma cadeia funcional escolhendo primitivas/options por uma
 API genérica, sem caminho codificado por estágio.
 

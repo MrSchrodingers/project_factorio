@@ -6,7 +6,7 @@
 ## Estado atual
 
 - Programa: Cortex Research Architecture v0.1
-- Fase: **F2-B concluída — F2-C autorizada; authority ainda SHADOW**
+- Fase: **F2-C concluída — F2-D autorizada; authority ainda SHADOW**
 - Branch: `research/cortex-v1`
 - Baseline imutável de origem: `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 - Tag baseline publicada: `cortex-pre-research-baseline-20260923`
@@ -46,30 +46,31 @@ silenciosamente pelo commit da F0**.
 
 ## Próxima ação
 
-**F2-C — capability estrutural `place_processing_for_buffered_output` em pure/shadow planning.**
+**F2-D — ResourceSurvey/mining identity + Prepared structural action.**
 
-F2-B fechou parity para resupply e power-tap:
+F2-C fechou o primeiro capability estrutural não existente no runner legado:
 
-- implementation commit: `7c38cd7c9f0f67068e449fa3e5ff107b74ebcbd1`;
-- 69 focused PASS;
-- 1323 core/FLE PASS + 2 PyTorch PASS;
-- script/purpose/refusal parity comprovada;
-- nenhuma nova live authority.
+- implementation commit: `cacf3b7eae8e8a3a8c6b9e5471ec942ba7548e0f`;
+- 116 focused PASS;
+- 1333 core/FLE PASS + 2 PyTorch PASS;
+- live shadow audit sobre 125 entidades;
+- u1839: iron-ore -> iron-plate / stone-furnace / placement+inserter válido;
+- u1778: refusal por buffer vazio;
+- u1838: refusal por buffer contaminado coal + iron-ore;
+- nenhuma live authority concedida.
 
-Documento: `docs/CORTEX_PHASE2_LEGACY_PARITY.md`.
-
-Infra hardening pós-deploy: /tmp havia chegado a 100% por Chromium headless órfão. Corrigido; scripts/capture_dashboard.sh agora usa temp/profile sob runs/ e cleanup garantido; scripts/deploy_dashboard.sh recusa deploy com /tmp abaixo de 64 MiB. Evidência: docs/CORTEX_DASHBOARD_TMP_HARDENING.md.
+Documento: `docs/CORTEX_PHASE2_STRUCTURAL_PLANNING.md`.
 
 Próximo bloco seguro:
 
-1. definir planner genérico para buffered producer -> processing requirement;
-2. usar factory_graph + runtime catalog + dependency/placement/delivery planners;
-3. produzir ActionRequest/Prepared structural option sem executar;
-4. medir hard preconditions e predicted postconditions;
-5. testar diretamente o counterexample F1;
-6. só depois discutir adapter transacional.
+1. integrar ResourceSurvey ou mining-resource evidence ao material resolver;
+2. desambiguar producer buffer contaminado por evidência causal, nunca majority heuristic;
+3. compilar ProcessingBranch pronto em Prepared structural action;
+4. definir purpose, measurement keys e code contract;
+5. parity/invariant tests sem chamar TransactionalFLEExecutor;
+6. só depois discutir controlled EXECUTE authority.
 
-Não criar um handler específico de green science. Não gastar seeds 20261101–20261110.
+Não criar handler específico de green science. Não executar seeds confirmatórias 20261101–20261110. Curriculum runner permanece baseline.
 
 ## Protocolo de retomada após interrupção
 
