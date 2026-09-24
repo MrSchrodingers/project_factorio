@@ -87,6 +87,26 @@ PAYLOAD = {
             "type": "assembling-machine",
             "crafting_categories": ["crafting"],
         },
+        {
+            "name": "inserter",
+            "type": "inserter",
+            "energy_source_type": "electric",
+            "energy_source_status": PROBE_MEASURED,
+            "energy_usage_per_tick_j": 245,
+            "energy_usage_status": PROBE_MEASURED,
+            "fuel_categories": [],
+            "fuel_categories_status": PROBE_ABSENT,
+        },
+        {
+            "name": "burner-inserter",
+            "type": "inserter",
+            "energy_source_type": "burner",
+            "energy_source_status": PROBE_MEASURED,
+            "energy_usage_per_tick_j": 2400,
+            "energy_usage_status": PROBE_MEASURED,
+            "fuel_categories": ["chemical"],
+            "fuel_categories_status": PROBE_MEASURED,
+        },
     ],
     "fuels": [
         {
@@ -304,3 +324,16 @@ def test_summary_reports_runtime_machine_and_belt_facts(catalog):
     assert belts["transport-belt"]["tiles_per_second"] == pytest.approx(1.875)
     assert belts["transport-belt"]["belt_speed_unit"] == BELT_SPEED_UNIT
     assert json.dumps(json_finite(summary), allow_nan=False)
+
+def test_machine_names_by_type_uses_observed_runtime_type(catalog):
+    assert catalog.machine_names_by_type("inserter") == (
+        "burner-inserter",
+        "inserter",
+    )
+    assert catalog.machine_names_by_type("furnace") == ("stone-furnace",)
+    assert catalog.machine_names_by_type("not-a-type") == ()
+
+def test_knowledge_command_keeps_energy_actuators_in_machine_catalog():
+    command = FactorioObserver._GAME_KNOWLEDGE_COMMAND
+    assert 'local energy_actor=energy_source_status~="absent"' in command
+    assert "if crafting or mining or energy_actor then" in command

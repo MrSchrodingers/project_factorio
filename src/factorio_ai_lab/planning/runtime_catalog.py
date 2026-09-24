@@ -595,6 +595,19 @@ class RuntimeFactorioCatalog:
     def machine_energies(self) -> tuple[MachineEnergy, ...]:
         return tuple(self._machine_energy.values())
 
+    def machine_names_by_type(self, entity_type: str) -> tuple[str, ...]:
+        """Runtime prototype names whose observed entity type matches exactly."""
+
+        return tuple(
+            sorted(
+                {
+                    str(row.get("name"))
+                    for row in self.machine_rows
+                    if row.get("name") and row.get("type") == entity_type
+                }
+            )
+        )
+
     def fuel(self, name: str) -> FuelSpec | None:
         return self._fuels.get(name)
 

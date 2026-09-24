@@ -17,6 +17,12 @@ from factorio_ai_lab.cortex.actions import (
     EvidenceRef,
     Refusal,
 )
+from factorio_ai_lab.cortex.delivery_actuator_dependency import (
+    DeliveryActuatorDependency,
+    DeliveryActuatorEvaluation,
+    DeliveryActuatorResult,
+    complete_delivery_actuator_dependency,
+)
 from factorio_ai_lab.cortex.executor import (
     ActionBinding,
     UniversalExecutor,
@@ -25,8 +31,10 @@ from factorio_ai_lab.cortex.executor import (
 from factorio_ai_lab.cortex.functional_dependency import (
     FuelCandidateEvaluation,
     FuelDependency,
+    FuelDependencyPlan,
     FunctionalDependencyResult,
     complete_structural_dependencies,
+    plan_burner_fuel_dependency,
 )
 from factorio_ai_lab.cortex.legacy_parity import (
     LegacyRepairParityAdapter,
@@ -64,9 +72,13 @@ __all__ = [
     "CompiledStructuralAction",
     "ConditionOperator",
     "ConditionState",
+    "DeliveryActuatorDependency",
+    "DeliveryActuatorEvaluation",
+    "DeliveryActuatorResult",
     "EvidenceRef",
     "FuelCandidateEvaluation",
     "FuelDependency",
+    "FuelDependencyPlan",
     "FunctionalDependencyResult",
     "LegacyRepairParityAdapter",
     "PreparationResult",
@@ -81,8 +93,10 @@ __all__ = [
     "StructuralTransactionalAdapter",
     "UniversalExecutor",
     "compile_structural_action",
+    "complete_delivery_actuator_dependency",
     "complete_structural_dependencies",
     "execution_guard_conditions",
+    "plan_burner_fuel_dependency",
     "plan_processing_for_buffered_output",
     "prepare_structural_branch",
     "request_from_repair_action",

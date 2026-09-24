@@ -163,6 +163,163 @@ def _insert_fuel_operation(
     return tuple(result)
 
 
+@dataclass(frozen=True)
+class FuelDependencyPlan:
+    """Reusable fuel dependency plan for any observed burner machine."""
+
+    dependency: FuelDependency | None = None
+    evaluations: tuple[FuelCandidateEvaluation, ...] = ()
+    refusal: Refusal | None = None
+
+    def __post_init__(self) -> None:
+        if (self.dependency is None) == (self.refusal is None):
+            raise ValueError("fuel plan requires exactly one dependency/refusal")
+
+    @property
+    def ready(self) -> bool:
+        return self.dependency is not None
+
+
+def plan_burner_fuel_dependency(
+    *,
+    machine: str,
+    energy: MachineEnergy,
+    anchor: tuple[float, float] | None,
+    catalog: RuntimeFactorioCatalog,
+    inventory: Mapping[str, Any],
+    fuel_sources_by_item: Mapping[str, Sequence[FuelSource]] | None = None,
+    horizon_s: float = 10.0,
+    margin: float = 1.25,
+) -> FuelDependencyPlan:
+    """Plan measured burner fuel without mutating a PreparedStructuralAction."""
+
+    if energy.source_type_status != PROBE_MEASURED:
+        return FuelDependencyPlan(
+            refusal=Refusal(
+                code=REFUSAL_ENERGY_SOURCE_UNMEASURED,
+                detail=(
+                    f"energy source for {machine!r} is "
+                    f"{energy.source_type_status}"
+                ),
+                retriable=True,
+            ),
+        )
+    if energy.source_type != "burner":
+        return FuelDependencyPlan(
+            refusal=Refusal(
+                code=REFUSAL_ENERGY_SOURCE_NOT_COMPOSED,
+                detail=(
+                    f"energy source {energy.source_type!r} for {machine!r} "
+                    "is not a burner dependency"
+                ),
+            ),
+        )
+    if not energy.energy_usage_measured:
+        return FuelDependencyPlan(
+            refusal=Refusal(
+                code=REFUSAL_ENERGY_USAGE_UNMEASURED,
+                detail=f"energy usage for burner {machine!r} was not measured",
+                retriable=True,
+            ),
+        )
+    if (
+        energy.fuel_categories_status != PROBE_MEASURED
+        or not energy.fuel_categories
+    ):
+        return FuelDependencyPlan(
+            refusal=Refusal(
+                code=REFUSAL_FUEL_CATEGORIES_UNMEASURED,
+                detail=f"fuel categories for burner {machine!r} were not measured",
+                retriable=True,
+            ),
+        )
+    if anchor is None:
+        return FuelDependencyPlan(
+            refusal=Refusal(
+                code=REFUSAL_PLACEMENT_ANCHOR_MISSING,
+                detail=f"no usable placement anchor for burner {machine!r}",
+            ),
+        )
+
+    profile = profile_from_energy_per_tick(
+        machine,
+        energy.energy_usage_per_tick_j,
+    )
+    if profile is None:
+        return FuelDependencyPlan(
+            refusal=Refusal(
+                code=REFUSAL_ENERGY_USAGE_UNMEASURED,
+                detail=f"no valid BurnerProfile for {machine!r}",
+                retriable=True,
+            ),
+        )
+
+    fuels = catalog.compatible_fuels(energy.fuel_categories)
+    if not fuels:
+        return FuelDependencyPlan(
+            refusal=Refusal(
+                code=REFUSAL_NO_COMPATIBLE_FUEL,
+                detail=(
+                    "no measured fuel matches categories "
+                    f"{list(energy.fuel_categories)!r}"
+                ),
+                retriable=True,
+            ),
+        )
+
+    sources = fuel_sources_by_item or {}
+    evaluations: list[FuelCandidateEvaluation] = []
+    for fuel in fuels:
+        if fuel.fuel_value_j is None:
+            continue
+        units = profile.fuel_units_for_seconds(
+            horizon_s,
+            fuel.fuel_value_j,
+            margin=margin,
+        )
+        carried = _inventory_count(inventory, fuel.name)
+        supply = plan_supply(
+            anchor=anchor,
+            fuel_needed=units,
+            fuel_carried=carried,
+            fuel_sources=tuple(sources.get(fuel.name, ())),
+        )
+        evaluation = FuelCandidateEvaluation(
+            fuel=fuel,
+            units_needed=units,
+            carried=carried,
+            supply_plan=supply,
+        )
+        evaluations.append(evaluation)
+        if supply.refused:
+            continue
+        return FuelDependencyPlan(
+            dependency=FuelDependency(
+                machine=machine,
+                energy=energy,
+                horizon_s=float(horizon_s),
+                fuel=fuel,
+                units_needed=units,
+                supply_plan=supply,
+            ),
+            evaluations=tuple(evaluations),
+        )
+
+    details = "; ".join(
+        f"{row.fuel.name}:{','.join(row.supply_plan.refusals)}"
+        for row in evaluations
+    )
+    return FuelDependencyPlan(
+        evaluations=tuple(evaluations),
+        refusal=Refusal(
+            code=REFUSAL_FUEL_SUPPLY_UNAVAILABLE,
+            detail="no compatible fuel supply covers the horizon"
+            + (f" ({details})" if details else ""),
+            retriable=True,
+        ),
+    )
+
+
 def complete_structural_dependencies(
     prepared: PreparedStructuralAction,
     *,
@@ -206,137 +363,35 @@ def complete_structural_dependencies(
             ),
         )
 
-    if energy.source_type != "burner":
-        return FunctionalDependencyResult(
-            source=prepared,
-            refusal=Refusal(
-                code=REFUSAL_ENERGY_SOURCE_NOT_COMPOSED,
-                detail=(
-                    f"energy source {energy.source_type!r} for {processor!r} "
-                    "has no F2-F2 dependency adapter"
-                ),
-                retriable=False,
-            ),
-        )
-
-    if not energy.energy_usage_measured:
-        return FunctionalDependencyResult(
-            source=prepared,
-            refusal=Refusal(
-                code=REFUSAL_ENERGY_USAGE_UNMEASURED,
-                detail=f"energy usage for burner {processor!r} was not measured",
-                retriable=True,
-            ),
-        )
-    if energy.fuel_categories_status != PROBE_MEASURED or not energy.fuel_categories:
-        return FunctionalDependencyResult(
-            source=prepared,
-            refusal=Refusal(
-                code=REFUSAL_FUEL_CATEGORIES_UNMEASURED,
-                detail=f"fuel categories for burner {processor!r} were not measured",
-                retriable=True,
-            ),
-        )
-
-    profile = profile_from_energy_per_tick(
-        processor,
-        energy.energy_usage_per_tick_j,
+    plan = plan_burner_fuel_dependency(
+        machine=processor,
+        energy=energy,
+        anchor=_placement_anchor(prepared),
+        catalog=catalog,
+        inventory=inventory,
+        fuel_sources_by_item=fuel_sources_by_item,
+        horizon_s=horizon_s,
+        margin=margin,
     )
-    if profile is None:
+    if not plan.ready or plan.dependency is None:
         return FunctionalDependencyResult(
             source=prepared,
-            refusal=Refusal(
-                code=REFUSAL_ENERGY_USAGE_UNMEASURED,
-                detail=f"no valid BurnerProfile for {processor!r}",
-                retriable=True,
-            ),
+            evaluations=plan.evaluations,
+            refusal=plan.refusal,
         )
 
-    anchor = _placement_anchor(prepared)
-    if anchor is None:
-        return FunctionalDependencyResult(
-            source=prepared,
-            refusal=Refusal(
-                code=REFUSAL_PLACEMENT_ANCHOR_MISSING,
-                detail="prepared action has no usable processor placement anchor",
-            ),
-        )
-
-    fuels = catalog.compatible_fuels(energy.fuel_categories)
-    if not fuels:
-        return FunctionalDependencyResult(
-            source=prepared,
-            refusal=Refusal(
-                code=REFUSAL_NO_COMPATIBLE_FUEL,
-                detail=(
-                    f"no measured fuel matches categories "
-                    f"{list(energy.fuel_categories)!r}"
-                ),
-                retriable=True,
-            ),
-        )
-
-    sources = fuel_sources_by_item or {}
-    evaluations: list[FuelCandidateEvaluation] = []
-    for fuel in fuels:
-        if fuel.fuel_value_j is None:
-            continue
-        units = profile.fuel_units_for_seconds(
-            horizon_s,
-            fuel.fuel_value_j,
-            margin=margin,
-        )
-        carried = _inventory_count(inventory, fuel.name)
-        supply = plan_supply(
-            anchor=anchor,
-            fuel_needed=units,
-            fuel_carried=carried,
-            fuel_sources=tuple(sources.get(fuel.name, ())),
-        )
-        evaluation = FuelCandidateEvaluation(
-            fuel=fuel,
-            units_needed=units,
-            carried=carried,
-            supply_plan=supply,
-        )
-        evaluations.append(evaluation)
-        if supply.refused:
-            continue
-
-        dependency = FuelDependency(
-            machine=processor,
-            energy=energy,
-            horizon_s=float(horizon_s),
-            fuel=fuel,
-            units_needed=units,
-            supply_plan=supply,
-        )
-        preflight = dict(prepared.preflight)
-        preflight["energy_dependency"] = dependency.to_dict()
-        completed = replace(
-            prepared,
-            contract_version=FUNCTIONAL_CONTRACT_VERSION,
-            operations=_insert_fuel_operation(prepared, dependency),
-            preflight=preflight,
-        )
-        return FunctionalDependencyResult(
-            source=prepared,
-            prepared=completed,
-            dependency=dependency,
-            evaluations=tuple(evaluations),
-        )
-
-    details = "; ".join(
-        f"{evaluation.fuel.name}:{','.join(evaluation.supply_plan.refusals)}"
-        for evaluation in evaluations
+    dependency = plan.dependency
+    preflight = dict(prepared.preflight)
+    preflight["energy_dependency"] = dependency.to_dict()
+    completed = replace(
+        prepared,
+        contract_version=FUNCTIONAL_CONTRACT_VERSION,
+        operations=_insert_fuel_operation(prepared, dependency),
+        preflight=preflight,
     )
     return FunctionalDependencyResult(
         source=prepared,
-        evaluations=tuple(evaluations),
-        refusal=Refusal(
-            code=REFUSAL_FUEL_SUPPLY_UNAVAILABLE,
-            detail="no compatible fuel supply covers the horizon"
-            + (f" ({details})" if details else ""),
-            retriable=True,
-        ),
+        prepared=completed,
+        dependency=dependency,
+        evaluations=plan.evaluations,
     )

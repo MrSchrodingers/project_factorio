@@ -18,7 +18,12 @@ from factorio_ai_lab.planning.delivery import MODE_BELT, MODE_INSERTER
 
 CONTRACT_VERSION = "cortex_structural_ops_v1"
 FUNCTIONAL_CONTRACT_VERSION = "cortex_structural_ops_v2"
-SUPPORTED_CONTRACT_VERSIONS = frozenset({CONTRACT_VERSION, FUNCTIONAL_CONTRACT_VERSION})
+DELIVERY_ACTUATOR_CONTRACT_VERSION = "cortex_structural_ops_v3"
+SUPPORTED_CONTRACT_VERSIONS = frozenset({
+    CONTRACT_VERSION,
+    FUNCTIONAL_CONTRACT_VERSION,
+    DELIVERY_ACTUATOR_CONTRACT_VERSION,
+})
 PURPOSE_INFRASTRUCTURE = "infrastructure"
 
 REFUSAL_BRANCH_PRECONDITION = "structural_branch_precondition_unsatisfied"

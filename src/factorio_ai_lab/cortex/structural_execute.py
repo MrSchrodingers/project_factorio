@@ -189,18 +189,25 @@ class _WorldFuelDrawUnsupported(RuntimeError):
     pass
 
 
-def _compile_fuel_processor(operation: StructuralOperation) -> list[str]:
+def _compile_carried_fuel(
+    operation: StructuralOperation,
+    *,
+    target_var: str,
+    operation_name: str,
+) -> list[str]:
     fuel_item = str(operation.parameters.get("fuel_item") or "")
     quantity = operation.parameters.get("quantity")
     if not isinstance(quantity, Real) or isinstance(quantity, bool):
-        raise TypeError("fuel_processor quantity must be numeric")
+        raise TypeError(f"{operation_name} quantity must be numeric")
     amount = int(quantity)
     if amount <= 0 or float(quantity) != float(amount):
-        raise ValueError("fuel_processor quantity must be a positive integer")
+        raise ValueError(
+            f"{operation_name} quantity must be a positive integer"
+        )
 
     supply_plan = operation.parameters.get("supply_plan")
     if not isinstance(supply_plan, Mapping):
-        raise TypeError("fuel_processor requires supply_plan")
+        raise TypeError(f"{operation_name} requires supply_plan")
     draws = supply_plan.get("fuel_draws")
     if (
         isinstance(draws, Sequence)
@@ -208,17 +215,35 @@ def _compile_fuel_processor(operation: StructuralOperation) -> list[str]:
         and len(draws) > 0
     ):
         raise _WorldFuelDrawUnsupported(
-            "fuel_processor world draws require a provenance-preserving adapter"
+            f"{operation_name} world draws require a provenance-preserving adapter"
         )
 
     symbol = prototype_symbol(fuel_item)
     return [
-        "cortex_processor=insert_item(",
+        f"{target_var}=insert_item(",
         f"    {symbol},",
-        "    cortex_processor,",
+        f"    {target_var},",
         f"    quantity={amount},",
         ")",
     ]
+
+
+def _compile_fuel_processor(operation: StructuralOperation) -> list[str]:
+    return _compile_carried_fuel(
+        operation,
+        target_var="cortex_processor",
+        operation_name="fuel_processor",
+    )
+
+
+def _compile_fuel_delivery_actuator(
+    operation: StructuralOperation,
+) -> list[str]:
+    return _compile_carried_fuel(
+        operation,
+        target_var="cortex_delivery",
+        operation_name="fuel_delivery_actuator",
+    )
 
 
 def _compile_delivery(operation: StructuralOperation) -> list[str]:
@@ -262,6 +287,7 @@ def _compile_operation(operation: StructuralOperation) -> list[str]:
         "configure_processing": _compile_configure_processing,
         "fuel_processor": _compile_fuel_processor,
         "connect_delivery": _compile_delivery,
+        "fuel_delivery_actuator": _compile_fuel_delivery_actuator,
     }
     if operation.op == "verify_postconditions":
         return []

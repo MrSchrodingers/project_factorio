@@ -1958,7 +1958,8 @@ for name,entity in pairs(prototypes.entity) do
 
   local crafting=ok_categories and categories and next(categories)~=nil
   local mining=ok_resources and resource_categories and next(resource_categories)~=nil
-  if crafting or mining then
+  local energy_actor=energy_source_status~="absent"
+  if crafting or mining or energy_actor then
     machines[#machines+1]={
       name=name,
       type=entity.type,
