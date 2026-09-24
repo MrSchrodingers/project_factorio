@@ -974,13 +974,15 @@ scripts/run_cortex_structural_canary.py;
 tests/test_cortex_structural_execute.py;
 tests/test_cortex_structural_canary_contract.py.
 
-**Tests F2-E1 focused:** 35 continuity/execution PASS neste checkpoint; dry-run do canário
-fail-closed com world_mutation=false. Full gate ainda obrigatório antes do canário real.
+**Tests F2-E1:** 35 continuity/execution focused PASS; full gate 1363 core/FLE PASS + 2 PyTorch PASS; Ruff/static e frontend TypeScript/Vite PASS; dry-run fail-closed com world_mutation=false.
 
-**Decision F2-E1:** **PENDENTE DE FULL GATE/COMMIT.** F2-E2 não pode executar de working tree dirty.
+**Reboot hardening:** fd9da1ae3999b549aa4026186cce5b0caaca0b6d preserva game_knowledge_graph válido quando o probe vivo retorna agent-character unavailable. Após regeneração oficial: 217 recipes, 196 technologies, 14 machines; os 10 failures transitórios passaram 10/10.
 
-**Next:** após commit limpo, F2-E2 — one-shot controlled Factorio canary em seed 424242.
-Continuous autonomous authority continua proibida.
+**Commit F2-E1:** 7552140bb6575ec9faad94436633e77eb4949ed5 — feat: adiciona execução transacional controlada do Cortex.
+
+**Decision F2-E1:** **PASS parcial de F2.** F2-E2 está autorizado somente como one-shot controlled Factorio canary em seed 424242, partindo de árvore clean e evolution inactive/disabled.
+
+**Next:** F2-E2 — executar canário real, analisar accepted/rejected e preservar rollback/evidence sem enfraquecer hard guards. Continuous autonomous authority continua proibida.
 
 **Exit Gate F2:** o agente pode montar uma cadeia funcional escolhendo primitivas/options por uma
 API genérica, sem caminho codificado por estágio.

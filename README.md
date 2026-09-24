@@ -31,9 +31,9 @@ com experiência sem receber do programador a sequência de ações que constitu
 
 ## Estado do programa
 
-**Cortex Research Architecture v0.1 — F2-E1 ativa. O adapter transacional controlado já está
-validado contra TransactionalFLEExecutor com commit/rollback e hard functional guards; o canário
-Factorio F2-E2 ainda não foi executado. Continuous autonomous authority permanece bloqueada.**
+**Cortex Research Architecture v0.1 — F2-E1 concluída. O adapter transacional controlado passou
+full gate e está versionado; F2-E2 está autorizado somente como one-shot Factorio canary na seed
+424242. Continuous autonomous authority e F3 permanecem bloqueadas até análise do canário.**
 
 As seeds confirmatórias 20261101–20261110 permanecem congeladas e não executadas; serão usadas
 posteriormente para avaliação pareada do Cortex, sem tuning nelas.

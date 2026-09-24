@@ -6,7 +6,7 @@
 ## Estado atual
 
 - Programa: Cortex Research Architecture v0.1
-- Fase: **F2-E1 ativa — adapter validado; F2-E2 canário pendente; authority contínua bloqueada**
+- Fase: **F2-E1 concluída — F2-E2 one-shot canary autorizado; authority contínua/F3 bloqueadas**
 - Branch: `research/cortex-v1`
 - Baseline imutável de origem: `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 - Tag baseline publicada: `cortex-pre-research-baseline-20260923`
@@ -46,37 +46,30 @@ silenciosamente pelo commit da F0**.
 
 ## Próxima ação
 
-**Fechar F2-E1 em commit limpo; depois executar F2-E2 canário isolado.**
+**F2-E2 — executar um único controlled Factorio canary na seed 424242.**
 
-Estado F2-E1 comprovado:
+Pré-condições já satisfeitas:
 
-- StructuralTransactionalAdapter exige ActionAuthority.EXECUTE explícita;
-- utiliza exclusivamente TransactionalFLEExecutor para commit/rollback;
-- Prototype names são validados contra o enum FLE real;
-- direct-inserter é o único delivery mode autorizado neste checkpoint;
-- hard guards: producers_reaching_processor aumenta, processor_exists == true e processor_output aumenta;
-- engine, measurement e postcondition failures têm refusals distintas;
-- rollback foi provado em replay/fake com checkpoint serializado;
-- 35 focused continuity/execution tests PASS neste checkpoint;
-- dry-run do canário sem --execute retorna world_mutation=false;
-- confirmatory seeds 20261101–20261110 são recusadas no runner;
-- factorio-ai-evolution está inactive e disabled após o reboot;
-- runtime F1 segue 95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac, dirty=false.
+- implementation commit F2-E1: 7552140bb6575ec9faad94436633e77eb4949ed5;
+- catalog hardening: fd9da1ae3999b549aa4026186cce5b0caaca0b6d;
+- 1363 core/FLE PASS + 2 PyTorch PASS;
+- frontend/static PASS;
+- evolution inactive e disabled;
+- runtime F1 95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac, dirty=false;
+- confirmatory seeds 20261101–20261110 intactas;
+- phase-state F2-E1;
+- canário sem --execute comprovadamente fail-closed.
 
-Documento canônico:
-docs/CORTEX_PHASE2_TRANSACTIONAL_EXECUTION.md
+Executar apenas após este fechamento documental ser commitado e a árvore voltar clean:
 
-Sequência obrigatória:
-
-1. full gate;
-2. commit/push F2-E1;
-3. confirmar árvore clean + evolution inactive;
-4. executar uma única vez scripts/run_cortex_structural_canary.py --execute --seed 424242;
-5. analisar runs/audits/cortex_f2e_structural_canary.json;
-6. documentar accepted ou rejected sem alterar o gate para fabricar sucesso;
-7. somente depois decidir próximo checkpoint.
-
-F3 NÃO está autorizada. Continuous autonomous authority NÃO está autorizada.
+1. verificar git status clean;
+2. verificar evolution inactive/disabled;
+3. rodar scripts/run_cortex_structural_canary.py --execute --seed 424242;
+4. analisar runs/audits/cortex_f2e_structural_canary.json;
+5. se rejected, confirmar rollback e tratar o counterexample;
+6. se accepted, confirmar todos hard guards e estado final;
+7. atualizar docs/README/frontend/phase-state;
+8. não autorizar F3 nem continuous authority apenas porque o canário completou.
 
 ## Protocolo de retomada após interrupção
 
