@@ -23,6 +23,7 @@ com experiência sem receber do programador a sequência de ações que constitu
 > **F2-B — Legacy parity:** [docs/CORTEX_PHASE2_LEGACY_PARITY.md](docs/CORTEX_PHASE2_LEGACY_PARITY.md)
 > **F1-B — storage hardening:** [docs/CORTEX_F1_STORAGE_HARDENING.md](docs/CORTEX_F1_STORAGE_HARDENING.md)
 > **Dashboard / evidence scope:** [docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md](docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md)
+> **Dashboard / tmp hardening:** [docs/CORTEX_DASHBOARD_TMP_HARDENING.md](docs/CORTEX_DASHBOARD_TMP_HARDENING.md)
 > **Continuidade / retomada:** [docs/CORTEX_CONTINUITY_PROTOCOL.md](docs/CORTEX_CONTINUITY_PROTOCOL.md)
 
 ## Estado do programa

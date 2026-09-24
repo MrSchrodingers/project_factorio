@@ -5,8 +5,20 @@ SOURCE_ROOT="${FACTORIO_AI_SOURCE_ROOT:-/srv/factorio-ai-lab}"
 DASHBOARD_RUNTIME_ROOT="${FACTORIO_AI_DASHBOARD_RUNTIME_ROOT:-/srv/factorio-ai-dashboard-runtime}"
 STATE_ROOT="${FACTORIO_AI_STATE_ROOT:-/srv/factorio-ai-lab}"
 REF="${1:-HEAD}"
+TMP_PATH="${FACTORIO_AI_TMP_PATH:-/tmp}"
+MIN_TMP_FREE_BYTES="${FACTORIO_AI_MIN_TMP_FREE_BYTES:-67108864}"
 
 cd "$SOURCE_ROOT"
+
+TMP_FREE_BYTES="$(df -PB1 "$TMP_PATH" | awk 'NR==2 {print $4}')"
+if [[ ! "$TMP_FREE_BYTES" =~ ^[0-9]+$ ]]; then
+  echo "refusing dashboard deploy: unable to measure temp space at $TMP_PATH" >&2
+  exit 65
+fi
+if (( TMP_FREE_BYTES < MIN_TMP_FREE_BYTES )); then
+  echo "refusing dashboard deploy: insufficient temp space at $TMP_PATH ($TMP_FREE_BYTES < $MIN_TMP_FREE_BYTES bytes)" >&2
+  exit 65
+fi
 
 if [[ -n "$(git status --porcelain)" ]]; then
   echo "refusing dashboard deploy: source checkout is dirty" >&2

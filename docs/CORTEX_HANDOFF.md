@@ -58,6 +58,8 @@ F2-B fechou parity para resupply e power-tap:
 
 Documento: `docs/CORTEX_PHASE2_LEGACY_PARITY.md`.
 
+Infra hardening pós-deploy: /tmp havia chegado a 100% por Chromium headless órfão. Corrigido; scripts/capture_dashboard.sh agora usa temp/profile sob runs/ e cleanup garantido; scripts/deploy_dashboard.sh recusa deploy com /tmp abaixo de 64 MiB. Evidência: docs/CORTEX_DASHBOARD_TMP_HARDENING.md.
+
 Próximo bloco seguro:
 
 1. definir planner genérico para buffered producer -> processing requirement;
