@@ -245,6 +245,8 @@ F2-F1 provides the missing factual substrate required to plan a dependency-compl
 
 No new EXECUTE path was introduced.
 
+F2-F1 commit: 32ee7e0dfc74bf22d4aabb8b442b7683cb3f98ba
+
 ## 12. Next checkpoint — F2-F2
 
 F2-F2 will:

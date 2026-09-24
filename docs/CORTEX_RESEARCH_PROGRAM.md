@@ -1043,6 +1043,8 @@ py_compile, frontend TypeScript/Vite e diff check PASS; live read-only game_know
 **Decision F2-F1:** **PASS.** O runtime agora fornece o substrato energético necessário para
 F2-F2 sem hardcodes de machine/fuel. Nenhuma nova authority de escrita foi criada.
 
+**F2-F1 commit:** 32ee7e0dfc74bf22d4aabb8b442b7683cb3f98ba — feat: instrumenta dependências energéticas do Cortex.
+
 **Next after publication:** F2-F2 — compor fuel/energy como child dependency tipada usando
 planning/fuel.py + planning/resupply.py. O próximo canário continua proibido até novo gate/commit
 clean. Continuous autonomous authority e F3 permanecem bloqueadas.

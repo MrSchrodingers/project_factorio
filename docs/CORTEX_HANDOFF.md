@@ -62,6 +62,8 @@ F2-F1 mediu e validou no runtime Factorio 2.0.73:
 Documento canônico:
 docs/CORTEX_PHASE2_FUNCTIONAL_DEPENDENCY.md
 
+F2-F1 commit: 32ee7e0dfc74bf22d4aabb8b442b7683cb3f98ba
+
 Próximo bloco seguro:
 
 1. generalizar BurnerProfile para fuel_value arbitrário preservando wrappers de coal;
