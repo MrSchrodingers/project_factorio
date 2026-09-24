@@ -1,176 +1,171 @@
-# Factorio AI Lab
+# Factorio AI Lab — Cortex Research
 
-Laboratório experimental para estudar agentes autônomos capazes de construir, diagnosticar,
-otimizar e evoluir fábricas no **Factorio** com custo de inferência inicial igual a zero.
+Laboratório de pesquisa em **agência cognitiva, aprendizado contínuo, memória, otimização de
+engenharia e NeuroAI** usando Factorio como ambiente experimental.
 
-O projeto não assume que um LLM seja o controlador ideal de baixo nível. A arquitetura é híbrida:
-algoritmos determinísticos resolvem geometria, fluxo e restrições; modelos neurais aprendem
-políticas e heurísticas; um LLM local atua como planejador semântico, sintetizador de programas
-e crítico de alto nível.
+O objetivo do projeto não é simplesmente automatizar uma sequência capaz de lançar um foguete.
+A pergunta científica é se um agente consegue **aprender a projetar, operar, reorganizar e
+otimizar fábricas**, formar memória reutilizável, transferir estratégias entre mundos e melhorar
+com experiência sem receber do programador a sequência de ações que constitui a solução.
 
-## Hipótese de pesquisa
+> **Documento canônico:** [docs/CORTEX_RESEARCH_PROGRAM.md](docs/CORTEX_RESEARCH_PROGRAM.md)
+> **Handoff operacional:** [docs/CORTEX_HANDOFF.md](docs/CORTEX_HANDOFF.md)
+> **Diagnóstico da arquitetura anterior:** [docs/HANDOFF-CORTEX.md](docs/HANDOFF-CORTEX.md)
 
-Uma política hierárquica
+## Estado do programa
 
-`objetivo -> decomposição -> otimização -> roteamento -> execução -> verificação -> aprendizado`
+**Cortex Research Architecture v0.1 — Fase 0: Constituição científica e baseline
+reprodutível.**
 
-deve superar um agente LLM monolítico em pelo menos três eixos:
+A arquitetura anterior permanece disponível como baseline. Ela possui excelente instrumentação,
+solvers e mecanismos de segurança, mas o caminho de decisão principal ainda é dominado por
+runners escritos à mão. A refatoração Cortex desloca essa autoridade para um loop cognitivo
+medido.
 
-1. taxa de sucesso sob orçamento fixo de computação;
-2. eficiência espacial/material da solução;
-3. capacidade de recuperação após falhas sem degradar o estado do mundo.
+## Duas vertentes
 
-## Base externa
+### A. Cortex Híbrido de Engenharia
 
-- **Factorio Learning Environment (FLE)**: ambiente Gym/REPL, tarefas lab-play/open-play,
-  checkpoints e interface com o Factorio real.
-- **Factorion**: referência de RL espacial com simulador rápido, SFT + PPO e política
-  CNN + self-attention.
-- **Factorio Runtime API 2.1**: fonte de verdade para integração do mundo real.
+Combina:
 
-Não vendorizamos esses projetos. Integrações são feitas por adapters/dependências para manter
-comparações reproduzíveis e separar claramente trabalho próprio de código externo.
+- espaço de ações e *options* tipados;
+- memória de trabalho, episódica, semântica e procedural;
+- LLM local como gerador de hipóteses/programas;
+- política aprendida para escolha;
+- ferramentas determinísticas de engenharia;
+- Graph World Model residual;
+- quality-diversity;
+- ALNS/LNS para reconfiguração industrial;
+- avaliação externa e verificável.
 
-## Arquitetura inicial
+Fluxo alvo:
 
 ```text
-Goal / Task
-    |
-    v
-Hierarchical Orchestrator
-    |------> Local LLM planner/critic (OpenAI-compatible endpoint)
-    |------> Production optimizer (LP/MILP)
-    |------> Spatial planner (A*/JPS/constraint search)
-    |------> Learned policy/value model
-    |
-    v
-Transactional Executor
-    |
-    +------> Fast abstract simulator
-    |
-    +------> FLE / Factorio ground truth
-    |
-    v
-Telemetry + Replay Buffer + Evaluator
+observe → belief update → goal → memory recall → candidates
+        → feasibility → counterfactuals → policy → act
+        → verify → credit assignment → learn
 ```
 
-## Hardware-alvo inicial
+### B. Cortex-Fly / Connectomic Prior
 
-O primeiro host é CPU-only. O baseline deve funcionar em 8 cores/16 threads e 16 GiB RAM.
-Por isso o primeiro modelo sugerido é **Qwen3-4B GGUF Q4_K_M via llama.cpp**. Nemotron Nano
-9B v2 pode entrar como benchmark secundário quantizado; modelos MoE de ~30B ficam fora do
-baseline de RAM.
+Pesquisa NeuroAI inspirada por FlyWire/FlyGM. O connectoma de *Drosophila* é tratado como um
+**prior topológico falsificável**, não como uma simulação presumida da mente de uma mosca.
 
-## Estado do marco v0.11.0
+A topologia real será comparada contra controles degree-preserving rewired, random graph, GNN,
+Graph Transformer e MLP sob orçamento pareado.
 
-A v0.11 consolida o laboratório como sistema de pesquisa geracional orientado por evidência
-física, com conhecimento canônico extraído do runtime do Factorio e gates estruturais de
-maturidade.
+## O que preservamos da arquitetura atual
 
-O runtime continua usando Factorio 2.0.73 + FLE, Qwen3-4B local e execução transacional, mas
-agora existem seis camadas de aprendizado e validação separadas:
+Ferramentas corretas continuam sendo ferramentas do agente:
 
-1. evolução de engenharia — champion/challenger com genome estrutural, survival gates e rollback;
-2. modelo de mundo — ESN e GRU PyTorch treinados sobre telemetria temporal e avaliados por
-   holdout de gerações inteiras;
-3. política espacial — MLP e Transformer/attention aprendem de demonstrações A* e competem por
-   rollout/custo relativo ao A*;
-4. conhecimento generativo — Qwen sintetiza hipóteses/lessons, mas um verifier determinístico
-   rejeita números e taxas sem suporte nos fatos medidos;
-5. conhecimento canônico do jogo — receitas, tecnologias, máquinas e dependências são extraídas
-   dos prototypes do Factorio 2.0.73 e usadas pelo Production DAG quando o runtime está disponível;
-6. topologia física — extração, belts, inserters, processamento, buffers, energia e fluidos formam
-   um grafo observado, com starvation e cobertura até processamento entrando nos survival gates.
+- Factorio Learning Environment;
+- execução transacional e rollback;
+- telemetria causal;
+- catálogo real de receitas/tecnologias;
+- Production DAG;
+- A* e futuros solvers de rede;
+- placement/delivery/resupply;
+- material ledger;
+- factory graph;
+- survival analysis;
+- MAP-Elites;
+- modelos neurais como challengers com gates.
 
-O currículo lab-play possui 16 estágios, avançando de iron mining até electronic circuits,
-logistic science e otimização destrutiva/rebuild. Green science usa um DAG rate-balanced de
-receitas do Factorio 2.0.73; matéria-prima e intermediários deixam de ser tratados como sobras
-ocasionais de inventário.
+O projeto não pretende fazer uma rede neural redescobrir receitas ou A* apenas para parecer mais
+“AI”. O aprendizado entra onde há uma **decisão** a aprender ou um residual que métodos explícitos
+não explicam.
 
-A seleção não usa uma soma de taxas heterogêneas. Ferro/s, copper/s, science/s e outros fluxos
-permanecem métricas separadas. Promoção exige retenção de capabilities, ausência de novas falhas
-e melhoria em dimensões comparáveis.
+## Regra experimental
 
-### Estado experimental atual
+Um componente treinado não recebe autoridade automaticamente.
 
-- champion do laboratório: geração G6; este é um lab champion, não um autonomous champion;
-- gerações recentes preservam iron/coal/copper/power/red science e convergem para electronic
-  circuits;
-- milhares de amostras temporais reais alimentam o world model;
-- o GRU está treinado, mas permanece fora do controle quando não vence persistence de forma
-  consistente no holdout entre gerações;
-- a política espacial neural recebe autoridade somente conforme os gates contra A*;
-- não existe ainda um open-play validated champion; esse artefato só pode ser criado quando
-  o gate final registra closed-loop autonomy com zero logística manual na janela de soak;
-- o open-play prioriza agora Electric Mining Transition antes do scale-up industrial pesado:
-  commissioning manual → Automation → mineração elétrica → coal/iron/copper físicos → science;
-- harvest, insert e extract são medidos separadamente como intervention debt; tentativas
-  rejeitadas e ações commitadas não são misturadas;
-- milestones de carvão e vapor são rotulados como commissioning até que a fábrica sobreviva
-  ao soak físico sem intervenção;
-- open-play usa inventário vazio e a árvore tecnológica real; fallback de navegação causado por
-  limitação do FLE é registrado como assisted navigation, nunca como validação espacial estrita.
+```text
+offline → shadow → proposal → control-eligible
+```
 
-### Control plane
+Promoção exige baseline, holdout, multi-seed, ablação, provenance e incerteza.
 
-O dashboard v0.11 inclui Generation Health, Champion vs Challenger, Generation Report,
-tendências geracionais, Production DAG, grafo canônico do jogo, topologia física viva,
-WIP/safety stock, starvation, matriz de modelos e Production/Consumption nativo. O mapa usa
-viewport em coordenadas reais do mundo; pan/zoom requisitam uma nova janela ao Factorio em vez
-de apenas transformar uma imagem fixa. Séries de produção discretas são agregadas antes do plot
-para reduzir aliasing visual de buckets sub-segundo.
+## Métrica operacional central
 
-A arquitetura de ML/LLM está detalhada em docs/ML_ARCHITECTURE.md e a seleção evolutiva em
-docs/EVOLUTION.md.
+A principal medida física é **produção autônoma sustentável durante janela de holdout sem
+intervenção**. “Stage completed” e produção causada por chamadas manuais não substituem essa
+evidência.
 
-## Comandos principais
+Métricas adicionais incluem throughput, área, distância logística ponderada por fluxo,
+congestionamento, WIP, energia, custo de rebuild, intervenção, expansão futura, calibration,
+regret, sample efficiency, transferência e recuperação a perturbações.
 
-    cd /srv/factorio-ai-lab
+## Ambiente atual
 
-    # Testes
-    PYTHONPATH=src python3 -m unittest discover -s tests -v
+Baseline de software:
 
-    # Baseline determinístico
-    PYTHONPATH=src python3 -m factorio_ai_lab.cli baseline
+- Factorio 2.0.73;
+- FLE 0.4.3;
+- Python 3.12;
+- Qwen3-4B Q4_K_M via llama.cpp;
+- host inicial CPU-only (8C/16T, ~15 GiB RAM);
+- FastAPI dashboard;
+- execução baseada em checkpoints.
 
-    # Sweep A*
-    PYTHONPATH=src python3 -m factorio_ai_lab.experiments.routing_sweep       --seeds 100 --output runs/routing_sweep_100.csv
+A baseline pré-Cortex foi marcada no commit
+`74a1bf9c0f8792a68d7252b11d477835ec93d508`.
 
-    # Aprendizado do hiperparâmetro de curva
-    PYTHONPATH=src python3 -m factorio_ai_lab.experiments.learn_turn_penalty       --episodes 300
+## Estrutura
 
-    # Primeira run construtiva no Factorio real
-    PYTHONPATH=src .venv-fle/bin/python -m factorio_ai_lab.experiments.run_iron_miner \
-      --seed 20260921 --settle-seconds 20
+```text
+src/factorio_ai_lab/
+├── agents/          LLM/router/advisors
+├── learning/        memória, evolução, modelos, survival, repair
+├── planning/        solvers e ferramentas de engenharia
+├── integrations/    FLE / runtime
+├── experiments/     baselines, arenas e runners herdados
+└── dashboard/       observabilidade e cockpit científico
 
-    # Uma geração evolutiva completa: lab -> treino -> selection -> open-play
-    ./scripts/run_evolution_loop.sh --generations 1
+docs/
+├── CORTEX_RESEARCH_PROGRAM.md   contrato científico e roadmap
+├── CORTEX_HANDOFF.md            checkpoint curto para retomada
+├── HANDOFF-CORTEX.md            diagnóstico da transição
+└── pesquisa-metodologia.md      revisão metodológica anterior
+```
 
-    # Treino/eval dos modelos recorrentes
-    ./scripts/train_recurrent_world_model.sh
+## Testes
 
-    # Treino/eval da política espacial
-    ./scripts/train_spatial_policy.sh
+```bash
+cd /srv/factorio-ai-lab
 
-    # Currículo lab isolado
-    ./scripts/run_curriculum.sh
+PYTHONPATH=src python3 -m pytest -q
+python3 -m ruff check src tests
+python3 -m compileall -q src
+```
 
-    # Dashboard manual
-    ./scripts/run_dashboard.sh
+Para frontend:
 
-    # Publicar dashboard somente na tailnet
-    ./scripts/expose_dashboard_tailscale.sh
+```bash
+cd frontend
+npm run typecheck
+npm run build
+```
 
-## Próximos experimentos
+## Continuidade
 
-1. resolver electronic circuits usando material allocation/DAG em vez de estoques incidentais;
-2. fechar o primeiro open-play production/technology validated champion;
-3. ampliar o catálogo de receitas e allocator para green science, mall/bus e produção elétrica;
-4. coletar mais gerações independentes para o GRU atingir o gate cross-generation;
-5. evoluir políticas espaciais de imitation para DAgger e depois RL onde A* não for suficiente;
-6. expandir destructive rebuild para células industriais e medir throughput/área/WIP;
-7. adicionar perturbações dinâmicas e biters após a fábrica autônoma manter capacidades sob
-   múltiplos seeds.
+Não use a conversa como fonte de verdade. Use o repositório.
 
-Consulte docs/ARCHITECTURE.md, docs/DASHBOARD.md, docs/FLE_RUNTIME.md,
-docs/LLM_RUNTIME.md, docs/RESEARCH_BASELINE.md e docs/ROADMAP.md.
+Toda fase do programa contém checkboxes, Exit Gate e campos de evidência. Um novo operador deve
+começar por `docs/CORTEX_HANDOFF.md`, verificar a árvore Git e continuar apenas a fase ativa.
+
+## Referências centrais
+
+- FLE — https://arxiv.org/abs/2503.09617
+- CoALA — https://arxiv.org/abs/2309.02427
+- DreamerV3 — https://doi.org/10.1038/s41586-025-08744-2
+- Voyager — https://arxiv.org/abs/2305.16291
+- Agent Lightning — https://www.microsoft.com/en-us/research/publication/agent-lightning-v1-0-towards-harnessed-agentic-rl/
+- FunSearch — https://doi.org/10.1038/s41586-023-06924-6
+- AlphaEvolve — https://deepmind.google/blog/alphaevolve-a-gemini-powered-coding-agent-for-designing-advanced-algorithms/
+- FlyWire — https://doi.org/10.1038/s41586-024-07558-y
+- FlyGM — https://arxiv.org/abs/2602.17997
+- NeuroMechFly v2 — https://doi.org/10.1038/s41592-024-02497-y
+
+## Licença
+
+MIT, salvo datasets/modelos externos, que mantêm suas próprias licenças.
