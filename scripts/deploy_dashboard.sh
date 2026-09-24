@@ -88,4 +88,11 @@ tmp.replace(path)
 PY
 chown ti:devs "$STATE_ROOT/runs/dashboard_deployment.json"
 
+PHASE_STATE_PY="$STATE_ROOT/.venv-fle/bin/python"
+PHASE_STATE_SCRIPT="$SOURCE_ROOT/scripts/cortex_phase_state.py"
+PHASE_PROTOCOL="$STATE_ROOT/configs/cortex_baseline_v1.json"
+if [[ -x "$PHASE_STATE_PY" && -f "$PHASE_STATE_SCRIPT" ]]; then
+  "$PHASE_STATE_PY" "$PHASE_STATE_SCRIPT"     --state-root "$STATE_ROOT"     --protocol "$PHASE_PROTOCOL"     --write >/dev/null
+fi
+
 echo "$COMMIT"

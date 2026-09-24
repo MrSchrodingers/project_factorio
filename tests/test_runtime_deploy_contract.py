@@ -86,6 +86,9 @@ def test_dashboard_deployer_is_independent_and_attributable() -> None:
     assert '/srv/factorio-ai-dashboard-runtime' in script
     assert 'BUILD_INFO.json' in script
     assert 'runs/dashboard_deployment.json' in script
+    assert 'cortex_phase_state.py' in script
+    assert '--state-root "$STATE_ROOT"' in script
+    assert '--write' in script
     assert 'current.next' in script
 
 
