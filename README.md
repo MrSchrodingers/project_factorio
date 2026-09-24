@@ -45,6 +45,11 @@ provada. F2-G fecha options + runner independence; F3 e continuous authority seg
 As seeds confirmatórias 20261101–20261110 permanecem congeladas e não executadas; serão usadas
 posteriormente para avaliação pareada do Cortex, sem tuning nelas.
 
+O aceite F2-F4C é funcional e bounded: 13 iron plates foram produzidos, mas o furnace terminou
+`no_fuel`. O diagnóstico temporal mostrou que o step do FLE continua avançando o mundo durante
+instrumentação pós-eval; portanto F2-G deve medir o horizon efetivo em ticks antes de qualquer
+claim de operação sustentável.
+
 A arquitetura anterior permanece disponível como baseline. Ela possui excelente instrumentação,
 solvers e mecanismos de segurança, mas o caminho de decisão principal ainda é dominado por
 runners escritos à mão. A refatoração Cortex desloca essa autoridade para um loop cognitivo

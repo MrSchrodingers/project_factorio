@@ -1196,6 +1196,8 @@ inactive+disabled.
 
 **F2-F4C mechanical state commit:** `01c4390d1668631722dcef8d33c980e7e704247e` — `feat: registra aceite funcional F2-F4C`.
 
+**Temporal diagnosis F2-F4C:** one coal at 1,500 J/tick lasts 44.44 game s; iron plate at 3.2 s yields exactly 13 complete crafts, matching the observed `13 plates + no_fuel`. FLE runs at game speed 10 and pauses only after post-eval verification/state/observation, so the effective transaction horizon exceeded the nominal `settle_seconds=10`. F2-G must instrument actual tick horizon and use it in option energy/sustainability semantics; no arbitrary fuel multiplier is permitted.
+
 **Next:** F2-G — Option composition + runner independence. Remover qualquer dependência Cortex de
 `curriculum_runner`, formalizar a primeira option temporally extended e provar cadeia funcional por
 API genérica sem stage handler. F3 permanece bloqueada.

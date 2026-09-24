@@ -150,3 +150,39 @@ The mechanical state exposes both:
 - sustainability_classification = functional_accept_terminal_no_fuel.
 
 This prevents a green functional result from being misreported as sustained autonomous production.
+## 10. Temporal-accounting diagnosis
+
+The terminal `no_fuel` state is explained by a mismatch between the nominal fuel horizon and the actual simulation horizon of one FLE step.
+
+Measured/runtime facts:
+
+- coal fuel value = 4,000,000 J;
+- stone-furnace energy usage = 1,500 J/tick;
+- Factorio = 60 ticks/s;
+- therefore one coal powers the furnace for 4,000,000 / (1,500 * 60) = 44.44 game seconds;
+- iron-plate recipe time = 3.2 s at measured furnace crafting speed 1.0;
+- floor(44.44 / 3.2) = 13 complete plates.
+
+F2-F4C observed exactly 13 plates and then `no_fuel`.
+
+This is a strong temporal signature that the furnace remained active for approximately one full coal lifetime, not merely the nominal 10 s settle window.
+
+FLE semantics explain the difference:
+
+- the gym environment runs with `fast=True` and game speed 10;
+- `sleep(10)` represents 600 nominal ticks;
+- `FactorioGymEnv.step()` unpauses before `eval()`;
+- after `eval()` returns, the world remains unpaused while task verification, score, `GameState.from_instance`, production statistics and observation are collected;
+- pause happens only at the end of `step()`.
+
+The unbudgeted ~34.44 game seconds correspond to only ~3.44 wall seconds at game speed 10, which is consistent with the post-eval instrumentation path.
+
+Artifact:
+
+`runs/audits/cortex_f2f4c_temporal_diagnosis.json`
+
+Scientific consequence:
+
+`settle_seconds` is not a reliable proxy for the complete transaction energy horizon. Future options must record actual transaction tick deltas and distinguish explicit settle ticks from unpaused execution/instrumentation ticks. Fuel sizing and sustainability gates must be based on the effective horizon rather than a nominal sleep constant.
+
+This diagnosis does not invalidate the F2-F4C functional accept. It explains why bounded output succeeded while sustained operation was not proven.

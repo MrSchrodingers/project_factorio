@@ -74,6 +74,18 @@ Limitação científica:
 - portanto functional_accept=true, mas sustained_operation=false/not proven;
 - F2-F4C prova operação funcional bounded, não produção sustentável contínua.
 
+Diagnóstico temporal fechado:
+
+- 1 coal no stone-furnace = 44,44 s de jogo;
+- iron plate = 3,2 s; 44,44 s comportam exatamente 13 crafts completos;
+- F2-F4C observou 13 plates + no_fuel;
+- FLE roda game.speed=10 e só pausa ao final de `FactorioGymEnv.step()`;
+- pós-eval (GameState/verification/observation) continua consumindo ticks;
+- `settle_seconds=10` não representa o horizon energético total da transação;
+- F2-G deve instrumentar tick horizon efetivo e não aumentar coal por constante arbitrária.
+
+Artifact: `runs/audits/cortex_f2f4c_temporal_diagnosis.json`.
+
 Segurança:
 
 - confirmatory seeds 20261101–20261110 seguem intactas;
