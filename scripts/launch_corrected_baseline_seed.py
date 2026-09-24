@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -77,6 +78,13 @@ def build_launch_plan(
         raise ValueError(
             f"expected commit {expected_commit} != protocol commit {protocol_commit}"
         )
+    protocol_root=protocol.get("scientific_release_root")
+    if not isinstance(protocol_root,str) or not protocol_root:
+        raise ValueError("protocol does not pin scientific_release_root")
+    if Path(protocol_root).resolve() != release_root.resolve():
+        raise ValueError(
+            f"release root {release_root} != protocol root {protocol_root}"
+        )
     seeds=protocol.get(f"{mode}_seeds")
     if not isinstance(seeds, list) or seed not in [int(value) for value in seeds]:
         raise ValueError(f"seed {seed} is not frozen for mode {mode}")
@@ -126,11 +134,69 @@ def build_launch_plan(
     }
 
 
+def _sha256(path: Path) -> str:
+    digest=hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda:handle.read(1024 * 1024),b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def capture_global_isolation_snapshot(
+    *,
+    state_root: Path,
+    seed: int,
+) -> Path:
+    runs=state_root/"runs"
+    targets=(
+        "evolution_history.jsonl",
+        "evolution_loop_history.jsonl",
+        "open_play_validation_history.jsonl",
+        "knowledge.jsonl",
+        "counterexamples.jsonl",
+        "repairs.jsonl",
+        "baseline_reset.json",
+    )
+    path=runs/"audits"/f"baseline_{seed}_global_isolation_before.json"
+    if path.exists():
+        raise FileExistsError(f"isolation snapshot already exists: {path}")
+    champion_exists=(runs/"evolution_champion.json").exists()
+    if champion_exists:
+        raise RuntimeError("global evolution_champion.json must remain absent during F1-B")
+    payload={
+        "schema_version":"baseline_global_isolation_snapshot_v1",
+        "captured_at":datetime.now(UTC).isoformat(),
+        "seed":seed,
+        "evolution_champion_exists":champion_exists,
+        "files":{},
+    }
+    for rel in targets:
+        target=runs/rel
+        payload["files"][rel]={
+            "exists":target.exists(),
+            "sha256":_sha256(target) if target.exists() else None,
+            "bytes":target.stat().st_size if target.exists() else None,
+            "mtime_ns":target.stat().st_mtime_ns if target.exists() else None,
+        }
+    path.parent.mkdir(parents=True,exist_ok=True)
+    temp=path.with_suffix(".tmp")
+    temp.write_text(
+        json.dumps(payload,indent=2,sort_keys=True)+"\n",
+        encoding="utf-8",
+    )
+    temp.replace(path)
+    return path
+
+
 def launch(plan: dict[str, Any]) -> dict[str, Any]:
     if _evolution_active():
         raise RuntimeError("factorio-ai-evolution.service must remain inactive during baseline")
 
     state_root=Path(str(plan["state_root"]))
+    isolation_snapshot=capture_global_isolation_snapshot(
+        state_root=state_root,
+        seed=int(plan["seed"]),
+    )
     launch_dir=state_root/"runs"/"launchers"
     launch_dir.mkdir(parents=True,exist_ok=True)
     stem=f"baseline-{plan['mode']}-{plan['seed']}"
@@ -168,6 +234,7 @@ def launch(plan: dict[str, Any]) -> dict[str, Any]:
         "launcher_pid":proc.pid,
         "log_path":str(log_path),
         "record_path":str(record_path),
+        "isolation_snapshot":str(isolation_snapshot),
     }
     record_path.write_text(
         json.dumps(record,indent=2,sort_keys=True)+"\n",

@@ -69,10 +69,20 @@ Ele recusa:
 
 - release dirty;
 - SHA diferente do esperado;
+- SHA ou release-root diferentes do pin declarado no protocolo;
 - seed fora do protocolo congelado;
+- qualquer outra seed baseline ainda marcada como running;
 - sandbox já contendo evidência;
+- champion global reaparecido durante F1-B;
 - factorio-ai-evolution ativo;
 - runner ausente.
+
+Antes de criar o processo, o launcher grava automaticamente:
+
+    runs/audits/baseline_<seed>_global_isolation_before.json
+
+Esse snapshot contém SHA-256, tamanho e mtime dos artefatos globais críticos e confirma que
+evolution_champion.json continua ausente. A validação pós-run compara contra esse snapshot.
 
 Exemplo F1-B:
 

@@ -31,6 +31,7 @@ def _protocol(path: Path) -> None:
     path.write_text(json.dumps({
         "schema_version":"p1",
         "scientific_release_commit":"abc",
+        "scientific_release_root":str(path.parent/"release"),
         "exploratory_seeds":[11,12],
         "confirmatory_seeds":[21],
     })+"\n")
@@ -57,6 +58,36 @@ def test_detached_launch_plan_pins_exact_release(tmp_path) -> None:
     assert plan["expected_commit"]=="abc"
     assert plan["scientific_release"]["commit"]=="abc"
     assert str(release/"scripts"/"run_corrected_baseline_seed.py") in plan["command"]
+
+
+def test_isolation_snapshot_captures_global_hashes_and_refuses_champion(tmp_path) -> None:
+    module=_module("launch_corrected_baseline_seed.py")
+    runs=tmp_path/"runs"
+    runs.mkdir()
+    (runs/"knowledge.jsonl").write_text('{"lesson":"x"}\n')
+
+    snapshot=module.capture_global_isolation_snapshot(
+        state_root=tmp_path,
+        seed=11,
+    )
+    payload=json.loads(snapshot.read_text())
+
+    assert payload["seed"]==11
+    assert payload["evolution_champion_exists"] is False
+    assert payload["files"]["knowledge.jsonl"]["exists"] is True
+    assert payload["files"]["knowledge.jsonl"]["sha256"]
+
+    snapshot.unlink()
+    (runs/"evolution_champion.json").write_text("{}\n")
+    try:
+        module.capture_global_isolation_snapshot(
+            state_root=tmp_path,
+            seed=11,
+        )
+    except RuntimeError as exc:
+        assert "evolution_champion" in str(exc)
+    else:
+        raise AssertionError("launcher accepted a global champion during F1-B")
 
 
 def test_detached_launch_plan_rejects_concurrent_baseline_seed(tmp_path) -> None:

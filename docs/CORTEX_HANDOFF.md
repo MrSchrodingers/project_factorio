@@ -91,7 +91,8 @@ Durante a série exploratória o runtime científico deve permanecer em
 
 Checkpoint mecânico: executar `scripts/cortex_phase_state.py --write` e obedecer `resume.action`.
 Novas seeds devem ser iniciadas por `scripts/launch_corrected_baseline_seed.py`, que desacopla a
-execução da sessão SentinelX e recusa SHA incorreto, seed duplicada e evolution concorrente.
+execução da sessão SentinelX, valida SHA + release-root contra o protocolo, recusa seed duplicada
+ou evolution concorrente e grava automaticamente o snapshot global de isolamento pré-run.
 Detalhes: docs/CORTEX_CONTINUITY_PROTOCOL.md.
 
 ## Evidência de fechamento da F0
