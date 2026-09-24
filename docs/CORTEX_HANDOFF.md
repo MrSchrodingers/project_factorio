@@ -6,7 +6,7 @@
 ## Estado atual
 
 - Programa: Cortex Research Architecture v0.1
-- Fase: **F2-F4C functional accept concluído — F2-G autorizada; F3 bloqueada**
+- Fase: **F2-G1 concluída — F2-G2 autorizada em SHADOW/replay; F3 bloqueada**
 - Branch: `research/cortex-v1`
 - Baseline imutável de origem: `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 - Tag baseline publicada: `cortex-pre-research-baseline-20260923`
@@ -46,86 +46,60 @@ silenciosamente pelo commit da F0**.
 
 ## Próxima ação
 
-**F2-G — Option composition + runner independence.**
+**F2-G2 — primeira Option temporally extended para estabelecer uma processing chain funcional.**
 
-F2-F4C terminou com functional accept real em Factorio.
+F2-G1 removeu a dependência Cortex -> `curriculum_runner` para runtime footprints:
 
-Evidence principal:
+- novo instrumento read-only: `factorio_ai_lab.instrumentation.runtime.runtime_entity_footprints`;
+- canário Cortex importa o instrumento genérico diretamente;
+- `_runtime_entity_footprints` permanece apenas como wrapper de compatibilidade no runner legado;
+- falhas de RCON/malformed payload retornam mapa vazio e preservam fallback já existente;
+- regressão impede reintroduzir import de `curriculum_runner` no canário.
 
-- source commit: `20aac7f8eb0c3b71c8017b632892f37624b79fd0`;
-- seed 424242;
-- artifact: `runs/audits/cortex_f2f4c_structural_canary.json`;
-- SHA-256: `2c074e8ec312a5119c59487ee25acae5f1cab7f2ca7e2a2c95cedffada955d37`;
-- action_status=accepted;
-- transaction_committed=true;
-- rollback_observed=false;
-- producers_reaching_processor: 0 -> 1;
-- physical_processing_coverage: 0.0 -> 1.0;
-- processor_output: 0.0 -> 13.0;
-- all hard postconditions satisfied;
-- actuator selecionado=burner-inserter;
-- actuator fuel=coal;
-- processor fuel=coal;
-- continuous_authority=false.
+F2-G1 gates:
 
-Limitação científica:
+- 37 PASS no subset instrumentação/independência;
+- 64 PASS no gate combinado continuity/dashboard;
+- 1403 core/FLE PASS;
+- 2 PyTorch PASS;
+- Ruff/compileall/JavaScript/TypeScript/Vite/whitespace PASS.
 
-- final processor_status=no_fuel;
-- portanto functional_accept=true, mas sustained_operation=false/not proven;
-- F2-F4C prova operação funcional bounded, não produção sustentável contínua.
-
-Diagnóstico temporal fechado:
-
-- 1 coal no stone-furnace = 44,44 s de jogo;
-- iron plate = 3,2 s; 44,44 s comportam exatamente 13 crafts completos;
-- F2-F4C observou 13 plates + no_fuel;
-- FLE roda game.speed=10 e só pausa ao final de `FactorioGymEnv.step()`;
-- pós-eval (GameState/verification/observation) continua consumindo ticks;
-- `settle_seconds=10` não representa o horizon energético total da transação;
-- F2-G deve instrumentar tick horizon efetivo e não aumentar coal por constante arbitrária.
-
-Artifact: `runs/audits/cortex_f2f4c_temporal_diagnosis.json`.
-
-Segurança:
-
-- confirmatory seeds 20261101–20261110 seguem intactas;
-- runtime F1 continua 95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac;
-- evolution permanece inactive+disabled;
-- FactorioWorldLease bloqueou uma tentativa concorrente duplicada antes de qualquer mutação.
+Implementation commit F2-G1: `f1680811c2bee828c435cbf66c6c03aaf60156e6`.
 
 Documento canônico:
-`docs/CORTEX_PHASE2_DELIVERY_ACTUATOR_CANARY.md`
 
-Closure gate:
+`docs/CORTEX_PHASE2_RUNNER_INDEPENDENCE.md`
 
-- 41 focused continuity/dashboard PASS;
-- 1401 core/FLE PASS;
-- 2 PyTorch PASS;
-- Ruff/compileall/JavaScript/TypeScript/Vite PASS;
-- mechanical state/UI commit: `01c4390d1668631722dcef8d33c980e7e704247e`.
+F2-F4C continua sendo a última evidência live:
 
-F2 NÃO está encerrada.
+- functional_accept=true;
+- processor_output=13;
+- transaction_committed=true;
+- sustained_operation=false/not proven;
+- final processor_status=no_fuel.
 
-Checklist original ainda aberto:
+A UI F2-G1 deve continuar exibindo esse último canário funcional como evidência histórica, sem
+sugerir que F2-G1 executou nova mutação.
+
+F2-G2 deve:
+
+1. definir schema de Option com preconditions/children/effects/termination/provenance;
+2. compor structural planning + processor fuel + delivery actuator sem duplicar handlers;
+3. modelar option-level time/energy budget com ticks efetivos, não apenas `sleep()`;
+4. operar primeiro em SHADOW/replay;
+5. manter explicit authority por execução;
+6. não usar confirmatory seeds;
+7. não conceder continuous autonomous authority.
+
+F2 NÃO está encerrada. Checkboxes originais ainda abertos:
 
 - transactional execution universal;
 - options iniciais;
 - cadeia funcional sem curriculum_runner;
 - runner antigo baseline-only.
 
-Próximo bloco seguro F2-G:
-
-1. remover dependência Cortex -> curriculum_runner para runtime footprints;
-2. mover essa instrumentação para interface genérica de planning/runtime;
-3. formalizar uma option temporally extended para estabelecer processing chain funcional;
-4. compor essa option por primitives/typed dependencies já existentes;
-5. executá-la pelo boundary transacional genérico, sem stage handler;
-6. adicionar integration test sem import de curriculum_runner;
-7. só então avaliar os quatro checkboxes de fechamento da F2;
-8. manter continuous autonomous authority bloqueada.
-
-Não executar confirmatory seeds.
 F3 permanece bloqueada.
+
 ## Protocolo de retomada após interrupção
 
 Não inferir continuidade pela tela. Executar na ordem:

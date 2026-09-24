@@ -1198,9 +1198,28 @@ inactive+disabled.
 
 **Temporal diagnosis F2-F4C:** one coal at 1,500 J/tick lasts 44.44 game s; iron plate at 3.2 s yields exactly 13 complete crafts, matching the observed `13 plates + no_fuel`. FLE runs at game speed 10 and pauses only after post-eval verification/state/observation, so the effective transaction horizon exceeded the nominal `settle_seconds=10`. F2-G must instrument actual tick horizon and use it in option energy/sustainability semantics; no arbitrary fuel multiplier is permitted.
 
-**Next:** F2-G — Option composition + runner independence. Remover qualquer dependência Cortex de
-`curriculum_runner`, formalizar a primeira option temporally extended e provar cadeia funcional por
-API genérica sem stage handler. F3 permanece bloqueada.
+**F2-G1 progress:** **PASS parcial de F2.** Runtime footprint measurement foi movida
+para `factorio_ai_lab.instrumentation.runtime`. O canário Cortex não importa mais
+`curriculum_runner`; o helper legado permanece somente como wrapper compatível. Semântica de
+footprint/fallback não mudou.
+
+**Evidence F2-G1:** `docs/CORTEX_PHASE2_RUNNER_INDEPENDENCE.md`;
+`src/factorio_ai_lab/instrumentation/runtime.py`; regressões em
+`tests/test_entity_footprints.py` e `tests/test_cortex_structural_canary_contract.py`.
+
+**Focused gate F2-G1:** 37 PASS no subset instrumentação/independência; 64 PASS no gate combinado continuity/dashboard.
+
+**Full gate F2-G1:** 1403 core/FLE PASS + 2 PyTorch PASS; Ruff/compileall/JavaScript/TypeScript/Vite/diff checks PASS. Nenhuma nova authority ou world mutation.
+
+**F2-G1 implementation commit:** `f1680811c2bee828c435cbf66c6c03aaf60156e6` — `feat: desacopla instrumentação Cortex do runner legado`.
+
+**Decision F2-G1:** **PASS parcial de F2.** Uma dependência concreta do runner legado foi removida,
+mas os checkboxes de Option, execução universal, cadeia funcional independente e baseline-only
+permanecem abertos.
+
+**Next:** F2-G2 — formalizar a primeira Option temporally extended, incluindo preconditions,
+children, effects, termination e budget temporal/energético baseado em ticks efetivos. Validar
+primeiro em SHADOW/replay. F3 permanece bloqueada.
 
 **Exit Gate F2:** o agente pode montar uma cadeia funcional escolhendo primitivas/options por uma
 API genérica, sem caminho codificado por estágio.
