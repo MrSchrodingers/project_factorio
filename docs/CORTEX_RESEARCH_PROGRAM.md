@@ -1217,9 +1217,47 @@ footprint/fallback não mudou.
 mas os checkboxes de Option, execução universal, cadeia funcional independente e baseline-only
 permanecem abertos.
 
-**Next:** F2-G2 — formalizar a primeira Option temporally extended, incluindo preconditions,
-children, effects, termination e budget temporal/energético baseado em ticks efetivos. Validar
-primeiro em SHADOW/replay. F3 permanece bloqueada.
+**F2-G2 progress:** **PASS parcial de F2.** Foi criada a primeira Option temporally extended,
+`establish_processing_chain`, compondo structural planning, preparation v1, processor energy v2 e
+delivery-actuator energy v3 sem duplicar handlers. Initiation/preconditions, children, predicted
+effects, termination funcional, provenance e authority são tipados.
+
+**Temporal semantics F2-G2:** `OptionBudget` separa requested ticks de observed game ticks.
+Requested ticks nunca são promovidos a observação. Quando ticks observados existem, energy planning
+usa `max(requested_ticks, observed_ticks)`; sem observação, sustentabilidade permanece
+não-avaliável. `runtime_game_ticks()` foi movido para instrumentation genérica e o runner legado
+mantém somente wrapper compatível.
+
+**Functional termination F2-G2:** a Option termina apenas com
+`producers_reaching_processor INCREASE`, `processor_exists == true` e
+`processor_output INCREASE`. Isso incorpora diretamente o counterexample F2-F3, no qual topologia
+sem output não era sucesso funcional.
+
+**Evidence F2-G2:** `docs/CORTEX_PHASE2_OPTIONS.md`;
+`runs/audits/cortex_f2g2_option_contract_replay.json` SHA-256
+`b05b20cc0070dcb16180757b927702e790947bb686913522af30499a20a59d21`.
+
+**Historical replay boundary:** o source F2-F4C não preservou payloads crus
+world/catalog/resources/inventory. Portanto o replay declara `planner_reexecuted=false`,
+`historical_inputs_replayable=false` e não reivindica full planner replay. O composer completo é
+validado por testes determinísticos; nenhum estado live posterior é usado para preencher o artifact.
+
+**Focused gate F2-G2:** 48 PASS; Ruff/py_compile/replay PASS; world_mutation=false.
+
+**Full gate F2-G2:** 1413 core/FLE PASS + 2 PyTorch PASS;
+Ruff/compileall/JavaScript/TypeScript/Vite/whitespace PASS.
+
+**F2-G2 implementation commit:** `9c57b7b1fa8b804113d77044df8cf0c3feba4355` —
+`feat: formaliza primeira Option do Cortex`.
+
+**Decision F2-G2:** **PASS parcial de F2.** O requisito de Option inicial está atendido em
+SHADOW/replay, mas execution universal, execução da cadeia por Option/API genérica e baseline-only
+do runner legado permanecem abertos.
+
+**Next:** F2-G3 — implementar o universal Option execution boundary, primeiro em SHADOW/replay e
+fake transacional. Reusar `StructuralTransactionalAdapter`/`TransactionalFLEExecutor`, medir
+ticks before/after e manter lineage Option -> Action -> transaction. Nenhum canário live é
+autorizado por F2-G2. F3 permanece bloqueada.
 
 **Exit Gate F2:** o agente pode montar uma cadeia funcional escolhendo primitivas/options por uma
 API genérica, sem caminho codificado por estágio.

@@ -6,7 +6,7 @@
 ## Estado atual
 
 - Programa: Cortex Research Architecture v0.1
-- Fase: **F2-G1 concluída — F2-G2 autorizada em SHADOW/replay; F3 bloqueada**
+- Fase: **F2-G2 concluída — F2-G3 autorizada em SHADOW/replay; F3 bloqueada**
 - Branch: `research/cortex-v1`
 - Baseline imutável de origem: `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 - Tag baseline publicada: `cortex-pre-research-baseline-20260923`
@@ -46,58 +46,75 @@ silenciosamente pelo commit da F0**.
 
 ## Próxima ação
 
-**F2-G2 — primeira Option temporally extended para estabelecer uma processing chain funcional.**
+**F2-G3 — universal Option execution boundary, primeiro em SHADOW/replay.**
 
-F2-G1 removeu a dependência Cortex -> `curriculum_runner` para runtime footprints:
+F2-G2 formalizou a primeira Option temporally extended do Cortex:
 
-- novo instrumento read-only: `factorio_ai_lab.instrumentation.runtime.runtime_entity_footprints`;
-- canário Cortex importa o instrumento genérico diretamente;
-- `_runtime_entity_footprints` permanece apenas como wrapper de compatibilidade no runner legado;
-- falhas de RCON/malformed payload retornam mapa vazio e preservam fallback já existente;
-- regressão impede reintroduzir import de `curriculum_runner` no canário.
+- kind: `establish_processing_chain`;
+- initiation = preconditions do branch estrutural;
+- children = structural planner -> prepare v1 -> processor energy v2 -> delivery actuator v3;
+- termination = reaching_processor + processor_exists + processor_output;
+- authority F2-G2 = SHADOW/PROPOSAL; EXECUTE recusado;
+- provenance explícita Option -> ActionRequest -> ProcessingBranch;
+- ambiguity entre múltiplos materiais é refusal, não escolha silenciosa;
+- requested ticks não viram observação;
+- observed game ticks, quando disponíveis, ampliam o horizon de energy planning;
+- `runtime_game_ticks()` está em instrumentation genérica; runner legado só mantém wrapper.
 
-F2-G1 gates:
+Gates F2-G2:
 
-- 37 PASS no subset instrumentação/independência;
-- 64 PASS no gate combinado continuity/dashboard;
-- 1403 core/FLE PASS;
-- 2 PyTorch PASS;
-- Ruff/compileall/JavaScript/TypeScript/Vite/whitespace PASS.
+- focused composer/replay: 48 PASS;
+- full core/FLE: 1413 PASS;
+- PyTorch: 2 PASS;
+- Ruff/compileall/JavaScript/TypeScript/Vite/whitespace: PASS.
 
-Implementation commit F2-G1: `f1680811c2bee828c435cbf66c6c03aaf60156e6`.
+Implementation commit:
+
+`9c57b7b1fa8b804113d77044df8cf0c3feba4355`
+
+Replay canônico:
+
+`runs/audits/cortex_f2g2_option_contract_replay.json`
+
+SHA-256:
+
+`b05b20cc0070dcb16180757b927702e790947bb686913522af30499a20a59d21`
+
+Limitação do replay histórico:
+
+- F2-F4C preservou labels dos instrumentos, mas não os payloads crus world/catalog/resources/inventory;
+- portanto `planner_reexecuted=false` e `historical_inputs_replayable=false`;
+- full planner replay NÃO é reivindicado;
+- source output=13 e final no_fuel permanecem apenas como evidência histórica F2-F4C;
+- sustainability_evaluable=false porque observed ticks do ciclo completo não foram persistidos.
 
 Documento canônico:
 
-`docs/CORTEX_PHASE2_RUNNER_INDEPENDENCE.md`
+`docs/CORTEX_PHASE2_OPTIONS.md`
 
-F2-F4C continua sendo a última evidência live:
+F2-G3 deve:
 
-- functional_accept=true;
-- processor_output=13;
-- transaction_committed=true;
-- sustained_operation=false/not proven;
-- final processor_status=no_fuel.
+1. receber um `ProcessingChainOptionPlan` por API tipada;
+2. reutilizar `StructuralTransactionalAdapter` / `TransactionalFLEExecutor`;
+3. manter um único rollback abaixo do Cortex;
+4. medir `runtime_game_ticks()` before/after e devolver ticks observados ao OptionBudget;
+5. preservar lineage Option -> Action -> transaction;
+6. executar primeiro em fake/replay transacional, sem world live;
+7. provar integração funcional sem import/dispatch de `curriculum_runner`;
+8. manter termination funcional inalterada;
+9. só considerar one-shot EXECUTE live em checkpoint posterior.
 
-A UI F2-G1 deve continuar exibindo esse último canário funcional como evidência histórica, sem
-sugerir que F2-G1 executou nova mutação.
+F2 NÃO está encerrada.
 
-F2-G2 deve:
+Status dos requisitos originais:
 
-1. definir schema de Option com preconditions/children/effects/termination/provenance;
-2. compor structural planning + processor fuel + delivery actuator sem duplicar handlers;
-3. modelar option-level time/energy budget com ticks efetivos, não apenas `sleep()`;
-4. operar primeiro em SHADOW/replay;
-5. manter explicit authority por execução;
-6. não usar confirmatory seeds;
-7. não conceder continuous autonomous authority.
+- initial Option: atendido em F2-G2;
+- transactional execution universal: ainda aberto;
+- cadeia funcional por Option/API genérica: ainda não executada;
+- runner legado baseline-only: ainda aberto.
 
-F2 NÃO está encerrada. Checkboxes originais ainda abertos:
-
-- transactional execution universal;
-- options iniciais;
-- cadeia funcional sem curriculum_runner;
-- runner antigo baseline-only.
-
+Não executar confirmatory seeds.
+Não conceder continuous autonomous authority.
 F3 permanece bloqueada.
 
 ## Protocolo de retomada após interrupção
