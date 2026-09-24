@@ -992,3 +992,18 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
         g2["phase2_delivery_actuator_canary"]["classification"]
         == "functional_accept"
     )
+
+    (docs/"CORTEX_PHASE2_OPTION_EXECUTION_BOUNDARY.md").write_text(
+        "# F2-G3\n"
+    )
+    g3=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert g3["phase2_checkpoint"] == "F2-G3"
+    assert g3["phase2_option_execution_boundary"]["exists"] is True
+    assert g3["phase2_options"]["exists"] is True
+    assert (
+        g3["phase2_delivery_actuator_canary"]["classification"]
+        == "functional_accept"
+    )

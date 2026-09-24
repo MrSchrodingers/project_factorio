@@ -41,6 +41,12 @@ from factorio_ai_lab.cortex.legacy_parity import (
     PreparationResult,
     PreparedLegacyAction,
 )
+from factorio_ai_lab.cortex.option_execute import (
+    OptionExecutionBoundary,
+    OptionExecutionGrant,
+    OptionExecutionResult,
+    option_plan_digest,
+)
 from factorio_ai_lab.cortex.options import (
     OptionBudget,
     OptionKind,
@@ -92,6 +98,9 @@ __all__ = [
     "FunctionalDependencyResult",
     "LegacyRepairParityAdapter",
     "OptionBudget",
+    "OptionExecutionBoundary",
+    "OptionExecutionGrant",
+    "OptionExecutionResult",
     "OptionKind",
     "OptionRequest",
     "OptionStep",
@@ -114,6 +123,7 @@ __all__ = [
     "complete_structural_dependencies",
     "compose_processing_chain_option",
     "execution_guard_conditions",
+    "option_plan_digest",
     "plan_burner_fuel_dependency",
     "plan_processing_for_buffered_output",
     "prepare_structural_branch",

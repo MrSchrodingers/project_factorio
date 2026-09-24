@@ -1752,9 +1752,11 @@ function renderExperimentContext() {
     const deliveryActuatorCanary = phase2Checkpoint === "F2-F4C";
     const runnerIndependencePhase = phase2Checkpoint === "F2-G1";
     const optionCompositionPhase = phase2Checkpoint === "F2-G2";
+    const optionExecutionPhase = phase2Checkpoint === "F2-G3";
     const useDeliveryCanaryEvidence = deliveryActuatorCanary
       || runnerIndependencePhase
-      || optionCompositionPhase;
+      || optionCompositionPhase
+      || optionExecutionPhase;
     const useFunctionalCanaryEvidence = functionalCanary || deliveryActuatorPhase;
     const canary = useDeliveryCanaryEvidence
       ? (cortexPhase.phase2_delivery_actuator_canary || {})
@@ -1772,54 +1774,56 @@ function renderExperimentContext() {
       && canaryAccepted
       && canary.sustained_operation === false;
 
-    setText(
-      "cortexPhaseTitle",
-      seriesComplete
-        ? (optionCompositionPhase
-          ? "F2-G2 · processing-chain Option · SHADOW"
-          : (runnerIndependencePhase
-            ? "F2-G1 · runner independence · SHADOW"
-            : (deliveryActuatorCanary
-          ? (canaryUnsustained
-            ? "F2-F4C · functional accept · sustentabilidade não provada"
-            : "F2-F4C · delivery actuator canary evidence")
-          : (deliveryActuatorRunner
-            ? "F2-F4B · runner integrado · NO LIVE EXECUTE"
-            : (deliveryActuatorPhase
-              ? "F2-F4A · delivery actuator dependency · SHADOW"
-            : (functionalCanary
-            ? "F2-F3 · dependency-complete canary evidence"
-            : (controlledExecution
-            ? phase2Checkpoint + " · controlled transaction evidence"
-            : (dependencyComposed
-            ? "F2-F2 · fuel dependency composed · canary pending"
-            : phase2Checkpoint + " · Cortex research · SHADOW"))))))))
-        : "F1-B · baseline corrigida em execução · "
-          + (context.mode === "exploratory" ? "exploratória" : String(context.mode || ""))
-    );
+    let phaseTitle;
+    let phaseBadge;
+    if (!seriesComplete) {
+      phaseTitle = "F1-B · baseline corrigida em execução · "
+        + (context.mode === "exploratory"
+          ? "exploratória"
+          : String(context.mode || ""));
+      phaseBadge = configured
+        ? "F1-B · " + completed + "/" + configured
+        : "F1-B · seed " + seed;
+    } else if (optionExecutionPhase) {
+      phaseTitle = "F2-G3 · Option execution boundary · FAKE/REPLAY";
+      phaseBadge = "F2-G3 · boundary universal · no live EXECUTE";
+    } else if (optionCompositionPhase) {
+      phaseTitle = "F2-G2 · processing-chain Option · SHADOW";
+      phaseBadge = "F2-G2 · typed Option · tick budget explicit";
+    } else if (runnerIndependencePhase) {
+      phaseTitle = "F2-G1 · runner independence · SHADOW";
+      phaseBadge = "F2-G1 · generic runtime instrumentation";
+    } else if (deliveryActuatorCanary) {
+      phaseTitle = canaryUnsustained
+        ? "F2-F4C · functional accept · sustentabilidade não provada"
+        : "F2-F4C · delivery actuator canary evidence";
+      phaseBadge = canaryUnsustained
+        ? "F2-F4C · output funcional · final no_fuel"
+        : "F2-F4C · canary evidence · v3";
+    } else if (deliveryActuatorRunner) {
+      phaseTitle = "F2-F4B · runner integrado · NO LIVE EXECUTE";
+      phaseBadge = "F2-F4B · v3 runner · dry-run only";
+    } else if (deliveryActuatorPhase) {
+      phaseTitle = "F2-F4A · delivery actuator dependency · SHADOW";
+      phaseBadge = "F2-F4A · actuator energy · v3";
+    } else if (functionalCanary) {
+      phaseTitle = "F2-F3 · dependency-complete canary evidence";
+      phaseBadge = "F2-F3 · rollback evidence";
+    } else if (controlledExecution) {
+      phaseTitle = phase2Checkpoint + " · controlled transaction evidence";
+      phaseBadge = phase2Checkpoint + " · evidence";
+    } else if (dependencyComposed) {
+      phaseTitle = "F2-F2 · fuel dependency composed · canary pending";
+      phaseBadge = "F2-F2 · typed fuel · v2";
+    } else {
+      phaseTitle = phase2Checkpoint + " · Cortex research · SHADOW";
+      phaseBadge = phase2Checkpoint + " · shadow";
+    }
+
+    setText("cortexPhaseTitle", phaseTitle);
     setClassText(
       "cortexPhaseBadge",
-      seriesComplete
-        ? (optionCompositionPhase
-          ? "F2-G2 · typed Option · tick budget explicit"
-          : (runnerIndependencePhase
-            ? "F2-G1 · generic runtime instrumentation"
-            : (deliveryActuatorCanary
-          ? (canaryUnsustained
-            ? "F2-F4C · output funcional · final no_fuel"
-            : "F2-F4C · canary evidence · v3")
-          : (deliveryActuatorRunner
-            ? "F2-F4B · v3 runner · dry-run only"
-            : (deliveryActuatorPhase
-              ? "F2-F4A · actuator energy · v3"
-            : (functionalCanary
-            ? "F2-F3 · rollback evidence"
-            : (dependencyComposed
-            ? "F2-F2 · typed fuel · v2"
-            : phase2Checkpoint + (controlledExecution ? " · evidence" : " · shadow"))))))))
-        : (configured
-          ? "F1-B · " + completed + "/" + configured
-          : "F1-B · seed " + seed),
+      phaseBadge,
       seriesComplete || context.status === "completed"
         ? "badge good"
         : "badge live"
@@ -1873,14 +1877,16 @@ function renderExperimentContext() {
       );
       setText(
         "cortexAuthorityDetail",
-        optionCompositionPhase
-          ? "F2-G2 permanece em SHADOW/replay; último EXECUTE pertence ao canário F2-F4C · continuous authority OFF."
-          : (runnerIndependencePhase
+        optionExecutionPhase
+          ? "F2-G3 validado apenas em fake/replay; live Option EXECUTE bloqueado · continuous authority OFF."
+          : (optionCompositionPhase
+            ? "F2-G2 permanece em SHADOW/replay; último EXECUTE pertence ao canário F2-F4C · continuous authority OFF."
+            : (runnerIndependencePhase
             ? "F2-G1 permanece em SHADOW; último EXECUTE pertence ao canário F2-F4C · continuous authority OFF."
             : ("EXECUTE concedido somente ao canário registrado"
               + " · continuous authority "
               + (canary.continuous_authority ? "ON" : "OFF")
-              + " · baseline/holdout separados."))
+              + " · baseline/holdout separados.")))
       );
     } else {
       setText("cortexCanaryStatus", "canário não executado");

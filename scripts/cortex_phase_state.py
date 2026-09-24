@@ -231,6 +231,10 @@ def build_phase_state(
         state_root / "docs" / "CORTEX_PHASE2_OPTIONS.md"
     )
     phase2_options=phase2_options_path.exists()
+    phase2_option_execution_path=(
+        state_root / "docs" / "CORTEX_PHASE2_OPTION_EXECUTION_BOUNDARY.md"
+    )
+    phase2_option_execution=phase2_option_execution_path.exists()
     phase2_delivery_actuator_canary_path=(
         state_root
         / "runs"
@@ -493,6 +497,7 @@ def build_phase_state(
 
     phase2_checkpoint=None
     for checkpoint,enabled in (
+        ("F2-G3",phase2_option_execution),
         ("F2-G2",phase2_options),
         ("F2-G1",phase2_runner_independence),
         ("F2-F4C",phase2_delivery_actuator_canary),
@@ -586,6 +591,10 @@ def build_phase_state(
         "phase2_options":{
             "path":str(phase2_options_path),
             "exists":phase2_options,
+        },
+        "phase2_option_execution_boundary":{
+            "path":str(phase2_option_execution_path),
+            "exists":phase2_option_execution,
         },
         "phase2_delivery_actuator_canary":{
             "path":str(phase2_delivery_actuator_canary_path),
