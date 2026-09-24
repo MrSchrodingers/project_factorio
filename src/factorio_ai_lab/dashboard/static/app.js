@@ -2183,7 +2183,11 @@ function renderResearchCockpit() {
 
   setText(
     "generationChampion",
-    champion ? "G" + String(champion.generation || "?") : "none"
+    baselineSeed !== null && baselineSeed !== undefined
+      ? "none · cold start"
+      : champion
+        ? "G" + String(champion.generation || "?")
+        : "none"
   );
 
   const currentRoute = Number((research.metrics || {}).logistics_route_cost);
@@ -3365,7 +3369,15 @@ function renderTimeline() {
 
   timeline.innerHTML = recent.map((event) => {
     const type = String(event.type || "event").toLowerCase();
-    const message = event.message || event.observation || event.lesson || type;
+    let message = event.message || event.observation || event.lesson || type;
+    const baselineContext = (state.experimentContext || {}).kind === "baseline_seed";
+    if (
+      baselineContext
+      && type === "selection"
+      && String(message) === "Incumbent champion retained."
+    ) {
+      message = "Baseline seed closed; no champion was inherited or selected.";
+    }
     const when = eventTime(event);
     return '<div class="timeline-row ' + escapeHtml(type) + '">'
       + '<strong>' + escapeHtml(message) + '</strong>'
@@ -3762,18 +3774,19 @@ function updateKpis() {
   const generationRejected = researchStatus === "partial_success"
     && researchPromotion
     && !researchPromotion.promoted;
-  const loopLabel = runnerStalled
-    ? "stalled"
-    : runner.active
-      ? runnerPhase === "model_training"
+  const baselineCompleted = baselineContext && context.status === "completed";
+  const loopLabel = baselineCompleted
+    ? "baseline seed completed"
+    : runnerStalled
+      ? "stalled"
+      : runner.active
+        ? runnerPhase === "model_training"
         ? "model training"
         : runnerPhase === "open_play_validation"
           ? "open-play validation"
           : runnerPhase === "selection_transition"
             ? "selection / transition"
             : "generation active"
-      : baselineContext && context.status === "completed"
-        ? "baseline seed completed"
         : generationRejected
           ? "generation rejected"
           : generationDone
@@ -3788,9 +3801,13 @@ function updateKpis() {
   );
   setText(
     "researchLoopDetail",
-    runnerStalled
-      ? "process active · no state update for " + formatNumber(researchAgeS, 0) + " s"
-      : runner.active
+    baselineCompleted
+      ? "seed " + String(context.seed ?? "--")
+        + " closed · " + String(research.status || context.status || "--")
+        + " · next: " + String(research.next_action || "--")
+      : runnerStalled
+        ? "process active · no state update for " + formatNumber(researchAgeS, 0) + " s"
+        : runner.active
         ? runnerPhase === "model_training"
           ? "generation closed · ESN/GRU holdout training and model selection"
           : runnerPhase === "open_play_validation"
