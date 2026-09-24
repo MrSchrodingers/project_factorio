@@ -6,7 +6,7 @@
 ## Estado atual
 
 - Programa: Cortex Research Architecture v0.1
-- Fase: **F2-A ativa — ontology + UniversalExecutor em SHADOW**
+- Fase: **F2-B concluída — F2-C autorizada; authority ainda SHADOW**
 - Branch: `research/cortex-v1`
 - Baseline imutável de origem: `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 - Tag baseline publicada: `cortex-pre-research-baseline-20260923`
@@ -46,32 +46,28 @@ silenciosamente pelo commit da F0**.
 
 ## Próxima ação
 
-**F2-B — adapters transacionais com parity contra os handlers legados.**
+**F2-C — capability estrutural `place_processing_for_buffered_output` em pure/shadow planning.**
 
-F2-A já existe e está testada:
+F2-B fechou parity para resupply e power-tap:
 
-- ActionFamily: placement/delivery/resupply/rebuild/craft/research/dependency_plan;
-- ActionRequest / ActionResult / EvidenceRef / Refusal;
-- ActionProvenance por request;
-- preconditions hard bloqueiam UNKNOWN/UNSATISFIED;
-- ACCEPTED exige EXECUTE authority + hard postconditions SATISFIED;
-- UniversalExecutor resolve as seis famílias exigidas em SHADOW;
-- RepairAction -> ActionRequest cobre place_processing_for_buffered_output;
-- Cortex continua sem live authority.
+- implementation commit: `7c38cd7c9f0f67068e449fa3e5ff107b74ebcbd1`;
+- 69 focused PASS;
+- 1323 core/FLE PASS + 2 PyTorch PASS;
+- script/purpose/refusal parity comprovada;
+- nenhuma nova live authority.
 
-Documento canônico da fase: docs/CORTEX_PHASE2_ACTION_ONTOLOGY.md.
-
-Checkpoint técnico F2-A: 6c50e3bc90505bb27d74431a8f01ac06d42ed9e5 — feat: institui ontologia de ações do Cortex.
-Gate: 68 focused PASS; 1318 core/FLE PASS + 2 PyTorch PASS; frontend/static PASS.
+Documento: `docs/CORTEX_PHASE2_LEGACY_PARITY.md`.
 
 Próximo bloco seguro:
 
-1. adapter de resupply com parity contra _repair_insert_fuel;
-2. adapter de placement power-tap com parity contra _repair_power_tap;
-3. registrar resultado como ActionResult sem alterar semântica transacional;
-4. somente depois construir o adapter estrutural place_processing_for_buffered_output.
+1. definir planner genérico para buffered producer -> processing requirement;
+2. usar factory_graph + runtime catalog + dependency/placement/delivery planners;
+3. produzir ActionRequest/Prepared structural option sem executar;
+4. medir hard preconditions e predicted postconditions;
+5. testar diretamente o counterexample F1;
+6. só depois discutir adapter transacional.
 
-Não executar seeds confirmatórias 20261101–20261110. Não alterar/deletar curriculum_runner baseline.
+Não criar um handler específico de green science. Não gastar seeds 20261101–20261110.
 
 ## Protocolo de retomada após interrupção
 

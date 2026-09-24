@@ -913,6 +913,19 @@ node --check e frontend TypeScript/Vite build PASS.
 **Decision F2-A:** **PASS parcial de F2.** A ontology, provenance, refusals, pre/postconditions e
 facade universal existem em SHADOW. Transactional universal execution permanece bloqueada até F2-B.
 
+**F2-B progress:** **PASS parcial.** Parity adapters para resupply e power-tap produzem o mesmo
+script, purpose e refusal semantics dos handlers legados, sem world mutation. Evidence:
+`docs/CORTEX_PHASE2_LEGACY_PARITY.md`, `src/factorio_ai_lab/cortex/legacy_parity.py` e
+`tests/test_cortex_legacy_parity.py`.
+
+**Tests F2-B:** 69 focused PASS; full gate 1323 core/FLE PASS + 2 PyTorch PASS; static checks PASS.
+
+**Commit F2-B:** `7c38cd7c9f0f67068e449fa3e5ff107b74ebcbd1` —
+`feat: adiciona adapters de paridade do Cortex`.
+
+**Decision F2-B:** **PASS parcial de F2.** Transactional execution continua aberta. O gap
+`place_processing_for_buffered_output` permanece deliberadamente unbound e passa a ser F2-C.
+
 **Exit Gate F2:** o agente pode montar uma cadeia funcional escolhendo primitivas/options por uma
 API genérica, sem caminho codificado por estágio.
 

@@ -20,15 +20,16 @@ com experiência sem receber do programador a sequência de ações que constitu
 > **F1-B — seed 20261005:** [docs/CORTEX_PHASE1_BASELINE_SEED_20261005.md](docs/CORTEX_PHASE1_BASELINE_SEED_20261005.md)
 > **F1 — relatório estatístico:** [docs/CORTEX_PHASE1_BASELINE_STATISTICAL_REPORT.md](docs/CORTEX_PHASE1_BASELINE_STATISTICAL_REPORT.md)
 > **F2 — Action Ontology:** [docs/CORTEX_PHASE2_ACTION_ONTOLOGY.md](docs/CORTEX_PHASE2_ACTION_ONTOLOGY.md)
+> **F2-B — Legacy parity:** [docs/CORTEX_PHASE2_LEGACY_PARITY.md](docs/CORTEX_PHASE2_LEGACY_PARITY.md)
 > **F1-B — storage hardening:** [docs/CORTEX_F1_STORAGE_HARDENING.md](docs/CORTEX_F1_STORAGE_HARDENING.md)
 > **Dashboard / evidence scope:** [docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md](docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md)
 > **Continuidade / retomada:** [docs/CORTEX_CONTINUITY_PROTOCOL.md](docs/CORTEX_CONTINUITY_PROTOCOL.md)
 
 ## Estado do programa
 
-**Cortex Research Architecture v0.1 — F2-A ativa. F1 permanece congelada como baseline 5/5;
-a Action Ontology e o Universal Executor já existem em shadow/no-authority mode. O próximo gate é
-F2-B: adapters transacionais com parity contra os handlers legados, ainda sem autonomia live.**
+**Cortex Research Architecture v0.1 — F2-B concluída. A ontology universal permanece em SHADOW;
+resupply e power-tap possuem parity adapters validados contra os handlers legados. O próximo
+checkpoint é F2-C: capacidade estrutural genérica place_processing_for_buffered_output.**
 
 As seeds confirmatórias 20261101–20261110 permanecem congeladas e não executadas; serão usadas
 posteriormente para avaliação pareada do Cortex, sem tuning nelas.

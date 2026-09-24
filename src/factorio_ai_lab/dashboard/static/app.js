@@ -1747,14 +1747,14 @@ function renderExperimentContext() {
     setText(
       "cortexPhaseTitle",
       seriesComplete
-        ? "F2-A · Action Ontology + Universal Executor · SHADOW"
+        ? "F2-B · Legacy parity adapters · SHADOW"
         : "F1-B · baseline corrigida em execução · "
           + (context.mode === "exploratory" ? "exploratória" : String(context.mode || ""))
     );
     setClassText(
       "cortexPhaseBadge",
       seriesComplete
-        ? "F2-A · shadow"
+        ? "F2-B · shadow parity"
         : (configured
           ? "F1-B · " + completed + "/" + configured
           : "F1-B · seed " + seed),

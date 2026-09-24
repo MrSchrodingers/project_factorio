@@ -183,6 +183,8 @@ def build_phase_state(
         state_root / "docs" / "CORTEX_PHASE2_ACTION_ONTOLOGY.md"
     )
     phase2_started=phase2_ontology_path.exists()
+    phase2_parity_path=state_root / "docs" / "CORTEX_PHASE2_LEGACY_PARITY.md"
+    phase2_parity=phase2_parity_path.exists()
 
     if blocked_running:
         action=f"monitor seed {exploratory['running'][0]}"
@@ -234,6 +236,11 @@ def build_phase_state(
         "phase2_ontology":{
             "path":str(phase2_ontology_path),
             "exists":phase2_started,
+        },
+        "phase2_checkpoint":"F2-B" if phase2_parity else ("F2-A" if phase2_started else None),
+        "phase2_parity":{
+            "path":str(phase2_parity_path),
+            "exists":phase2_parity,
         },
         "modes":modes,
         "resume":{
