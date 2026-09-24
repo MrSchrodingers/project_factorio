@@ -19,15 +19,16 @@ com experiência sem receber do programador a sequência de ações que constitu
 > **F1-B — seed 20261004:** [docs/CORTEX_PHASE1_BASELINE_SEED_20261004.md](docs/CORTEX_PHASE1_BASELINE_SEED_20261004.md)
 > **F1-B — seed 20261005:** [docs/CORTEX_PHASE1_BASELINE_SEED_20261005.md](docs/CORTEX_PHASE1_BASELINE_SEED_20261005.md)
 > **F1 — relatório estatístico:** [docs/CORTEX_PHASE1_BASELINE_STATISTICAL_REPORT.md](docs/CORTEX_PHASE1_BASELINE_STATISTICAL_REPORT.md)
+> **F2 — Action Ontology:** [docs/CORTEX_PHASE2_ACTION_ONTOLOGY.md](docs/CORTEX_PHASE2_ACTION_ONTOLOGY.md)
 > **F1-B — storage hardening:** [docs/CORTEX_F1_STORAGE_HARDENING.md](docs/CORTEX_F1_STORAGE_HARDENING.md)
 > **Dashboard / evidence scope:** [docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md](docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md)
 > **Continuidade / retomada:** [docs/CORTEX_CONTINUITY_PROTOCOL.md](docs/CORTEX_CONTINUITY_PROTOCOL.md)
 
 ## Estado do programa
 
-**Cortex Research Architecture v0.1 — F1 concluída: baseline exploratória corrigida 5/5 válida,
-G37 aposentada e runtime científico congelado em
-95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac. F2 está autorizada.**
+**Cortex Research Architecture v0.1 — F2-A ativa. F1 permanece congelada como baseline 5/5;
+a Action Ontology e o Universal Executor já existem em shadow/no-authority mode. O próximo gate é
+F2-B: adapters transacionais com parity contra os handlers legados, ainda sem autonomia live.**
 
 As seeds confirmatórias 20261101–20261110 permanecem congeladas e não executadas; serão usadas
 posteriormente para avaliação pareada do Cortex, sem tuning nelas.

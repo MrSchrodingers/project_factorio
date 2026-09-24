@@ -179,6 +179,10 @@ def build_phase_state(
         state_root / "docs" / "CORTEX_PHASE1_BASELINE_STATISTICAL_REPORT.md"
     )
     statistical_report_exists=statistical_report_path.exists()
+    phase2_ontology_path=(
+        state_root / "docs" / "CORTEX_PHASE2_ACTION_ONTOLOGY.md"
+    )
+    phase2_started=phase2_ontology_path.exists()
 
     if blocked_running:
         action=f"monitor seed {exploratory['running'][0]}"
@@ -190,6 +194,8 @@ def build_phase_state(
         action="halt: scientific release provenance mismatch"
     elif exploratory["next_seed"] is not None:
         action=f"run seed {exploratory['next_seed']}"
+    elif exploratory_complete and statistical_report_exists and phase2_started:
+        action="F2 active; follow docs/CORTEX_HANDOFF.md"
     elif exploratory_complete and statistical_report_exists:
         action="F1 complete; follow docs/CORTEX_HANDOFF.md"
     else:
@@ -198,11 +204,19 @@ def build_phase_state(
     return {
         "schema_version":"cortex_phase_state_v1",
         "generated_at":datetime.now(UTC).isoformat(),
-        "phase":"F1" if exploratory_complete and statistical_report_exists else "F1-B",
+        "phase":(
+            "F2"
+            if exploratory_complete and statistical_report_exists and phase2_started
+            else ("F1" if exploratory_complete and statistical_report_exists else "F1-B")
+        ),
         "phase_status":(
-            "complete"
-            if exploratory_complete and statistical_report_exists
-            else "active"
+            "active"
+            if phase2_started and exploratory_complete and statistical_report_exists
+            else (
+                "complete"
+                if exploratory_complete and statistical_report_exists
+                else "active"
+            )
         ),
         "protocol":protocol_id,
         "scientific_release_commit":protocol_commit,
@@ -216,6 +230,10 @@ def build_phase_state(
         "statistical_report":{
             "path":str(statistical_report_path),
             "exists":statistical_report_exists,
+        },
+        "phase2_ontology":{
+            "path":str(phase2_ontology_path),
+            "exists":phase2_started,
         },
         "modes":modes,
         "resume":{

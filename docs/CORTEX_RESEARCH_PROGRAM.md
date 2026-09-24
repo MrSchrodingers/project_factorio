@@ -879,16 +879,26 @@ pareada nas seeds confirmatórias congeladas.
 
 **Objetivo:** dar ao agente um espaço de decisão real.
 
-- [ ] schemas para ações primitivas;
-- [ ] `ActionRequest`, `ActionResult`, `Refusal`, `EvidenceRef`;
-- [ ] facade sobre placement/delivery/resupply/rebuild/research/craft;
-- [ ] contratos pré/pós-condição;
-- [ ] provenance por ação;
-- [ ] refusals nomeadas;
+- [x] schemas para ações primitivas;
+- [x] `ActionRequest`, `ActionResult`, `Refusal`, `EvidenceRef`;
+- [x] facade sobre placement/delivery/resupply/rebuild/research/craft;
+- [x] contratos pré/pós-condição;
+- [x] provenance por ação;
+- [x] refusals nomeadas;
 - [ ] transactional execution universal;
 - [ ] options iniciais;
 - [ ] teste que constrói cadeia funcional sem `curriculum_runner`;
 - [ ] runner antigo executável apenas como baseline.
+
+**F2-A progress:** PASS parcial. Ontology tipada e UniversalExecutor em SHADOW foram
+implementados sem alterar o runtime científico F1. Evidence: docs/CORTEX_PHASE2_ACTION_ONTOLOGY.md,
+src/factorio_ai_lab/cortex/actions.py, src/factorio_ai_lab/cortex/executor.py e
+tests/test_cortex_actions.py.
+
+**Authority F2-A:** SHADOW apenas. Nenhum novo handler live foi ligado ao Cortex.
+
+**Next:** F2-B — adapters transacionais com parity tests, começando por resupply e power-tap,
+seguindo para place_processing_for_buffered_output, o counterexample estrutural replicado em F1.
 
 **Exit Gate F2:** o agente pode montar uma cadeia funcional escolhendo primitivas/options por uma
 API genérica, sem caminho codificado por estágio.

@@ -1747,15 +1747,17 @@ function renderExperimentContext() {
     setText(
       "cortexPhaseTitle",
       seriesComplete
-        ? "F1 · baseline exploratória concluída · " + completed + "/" + configured
+        ? "F2-A · Action Ontology + Universal Executor · SHADOW"
         : "F1-B · baseline corrigida em execução · "
           + (context.mode === "exploratory" ? "exploratória" : String(context.mode || ""))
     );
     setClassText(
       "cortexPhaseBadge",
-      configured
-        ? "F1-B · " + completed + "/" + configured
-        : "F1-B · seed " + seed,
+      seriesComplete
+        ? "F2-A · shadow"
+        : (configured
+          ? "F1-B · " + completed + "/" + configured
+          : "F1-B · seed " + seed),
       seriesComplete || context.status === "completed"
         ? "badge good"
         : "badge live"

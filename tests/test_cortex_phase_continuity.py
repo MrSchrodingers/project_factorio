@@ -294,3 +294,33 @@ def test_phase_state_marks_f1_complete_when_exploratory_series_and_report_exist(
     assert state["phase"] == "F1"
     assert state["phase_status"] == "complete"
     assert state["resume"]["action"] == "F1 complete; follow docs/CORTEX_HANDOFF.md"
+
+def test_phase_state_marks_f2_active_when_action_ontology_exists(tmp_path) -> None:
+    module=_module("cortex_phase_state.py")
+    protocol=tmp_path/"protocol.json"
+    _protocol(protocol)
+
+    for seed in (11,12):
+        seed_dir=tmp_path/"baseline_runs"/"p1"/"exploratory"/str(seed)
+        seed_dir.mkdir(parents=True)
+        (seed_dir/"manifest.json").write_text(json.dumps({
+            "status":"completed",
+            "returncode":0,
+            "release":{"commit":"abc"},
+        })+"\n")
+        (seed_dir/"result.json").write_text(json.dumps({
+            "code_revision":{"commit":"abc","dirty":False},
+            "challenger":{"fitness":{}},
+        })+"\n")
+
+    docs=tmp_path/"docs"
+    docs.mkdir()
+    (docs/"CORTEX_PHASE1_BASELINE_STATISTICAL_REPORT.md").write_text("# report\n")
+    (docs/"CORTEX_PHASE2_ACTION_ONTOLOGY.md").write_text("# F2\n")
+
+    state=module.build_phase_state(state_root=tmp_path,protocol_path=protocol)
+
+    assert state["phase"] == "F2"
+    assert state["phase_status"] == "active"
+    assert state["phase2_ontology"]["exists"] is True
+    assert state["resume"]["action"] == "F2 active; follow docs/CORTEX_HANDOFF.md"

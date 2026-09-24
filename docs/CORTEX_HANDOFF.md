@@ -6,12 +6,12 @@
 ## Estado atual
 
 - Programa: Cortex Research Architecture v0.1
-- Fase: **F1 concluída — F2 autorizada**
+- Fase: **F2-A ativa — ontology + UniversalExecutor em SHADOW**
 - Branch: `research/cortex-v1`
 - Baseline imutável de origem: `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 - Tag baseline publicada: `cortex-pre-research-baseline-20260923`
 - Handoff histórico: `docs/HANDOFF-CORTEX.md`
-- Runtime: arquitetura herdada ainda controla o jogo, mas executa somente releases imutáveis por SHA; Cortex continua sem autoridade de controle.
+- Runtime: arquitetura herdada ainda controla o jogo; UniversalExecutor Cortex está em SHADOW e não possui nova autoridade live.
 
 ## Regra de retomada
 
@@ -46,31 +46,29 @@ silenciosamente pelo commit da F0**.
 
 ## Próxima ação
 
-**F2 — Action/Option Ontology e Universal Executor.**
+**F2-B — adapters transacionais com parity contra os handlers legados.**
 
-F1 fechou com 5/5 seeds exploratórias válidas e 0/5 green-science successes. O bottleneck foi
-Logistic science em todas as seeds. O achado causal mais importante é que o sistema diagnostica
-producer_output_unprocessed e propõe place_processing_for_buffered_output, mas a ação não executa
-por no_runner_binding_for_intent.
+F2-A já existe e está testada:
 
-Baseline descritiva F1:
+- ActionFamily: placement/delivery/resupply/rebuild/craft/research/dependency_plan;
+- ActionRequest / ActionResult / EvidenceRef / Refusal;
+- ActionProvenance por request;
+- preconditions hard bloqueiam UNKNOWN/UNSATISFIED;
+- ACCEPTED exige EXECUTE authority + hard postconditions SATISFIED;
+- UniversalExecutor resolve as seis famílias exigidas em SHADOW;
+- RepairAction -> ActionRequest cobre place_processing_for_buffered_output;
+- Cortex continua sem live authority.
 
-- closed-loop autonomy: 0/5;
-- green-science success: 0/5;
-- bottleneck Logistic science: 5/5;
-- autonomy score: mediana 0.50, média 0.45;
-- physical processing coverage: mediana 0.50, média 0.4667;
-- manual logistics: mediana 55, média 54.2;
-- scientific runtime: 95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac;
-- provenance/isolation: PASS em 5/5.
+Documento canônico da fase: docs/CORTEX_PHASE2_ACTION_ONTOLOGY.md.
 
-As seeds 20261101–20261110 são holdout confirmatório. Não executá-las em F2 development/tuning.
+Próximo bloco seguro:
 
-**Primeiro bloco seguro de F2:** documentar e implementar os schemas de ActionRequest,
-ActionResult, Refusal e EvidenceRef e a facade do Universal Executor em shadow/no-authority mode.
-Não remover nem alterar o runner baseline até o Exit Gate F2.
+1. adapter de resupply com parity contra _repair_insert_fuel;
+2. adapter de placement power-tap com parity contra _repair_power_tap;
+3. registrar resultado como ActionResult sem alterar semântica transacional;
+4. somente depois construir o adapter estrutural place_processing_for_buffered_output.
 
-Artifact commit de fechamento F1: 9cffaca5401bcfb97d5c8472ec619a34abfa563f.
+Não executar seeds confirmatórias 20261101–20261110. Não alterar/deletar curriculum_runner baseline.
 
 ## Protocolo de retomada após interrupção
 
