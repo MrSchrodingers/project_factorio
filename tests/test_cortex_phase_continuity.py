@@ -688,3 +688,90 @@ def test_phase_state_advances_from_f2f1_to_f2f2_when_composition_doc_exists(tmp_
 
     assert state["phase2_checkpoint"] == "F2-F2"
     assert state["phase2_functional_composition"]["exists"] is True
+
+def test_phase_state_advances_to_f2f3_and_exposes_functional_canary(tmp_path) -> None:
+    module=_module("cortex_phase_state.py")
+    protocol=tmp_path/"protocol.json"
+    _protocol(protocol)
+
+    for seed in (11,12):
+        seed_dir=tmp_path/"baseline_runs"/"p1"/"exploratory"/str(seed)
+        seed_dir.mkdir(parents=True)
+        (seed_dir/"manifest.json").write_text(json.dumps({
+            "status":"completed",
+            "returncode":0,
+            "release":{"commit":"abc"},
+        })+"\n")
+        (seed_dir/"result.json").write_text(json.dumps({
+            "code_revision":{"commit":"abc","dirty":False},
+            "challenger":{"fitness":{}},
+        })+"\n")
+
+    docs=tmp_path/"docs"
+    docs.mkdir()
+    for name in (
+        "CORTEX_PHASE1_BASELINE_STATISTICAL_REPORT.md",
+        "CORTEX_PHASE2_ACTION_ONTOLOGY.md",
+        "CORTEX_PHASE2_TRANSACTIONAL_EXECUTION.md",
+        "CORTEX_PHASE2_FUNCTIONAL_DEPENDENCY.md",
+        "CORTEX_PHASE2_FUNCTIONAL_DEPENDENCY_COMPOSITION.md",
+    ):
+        (docs/name).write_text("# checkpoint\n")
+
+    audit=tmp_path/"runs"/"audits"
+    audit.mkdir(parents=True)
+    (audit/"cortex_f2f_structural_canary.json").write_text(json.dumps({
+        "status":"completed",
+        "run_id":"f2f3-canary",
+        "authority":"execute",
+        "continuous_authority":False,
+        "code_revision":{"commit":"feedface","dirty":False},
+        "transaction_committed":False,
+        "rollback_observed":True,
+        "functional_dependency":{
+            "ready":True,
+            "dependency":{
+                "fuel":{"name":"coal"},
+                "units_needed":1,
+                "carried_only":True,
+            },
+        },
+        "measurement_before":{
+            "producers_reaching_processor":0,
+            "processor_output":0.0,
+        },
+        "measurement_final":{
+            "producers_reaching_processor":0,
+            "processor_output":0.0,
+        },
+        "action_result":{
+            "status":"rejected",
+            "refusal":{"code":"structural_postcondition_failed"},
+            "measurements":{
+                "candidate_after":{
+                    "producers_reaching_processor":1,
+                    "physical_processing_coverage":1.0,
+                    "processor_exists":True,
+                    "processor_status":"no_ingredients",
+                    "processor_output":0.0,
+                },
+            },
+            "postconditions":[],
+        },
+    })+"\n")
+
+    state=module.build_phase_state(state_root=tmp_path,protocol_path=protocol)
+    canary=state["phase2_functional_canary"]
+
+    assert state["phase2_checkpoint"] == "F2-F3"
+    assert canary["exists"] is True
+    assert canary["classification"] == "processor_input_missing_with_rollback"
+    assert canary["code_commit"] == "feedface"
+    assert canary["processor_status"] == "no_ingredients"
+    assert canary["processor_output"] == 0.0
+    assert canary["functional_dependency_ready"] is True
+    assert canary["fuel"] == "coal"
+    assert canary["fuel_units"] == 1
+    assert canary["fuel_carried_only"] is True
+    assert canary["transaction_committed"] is False
+    assert canary["rollback_observed"] is True

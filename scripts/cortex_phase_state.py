@@ -207,6 +207,22 @@ def build_phase_state(
         / "CORTEX_PHASE2_FUNCTIONAL_DEPENDENCY_COMPOSITION.md"
     )
     phase2_functional_composition=phase2_functional_composition_path.exists()
+    phase2_functional_canary_path=(
+        state_root / "runs" / "audits" / "cortex_f2f_structural_canary.json"
+    )
+    phase2_functional_canary=phase2_functional_canary_path.exists()
+    phase2_functional_canary_payload: dict[str, Any]={}
+    phase2_functional_canary_error: str | None=None
+    if phase2_functional_canary:
+        try:
+            phase2_functional_canary_payload=_load(
+                phase2_functional_canary_path
+            )
+        except (OSError,json.JSONDecodeError,TypeError) as exc:
+            phase2_functional_canary_error=(
+                f"{type(exc).__name__}: {exc}"
+            )
+
     phase2_canary_path=(
         state_root / "runs" / "audits" / "cortex_f2e_structural_canary.json"
     )
@@ -259,6 +275,57 @@ def build_phase_state(
         elif phase2_canary_payload.get("status")=="failed":
             canary_classification="experiment_failed"
 
+    functional_action_result=phase2_functional_canary_payload.get(
+        "action_result"
+    )
+    if not isinstance(functional_action_result,dict):
+        functional_action_result={}
+    functional_measurements=functional_action_result.get("measurements")
+    if not isinstance(functional_measurements,dict):
+        functional_measurements={}
+    functional_candidate_after=functional_measurements.get("candidate_after")
+    if not isinstance(functional_candidate_after,dict):
+        functional_candidate_after={}
+    functional_refusal=functional_action_result.get("refusal")
+    if not isinstance(functional_refusal,dict):
+        functional_refusal={}
+    functional_code_revision=phase2_functional_canary_payload.get(
+        "code_revision"
+    )
+    if not isinstance(functional_code_revision,dict):
+        functional_code_revision={}
+    functional_dependency=phase2_functional_canary_payload.get(
+        "functional_dependency"
+    )
+    if not isinstance(functional_dependency,dict):
+        functional_dependency={}
+    dependency_row=functional_dependency.get("dependency")
+    if not isinstance(dependency_row,dict):
+        dependency_row={}
+    fuel_row=dependency_row.get("fuel")
+    if not isinstance(fuel_row,dict):
+        fuel_row={}
+
+    functional_canary_classification=None
+    if phase2_functional_canary:
+        if functional_action_result.get("status")=="accepted":
+            functional_canary_classification="functional_accept"
+        elif (
+            functional_action_result.get("status")=="rejected"
+            and phase2_functional_canary_payload.get("rollback_observed") is True
+            and functional_candidate_after.get("processor_status")=="no_ingredients"
+        ):
+            functional_canary_classification=(
+                "processor_input_missing_with_rollback"
+            )
+        elif (
+            functional_action_result.get("status")=="rejected"
+            and phase2_functional_canary_payload.get("rollback_observed") is True
+        ):
+            functional_canary_classification="rejected_with_rollback"
+        elif phase2_functional_canary_payload.get("status")=="failed":
+            functional_canary_classification="experiment_failed"
+
     if blocked_running:
         action=f"monitor seed {exploratory['running'][0]}"
     elif blocked_invalid:
@@ -278,6 +345,7 @@ def build_phase_state(
 
     phase2_checkpoint=None
     for checkpoint,enabled in (
+        ("F2-F3",phase2_functional_canary),
         ("F2-F2",phase2_functional_composition),
         ("F2-F1",phase2_functional),
         ("F2-E2",phase2_canary),
@@ -349,6 +417,46 @@ def build_phase_state(
         "phase2_functional_composition":{
             "path":str(phase2_functional_composition_path),
             "exists":phase2_functional_composition,
+        },
+        "phase2_functional_canary":{
+            "path":str(phase2_functional_canary_path),
+            "exists":phase2_functional_canary,
+            "status":phase2_functional_canary_payload.get("status"),
+            "run_id":phase2_functional_canary_payload.get("run_id"),
+            "authority":phase2_functional_canary_payload.get("authority"),
+            "continuous_authority":phase2_functional_canary_payload.get(
+                "continuous_authority"
+            ),
+            "code_commit":functional_code_revision.get("commit"),
+            "transaction_committed":phase2_functional_canary_payload.get(
+                "transaction_committed"
+            ),
+            "rollback_observed":phase2_functional_canary_payload.get(
+                "rollback_observed"
+            ),
+            "action_status":functional_action_result.get("status"),
+            "refusal":functional_refusal.get("code"),
+            "classification":functional_canary_classification,
+            "processor_status":functional_candidate_after.get(
+                "processor_status"
+            ),
+            "processor_output":functional_candidate_after.get(
+                "processor_output"
+            ),
+            "candidate_after":functional_candidate_after,
+            "measurement_before":phase2_functional_canary_payload.get(
+                "measurement_before"
+            ),
+            "measurement_final":phase2_functional_canary_payload.get(
+                "measurement_final"
+            ),
+            "postconditions":functional_action_result.get("postconditions"),
+            "functional_dependency_ready":functional_dependency.get("ready"),
+            "fuel":fuel_row.get("name"),
+            "fuel_units":dependency_row.get("units_needed"),
+            "fuel_carried_only":dependency_row.get("carried_only"),
+            "failure":phase2_functional_canary_payload.get("failure"),
+            "read_error":phase2_functional_canary_error,
         },
         "phase2_canary":{
             "path":str(phase2_canary_path),
