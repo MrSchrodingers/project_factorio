@@ -22,6 +22,11 @@ from factorio_ai_lab.cortex.executor import (
     UniversalExecutor,
     request_from_repair_action,
 )
+from factorio_ai_lab.cortex.legacy_parity import (
+    LegacyRepairParityAdapter,
+    PreparationResult,
+    PreparedLegacyAction,
+)
 
 __all__ = [
     "ActionAuthority",
@@ -35,6 +40,9 @@ __all__ = [
     "ConditionOperator",
     "ConditionState",
     "EvidenceRef",
+    "LegacyRepairParityAdapter",
+    "PreparationResult",
+    "PreparedLegacyAction",
     "Refusal",
     "UniversalExecutor",
     "request_from_repair_action",
