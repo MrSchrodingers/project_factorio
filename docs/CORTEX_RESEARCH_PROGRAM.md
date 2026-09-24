@@ -832,12 +832,12 @@ docs/CORTEX_PHASE1_INTEGRITY.md. G37 já foi aposentada; permanecem abertos a ex
 baseline corrigida e o relatório estatístico. Protocolo pré-registrado em
 docs/CORTEX_PHASE1_BASELINE_PROTOCOL.md.
 
-**F1-B progress:** 3/5 exploratory seeds valid. All three are partial_success and fail at
+**F1-B progress:** 4/5 exploratory seeds valid. All four are partial_success and fail at
 Logistic science with zero green-science output. Coverage ranges from 33.3% to 50%; manual
-logistics is 53–55 calls; closed-loop autonomy remains false. Isolation PASS in all three.
+logistics is 53–55 calls; closed-loop autonomy remains false. Isolation PASS in all four.
 Evidence: docs/CORTEX_PHASE1_BASELINE_SEED_20261001.md,
-docs/CORTEX_PHASE1_BASELINE_SEED_20261002.md, docs/CORTEX_PHASE1_BASELINE_SEED_20261003.md
-and docs/CORTEX_PHASE1_BASELINE_RESULTS.md.
+docs/CORTEX_PHASE1_BASELINE_SEED_20261002.md, docs/CORTEX_PHASE1_BASELINE_SEED_20261003.md,
+docs/CORTEX_PHASE1_BASELINE_SEED_20261004.md and docs/CORTEX_PHASE1_BASELINE_RESULTS.md.
 
 **Observability hardening:** dashboard evidence scope, map truth labels and component-isolated
 deployment are specified in docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md.

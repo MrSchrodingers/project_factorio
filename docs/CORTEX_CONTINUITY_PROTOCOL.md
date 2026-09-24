@@ -159,10 +159,10 @@ Uma divergência temporal entre ambos não é automaticamente corrupção.
 
 ## 9. Estado atual
 
-Seeds exploratórias válidas: 20261001, 20261002 e 20261003.
+Seeds exploratórias válidas: 20261001, 20261002, 20261003 e 20261004.
 
-Próxima seed autorizável após fechamento deste checkpoint: 20261004.
+Próxima seed autorizável após fechamento deste checkpoint: 20261005.
 
-As três seeds concluídas falharam em Logistic science com logistic_science_output=0 e closed_loop_autonomy=false. O padrão estrutural se repete; a severidade de fuel starvation varia entre seeds.
+As quatro seeds concluídas falharam em Logistic science com logistic_science_output=0 e closed_loop_autonomy=false. O padrão estrutural se repete; a severidade de fuel starvation varia entre seeds.
 
 Storage hardening: docs/CORTEX_F1_STORAGE_HARDENING.md.

@@ -6,7 +6,7 @@
 ## Estado atual
 
 - Programa: Cortex Research Architecture v0.1
-- Fase: **F1-A concluída; F1-B ativa — 3/5 seeds exploratórias válidas**
+- Fase: **F1-A concluída; F1-B ativa — 4/5 seeds exploratórias válidas**
 - Branch: `research/cortex-v1`
 - Baseline imutável de origem: `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 - Tag baseline publicada: `cortex-pre-research-baseline-20260923`
@@ -46,31 +46,26 @@ silenciosamente pelo commit da F0**.
 
 ## Próxima ação
 
-**F1-B — executar seed exploratória 20261004.**
+**F1-B — executar seed exploratória 20261005.**
 
 Seeds válidas:
 
 - 20261001: partial_success · Logistic science · autonomy 0.50 · coverage 33.3% · manual 53 · fuel-starved 0;
 - 20261002: partial_success · Logistic science · autonomy 0.375 · coverage 50% · manual 53 · fuel-starved 1;
-- 20261003: partial_success · Logistic science · autonomy 0.375 · coverage 50% · manual 55 · fuel-starved 5.
+- 20261003: partial_success · Logistic science · autonomy 0.375 · coverage 50% · manual 55 · fuel-starved 5;
+- 20261004: partial_success · Logistic science · autonomy 0.50 · coverage 50% · manual 55 · fuel-starved 0.
 
-Padrão replicado 3/3:
+Padrão replicado 4/4:
 
 - logistic_science_output = 0;
 - closed_loop_autonomy = false;
 - bottleneck = Logistic science;
-- endogenous_rate_per_s = 0.60628371;
 - scientific runtime = 95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac;
 - global isolation = PASS.
 
-Infraestrutura antes da próxima seed:
+A seed 20261004 terminou sem fuel/power starvation, mas green science continuou zero e o repair estrutural continuou não executável por no_runner_binding_for_intent. Isso reforça que a fronteira não é explicada apenas por energia/combustível.
 
-- /var chegou a 95% e foi tratado antes de avançar;
-- Factorio Docker log agora possui rotação 50m × 3;
-- launcher possui gate de pelo menos 1 GiB livre em /var;
-- playit permanece fora do escopo e não foi alterado.
-
-Próxima execução autorizável: somente 20261004, após commit/push deste checkpoint e phase-state regenerado.
+Próxima execução autorizável: somente 20261005, após commit/push deste checkpoint e phase-state regenerado.
 
 ## Protocolo de retomada após interrupção
 
