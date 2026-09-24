@@ -2192,6 +2192,23 @@ local bottom=viewport_cy+viewport_radius
                 payload = json.loads(raw)
                 if not isinstance(payload, dict):
                     raise TypeError("RCON game knowledge was not an object")
+                required_rows = ("recipes", "technologies", "machines")
+                if payload.get("connected") is not True:
+                    raise RuntimeError(
+                        "RCON game knowledge unavailable: "
+                        + str(payload.get("error") or "connected=false")
+                    )
+                missing_rows = [
+                    key
+                    for key in required_rows
+                    if not isinstance(payload.get(key), list)
+                    or not payload.get(key)
+                ]
+                if missing_rows:
+                    raise RuntimeError(
+                        "RCON game knowledge incomplete: "
+                        + ",".join(missing_rows)
+                    )
                 self._game_knowledge_cache = payload
                 self._game_knowledge_cache_at = now
                 try:
