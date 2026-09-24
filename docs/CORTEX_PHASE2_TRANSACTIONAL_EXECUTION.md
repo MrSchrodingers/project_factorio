@@ -360,6 +360,8 @@ F2 permanece aberta. F3 não está autorizada.
 - confirmatory seeds: unspent;
 - rollback exactness: PASS.
 
+F2-E2 closure snapshot commit: b61f199febd83a5c4aa9a1187f5f15eaecfe25e6
+
 ## 18. Próximo checkpoint — F2-F
 
 F2-F deve tornar a opção estrutural dependency-complete.

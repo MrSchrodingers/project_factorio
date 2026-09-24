@@ -1018,6 +1018,8 @@ precisa de fuel/energy dependency explícita. O output gate não será relaxado.
 Ruff/static + frontend TypeScript/Vite + node PASS; runtime F1 unchanged; evolution
 inactive+disabled; rollback exactness PASS.
 
+**F2-E2 closure snapshot commit:** b61f199febd83a5c4aa9a1187f5f15eaecfe25e6 — feat: fecha canário transacional F2-E2.
+
 
 **Next:** F2-F — dependency-complete structural option. Compor fuel/energy usando planners
 existentes, mantendo TransactionalFLEExecutor como única fronteira de rollback. Repetir um canário

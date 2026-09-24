@@ -67,6 +67,8 @@ Resultado observado:
 Artifact canônico:
 runs/audits/cortex_f2e_structural_canary.json
 
+F2-E2 closure snapshot commit: b61f199febd83a5c4aa9a1187f5f15eaecfe25e6
+
 Cópia preservada:
 runs/audits/cortex_f2e_structural_canary_attempt2.json
 
