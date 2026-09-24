@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-shot controlled F2-E structural canary.
+"""One-shot dependency-complete F2-F structural canary.
 
 The canary intentionally replaces the current live lab world with a dedicated
 non-confirmatory deterministic world. Frozen F1 evidence is not modified.
@@ -19,6 +19,9 @@ from typing import Any
 
 from factorio_ai_lab.cortex.actions import ActionAuthority, ActionProvenance
 from factorio_ai_lab.cortex.executor import request_from_repair_action
+from factorio_ai_lab.cortex.functional_dependency import (
+    complete_structural_dependencies,
+)
 from factorio_ai_lab.cortex.structural import plan_processing_for_buffered_output
 from factorio_ai_lab.cortex.structural_execute import StructuralTransactionalAdapter
 from factorio_ai_lab.cortex.structural_prepare import prepare_structural_branch
@@ -51,6 +54,7 @@ DEFAULT_SEED = 424242
 CONFIRMATORY_SEEDS = frozenset(range(20261101, 20261111))
 DEFAULT_BOOTSTRAP_SETTLE_SECONDS = 5
 DEFAULT_STRUCTURAL_SETTLE_SECONDS = 10
+DEFAULT_ARTIFACT = RUNS_DIR / "audits" / "cortex_f2f_structural_canary.json"
 
 
 def utc_now() -> str:
@@ -323,12 +327,12 @@ def run_canary(
     revision = code_revision()
     if revision.get("dirty") is not False:
         raise RuntimeError(
-            "F2-E canary requires a clean committed source tree"
+            "F2-F canary requires a clean committed source tree"
         )
 
-    run_id = datetime.now(UTC).strftime("cortex-f2e-%Y%m%dT%H%M%SZ")
+    run_id = datetime.now(UTC).strftime("cortex-f2f-%Y%m%dT%H%M%SZ")
     record: dict[str, Any] = {
-        "schema_version": "cortex_f2e_structural_canary_v1",
+        "schema_version": "cortex_f2f_structural_canary_v1",
         "run_id": run_id,
         "seed": seed,
         "confirmatory_seed": False,
@@ -344,7 +348,7 @@ def run_canary(
     observer = None
     with FactorioWorldLease(
         run_id=run_id,
-        arena="cortex_f2e_canary",
+        arena="cortex_f2f_canary",
         owner="run_cortex_structural_canary",
     ):
         try:
@@ -453,11 +457,12 @@ print({{'canary_iron':canary_iron}})
                     run_id=run_id,
                 ),
             )
+            catalog = RuntimeFactorioCatalog(knowledge)
             plan = plan_processing_for_buffered_output(
                 request,
                 graph=graph,
                 world_entities=machines,
-                catalog=RuntimeFactorioCatalog(knowledge),
+                catalog=catalog,
                 available=available,
                 footprints=_runtime_entity_footprints(instance),
                 resources=resources,
@@ -496,6 +501,39 @@ print({{'canary_iron':canary_iron}})
                     "ready branch failed PreparedStructuralAction compilation"
                 )
             prepared = preparation.prepared
+            functional = complete_structural_dependencies(
+                prepared,
+                catalog=catalog,
+                inventory=available,
+                horizon_s=float(structural_settle_seconds),
+            )
+            record["functional_dependency"] = {
+                "ready": functional.ready,
+                "dependency": (
+                    None
+                    if functional.dependency is None
+                    else functional.dependency.to_dict()
+                ),
+                "evaluations": [
+                    evaluation.to_dict()
+                    for evaluation in functional.evaluations
+                ],
+                "refusal": (
+                    None
+                    if functional.refusal is None
+                    else functional.refusal.to_dict()
+                ),
+            }
+            if not functional.ready or functional.prepared is None:
+                code = (
+                    "unknown"
+                    if functional.refusal is None
+                    else functional.refusal.code
+                )
+                raise RuntimeError(
+                    f"functional dependency completion refused: {code}"
+                )
+            prepared = functional.prepared
 
             placement = prepared.preflight.get("placement")
             position = placement.get("position") if isinstance(placement, dict) else None
@@ -587,7 +625,7 @@ def main() -> int:
     parser.add_argument(
         "--artifact",
         type=Path,
-        default=RUNS_DIR / "audits" / "cortex_f2e_structural_canary.json",
+        default=DEFAULT_ARTIFACT,
     )
     args = parser.parse_args()
 
@@ -597,7 +635,7 @@ def main() -> int:
             json.dumps(
                 {
                     "status": "refused",
-                    "reason": "pass --execute for the one-shot F2-E canary",
+                    "reason": "pass --execute for the one-shot F2-F canary",
                     "seed": args.seed,
                     "world_mutation": False,
                 },
