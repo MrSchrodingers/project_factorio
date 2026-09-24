@@ -94,6 +94,17 @@ def validate_seed(seed_dir: Path, expected_commit: str | None = None) -> dict[st
     completed = fitness.get("completed_stages")
     failed = fitness.get("failed_stages")
     capabilities = fitness.get("capabilities")
+    research_state: dict[str, Any] = {}
+    research_path = seed_dir / "runs" / "research_state.json"
+    if research_path.exists():
+        try:
+            research_state = _load(research_path)
+        except (OSError, json.JSONDecodeError, TypeError):
+            research_state = {}
+    research_metrics = research_state.get("metrics")
+    if not isinstance(research_metrics, dict):
+        research_metrics = {}
+
     return {
         "seed": manifest.get("seed"),
         "seed_dir": str(seed_dir),
@@ -104,11 +115,18 @@ def validate_seed(seed_dir: Path, expected_commit: str | None = None) -> dict[st
         "generation": challenger.get("generation"),
         "run_id": challenger.get("run_id"),
         "completed_stage_count": result.get("completed_stage_count"),
+        "bottleneck": result.get("bottleneck"),
         "completed_stages": list(completed) if isinstance(completed, list) else [],
         "failed_stages": list(failed) if isinstance(failed, list) else [],
         "capabilities": list(capabilities) if isinstance(capabilities, list) else [],
         "closed_loop_autonomy": fitness.get("closed_loop_autonomy"),
         "halt_cause": fitness.get("halt_cause"),
+        "logistic_science_output": _finite_number(
+            research_metrics.get("logistic_science_output")
+        ),
+        "logistic_science_rate_per_s": _finite_number(
+            research_metrics.get("logistic_science_rate_per_s")
+        ),
         "metrics": metrics,
         "manifest": manifest,
     }
@@ -123,7 +141,21 @@ def summarize(records: list[dict[str, Any]]) -> dict[str, Any]:
         "invalid_seed_count": len(records) - len(valid),
         "seeds": records,
         "halt_causes": dict(Counter(str(row.get("halt_cause")) for row in valid)),
-        "closed_loop_successes": sum(row.get("closed_loop_autonomy") is True for row in valid),
+        "bottlenecks": dict(Counter(str(row.get("bottleneck")) for row in valid)),
+        "failed_stage_counts": dict(
+            Counter(
+                stage
+                for row in valid
+                for stage in row.get("failed_stages", [])
+            )
+        ),
+        "closed_loop_successes": sum(
+            row.get("closed_loop_autonomy") is True for row in valid
+        ),
+        "green_science_successes": sum(
+            (row.get("logistic_science_output") or 0) > 0
+            for row in valid
+        ),
         "metric_summary": {},
     }
     for metric in PRIMARY_METRICS:
@@ -137,14 +169,27 @@ def summarize(records: list[dict[str, Any]]) -> dict[str, Any]:
                 "n": 0,
                 "mean": None,
                 "median": None,
+                "sample_stdev": None,
+                "q1": None,
+                "q3": None,
+                "iqr": None,
                 "min": None,
                 "max": None,
             }
             continue
+        quartiles = (
+            statistics.quantiles(values, n=4, method="inclusive")
+            if len(values) >= 2
+            else [values[0], values[0], values[0]]
+        )
         summary["metric_summary"][metric] = {
             "n": len(values),
             "mean": statistics.fmean(values),
             "median": statistics.median(values),
+            "sample_stdev": statistics.stdev(values) if len(values) >= 2 else 0.0,
+            "q1": quartiles[0],
+            "q3": quartiles[2],
+            "iqr": quartiles[2] - quartiles[0],
             "min": min(values),
             "max": max(values),
         }
@@ -152,6 +197,11 @@ def summarize(records: list[dict[str, Any]]) -> dict[str, Any]:
     for row in valid:
         stages.update(row.get("completed_stages", []))
     summary["stage_completion_counts"] = dict(stages)
+    denominator = len(valid)
+    summary["stage_completion_rates"] = {
+        stage: count / denominator if denominator else None
+        for stage, count in stages.items()
+    }
     return summary
 
 
@@ -163,37 +213,55 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- valid seeds: {summary['valid_seed_count']}",
         f"- invalid seeds: {summary['invalid_seed_count']}",
         f"- closed-loop successes: {summary['closed_loop_successes']}",
+        f"- green-science successes: {summary['green_science_successes']}",
+        f"- bottlenecks: {summary['bottlenecks']}",
         "",
         "## Seed results",
         "",
-        "| Seed | Valid | Completed stages | Closed loop | Halt cause | Autonomy | Manual logistics | Physical coverage |",
-        "|---:|---|---:|---|---|---:|---:|---:|",
+        "| Seed | Valid | Completed stages | Bottleneck | Closed loop | Green science | Halt cause | Autonomy | Manual logistics | Physical coverage |",
+        "|---:|---|---:|---|---|---:|---|---:|---:|---:|",
     ]
     for row in summary["seeds"]:
         metrics=row.get("metrics", {})
         lines.append(
-            "| {seed} | {valid} | {stages} | {closed} | {halt} | {autonomy} | {manual} | {coverage} |".format(
+            "| {seed} | {valid} | {stages} | {bottleneck} | {closed} | {green} | {halt} | {autonomy} | {manual} | {coverage} |".format(
                 seed=row.get("seed"),
                 valid="yes" if row.get("valid") else "no",
                 stages=row.get("completed_stage_count"),
+                bottleneck=row.get("bottleneck"),
                 closed=row.get("closed_loop_autonomy"),
+                green=row.get("logistic_science_output"),
                 halt=row.get("halt_cause"),
                 autonomy=metrics.get("autonomy_score"),
                 manual=metrics.get("manual_logistics_calls"),
                 coverage=metrics.get("physical_processing_coverage"),
             )
         )
-    lines += ["", "## Aggregate metrics", "", "| Metric | n | Mean | Median | Min | Max |", "|---|---:|---:|---:|---:|---:|"]
+    lines += [
+        "",
+        "## Aggregate metrics",
+        "",
+        "| Metric | n | Mean | Median | Sample SD | Q1 | Q3 | IQR | Min | Max |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+    ]
     for metric, stats in summary["metric_summary"].items():
         lines.append(
-            f"| {metric} | {stats['n']} | {stats['mean']} | {stats['median']} | {stats['min']} | {stats['max']} |"
+            f"| {metric} | {stats['n']} | {stats['mean']} | {stats['median']} | "
+            f"{stats['sample_stdev']} | {stats['q1']} | {stats['q3']} | "
+            f"{stats['iqr']} | {stats['min']} | {stats['max']} |"
         )
     lines += [
         "",
         "## Interpretation rule",
         "",
-        "With fewer than five exploratory seeds this document is a run ledger, not a statistical conclusion.",
+        (
+            "Five exploratory seeds are complete; this is a descriptive exploratory baseline, "
+            "not a confirmatory performance claim."
+            if summary["valid_seed_count"] >= 5
+            else "With fewer than five exploratory seeds this document is a run ledger, not a statistical conclusion."
+        ),
         "Invalid seeds stay visible and must be explained; failed agent runs stay in the sample.",
+        "The frozen confirmatory seeds remain unspent for later paired Cortex comparisons.",
     ]
     return "\n".join(lines)
 

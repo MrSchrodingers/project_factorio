@@ -1,6 +1,6 @@
 # Cortex Research — F1-B Baseline Corrigida
 
-**Status:** RUNNING — 2/5 exploratory observations valid.
+**Status:** EXPLORATORY COMPLETE — 5/5 valid observations; confirmatory seeds remain frozen and unspent.
 **Pré-condição:** F1-A PASS e G37 aposentada de forma reversível.
 **Objetivo:** medir a arquitetura pré-Cortex corrigida sob execução limpa, sem herança entre seeds.
 
@@ -64,16 +64,22 @@ Fonte canônica: configs/cortex_baseline_v1.json.
 
 ### Exploratory
 
-**Progress:** 4/5 valid observations. Seeds 20261001–20261004 are retained as valid partial-success results. All four stop at Logistic science with zero green-science output; detailed per-seed evidence is versioned separately.
+**Progress:** 5/5 valid observations. Seeds 20261001–20261005 are retained as valid partial-success results. All five stop at Logistic science with zero green-science output; detailed per-seed evidence is versioned separately.
 
 
 - [x] 20261001
 - [x] 20261002
 - [x] 20261003
 - [x] 20261004
-- [ ] 20261005
+- [x] 20261005
 
 As seeds exploratórias podem revelar defeitos no protocolo. Mudanças metodológicas exigem nova versão do protocolo e não podem ser retroativamente tratadas como se fossem o mesmo experimento.
+
+### Exploratory statistical report
+
+Canonical report: docs/CORTEX_PHASE1_BASELINE_STATISTICAL_REPORT.md.
+
+The 10 confirmatory seeds below remain unspent and are reserved for later paired Cortex comparisons.
 
 ### Confirmatory
 

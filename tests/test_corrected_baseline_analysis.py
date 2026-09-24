@@ -29,6 +29,7 @@ def _seed(tmp_path: Path, *, seed: int=11, commit: str="abc", completed: bool=Tr
     result={
         "code_revision":{"commit":commit,"dirty":False},
         "completed_stage_count":3,
+        "bottleneck":"d",
         "challenger":{
             "generation":1,
             "run_id":"run",
@@ -54,6 +55,14 @@ def _seed(tmp_path: Path, *, seed: int=11, commit: str="abc", completed: bool=Tr
         },
     }
     (path/"result.json").write_text(json.dumps(result)+"\n")
+    runs=path/"runs"
+    runs.mkdir()
+    (runs/"research_state.json").write_text(json.dumps({
+        "metrics":{
+            "logistic_science_output":0.0,
+            "logistic_science_rate_per_s":0.0,
+        },
+    })+"\n")
     return path
 
 
@@ -63,6 +72,8 @@ def test_validate_seed_accepts_clean_attributable_result(tmp_path) -> None:
     assert row["valid"] is True
     assert row["metrics"]["autonomy_score"] == 0.5
     assert row["completed_stage_count"] == 3
+    assert row["bottleneck"] == "d"
+    assert row["logistic_science_output"] == 0.0
 
 
 def test_commit_mismatch_invalidates_seed(tmp_path) -> None:
@@ -91,3 +102,39 @@ def test_summary_keeps_failed_or_invalid_records_visible(tmp_path) -> None:
     assert summary["valid_seed_count"] == 1
     assert summary["invalid_seed_count"] == 1
     assert summary["metric_summary"]["autonomy_score"]["median"] == 0.5
+
+def test_summary_reports_dispersion_bottlenecks_and_stage_rates(tmp_path) -> None:
+    module=_module()
+    first=module.validate_seed(_seed(tmp_path,seed=11))
+    second=module.validate_seed(_seed(tmp_path,seed=12))
+    second["metrics"]=dict(second["metrics"])
+    second["metrics"]["autonomy_score"]=0.75
+    second["logistic_science_output"]=1.0
+
+    summary=module.summarize([first,second])
+    stats=summary["metric_summary"]["autonomy_score"]
+
+    assert stats["n"] == 2
+    assert stats["mean"] == 0.625
+    assert stats["median"] == 0.625
+    assert stats["sample_stdev"] > 0
+    assert stats["q1"] <= stats["median"] <= stats["q3"]
+    assert stats["iqr"] == stats["q3"] - stats["q1"]
+    assert summary["bottlenecks"] == {"d": 2}
+    assert summary["failed_stage_counts"] == {"d": 2}
+    assert summary["green_science_successes"] == 1
+    assert summary["stage_completion_rates"]["a"] == 1.0
+
+
+def test_markdown_labels_five_seed_summary_exploratory_not_confirmatory(tmp_path) -> None:
+    module=_module()
+    records=[
+        module.validate_seed(_seed(tmp_path,seed=seed))
+        for seed in range(11,16)
+    ]
+    summary=module.summarize(records)
+    rendered=module.render_markdown(summary)
+
+    assert "Five exploratory seeds are complete" in rendered
+    assert "not a confirmatory performance claim" in rendered
+    assert "confirmatory seeds remain unspent" in rendered
