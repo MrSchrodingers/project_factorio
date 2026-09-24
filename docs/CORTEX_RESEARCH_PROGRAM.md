@@ -1132,9 +1132,33 @@ checks PASS.
 **Decision F2-F4A:** **PASS parcial de F2.** A dependência energética do actuator agora é
 representável e compilável em SHADOW. Nenhum novo canário real foi executado por F2-F4A.
 
-**Next:** F2-F4B — integrar a dependency ao one-shot runner, persistir power evidence e v3
-prepared action, validar replay/full gate e só depois considerar um único canário real.
-F3 permanece bloqueada.
+**F2-F4B progress:** **FULL GATE PASS / implementação publicada.** O one-shot runner agora aplica a
+dependency do actuator após processor fuel completion e antes de qualquer EXECUTE. O power
+capability é tri-state fail-closed: zero power edges só produz `False` quando combinado ao
+contrato do fixture `fixture_power_operation=false`; zero sem esse contrato e rede existente sem
+medição posicional permanecem unknown.
+
+O runner persiste `delivery_power_capability`, actuator evaluations, selected dependency e
+`prepared_v3`. Dry-run sem `--execute` grava refusal auditável com `world_mutation=false`,
+`authority=null` e `continuous_authority=false`.
+
+**Focused gate F2-F4B:** 60 PASS; continuity/dashboard 76 PASS; Ruff/py_compile PASS;
+dry-run fail-closed PASS.
+
+**Integrated replay F2-F4B:** `runs/audits/cortex_f2f4b_runner_replay.json`,
+`world_mutation=false`; power=`derived_unavailable`; burner-inserter + coal selected; v3 compiled.
+
+**Full gate F2-F4B:** 1400 core/FLE PASS + 2 PyTorch PASS; Ruff/compileall/TypeScript/Vite PASS.
+
+**Published F2-F4B:** implementation `0607d1286b3a0c885e03c11c23e51935e2a16aa1`; dashboard
+`beb96a6a5fd7142cb6d6d1a3bfaa48d380f9ed65`; cache stamp
+`c39cefcef0e7ae9bc6f1b9a127f6ab4d90238690`.
+
+**Decision F2-F4B:** **PASS parcial de F2.** Runner integration está versionada e o caminho v3
+foi validado em replay sem mutação. Nenhum novo canário real foi executado por F2-F4B.
+
+**Next:** F2-F4C — após clean publication, revalidar HEAD/isolation/runtime F1/artifact único e
+executar no máximo um canário one-shot não-confirmatório. F3 permanece bloqueada.
 
 **Exit Gate F2:** o agente pode montar uma cadeia funcional escolhendo primitivas/options por uma
 API genérica, sem caminho codificado por estágio.

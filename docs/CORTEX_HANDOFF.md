@@ -6,7 +6,7 @@
 ## Estado atual
 
 - Programa: Cortex Research Architecture v0.1
-- Fase: **F2-F4A concluída em SHADOW — F2-F4B autorizada; novo canário e F3 bloqueados**
+- Fase: **F2-F4B full gate PASS — implementação/UI publicadas; verificação pós-publicação pendente; F3 bloqueada**
 - Branch: `research/cortex-v1`
 - Baseline imutável de origem: `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 - Tag baseline publicada: `cortex-pre-research-baseline-20260923`
@@ -46,58 +46,50 @@ silenciosamente pelo commit da F0**.
 
 ## Próxima ação
 
-**F2-F4B — integrar delivery actuator dependency ao one-shot runner, ainda sem canário real.**
+**F2-F4C — revalidar isolamento e, somente se todos os gates permanecerem verdes, executar exatamente um canário não-confirmatório.**
 
-F2-F4A está implementada em SHADOW.
+F2-F4B está concluída.
 
-Capabilities F2-F4A:
+Publicação:
 
-- RuntimeFactorioCatalog expõe machine_names_by_type() a partir do type observado;
-- FactorioObserver.game_knowledge preserva todo energy actor, não apenas crafting/mining;
-- live read-only probe em Factorio 2.0.73 observou cinco inserters com energia medida;
-- plan_burner_fuel_dependency() reutiliza o fuel planner F2-F2 para qualquer burner machine;
-- complete_delivery_actuator_dependency() avalia candidates type=inserter;
-- electric power é input tri-state explícito True/False/None;
-- power=None não licencia actuator elétrico;
-- actuator não carregado é refusal, sem craft silencioso;
-- burner actuator só fica ready quando fuel dependency está coberta;
-- contrato v3 adiciona fuel_delivery_actuator após connect_delivery;
-- TransactionalFLEExecutor permanece o único commit/rollback.
+- runner integration: `0607d1286b3a0c885e03c11c23e51935e2a16aa1`;
+- dashboard state: `beb96a6a5fd7142cb6d6d1a3bfaa48d380f9ed65`;
+- documentação de fechamento: commit posterior a estes dois.
 
-Shadow replay real:
+Evidence final:
 
-- source artifact: runs/audits/cortex_f2f_structural_canary.json;
-- output: runs/audits/cortex_f2f4_delivery_actuator_shadow.json;
-- world_mutation=false;
-- inserter elétrico: carried=50, recusado por delivery_actuator_power_unavailable;
-- burner-inserter: carried=50, burner measured, coal covered, ready=true;
-- selected actuator=burner-inserter;
-- compiled v3=true;
-- operation sequence contém connect_delivery -> fuel_delivery_actuator.
+- 60 focused PASS;
+- 76 continuity/dashboard PASS;
+- 1400 core/FLE PASS;
+- 2 PyTorch PASS;
+- Ruff/compileall/TypeScript/Vite PASS;
+- dry-run artifact `runs/audits/cortex_f2f4b_dryrun.json`, `world_mutation=false`;
+- replay `runs/audits/cortex_f2f4b_runner_replay.json`, `world_mutation=false`;
+- replay selecionou `burner-inserter` + coal e compilou contract v3.
 
-Focused evidence:
+Power contract:
 
-- 54 PASS no gate planner/compiler/runtime;
-- 22 PASS após correção do instrumento canônico + live read-only validation;
-- 26 PASS phase continuity/dashboard context;
-- Ruff/py_compile/node checks PASS.
+- zero power edges + fixture sem power operation => `derived_unavailable`;
+- zero edges sem fixture contract => unknown;
+- rede existente sem medição posicional => unknown;
+- missing nunca vira false/zero por default.
 
-Documento canônico:
-docs/CORTEX_PHASE2_DELIVERY_ACTUATOR_DEPENDENCY.md
+Antes de F2-F4C:
 
-Próximo bloco seguro:
-
-1. integrar complete_delivery_actuator_dependency() no runner após processor fuel completion;
-2. persistir power-capability evidence no artifact;
-3. persistir actuator evaluations/dependency/prepared v3;
-4. testes de runner/replay sem mutação;
-5. full repository gate;
-6. commit/push limpo;
-7. somente então decidir se um único F2-F4B canary real é autorizado.
+1. confirmar HEAD local == origin/research/cortex-v1;
+2. árvore Git limpa;
+3. evolution inactive+disabled;
+4. runtime científico F1 intacto em `95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac`;
+5. confirmar seed 424242 fora do holdout;
+6. confirmar inexistência do artifact F2-F4C;
+7. executar exatamente uma vez;
+8. não repetir automaticamente se alcançar a capability e resultar em reject;
+9. classificar o resultado antes de qualquer nova alteração.
 
 Não executar seeds 20261101–20261110.
 Não conceder continuous autonomous authority.
 F3 permanece bloqueada.
+
 ## Protocolo de retomada após interrupção
 
 Não inferir continuidade pela tela. Executar na ordem:
