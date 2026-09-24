@@ -466,3 +466,54 @@ def test_phase_state_tracks_f2e1_and_f2e2_from_persisted_artifacts(tmp_path) -> 
     state=module.build_phase_state(state_root=tmp_path,protocol_path=protocol)
     assert state["phase2_checkpoint"] == "F2-E2"
     assert state["phase2_canary"]["exists"] is True
+
+def test_phase_state_exposes_f2e_canary_outcome(tmp_path) -> None:
+    module=_module("cortex_phase_state.py")
+    protocol=tmp_path/"protocol.json"
+    _protocol(protocol)
+
+    for seed in (11,12):
+        seed_dir=tmp_path/"baseline_runs"/"p1"/"exploratory"/str(seed)
+        seed_dir.mkdir(parents=True)
+        (seed_dir/"manifest.json").write_text(json.dumps({
+            "status":"completed",
+            "returncode":0,
+            "release":{"commit":"abc"},
+        })+"\n")
+        (seed_dir/"result.json").write_text(json.dumps({
+            "code_revision":{"commit":"abc","dirty":False},
+            "challenger":{"fitness":{}},
+        })+"\n")
+
+    docs=tmp_path/"docs"
+    docs.mkdir()
+    for name in (
+        "CORTEX_PHASE1_BASELINE_STATISTICAL_REPORT.md",
+        "CORTEX_PHASE2_ACTION_ONTOLOGY.md",
+        "CORTEX_PHASE2_TRANSACTIONAL_EXECUTION.md",
+    ):
+        (docs/name).write_text("# checkpoint\n")
+
+    audit=tmp_path/"runs"/"audits"
+    audit.mkdir(parents=True)
+    (audit/"cortex_f2e_structural_canary.json").write_text(json.dumps({
+        "status":"completed",
+        "run_id":"canary-1",
+        "transaction_committed":False,
+        "rollback_observed":True,
+        "action_result":{
+            "status":"rejected",
+            "refusal":{"code":"structural_postcondition_failed"},
+        },
+    })+"\n")
+
+    state=module.build_phase_state(state_root=tmp_path,protocol_path=protocol)
+    canary=state["phase2_canary"]
+
+    assert state["phase2_checkpoint"] == "F2-E2"
+    assert canary["status"] == "completed"
+    assert canary["run_id"] == "canary-1"
+    assert canary["action_status"] == "rejected"
+    assert canary["refusal"] == "structural_postcondition_failed"
+    assert canary["transaction_committed"] is False
+    assert canary["rollback_observed"] is True

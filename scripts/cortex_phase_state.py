@@ -201,6 +201,13 @@ def build_phase_state(
         state_root / "runs" / "audits" / "cortex_f2e_structural_canary.json"
     )
     phase2_canary=phase2_canary_path.exists()
+    phase2_canary_payload: dict[str, Any] = {}
+    phase2_canary_error: str | None = None
+    if phase2_canary:
+        try:
+            phase2_canary_payload=_load(phase2_canary_path)
+        except (OSError,json.JSONDecodeError,TypeError) as exc:
+            phase2_canary_error=f"{type(exc).__name__}: {exc}"
 
     if blocked_running:
         action=f"monitor seed {exploratory['running'][0]}"
@@ -293,6 +300,31 @@ def build_phase_state(
         "phase2_canary":{
             "path":str(phase2_canary_path),
             "exists":phase2_canary,
+            "status":phase2_canary_payload.get("status"),
+            "run_id":phase2_canary_payload.get("run_id"),
+            "transaction_committed":phase2_canary_payload.get(
+                "transaction_committed"
+            ),
+            "rollback_observed":phase2_canary_payload.get(
+                "rollback_observed"
+            ),
+            "action_status":(
+                (phase2_canary_payload.get("action_result") or {}).get("status")
+                if isinstance(phase2_canary_payload.get("action_result"),dict)
+                else None
+            ),
+            "refusal":(
+                (
+                    (phase2_canary_payload.get("action_result") or {}).get(
+                        "refusal"
+                    )
+                    or {}
+                ).get("code")
+                if isinstance(phase2_canary_payload.get("action_result"),dict)
+                else None
+            ),
+            "failure":phase2_canary_payload.get("failure"),
+            "read_error":phase2_canary_error,
         },
         "modes":modes,
         "resume":{

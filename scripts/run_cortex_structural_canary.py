@@ -196,25 +196,95 @@ def runtime_catalog(instance: Any) -> RuntimeFactorioCatalog:
     return RuntimeFactorioCatalog(json.loads(raw))
 
 
-def available_entities(rows: list[dict[str, Any]]) -> dict[str, float]:
-    counts = Counter(str(row.get("name") or "") for row in rows)
-    counts.pop("", None)
-    counts["character"] += 1
+def available_inventory(rows: list[dict[str, Any]]) -> dict[str, float]:
+    """On-hand player items; placed world entities are not inventory."""
+
+    counts: Counter[str] = Counter()
+    character_seen = False
+    for row in rows:
+        if str(row.get("name") or "") != "character":
+            continue
+        character_seen = True
+        inventory = row.get("inventory")
+        if not isinstance(inventory, dict):
+            continue
+        for name, value in inventory.items():
+            if (
+                isinstance(name, str)
+                and isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and float(value) > 0
+            ):
+                counts[name] += float(value)
+    if character_seen:
+        counts["character"] = max(1.0, float(counts.get("character", 0.0)))
     return {name: float(count) for name, count in sorted(counts.items())}
 
 
-def build_measurement_probe(namespace: Any):
+def resource_survey_from_overview(payload: dict[str, Any]) -> ResourceSurvey:
+    """Convert the canonical RCON resource instrument into planner evidence."""
+
+    points = [
+        {
+            "name": str(point["name"]),
+            "type": "resource",
+            "position": {
+                "x": float(point["x"]),
+                "y": float(point["y"]),
+            },
+        }
+        for point in payload.get("points", [])
+        if isinstance(point, dict)
+        and point.get("name")
+        and isinstance(point.get("x"), (int, float))
+        and isinstance(point.get("y"), (int, float))
+    ]
+    center = payload.get("center")
+    radius = payload.get("radius")
+    surveyed = None
+    if isinstance(center, dict) and isinstance(radius, (int, float)):
+        x = center.get("x")
+        y = center.get("y")
+        if isinstance(x, (int, float)) and isinstance(y, (int, float)):
+            r = float(radius)
+            surveyed = (float(x) - r, float(y) - r, float(x) + r, float(y) + r)
+    return ResourceSurvey.from_entities(points, surveyed=surveyed)
+
+
+def craft_output_count(row: dict[str, Any] | None, product: str) -> float:
+    if row is None:
+        return 0.0
+    output = row.get("craft_output")
+    if not isinstance(output, list):
+        return 0.0
+    total = 0.0
+    for stack in output:
+        if not isinstance(stack, dict) or str(stack.get("name") or "") != product:
+            continue
+        count = stack.get("count")
+        if isinstance(count, (int, float)) and not isinstance(count, bool):
+            total += float(count)
+    return total
+
+
+def build_measurement_probe(observer: FactorioObserver):
     def measure(prepared: Any) -> dict[str, Any]:
-        rows = player_rows(world_rows(namespace, resources=False))
+        snapshot = observer.snapshot()
+        if snapshot.get("connected") is not True:
+            raise RuntimeError(
+                "canonical world snapshot unavailable: "
+                + str(snapshot.get("error") or "connected=false")
+            )
+        rows = [
+            row
+            for row in snapshot.get("entities", [])
+            if isinstance(row, dict)
+        ]
         graph = build_factory_graph(rows)
         metrics = graph.get("metrics", {})
         processor = processor_row(prepared, rows)
         exists = processor is not None
-        output = 0.0
-        if exists:
-            raw = getattr(namespace, "cortex_processor_output", None)
-            if isinstance(raw, (int, float)):
-                output = float(raw)
+        product = str(prepared.preflight.get("product") or "")
         return {
             "producers_reaching_processor": metrics.get(
                 "producers_reaching_processor"
@@ -226,7 +296,7 @@ def build_measurement_probe(namespace: Any):
             "processor_status": (
                 None if processor is None else processor.get("status")
             ),
-            "processor_output": output,
+            "processor_output": craft_output_count(processor, product),
         }
 
     return measure
@@ -271,6 +341,7 @@ def run_canary(
     }
 
     env = None
+    observer = None
     with FactorioWorldLease(
         run_id=run_id,
         arena="cortex_f2e_canary",
@@ -330,9 +401,30 @@ print({{'canary_iron':canary_iron}})
             if not bootstrap.accepted:
                 raise RuntimeError("producer+buffer bootstrap was rejected")
 
-            all_rows = world_rows(namespace, resources=True)
-            machines = player_rows(all_rows)
-            resources = ResourceSurvey.from_entities(resource_rows(all_rows))
+            fle_rows = world_rows(namespace, resources=False)
+            available = available_inventory(fle_rows)
+
+            observer = FactorioObserver()
+            snapshot = observer.snapshot()
+            overview = observer.resource_overview(max_age_s=0)
+            knowledge = observer.game_knowledge(max_age_s=0)
+            if snapshot.get("connected") is not True:
+                raise RuntimeError(
+                    "canonical world snapshot unavailable after bootstrap: "
+                    + str(snapshot.get("error") or "connected=false")
+                )
+            if overview.get("connected") is not True:
+                raise RuntimeError(
+                    "canonical resource survey unavailable after bootstrap: "
+                    + str(overview.get("error") or "connected=false")
+                )
+
+            machines = [
+                row
+                for row in snapshot.get("entities", [])
+                if isinstance(row, dict)
+            ]
+            resources = resource_survey_from_overview(overview)
             graph = build_factory_graph(machines)
             targets = structural_targets(graph)
             if not targets:
@@ -365,12 +457,35 @@ print({{'canary_iron':canary_iron}})
                 request,
                 graph=graph,
                 world_entities=machines,
-                catalog=runtime_catalog(instance),
-                available=available_entities(machines),
+                catalog=RuntimeFactorioCatalog(knowledge),
+                available=available,
                 footprints=_runtime_entity_footprints(instance),
                 resources=resources,
             )
-            ready = [branch for branch in plan.branches if branch.executable_preconditions_satisfied]
+            record.update(
+                {
+                    "bootstrap": {
+                        "accepted": bootstrap.accepted,
+                        "iron_buffered": float(namespace.canary_iron or 0),
+                        "patch_center": {"x": x, "y": y},
+                    },
+                    "planning_instruments": {
+                        "world": "FactorioObserver.snapshot",
+                        "resources": "FactorioObserver.resource_overview",
+                        "catalog": "FactorioObserver.game_knowledge",
+                        "available": "FLE character inventory",
+                    },
+                    "available_inventory": available,
+                    "graph_before": graph.get("metrics", {}),
+                    "targets": targets,
+                    "plan": plan.to_dict(),
+                }
+            )
+            ready = [
+                branch
+                for branch in plan.branches
+                if branch.executable_preconditions_satisfied
+            ]
             if len(ready) != 1:
                 raise RuntimeError(
                     f"canary expected exactly one ready branch, got {len(ready)}"
@@ -404,7 +519,7 @@ print({{'canary_iron':canary_iron}})
             if not sync.accepted:
                 raise RuntimeError("failed to serialize pre-action canary checkpoint")
 
-            measure = build_measurement_probe(namespace)
+            measure = build_measurement_probe(observer)
             before = dict(measure(prepared))
             result = StructuralTransactionalAdapter().execute(
                 prepared,
@@ -420,14 +535,6 @@ print({{'canary_iron':canary_iron}})
                 {
                     "status": "completed",
                     "finished_at": utc_now(),
-                    "bootstrap": {
-                        "accepted": bootstrap.accepted,
-                        "iron_buffered": float(namespace.canary_iron or 0),
-                        "patch_center": {"x": x, "y": y},
-                    },
-                    "graph_before": graph.get("metrics", {}),
-                    "targets": targets,
-                    "plan": plan.to_dict(),
                     "prepared": prepared.to_dict(),
                     "measurement_before": before,
                     "action_result": result.to_dict(),
@@ -454,6 +561,8 @@ print({{'canary_iron':canary_iron}})
                 }
             )
         finally:
+            if observer is not None:
+                observer.close()
             if env is not None:
                 env.close()
 

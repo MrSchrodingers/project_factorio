@@ -6,7 +6,7 @@
 ## Estado atual
 
 - Programa: Cortex Research Architecture v0.1
-- Fase: **F2-E1 concluída — F2-E2 one-shot canary autorizado; authority contínua/F3 bloqueadas**
+- Fase: **F2-E2 attempt 1 preservado — instrumentation fix em validação; retry ainda bloqueado por working tree dirty**
 - Branch: `research/cortex-v1`
 - Baseline imutável de origem: `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 - Tag baseline publicada: `cortex-pre-research-baseline-20260923`
@@ -46,30 +46,32 @@ silenciosamente pelo commit da F0**.
 
 ## Próxima ação
 
-**F2-E2 — executar um único controlled Factorio canary na seed 424242.**
+**Versionar o instrumentation fix F2-E2 e somente depois repetir o canário seed 424242.**
 
-Pré-condições já satisfeitas:
+Attempt 1 preservado: runs/audits/cortex_f2e_structural_canary_attempt1.json.
 
-- implementation commit F2-E1: 7552140bb6575ec9faad94436633e77eb4949ed5;
-- catalog hardening: fd9da1ae3999b549aa4026186cce5b0caaca0b6d;
-- 1363 core/FLE PASS + 2 PyTorch PASS;
-- frontend/static PASS;
-- evolution inactive e disabled;
-- runtime F1 95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac, dirty=false;
-- confirmatory seeds 20261101–20261110 intactas;
-- phase-state F2-E1;
-- canário sem --execute comprovadamente fail-closed.
+Resultado attempt 1:
 
-Executar apenas após este fechamento documental ser commitado e a árvore voltar clean:
+- commit limpo 564cfbb54489ce2c6690adafcc629ec036bd4720;
+- status failed antes de EXECUTE;
+- nenhum ActionResult;
+- nenhuma transação estrutural enviada;
+- causa: planner recebeu _save_entity_state, que expõe chest em inventories.chest e zero resource rows;
+- bootstrap havia medido iron ore corretamente;
+- refusal efetiva na reconstrução: structural_buffer_contents_unobserved.
 
-1. verificar git status clean;
-2. verificar evolution inactive/disabled;
-3. rodar scripts/run_cortex_structural_canary.py --execute --seed 424242;
-4. analisar runs/audits/cortex_f2e_structural_canary.json;
-5. se rejected, confirmar rollback e tratar o counterexample;
-6. se accepted, confirmar todos hard guards e estado final;
-7. atualizar docs/README/frontend/phase-state;
-8. não autorizar F3 nem continuous authority apenas porque o canário completou.
+Correção já implementada e full gateada:
+
+- planning usa FactorioObserver.snapshot/resource_overview/game_knowledge;
+- on-hand available vem apenas do inventory do character;
+- post-action processor_output vem de craft_output observado;
+- plan/targets/instruments são persistidos antes do ready gate;
+- 34 focused PASS;
+- full gate 1367 core/FLE + 2 PyTorch PASS.
+
+Próximo passo: commit/push da correção, confirmar tree clean + evolution inactive/disabled, remover apenas o artifact canônico antigo (cópia attempt1 já preservada) e executar um único retry.
+
+F3 e continuous autonomous authority permanecem proibidas.
 
 ## Protocolo de retomada após interrupção
 

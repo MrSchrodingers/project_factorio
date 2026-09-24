@@ -195,3 +195,58 @@ F2-E só pode ser PASS quando:
 - continuous autonomous authority continuar desabilitada.
 
 Enquanto isso F2-E permanece ativa e F3 não está autorizada.
+
+## 13. F2-E2 attempt 1 — instrumentation counterexample
+
+O primeiro canário real foi executado na seed 424242 a partir do commit limpo
+564cfbb54489ce2c6690adafcc629ec036bd4720.
+
+Resultado:
+
+- run_id: cortex-f2e-20260924T185807Z;
+- continuous_authority=false;
+- status do experimento: failed;
+- ActionResult: não criado;
+- transaction_committed: não alcançado;
+- structural EXECUTE: não alcançado;
+- failure: canary expected exactly one ready branch, got 0.
+
+O artifact original foi preservado em:
+
+runs/audits/cortex_f2e_structural_canary_attempt1.json
+
+A falha ocorreu antes de TransactionalFLEExecutor receber a ação estrutural. Portanto não é
+evidência contra a hipótese de execução transacional nem requer rollback estrutural.
+
+### Causa
+
+O bootstrap mediu iron ore no chest via inspect_inventory, mas o canário alimentava o planner com
+_save_entity_state.
+
+Esse instrumento retorna:
+
+- chest inventory em inventories.chest;
+- zero resource rows no cenário observado.
+
+Já o planner F2-D consome o schema científico canônico usado no shadow audit:
+
+- container contents em contents;
+- resource tiles via ResourceSurvey.
+
+Consequentemente o planner recebeu evidence incompleta e respondeu corretamente com
+structural_buffer_contents_unobserved.
+
+### Correção
+
+A boundary F2-E2 passa a usar:
+
+- FactorioObserver.snapshot para entidades/contents;
+- FactorioObserver.resource_overview para ResourceSurvey;
+- FactorioObserver.game_knowledge para RuntimeFactorioCatalog;
+- _save_entity_state apenas para o inventário on-hand do character e checkpoint FLE.
+
+Post-action measurement também usa o observer canônico. processor_output passa a ser medido em
+craft_output da máquina observada, não por variável transitória do namespace.
+
+O canário também grava plan/targets/instruments antes de exigir branch ready, de forma que futuras
+recusas pré-EXECUTE preservem evidência completa.

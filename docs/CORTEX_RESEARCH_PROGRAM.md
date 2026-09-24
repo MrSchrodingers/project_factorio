@@ -982,7 +982,17 @@ tests/test_cortex_structural_canary_contract.py.
 
 **Decision F2-E1:** **PASS parcial de F2.** F2-E2 está autorizado somente como one-shot controlled Factorio canary em seed 424242, partindo de árvore clean e evolution inactive/disabled.
 
-**Next:** F2-E2 — executar canário real, analisar accepted/rejected e preservar rollback/evidence sem enfraquecer hard guards. Continuous autonomous authority continua proibida.
+**F2-E2 attempt 1:** executado em seed 424242 a partir de 564cfbb54489ce2c6690adafcc629ec036bd4720. O experimento terminou antes de EXECUTE com zero ready branches. O artifact foi preservado como runs/audits/cortex_f2e_structural_canary_attempt1.json.
+
+**Causa:** instrumentation/schema mismatch. _save_entity_state mediu iron ore em inventories.chest, mas não forneceu contents nem resource rows; o planner F2-D recebeu evidence insuficiente e recusou corretamente. Não houve ActionResult nem structural transaction.
+
+**Correção F2-E2:** planning agora usa FactorioObserver.snapshot/resource_overview/game_knowledge; available usa exclusivamente inventory do character; output funcional usa craft_output observado. O artifact passa a gravar plan/targets/instruments antes do ready gate.
+
+**Tests da correção:** 34 focused PASS; full gate 1367 core/FLE PASS + 2 PyTorch PASS; static PASS.
+
+**Decision attempt 1:** instrumentation counterexample, não falsificação da structural hypothesis. Retry bloqueado até commit clean da correção.
+
+**Next:** versionar a correção e repetir um único canário seed 424242. Continuous autonomous authority continua proibida.
 
 **Exit Gate F2:** o agente pode montar uma cadeia funcional escolhendo primitivas/options por uma
 API genérica, sem caminho codificado por estágio.
