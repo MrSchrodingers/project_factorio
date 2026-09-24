@@ -46,13 +46,13 @@ silenciosamente pelo commit da F0**.
 
 ## Próxima ação
 
-**F1-B — retirement controlado de G37 e baseline corrigida.**
+**F1-B — baseline corrigida independente por seed.**
 
 Já concluído: alterações logísticas em a3a50b5; provenance/state-root em f8437d5; runtime imutável/systemd em e5cd102; release ativa verificada; evolution parado; backup em backups/cortex-f1-pre-20260924T031901Z; 1283 testes core/FLE + 2 PyTorch verdes; audit numérico 487/141 após duas correções críticas; Qwen limitado por cgroup com soak medido; seeds congeladas; backup/reset fail-closed.
 
-Ainda NÃO feito: G37 continua em runs/evolution_champion.json; baseline corrigida ainda não foi executada; relatório estatístico F1 ainda não existe.
+G37 foi aposentada em backups/selection-reset-20260924T040637Z; runs/evolution_champion.json não existe mais. Baseline corrigida ainda não foi executada e o relatório estatístico F1 ainda não existe.
 
-Retomada: conferir git status, fechar/implantar o commit F1-A e só então aplicar reset_selection_state.py --apply.
+Retomada: conferir git status e release ativa; ler docs/CORTEX_PHASE1_BASELINE_PROTOCOL.md; validar dry-run; iniciar pela seed exploratória 20261001. Não iniciar confirmatory antes do relatório exploratório.
 
 ## Evidência de fechamento da F0
 

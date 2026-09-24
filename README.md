@@ -12,11 +12,12 @@ com experiência sem receber do programador a sequência de ações que constitu
 > **Handoff operacional:** [docs/CORTEX_HANDOFF.md](docs/CORTEX_HANDOFF.md)
 > **Diagnóstico da arquitetura anterior:** [docs/HANDOFF-CORTEX.md](docs/HANDOFF-CORTEX.md)
 > **F1 — integridade e isolamento:** [docs/CORTEX_PHASE1_INTEGRITY.md](docs/CORTEX_PHASE1_INTEGRITY.md)
+> **F1-B — protocolo da baseline:** [docs/CORTEX_PHASE1_BASELINE_PROTOCOL.md](docs/CORTEX_PHASE1_BASELINE_PROTOCOL.md)
 
 ## Estado do programa
 
-**Cortex Research Architecture v0.1 — F1-A concluída. F1-B está autorizada para aposentar G37
-de forma controlada e produzir a baseline corrigida multi-seed.**
+**Cortex Research Architecture v0.1 — F1-A concluída; G37 aposentada. F1-B está pré-registrada
+e pronta para iniciar a baseline corrigida independente por seed.**
 
 A arquitetura anterior permanece disponível como baseline. Ela possui excelente instrumentação,
 solvers e mecanismos de segurança, mas o caminho de decisão principal ainda é dominado por

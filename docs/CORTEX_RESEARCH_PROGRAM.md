@@ -805,7 +805,7 @@ a baseline corrigida e o isolamento operacional estarem concluídos.
 
 - [x] finalizar/validar mudanças logísticas já não commitadas;
 - [x] snapshot de runs e artefatos históricos;
-- [ ] desativar G37 como baseline confirmatória;
+- [x] desativar G37 como baseline confirmatória;
 - [ ] reexecutar baseline com factory graph corrigido;
 - [x] separar código “deployed” de edição live;
 - [x] impedir geração com working tree suja de ser promoted;
@@ -819,8 +819,9 @@ a baseline corrigida e o isolamento operacional estarem concluídos.
 - [ ] produzir relatório estatístico da baseline.
 
 **Status F1-A:** **PASS — integridade e isolamento concluídos.** Evidência técnica em
-docs/CORTEX_PHASE1_INTEGRITY.md. Permanecem abertos apenas o retirement de G37, a execução da
-baseline corrigida e o relatório estatístico.
+docs/CORTEX_PHASE1_INTEGRITY.md. G37 já foi aposentada; permanecem abertos a execução da
+baseline corrigida e o relatório estatístico. Protocolo pré-registrado em
+docs/CORTEX_PHASE1_BASELINE_PROTOCOL.md.
 
 **Evidence F1-A:** commits a3a50b5, f8437d5 e e5cd102; snapshot
 backups/cortex-f1-pre-20260924T031901Z; docs/audits/NUMERIC_DEFAULT_AUDIT_F1.md; artefatos de
