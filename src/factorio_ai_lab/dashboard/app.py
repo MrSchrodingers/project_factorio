@@ -100,6 +100,11 @@ def api_status() -> dict[str, Any]:
     return state.status()
 
 
+@app.get("/api/context")
+def api_context() -> dict[str, Any]:
+    return state.experiment_context_data()
+
+
 @app.get("/api/world")
 async def api_world() -> dict[str, Any]:
     return await asyncio.to_thread(state.factorio.snapshot)

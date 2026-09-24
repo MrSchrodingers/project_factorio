@@ -9,10 +9,36 @@
     html, body { margin: 0; height: 100%; background: #14170f; }
     /* Dedicated page: the map owns the whole viewport. */
     #stage.fmap-root { height: 100dvh; }
+    #mapTruth {
+      position: fixed; z-index: 50; left: 12px; top: 12px;
+      max-width: min(680px, calc(100vw - 24px));
+      padding: 8px 10px; border: 1px solid rgba(99,215,212,.4);
+      border-radius: 8px; background: rgba(10,13,15,.90);
+      color: #d7dde1; font: 11px/1.45 Consolas, monospace;
+      pointer-events: none; backdrop-filter: blur(6px);
+    }
+    #mapTruth b { color: #63d7d4; }
   </style>
 </head>
 <body>
+  <div id="mapTruth"><b>LIVE RCON</b> · resolvendo contexto experimental…</div>
   <div id="stage" data-factory-map></div>
   <script src="/static/map/factory-map.js?v=fd8c84fe638e"></script>
+  <script>
+    Promise.all([
+      fetch("/api/context").then(r => r.json()),
+      fetch("/api/world").then(r => r.json())
+    ]).then(([ctx, world]) => {
+      const summary = ctx.result_summary || {};
+      const seed = ctx.seed == null ? "--" : ctx.seed;
+      const science = summary.logistic_science_output;
+      const scienceText = science == null ? "green science: --" : "green science output: " + science;
+      document.getElementById("mapTruth").innerHTML =
+        "<b>WORLD · LIVE RCON</b> · " + (ctx.label || ctx.scope || "--")
+        + " · " + (world.entity_count || 0) + " entities"
+        + " · " + scienceText
+        + " · evidence ≠ global legacy state";
+    }).catch(() => {});
+  </script>
 </body>
 </html>

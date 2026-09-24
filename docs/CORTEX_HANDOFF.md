@@ -71,6 +71,30 @@ branch.
 Next run: seed 20261002, mode exploratory, using the same explicit release root and PYTHONPATH.
 Validate result and isolation before 20261003.
 
+Dashboard contract for F1-B:
+
+- scope: baseline:cortex_baseline_protocol_v1:exploratory:auto;
+- /api/context must resolve current/latest baseline seed;
+- world source remains live RCON;
+- no G37/G97 global selection may appear as current baseline evidence;
+- dashboard runtime is independent from the frozen scientific runtime.
+
+## Protocolo de retomada após interrupção
+
+Não inferir continuidade pela tela. Executar na ordem:
+
+1. git status em /srv/factorio-ai-lab;
+2. ler BUILD_INFO do runtime científico;
+3. ler BUILD_INFO do runtime do dashboard;
+4. confirmar factorio-ai-evolution inativo durante baseline;
+5. consultar /api/context;
+6. conferir manifest/result da última seed;
+7. conferir checkboxes deste handoff e do programa;
+8. executar somente a próxima seed ainda não marcada.
+
+Durante a série exploratória o runtime científico deve permanecer em
+95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac mesmo que source e dashboard avancem.
+
 ## Evidência de fechamento da F0
 
 F0: **PASS**.

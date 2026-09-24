@@ -38,13 +38,22 @@ def test_evolution_executes_the_immutable_current_release() -> None:
     assert "FACTORIO_AI_REQUIRE_CLEAN_PROMOTION=1" in environment
 
 
-def test_dashboard_reads_state_but_executes_release_code() -> None:
+def test_dashboard_reads_state_but_executes_its_own_release_code() -> None:
+    name = "factorio-ai-dashboard.service"
+    assert _single_directive(name, "WorkingDirectory") == "/srv/factorio-ai-lab"
     assert _single_directive(
-        "factorio-ai-dashboard.service", "WorkingDirectory"
-    ) == "/srv/factorio-ai-lab"
-    assert _single_directive(
-        "factorio-ai-dashboard.service", "ExecStart"
-    ) == "/srv/factorio-ai-runtime/current/scripts/run_dashboard.sh"
+        name, "ExecStart"
+    ) == "/srv/factorio-ai-dashboard-runtime/current/scripts/run_dashboard.sh"
+    environment = "\n".join(
+        line.strip()
+        for line in _unit_text(name).splitlines()
+        if line.startswith("Environment=")
+    )
+    assert "FACTORIO_AI_STATE_ROOT=/srv/factorio-ai-lab" in environment
+    assert (
+        "FACTORIO_AI_DASHBOARD_SCOPE="
+        "baseline:cortex_baseline_protocol_v1:exploratory:auto"
+    ) in environment
 
 
 def test_llm_has_a_host_memory_guard() -> None:
@@ -66,6 +75,18 @@ def test_deployer_requires_clean_source_and_embeds_build_provenance() -> None:
     assert '"dirty":False' in script
     assert 'current.next' in script
     assert 'runs/deployment.json' in script
+
+
+def test_dashboard_deployer_is_independent_and_attributable() -> None:
+    script = (ROOT / "scripts" / "deploy_dashboard.sh").read_text(encoding="utf-8")
+
+    assert 'git status --porcelain' in script
+    assert 'refusing dashboard deploy: source checkout is dirty' in script
+    assert 'FACTORIO_AI_DASHBOARD_RUNTIME_ROOT' in script
+    assert '/srv/factorio-ai-dashboard-runtime' in script
+    assert 'BUILD_INFO.json' in script
+    assert 'runs/dashboard_deployment.json' in script
+    assert 'current.next' in script
 
 
 def test_runtime_launchers_separate_code_from_state() -> None:

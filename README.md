@@ -14,6 +14,7 @@ com experiência sem receber do programador a sequência de ações que constitu
 > **F1 — integridade e isolamento:** [docs/CORTEX_PHASE1_INTEGRITY.md](docs/CORTEX_PHASE1_INTEGRITY.md)
 > **F1-B — protocolo da baseline:** [docs/CORTEX_PHASE1_BASELINE_PROTOCOL.md](docs/CORTEX_PHASE1_BASELINE_PROTOCOL.md)
 > **F1-B — seed 20261001:** [docs/CORTEX_PHASE1_BASELINE_SEED_20261001.md](docs/CORTEX_PHASE1_BASELINE_SEED_20261001.md)
+> **Dashboard / evidence scope:** [docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md](docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md)
 
 ## Estado do programa
 
@@ -117,6 +118,10 @@ A baseline pré-Cortex foi marcada no commit
 O runtime científico não executa mais diretamente o checkout de desenvolvimento. Releases limpas
 são materializadas por SHA em /srv/factorio-ai-runtime/releases/<sha> e o symlink current é
 trocado atomicamente; estado mutável permanece em /srv/factorio-ai-lab/runs.
+
+O dashboard possui runtime separado em /srv/factorio-ai-dashboard-runtime. Durante F1-B ele pode
+avançar sem alterar o runtime científico congelado da baseline. O evidence scope é declarado por
+FACTORIO_AI_DASHBOARD_SCOPE; mundo físico e evidência experimental são rotulados separadamente.
 
 ## Estrutura
 

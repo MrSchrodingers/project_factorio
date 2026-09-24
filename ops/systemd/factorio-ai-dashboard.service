@@ -11,7 +11,8 @@ WorkingDirectory=/srv/factorio-ai-lab
 Environment=HOME=/home/ti
 Environment=FACTORIO_AI_STATE_ROOT=/srv/factorio-ai-lab
 Environment=FACTORIO_AI_VENV_FLE=/srv/factorio-ai-lab/.venv-fle
-ExecStart=/srv/factorio-ai-runtime/current/scripts/run_dashboard.sh
+Environment=FACTORIO_AI_DASHBOARD_SCOPE=baseline:cortex_baseline_protocol_v1:exploratory:auto
+ExecStart=/srv/factorio-ai-dashboard-runtime/current/scripts/run_dashboard.sh
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true

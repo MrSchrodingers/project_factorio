@@ -816,6 +816,10 @@ a baseline corrigida e o isolamento operacional estarem concluídos.
 - [x] garantir restart do container Factorio;
 - [x] protocolo de backup/reset versionado;
 - [x] congelar conjunto de seeds de baseline;
+- [x] separar runtime do dashboard do runtime científico sob teste;
+- [x] declarar evidence scope do dashboard por arena/seed;
+- [x] impedir mistura de estado global legado com seed baseline isolada;
+- [x] rotular mapa como mundo RCON ao vivo e evidência como sandbox da seed;
 - [ ] produzir relatório estatístico da baseline.
 
 **Status F1-A:** **PASS — integridade e isolamento concluídos.** Evidência técnica em
@@ -826,6 +830,9 @@ docs/CORTEX_PHASE1_BASELINE_PROTOCOL.md.
 **F1-B progress:** 1/5 exploratory seeds valid. Seed 20261001 = partial_success;
 Logistic science failed with 33.3% physical processing coverage and no global-state leakage.
 Detailed evidence: docs/CORTEX_PHASE1_BASELINE_SEED_20261001.md.
+
+**Observability hardening:** dashboard evidence scope, map truth labels and component-isolated
+deployment are specified in docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md.
 
 **Evidence F1-A:** commits a3a50b5, f8437d5 e e5cd102; snapshot
 backups/cortex-f1-pre-20260924T031901Z; docs/audits/NUMERIC_DEFAULT_AUDIT_F1.md; artefatos de

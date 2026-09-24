@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Factorio AI Lab</title>
-  <link rel="stylesheet" href="/static/styles.css?v=eadb4d2ebef1">
+  <link rel="stylesheet" href="/static/styles.css?v=3ecaadacce97">
   <link rel="stylesheet" href="/static/map/style.css?v=c71c7bfce507">
 </head>
 <body>
@@ -43,16 +43,28 @@
       </div>
     </section>
 
+    <section class="card experiment-context" aria-label="Contexto experimental observado">
+      <div>
+        <span class="label">CONTEXTO EXPERIMENTAL</span>
+        <strong id="experimentContextTitle">resolvendo arena…</strong>
+        <small id="experimentContextDetail">Nenhum dado deve ser combinado entre arenas.</small>
+      </div>
+      <div class="experiment-context-truth">
+        <span id="worldTruthBadge" class="badge live">WORLD · LIVE RCON</span>
+        <span id="evidenceTruthBadge" class="badge neutral">EVIDENCE · --</span>
+      </div>
+    </section>
+
     <section class="card cortex-program" aria-label="Programa Cortex Research">
       <div class="cortex-program-head">
         <div>
           <span class="label">PROGRAMA CORTEX RESEARCH · CRA v0.1</span>
-          <h2>F1-A concluída · G37 aposentada · F1-B baseline pré-registrada</h2>
+          <h2 id="cortexPhaseTitle">F1-B · baseline corrigida em execução</h2>
           <small>O runner herdado permanece baseline; nenhum módulo Cortex possui autoridade de controle nesta fase.</small>
         </div>
         <div class="cortex-program-badges">
-          <span class="badge good">F1-A concluída</span><span class="badge good">G37 aposentada</span><span class="badge warn">F1-B pronta</span>
-          <span class="badge neutral">baseline 74a1bf9</span>
+          <span class="badge good">F1-A concluída</span><span class="badge good">G37 aposentada</span><span id="cortexPhaseBadge" class="badge warn">F1-B · 1/5</span>
+          <span id="baselineRuntimeBadge" class="badge neutral">runtime baseline --</span>
         </div>
       </div>
       <div class="cortex-track-grid">
@@ -703,7 +715,7 @@
     </details>
   </main>
 
-  <script src="/static/app.js?v=476a64def6d6"></script>
+  <script src="/static/app.js?v=6769cd096ae2"></script>
   <script src="/static/map/factory-map.js?v=fd8c84fe638e"></script>
 </body>
 </html>

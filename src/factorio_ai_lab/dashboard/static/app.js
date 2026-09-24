@@ -2,6 +2,7 @@ const $ = (id) => document.getElementById(id);
 
 const state = {
   status: {},
+  experimentContext: {},
   world: {},
   learning: { history: [], summary: {} },
   history: [],
@@ -1697,6 +1698,157 @@ function renderLearningObservatory() {
 }
 
 
+function renderExperimentContext() {
+  const context = state.experimentContext || {};
+  const summary = context.result_summary || {};
+  const baseline = context.kind === "baseline_seed";
+  const seed = context.seed == null ? "--" : String(context.seed);
+  const release = context.baseline_release || {};
+  const releaseCommit = String(release.commit || "--").slice(0, 8);
+  const failed = Array.isArray(summary.failed_stages) ? summary.failed_stages : [];
+  const science = summary.logistic_science_output;
+  const worldEntities = Number((state.world || {}).entity_count || 0);
+
+  setText(
+    "experimentContextTitle",
+    baseline
+      ? "Baseline isolada · seed " + seed + " · " + String(context.status || "--")
+      : String(context.label || "Global / legacy")
+  );
+  setText(
+    "experimentContextDetail",
+    baseline
+      ? "evidência: sandbox da seed · runtime " + releaseCommit
+        + " · mundo: RCON ao vivo · " + worldEntities + " entidades"
+        + (failed.length ? " · falhou: " + failed.join(", ") : "")
+        + (science !== null && science !== undefined
+          ? " · logistic science output " + formatNumber(science, 0)
+          : "")
+      : "estado global legado; não confundir com uma seed isolada"
+  );
+  setClassText(
+    "evidenceTruthBadge",
+    baseline ? "EVIDENCE · SEED " + seed : "EVIDENCE · GLOBAL",
+    baseline ? "badge good" : "badge neutral"
+  );
+  setClassText("worldTruthBadge", "WORLD · LIVE RCON", "badge live");
+
+  if (baseline) {
+    setText(
+      "cortexPhaseTitle",
+      "F1-B · baseline corrigida em execução · "
+        + (context.mode === "exploratory" ? "exploratória" : String(context.mode || ""))
+    );
+    setClassText(
+      "cortexPhaseBadge",
+      "F1-B · seed " + seed,
+      context.status === "completed" ? "badge good" : "badge live"
+    );
+    setClassText(
+      "baselineRuntimeBadge",
+      "runtime " + releaseCommit,
+      "badge neutral"
+    );
+  }
+}
+
+
+function renderBaselineEvolution(context, evolution) {
+  const summary = context.result_summary || {};
+  const challenger = evolution.challenger || {};
+  const fitness = challenger.fitness || {};
+  const promotion = evolution.promotion || null;
+  const seed = context.seed == null ? "--" : String(context.seed);
+
+  setClassText("generationBadge", "seed " + seed, "badge live");
+  setClassText("validationBadge", "BASELINE · isolated", "badge good");
+  setText(
+    "evolutionKpi",
+    seed + " · " + String(context.status || challenger.status || "--")
+  );
+  setText(
+    "evolutionKpiDetail",
+    "cold-start independente · sem champion herdado · runtime "
+      + String(((context.baseline_release || {}).commit) || "--").slice(0, 8)
+  );
+  setText("championLabel", "none · cold start");
+  setText("championFitness", "G37 retired · no incumbent inherited");
+  setText(
+    "challengerLabel",
+    "seed " + seed + " · " + String(challenger.run_id || summary.run_id || "--")
+  );
+  setText(
+    "challengerFitness",
+    challenger.fitness
+      ? contenderSummary(challenger)
+      : "collecting isolated baseline evidence"
+  );
+
+  if (promotion) {
+    setClassText(
+      "promotionLabel",
+      promotion.promoted ? "accepted" : "baseline observation retained",
+      promotion.promoted ? "good" : "warn"
+    );
+    const regressions = Array.isArray(promotion.regressions) ? promotion.regressions : [];
+    setText(
+      "promotionDetail",
+      regressions.length ? regressions.join(" · ") : String(promotion.reason || "--")
+    );
+  } else {
+    setClassText("promotionLabel", String(context.status || "running"), "warn");
+    setText("promotionDetail", "independent seed · no cross-seed promotion");
+  }
+
+  const gates = [
+    ["closed loop", summary.closed_loop_autonomy === true ? "pass" : "fail"],
+    [
+      "physical processing "
+        + formatNumber(Number(summary.physical_processing_coverage || 0) * 100, 0) + "%",
+      Number(summary.physical_processing_coverage || 0) >= 0.5 ? "pass" : "fail",
+    ],
+    [
+      "manual logistics "
+        + (summary.manual_logistics_calls == null ? "--" : summary.manual_logistics_calls),
+      Number(summary.manual_logistics_calls || 0) === 0 ? "pass" : "fail",
+    ],
+    [
+      "logistic science "
+        + (summary.logistic_science_output == null
+          ? "--"
+          : formatNumber(summary.logistic_science_output, 0)),
+      Number(summary.logistic_science_output || 0) > 0 ? "pass" : "fail",
+    ],
+    ["isolation", "pass"],
+  ];
+  const gateContainer = $("survivalGates");
+  if (gateContainer) {
+    gateContainer.innerHTML = gates.map(([label, cls]) =>
+      '<span class="survival-gate ' + cls + '">' + escapeHtml(label) + '</span>'
+    ).join("");
+  }
+
+  const historyContainer = $("generationHistory");
+  if (historyContainer) {
+    historyContainer.innerHTML =
+      '<article class="generation-node '
+      + (context.status === "completed" ? "rejected" : "evaluating")
+      + '"><span>seed ' + escapeHtml(seed) + '</span><strong>'
+      + escapeHtml(String(context.status || "--"))
+      + '</strong><small>'
+      + escapeHtml(
+        String(summary.completed_stage_count ?? "--") + " stages · "
+        + (summary.bottleneck || "running")
+        + " · autonomy "
+        + (summary.autonomy_score == null
+          ? "--"
+          : formatNumber(Number(summary.autonomy_score) * 100, 0) + "%")
+      )
+      + '</small></article>';
+  }
+}
+
+
 function renderEvolution() {
   const researchEvolution = (state.research && state.research.evolution) || {};
   const evolution = Object.assign(
@@ -1706,6 +1858,11 @@ function renderEvolution() {
   );
   const generation = Number(evolution.generation || 0);
   const continuousLoop = evolution.continuous_loop || null;
+  const experimentContext = state.experimentContext || {};
+  if (experimentContext.kind === "baseline_seed") {
+    renderBaselineEvolution(experimentContext, evolution);
+    return;
+  }
   setClassText(
     "generationBadge",
     generation ? "generation " + generation : "generation --",
@@ -1976,12 +2133,19 @@ function renderResearchCockpit() {
   const activeStage = activeIndex >= 0 ? curriculum[activeIndex] : null;
   const totalStages = curriculum.length;
 
+  const experimentContext = state.experimentContext || {};
+  const baselineSeed = experimentContext.kind === "baseline_seed"
+    ? experimentContext.seed
+    : null;
   setText(
     "generationHealthTitle",
-    generation
-      ? "G" + generation + " · "
+    baselineSeed !== null && baselineSeed !== undefined
+      ? "seed " + String(baselineSeed) + " · "
         + (activeStage ? String(activeStage.name) : String(research.status || "idle"))
-      : "G-- · waiting"
+      : generation
+        ? "G" + generation + " · "
+          + (activeStage ? String(activeStage.name) : String(research.status || "idle"))
+        : "G-- · waiting"
   );
   const running = ["starting", "running", "learning", "validating"].includes(
     String(research.status || "")
@@ -2058,12 +2222,13 @@ function renderResearchCockpit() {
   );
 
   const healthDetail = running
-    ? "G" + String(generation || "?")
-      + " is collecting evidence · "
+    ? (baselineSeed !== null && baselineSeed !== undefined
+        ? "seed " + String(baselineSeed) + " is collecting isolated evidence · "
+        : "G" + String(generation || "?") + " is collecting evidence · ")
       + (activeStage
         ? "current gate: " + String(activeStage.name)
         : "initializing")
-      + (champion
+      + (baselineSeed === null && champion
         ? " · incumbent G" + String(champion.generation || "?")
         : "")
     : promotion
@@ -3555,20 +3720,26 @@ function updateKpis() {
   const runner = status.research_runner || {};
   const research = state.research || {};
   const arena = research.arena || {};
+  const context = state.experimentContext || {};
+  const baselineContext = context.kind === "baseline_seed";
   const arenaMode = String(arena.mode || "unknown");
-  const arenaLabel = arenaMode === "open_play"
-    ? "OPEN PLAY · tech tree real"
-    : arenaMode === "lab_play"
-      ? "LAB ARENA · accelerated"
-      : "arena --";
+  const arenaLabel = baselineContext
+    ? "BASELINE · seed " + String(context.seed ?? "--")
+    : arenaMode === "open_play"
+      ? "OPEN PLAY · tech tree real"
+      : arenaMode === "lab_play"
+        ? "LAB ARENA · accelerated"
+        : "arena --";
   setClassText(
     "arenaBadge",
     arenaLabel,
-    arenaMode === "open_play"
-      ? "badge live"
-      : arenaMode === "lab_play"
-        ? "badge neutral"
-        : "badge neutral"
+    baselineContext
+      ? "badge good"
+      : arenaMode === "open_play"
+        ? "badge live"
+        : arenaMode === "lab_play"
+          ? "badge neutral"
+          : "badge neutral"
   );
   const updatedAt = Date.parse(research.updated_at || "");
   const researchAgeS = Number.isFinite(updatedAt)
@@ -3601,9 +3772,11 @@ function updateKpis() {
           : runnerPhase === "selection_transition"
             ? "selection / transition"
             : "generation active"
-      : generationRejected
-        ? "generation rejected"
-        : generationDone
+      : baselineContext && context.status === "completed"
+        ? "baseline seed completed"
+        : generationRejected
+          ? "generation rejected"
+          : generationDone
           ? "generation complete"
           : researchStatus === "completed"
             ? "research complete"
@@ -3752,6 +3925,7 @@ function updateKpis() {
 
 function applyPayload(payload) {
   if (payload.status) state.status = payload.status;
+  if (payload.experiment_context) state.experimentContext = payload.experiment_context;
   if (payload.world) state.world = payload.world;
   if (payload.learning) state.learning = payload.learning;
   if (payload.history) state.history = payload.history;
@@ -3771,6 +3945,7 @@ function applyPayload(payload) {
   if (payload.datasets) state.datasets = payload.datasets;
 
   updateKpis();
+  renderExperimentContext();
   updateMission();
   updateEntityMix();
   renderWorldHotspots();
@@ -3818,6 +3993,7 @@ async function loadInitialState() {
     "/api/evolution",
     "/api/knowledge",
     "/api/datasets",
+    "/api/context",
   ];
   const responses = await Promise.all(paths.map((path) => fetch(path)));
   const payloads = await Promise.all(responses.map((response) => response.json()));
@@ -3838,6 +4014,7 @@ async function loadInitialState() {
     evolution: payloads[13],
     knowledge: payloads[14],
     datasets: payloads[15],
+    experiment_context: payloads[16],
   });
 }
 

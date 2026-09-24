@@ -14,6 +14,7 @@ from math import ceil, isfinite
 from pathlib import Path
 from typing import Any, ClassVar
 
+from factorio_ai_lab.dashboard.context import discover_experiment_context
 from factorio_ai_lab.dashboard.rendering import WorldFrameRenderer
 from factorio_ai_lab.learning.autonomy import evaluate_factory_autonomy
 from factorio_ai_lab.learning.discovery import (
@@ -37,7 +38,7 @@ from factorio_ai_lab.learning.telemetry import (
 )
 from factorio_ai_lab.learning.telemetry import compact_telemetry_sample
 from factorio_ai_lab.paths import CODE_ROOT as PROJECT_ROOT
-from factorio_ai_lab.paths import RUNS_DIR
+from factorio_ai_lab.paths import RUNS_DIR, STATE_ROOT, code_revision
 from factorio_ai_lab.planning.dependency_plan import (
     CapacityRequirement,
     DependencyPlan,
@@ -2509,6 +2510,39 @@ class DashboardState:
     def close(self) -> None:
         self.factorio.close()
 
+    def experiment_context_data(self) -> dict[str, Any]:
+        return discover_experiment_context(STATE_ROOT)
+
+    def evidence_runs_dir(self) -> Path:
+        context = self.experiment_context_data()
+        if context.get("kind") == "baseline_seed":
+            raw = context.get("runs_dir")
+            if isinstance(raw, str) and raw:
+                return Path(raw)
+            protocol = str(context.get("protocol") or "unknown")
+            mode = str(context.get("mode") or "unknown")
+            return (
+                STATE_ROOT
+                / "baseline_runs"
+                / protocol
+                / mode
+                / "__missing__"
+                / "runs"
+            )
+        return RUNS_DIR
+
+    def evidence_reports_dir(self) -> Path:
+        context = self.experiment_context_data()
+        if context.get("kind") == "baseline_seed":
+            return self.evidence_runs_dir() / "generation_reports"
+        return self.generation_reports_dir
+
+    def evidence_history_path(self) -> Path:
+        context = self.experiment_context_data()
+        if context.get("kind") == "baseline_seed":
+            return self.evidence_runs_dir() / "evolution_history.jsonl"
+        return self.evolution_history_path
+
     def _cached_artifact(
         self,
         key: str,
@@ -2655,10 +2689,14 @@ class DashboardState:
         }
 
     def status(self) -> dict[str, Any]:
+        revision = code_revision()
+        commit = revision.get("commit")
         return {
             "project": "Factorio AI Lab",
-            "git_sha": _git_value("rev-parse", "--short", "HEAD"),
-            "branch": _git_value("branch", "--show-current"),
+            "git_sha": str(commit)[:7] if commit else None,
+            "branch": revision.get("branch"),
+            "code_revision": revision,
+            "experiment_context": self.experiment_context_data(),
             "uptime_s": round(time.time() - self.started_at, 1),
             "factorio": {
                 "connected": self.factorio.connected(),
@@ -2752,6 +2790,7 @@ class DashboardState:
         return {
             "timestamp": point["timestamp"],
             "status": self.status(),
+            "experiment_context": self.experiment_context_data(),
             "world": world,
             "history": self.history_data(),
             "learning": self.learning_data(),
@@ -2890,7 +2929,7 @@ class DashboardState:
             return list(self.history)
 
     def active_run_data(self) -> dict[str, Any]:
-        path = RUNS_DIR / "active_run.json"
+        path = self.evidence_runs_dir() / "active_run.json"
         if not path.exists():
             return {}
         try:
@@ -2900,7 +2939,7 @@ class DashboardState:
         return loaded if isinstance(loaded, dict) else {}
 
     def research_data(self) -> dict[str, Any]:
-        path = RUNS_DIR / "research_state.json"
+        path = self.evidence_runs_dir() / "research_state.json"
         if not path.exists():
             return {
                 "status": "idle",
@@ -2914,12 +2953,75 @@ class DashboardState:
             return {"status": "degraded", "error": "invalid research_state.json"}
         return loaded if isinstance(loaded, dict) else {}
 
+    def _baseline_evolution_data(
+        self,
+        *,
+        context: dict[str, Any],
+        research: dict[str, Any],
+    ) -> dict[str, Any]:
+        seed_dir_raw = context.get("seed_dir")
+        seed_dir = Path(seed_dir_raw) if isinstance(seed_dir_raw, str) else None
+        result: dict[str, Any] = {}
+        if seed_dir is not None:
+            result_path = seed_dir / "result.json"
+            if result_path.exists():
+                try:
+                    loaded = json.loads(result_path.read_text(encoding="utf-8"))
+                    if isinstance(loaded, dict):
+                        result = loaded
+                except (OSError, json.JSONDecodeError):
+                    result = {}
+
+        challenger = result.get("challenger")
+        if not isinstance(challenger, dict):
+            challenger = {
+                "run_id": research.get("run_id"),
+                "generation": 1,
+                "status": context.get("status"),
+                "fitness": None,
+            }
+        else:
+            challenger = dict(challenger)
+            challenger.setdefault("status", context.get("status"))
+
+        decision = result.get("decision")
+        if not isinstance(decision, dict):
+            decision = None
+
+        report = result or None
+        return {
+            "scheme": "independent_baseline_seed",
+            "generation": int(challenger.get("generation", 1) or 1),
+            "seed": context.get("seed"),
+            "protocol": context.get("protocol"),
+            "mode": context.get("mode"),
+            "context_status": context.get("status"),
+            "champion": None,
+            "validated_champion": None,
+            "challenger": challenger,
+            "promotion": decision,
+            "history": [],
+            "history_lines_found": 0,
+            "history_lines_unreadable": 0,
+            "continuous_loop": None,
+            "latest_report": report,
+            "learning_artifacts": {
+                "strategy": None,
+                "robustness": None,
+                "counterexamples": [],
+                "counterexample_count": 0,
+            },
+        }
+
     def evolution_data(
         self,
         *,
         research: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         research = research if research is not None else self.research_data()
+        context = self.experiment_context_data()
+        if context.get("kind") == "baseline_seed":
+            return self._baseline_evolution_data(context=context, research=research)
         current = research.get("evolution", {})
         # One malformed line used to discard the whole history: the parse was
         # wrapped in a single try and the handler answered with an empty list,
@@ -2927,14 +3029,14 @@ class DashboardState:
         # The loop appends to this file while the dashboard serves it, which
         # makes a half-written last line an expected state rather than a
         # corruption. The shared reader skips and counts the bad line instead.
-        history_path = self.evolution_history_path
+        history_path = self.evidence_history_path()
         history, history_found, history_unreadable, _ = _read_evolution_history(
             history_path
         )
         history = history[-16:]
 
         latest_report: dict[str, Any] | None = None
-        report_dir = RUNS_DIR / "generation_reports"
+        report_dir = self.evidence_reports_dir()
         if report_dir.exists():
             try:
                 report_candidates = sorted(
@@ -2951,8 +3053,9 @@ class DashboardState:
             except (OSError, json.JSONDecodeError):
                 latest_report = None
 
-        champion_path = RUNS_DIR / "evolution_champion.json"
-        validated_path = RUNS_DIR / "open_play_validated_champion.json"
+        evidence_runs = self.evidence_runs_dir()
+        champion_path = evidence_runs / "evolution_champion.json"
+        validated_path = evidence_runs / "open_play_validated_champion.json"
         champion: dict[str, Any] = {}
         validated: dict[str, Any] = {}
         if champion_path.exists():
@@ -2970,7 +3073,7 @@ class DashboardState:
             except (OSError, json.JSONDecodeError):
                 validated = {}
 
-        loop_state_path = RUNS_DIR / "evolution_loop_state.json"
+        loop_state_path = evidence_runs / "evolution_loop_state.json"
         loop_state: dict[str, Any] = {}
         if loop_state_path.exists():
             try:
@@ -2989,7 +3092,7 @@ class DashboardState:
                 ("open_play_strategy.json", "strategy"),
                 ("open_play_robustness_state.json", "robustness"),
             ):
-                path = RUNS_DIR / artifact_name
+                path = evidence_runs / artifact_name
                 if not path.exists():
                     continue
                 try:
@@ -3003,7 +3106,7 @@ class DashboardState:
                 else:
                     robustness = loaded
 
-            counterexample_path = RUNS_DIR / "counterexamples.jsonl"
+            counterexample_path = evidence_runs / "counterexamples.jsonl"
             if counterexample_path.exists():
                 try:
                     for raw_line in counterexample_path.read_text(
@@ -3082,7 +3185,7 @@ class DashboardState:
         cache would eventually present a curve older than the generation being
         watched as the current one.
         """
-        directory = self.generation_reports_dir if reports_dir is None else Path(reports_dir)
+        directory = self.evidence_reports_dir() if reports_dir is None else Path(reports_dir)
         key = str(directory)
         fingerprint = _generation_reports_fingerprint(directory)
         cached = self._survival_cache.get(key)
@@ -3105,7 +3208,7 @@ class DashboardState:
         cache would present findings older than the generation on screen as
         the current ones.
         """
-        path = self.evolution_history_path if history_path is None else Path(history_path)
+        path = self.evidence_history_path() if history_path is None else Path(history_path)
         size = DISCOVERY_PAYLOAD_LIMIT if limit is None else int(limit)
         key = f"{path}|{size}"
         fingerprint = _evolution_history_fingerprint(path)
@@ -3129,7 +3232,7 @@ class DashboardState:
         cause measured two generations ago as the current one.
         """
         directory = (
-            self.generation_reports_dir
+            self.evidence_reports_dir()
             if reports_dir is None
             else Path(reports_dir)
         )
@@ -3214,13 +3317,14 @@ class DashboardState:
         return payload
 
     def knowledge_data(self, limit: int = 12) -> dict[str, Any]:
-        cache_key = f"knowledge-data-{limit}"
+        runs_dir = self.evidence_runs_dir()
+        cache_key = f"knowledge-data-{runs_dir}-{limit}"
         cached = self._artifact_cache.get(cache_key)
         now = time.time()
         if cached is not None and now - cached[0] <= 5.0:
             return cached[1]
 
-        path = RUNS_DIR / "knowledge.jsonl"
+        path = runs_dir / "knowledge.jsonl"
         if not path.exists():
             return {
                 "count": 0,
@@ -3251,6 +3355,7 @@ class DashboardState:
         )
         auditable = verified_count + fallback_count
         payload = {
+            "scope": self.experiment_context_data().get("scope"),
             "count": len(lines),
             "lessons": lessons,
             "verified_count": verified_count,
