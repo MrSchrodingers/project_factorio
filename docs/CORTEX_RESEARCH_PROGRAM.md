@@ -938,7 +938,31 @@ script, purpose e refusal semantics dos handlers legados, sem world mutation. Ev
 
 **Decision F2-C:** **PASS parcial de F2.** O gap replicado da F1 deixou de ser unbound quando há evidence material suficiente. Transactional execution universal continua aberta; buffer contaminado permanece refusal até ResourceSurvey/mining-target evidence.
 
-**Next:** F2-D — integrar ResourceSurvey para material identity e compilar ProcessingBranch em Prepared structural action. Ainda sem autonomous live authority.
+**F2-D progress:** **IMPLEMENTADO / gate integral pendente.** ResourceSurvey sobre o footprint do
+producer agora tem precedência causal sobre downstream buffer contents. Buffer contaminado não
+destrói identidade quando o recurso minerado é observado; mixed-resource footprint permanece
+refusal e não há majority heuristic. ProcessingBranch compila para PreparedStructuralAction
+versionado e inerte, sem TransactionalFLEExecutor.
+
+**Live shadow evidence F2-D:** targets automáticos u1778/u1838/u1839. u1778 foi identificado como
+coal por mining_resource mesmo com buffer vazio; u1838 e u1839 foram identificados como iron-ore.
+Os dois iron producers foram agrupados em um branch iron-ore -> iron-plate / stone-furnace,
+placement aproximadamente (30,85), delivery por inserter e PreparedStructuralAction ready=true.
+Coal permaneceu refusal estrutural por ausência de transformação direta. Artifact:
+runs/audits/cortex_f2d_live_structural_shadow.json.
+
+**Evidence F2-D:** docs/CORTEX_PHASE2_STRUCTURAL_PREPARATION.md;
+src/factorio_ai_lab/cortex/structural.py;
+src/factorio_ai_lab/cortex/structural_prepare.py;
+tests/test_cortex_structural.py; phase-state/dashboard context atualizados.
+
+**Tests F2-D:** 44 focused PASS; 1340 core/FLE PASS + 2 PyTorch PASS; Ruff/static checks e frontend TypeScript/Vite build PASS.
+
+**Commit F2-D:** `19e0c4fb57f7aa8dbd34c272324383617f7916d1` — `feat: adiciona identidade causal e preparação estrutural`.
+
+**Decision F2-D:** **PASS parcial de F2.** Resource identity causal e PreparedStructuralAction estão validados em SHADOW. F2-E está autorizada somente para controlled transactional execution com authority explícita, rollback e hard postconditions medidas.
+
+**Next:** F2-E — controlled transactional execution de PreparedStructuralAction via TransactionalFLEExecutor, com postconditions verificadas e rollback. Sem autonomous continuous authority.
 
 **Exit Gate F2:** o agente pode montar uma cadeia funcional escolhendo primitivas/options por uma
 API genérica, sem caminho codificado por estágio.

@@ -6,7 +6,7 @@
 ## Estado atual
 
 - Programa: Cortex Research Architecture v0.1
-- Fase: **F2-C concluída — F2-D autorizada; authority ainda SHADOW**
+- Fase: **F2-D concluída — F2-E autorizada; authority live contínua ainda bloqueada**
 - Branch: `research/cortex-v1`
 - Baseline imutável de origem: `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 - Tag baseline publicada: `cortex-pre-research-baseline-20260923`
@@ -46,31 +46,41 @@ silenciosamente pelo commit da F0**.
 
 ## Próxima ação
 
-**F2-D — ResourceSurvey/mining identity + Prepared structural action.**
+**F2-E — controlled transactional execution de PreparedStructuralAction.**
 
-F2-C fechou o primeiro capability estrutural não existente no runner legado:
+F2-D está formalmente concluída.
 
-- implementation commit: `cacf3b7eae8e8a3a8c6b9e5471ec942ba7548e0f`;
-- 116 focused PASS;
-- 1333 core/FLE PASS + 2 PyTorch PASS;
-- live shadow audit sobre 125 entidades;
-- u1839: iron-ore -> iron-plate / stone-furnace / placement+inserter válido;
-- u1778: refusal por buffer vazio;
-- u1838: refusal por buffer contaminado coal + iron-ore;
-- nenhuma live authority concedida.
+Evidência:
 
-Documento: `docs/CORTEX_PHASE2_STRUCTURAL_PLANNING.md`.
+- implementation commit: 19e0c4fb57f7aa8dbd34c272324383617f7916d1;
+- 44 focused PASS;
+- 1340 core/FLE PASS;
+- 2 PyTorch PASS;
+- frontend TypeScript/Vite build PASS;
+- live shadow audit: runs/audits/cortex_f2d_live_structural_shadow.json;
+- u1778 identificado causalmente como coal mesmo com buffer vazio;
+- u1838 desambiguado de coal + iron-ore para iron-ore por ResourceSurvey;
+- u1839 identificado como iron-ore;
+- branch agregado iron-ore -> iron-plate / stone-furnace;
+- PreparedStructuralAction ready=true;
+- world_mutation=false;
+- scientific runtime F1 continua 95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac, dirty=false.
 
-Próximo bloco seguro:
+Documento canônico:
+docs/CORTEX_PHASE2_STRUCTURAL_PREPARATION.md
 
-1. integrar ResourceSurvey ou mining-resource evidence ao material resolver;
-2. desambiguar producer buffer contaminado por evidência causal, nunca majority heuristic;
-3. compilar ProcessingBranch pronto em Prepared structural action;
-4. definir purpose, measurement keys e code contract;
-5. parity/invariant tests sem chamar TransactionalFLEExecutor;
-6. só depois discutir controlled EXECUTE authority.
+Primeiro bloco seguro de F2-E:
 
-Não criar handler específico de green science. Não executar seeds confirmatórias 20261101–20261110. Curriculum runner permanece baseline.
+1. criar adapter que consome PreparedStructuralAction;
+2. exigir ActionAuthority.EXECUTE explicitamente;
+3. compilar operações semânticas para FLE usando TransactionalFLEExecutor;
+4. medir todas hard postconditions;
+5. rollback em postcondition failure;
+6. executar primeiro somente em canary/replay isolado;
+7. comparar com shadow plan e registrar ActionResult;
+8. não conceder continuous autonomous authority.
+
+Não executar seeds confirmatórias 20261101–20261110. Não criar handler específico de green science.
 
 ## Protocolo de retomada após interrupção
 

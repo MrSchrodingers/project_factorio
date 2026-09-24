@@ -22,6 +22,7 @@ com experiência sem receber do programador a sequência de ações que constitu
 > **F2 — Action Ontology:** [docs/CORTEX_PHASE2_ACTION_ONTOLOGY.md](docs/CORTEX_PHASE2_ACTION_ONTOLOGY.md)
 > **F2-B — Legacy parity:** [docs/CORTEX_PHASE2_LEGACY_PARITY.md](docs/CORTEX_PHASE2_LEGACY_PARITY.md)
 > **F2-C — Structural planning:** [docs/CORTEX_PHASE2_STRUCTURAL_PLANNING.md](docs/CORTEX_PHASE2_STRUCTURAL_PLANNING.md)
+> **F2-D — Resource identity / preparation:** [docs/CORTEX_PHASE2_STRUCTURAL_PREPARATION.md](docs/CORTEX_PHASE2_STRUCTURAL_PREPARATION.md)
 > **F1-B — storage hardening:** [docs/CORTEX_F1_STORAGE_HARDENING.md](docs/CORTEX_F1_STORAGE_HARDENING.md)
 > **Dashboard / evidence scope:** [docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md](docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md)
 > **Dashboard / tmp hardening:** [docs/CORTEX_DASHBOARD_TMP_HARDENING.md](docs/CORTEX_DASHBOARD_TMP_HARDENING.md)
@@ -29,10 +30,9 @@ com experiência sem receber do programador a sequência de ações que constitu
 
 ## Estado do programa
 
-**Cortex Research Architecture v0.1 — F2-C ativa em SHADOW. F1 permanece congelada como
-baseline 5/5; ontology, parity adapters e o primeiro structural processing planner existem sem
-nova live authority. O próximo gate é F2-D: ResourceSurvey + prepared structural adapter antes
-de qualquer execução transacional live.**
+**Cortex Research Architecture v0.1 — F2-D concluída em SHADOW. ResourceSurvey fornece material
+identity causal e ProcessingBranch compila para PreparedStructuralAction inerte. F2-E está
+autorizada apenas como controlled transactional execution; continuous autonomous authority continua bloqueada.**
 
 As seeds confirmatórias 20261101–20261110 permanecem congeladas e não executadas; serão usadas
 posteriormente para avaliação pareada do Cortex, sem tuning nelas.
