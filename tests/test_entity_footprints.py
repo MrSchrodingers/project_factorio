@@ -8,7 +8,7 @@ prototypes), not from memory.
 import json
 
 from factorio_ai_lab.domain.state import GridPoint
-from factorio_ai_lab.experiments.curriculum_runner import _runtime_entity_footprints
+from factorio_ai_lab.instrumentation.runtime import runtime_entity_footprints
 from factorio_ai_lab.planning.astar import rectangular_bounds, weighted_astar
 from factorio_ai_lab.planning.footprints import (
     blocked_tiles,
@@ -192,7 +192,7 @@ def test_runtime_footprints_reuse_the_dashboard_prototype_command():
     from factorio_ai_lab.dashboard.state import FactorioObserver
 
     instance = _FakeInstance(json.dumps(RUNTIME_PAYLOAD))
-    footprints = _runtime_entity_footprints(instance)
+    footprints = runtime_entity_footprints(instance)
 
     assert footprints["assembling-machine-1"] == (3, 3)
     assert footprints["burner-mining-drill"] == (2, 2)
@@ -200,10 +200,18 @@ def test_runtime_footprints_reuse_the_dashboard_prototype_command():
 
 
 def test_runtime_footprints_degrade_to_the_static_table_when_rcon_fails():
-    assert _runtime_entity_footprints(_FakeInstance(OSError("rcon down"))) == {}
-    assert _runtime_entity_footprints(_FakeInstance("")) == {}
-    assert _runtime_entity_footprints(_FakeInstance("not json")) == {}
-    assert _runtime_entity_footprints(object()) == {}
+    assert runtime_entity_footprints(_FakeInstance(OSError("rcon down"))) == {}
+    assert runtime_entity_footprints(_FakeInstance("")) == {}
+    assert runtime_entity_footprints(_FakeInstance("not json")) == {}
+    assert runtime_entity_footprints(object()) == {}
 
     # With no runtime answer the static table still blocks the real footprint.
     assert entity_tiles(entity("assembling-machine-1", 5.5, 5.5), {}) == square(4, 4, 3, 3)
+
+def test_legacy_curriculum_footprint_adapter_delegates_to_generic_instrument():
+    from factorio_ai_lab.experiments.curriculum_runner import (
+        _runtime_entity_footprints,
+    )
+
+    instance = _FakeInstance(json.dumps(RUNTIME_PAYLOAD))
+    assert _runtime_entity_footprints(instance) == runtime_entity_footprints(instance)

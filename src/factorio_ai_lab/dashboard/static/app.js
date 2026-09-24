@@ -1750,8 +1750,11 @@ function renderExperimentContext() {
     const deliveryActuatorPhase = phase2Checkpoint.startsWith("F2-F4");
     const deliveryActuatorRunner = phase2Checkpoint === "F2-F4B";
     const deliveryActuatorCanary = phase2Checkpoint === "F2-F4C";
+    const runnerIndependencePhase = phase2Checkpoint.startsWith("F2-G");
+    const useDeliveryCanaryEvidence = deliveryActuatorCanary
+      || runnerIndependencePhase;
     const useFunctionalCanaryEvidence = functionalCanary || deliveryActuatorPhase;
-    const canary = deliveryActuatorCanary
+    const canary = useDeliveryCanaryEvidence
       ? (cortexPhase.phase2_delivery_actuator_canary || {})
       : (useFunctionalCanaryEvidence
         ? (cortexPhase.phase2_functional_canary || {})
@@ -1763,14 +1766,16 @@ function renderExperimentContext() {
     const actionStatus = String(canary.action_status || canary.status || "--");
     const canaryRejected = actionStatus === "rejected";
     const canaryAccepted = actionStatus === "accepted";
-    const canaryUnsustained = deliveryActuatorCanary
+    const canaryUnsustained = useDeliveryCanaryEvidence
       && canaryAccepted
       && canary.sustained_operation === false;
 
     setText(
       "cortexPhaseTitle",
       seriesComplete
-        ? (deliveryActuatorCanary
+        ? (runnerIndependencePhase
+          ? "F2-G1 · runner independence · SHADOW"
+          : (deliveryActuatorCanary
           ? (canaryUnsustained
             ? "F2-F4C · functional accept · sustentabilidade não provada"
             : "F2-F4C · delivery actuator canary evidence")
@@ -1784,14 +1789,16 @@ function renderExperimentContext() {
             ? phase2Checkpoint + " · controlled transaction evidence"
             : (dependencyComposed
             ? "F2-F2 · fuel dependency composed · canary pending"
-            : phase2Checkpoint + " · Cortex research · SHADOW"))))))
+            : phase2Checkpoint + " · Cortex research · SHADOW")))))))
         : "F1-B · baseline corrigida em execução · "
           + (context.mode === "exploratory" ? "exploratória" : String(context.mode || ""))
     );
     setClassText(
       "cortexPhaseBadge",
       seriesComplete
-        ? (deliveryActuatorCanary
+        ? (runnerIndependencePhase
+          ? "F2-G1 · generic runtime instrumentation"
+          : (deliveryActuatorCanary
           ? (canaryUnsustained
             ? "F2-F4C · output funcional · final no_fuel"
             : "F2-F4C · canary evidence · v3")
@@ -1803,7 +1810,7 @@ function renderExperimentContext() {
             ? "F2-F3 · rollback evidence"
             : (dependencyComposed
             ? "F2-F2 · typed fuel · v2"
-            : phase2Checkpoint + (controlledExecution ? " · evidence" : " · shadow"))))))
+            : phase2Checkpoint + (controlledExecution ? " · evidence" : " · shadow")))))))
         : (configured
           ? "F1-B · " + completed + "/" + configured
           : "F1-B · seed " + seed),
@@ -1814,8 +1821,8 @@ function renderExperimentContext() {
 
     setText(
       "cortexCanaryLabel",
-      deliveryActuatorCanary
-        ? "F2-F4C · DELIVERY ACTUATOR CANARY"
+      useDeliveryCanaryEvidence
+        ? "F2-F4C · ÚLTIMO CANÁRIO FUNCIONAL"
         : (useFunctionalCanaryEvidence
           ? "F2-F3 · ÚLTIMO CANÁRIO FUNCIONAL"
           : "F2-E · TRANSAÇÃO CONTROLADA")
@@ -1838,7 +1845,7 @@ function renderExperimentContext() {
           + String(candidate.processor_status || "--")
           + " · output "
           + formatNumber(candidate.processor_output, 2)
-          + (deliveryActuatorCanary && canary.actuator
+          + (useDeliveryCanaryEvidence && canary.actuator
             ? " · actuator " + String(canary.actuator)
               + (canary.actuator_fuel ? " · fuel " + String(canary.actuator_fuel) : "")
               + (canaryUnsustained

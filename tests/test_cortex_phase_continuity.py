@@ -965,3 +965,17 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
     assert canary["sustainability_classification"] == (
         "functional_accept_terminal_no_fuel"
     )
+
+    (docs/"CORTEX_PHASE2_RUNNER_INDEPENDENCE.md").write_text(
+        "# F2-G1\n"
+    )
+    g1=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert g1["phase2_checkpoint"] == "F2-G1"
+    assert g1["phase2_runner_independence"]["exists"] is True
+    assert (
+        g1["phase2_delivery_actuator_canary"]["classification"]
+        == "functional_accept"
+    )

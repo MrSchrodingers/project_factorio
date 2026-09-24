@@ -14,6 +14,7 @@ from typing import Any
 from factorio_ai_lab.agents.evolution_advisor import propose_evolution_advice
 from factorio_ai_lab.agents.llm_router import default_free_router
 from factorio_ai_lab.domain.state import GridPoint
+from factorio_ai_lab.instrumentation.runtime import runtime_entity_footprints
 from factorio_ai_lab.integrations.fle import (
     TransactionalFLEExecutor,
     fast_reposition,
@@ -87,7 +88,6 @@ from factorio_ai_lab.planning.footprints import (
     entity_footprint,
     entity_name,
     entity_tiles,
-    prototype_footprints,
 )
 from factorio_ai_lab.planning.fuel import (
     BURNER_MINING_DRILL,
@@ -3410,26 +3410,9 @@ def _supply_log_rows(raw: Any) -> list[dict[str, Any]] | None:
 
 
 def _runtime_entity_footprints(instance: Any) -> dict[str, tuple[int, int]]:
-    """Tile footprints for every placeable entity, straight from the runtime.
+    """Compatibility wrapper for the legacy curriculum baseline."""
 
-    Reuses the dashboard prototype command over the RCON client this stage
-    already holds, so the Lua that reads ``prototypes.entity`` is stated once
-    in the codebase. Best effort by design: any RCON or payload failure
-    returns an empty map and the caller falls back to the ``tile_dimensions``
-    the entity snapshot carries, then to the static table in
-    ``factorio_ai_lab.planning.footprints``.
-    """
-    try:
-        from factorio_ai_lab.dashboard.state import FactorioObserver
-
-        raw = instance.rcon_client.send_command(
-            FactorioObserver._ENTITY_PROTOTYPE_COMMAND
-        )
-        if not raw:
-            return {}
-        return prototype_footprints(json.loads(raw))
-    except (AttributeError, ImportError, OSError, TypeError, ValueError):
-        return {}
+    return runtime_entity_footprints(instance)
 
 
 def _runtime_crafting_speed(instance: Any, machine: str) -> float | None:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from factorio_ai_lab.domain.state import GridPoint
@@ -15,6 +17,7 @@ from scripts.run_cortex_structural_canary import (
     validate_canary_seed,
 )
 
+ROOT = Path(__file__).resolve().parents[1]
 
 def test_default_canary_seed_is_outside_confirmatory_holdout() -> None:
     assert DEFAULT_SEED not in CONFIRMATORY_SEEDS
@@ -164,3 +167,13 @@ def test_runner_delivery_glue_passes_fail_closed_power_to_planner(monkeypatch) -
     assert calls["electric_power_available"] is False
     assert calls["horizon_s"] == 10.0
     assert result is sentinel
+
+def test_cortex_canary_does_not_import_curriculum_runner() -> None:
+    source = (ROOT / "scripts" / "run_cortex_structural_canary.py").read_text(
+        encoding="utf-8"
+    )
+    assert "factorio_ai_lab.experiments.curriculum_runner" not in source
+    assert (
+        "factorio_ai_lab.instrumentation.runtime import "
+        "runtime_entity_footprints"
+    ) in source

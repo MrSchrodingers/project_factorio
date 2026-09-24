@@ -29,7 +29,7 @@ from factorio_ai_lab.cortex.structural import plan_processing_for_buffered_outpu
 from factorio_ai_lab.cortex.structural_execute import StructuralTransactionalAdapter
 from factorio_ai_lab.cortex.structural_prepare import prepare_structural_branch
 from factorio_ai_lab.dashboard.state import FactorioObserver
-from factorio_ai_lab.experiments.curriculum_runner import _runtime_entity_footprints
+from factorio_ai_lab.instrumentation.runtime import runtime_entity_footprints
 from factorio_ai_lab.integrations.fle import (
     TransactionalFLEExecutor,
     fast_reposition,
@@ -565,7 +565,7 @@ print({{
                 world_entities=machines,
                 catalog=catalog,
                 available=available,
-                footprints=_runtime_entity_footprints(instance),
+                footprints=runtime_entity_footprints(instance),
                 resources=resources,
             )
             record.update(
