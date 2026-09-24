@@ -61,6 +61,9 @@ F2-A já existe e está testada:
 
 Documento canônico da fase: docs/CORTEX_PHASE2_ACTION_ONTOLOGY.md.
 
+Checkpoint técnico F2-A: 6c50e3bc90505bb27d74431a8f01ac06d42ed9e5 — feat: institui ontologia de ações do Cortex.
+Gate: 68 focused PASS; 1318 core/FLE PASS + 2 PyTorch PASS; frontend/static PASS.
+
 Próximo bloco seguro:
 
 1. adapter de resupply com parity contra _repair_insert_fuel;

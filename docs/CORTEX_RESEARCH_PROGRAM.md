@@ -900,6 +900,19 @@ tests/test_cortex_actions.py.
 **Next:** F2-B — adapters transacionais com parity tests, começando por resupply e power-tap,
 seguindo para place_processing_for_buffered_output, o counterexample estrutural replicado em F1.
 
+
+**Evidence F2-A:** docs/CORTEX_PHASE2_ACTION_ONTOLOGY.md; src/factorio_ai_lab/cortex/actions.py;
+src/factorio_ai_lab/cortex/executor.py; tests/test_cortex_actions.py; phase-state e dashboard atualizados.
+
+**Tests F2-A:** 68 focused PASS; full gate 1318 core/FLE PASS + 2 PyTorch PASS; Ruff, compileall,
+node --check e frontend TypeScript/Vite build PASS.
+
+**Commit F2-A:** `6c50e3bc90505bb27d74431a8f01ac06d42ed9e5` —
+`feat: institui ontologia de ações do Cortex`.
+
+**Decision F2-A:** **PASS parcial de F2.** A ontology, provenance, refusals, pre/postconditions e
+facade universal existem em SHADOW. Transactional universal execution permanece bloqueada até F2-B.
+
 **Exit Gate F2:** o agente pode montar uma cadeia funcional escolhendo primitivas/options por uma
 API genérica, sem caminho codificado por estágio.
 

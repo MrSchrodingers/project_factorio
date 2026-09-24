@@ -282,3 +282,11 @@ Resupply e power-tap já possuem handlers legados validados. São o caminho de m
 Depois vem place_processing_for_buffered_output, exatamente o counterexample estrutural replicado em F1.
 
 F2-B começa com parity/shadow tests. Nenhuma autonomous live authority será ativada nesse primeiro bloco.
+
+## 22. Checkpoint versionado
+
+Implementation commit: 6c50e3bc90505bb27d74431a8f01ac06d42ed9e5
+
+Gate: 68 focused tests PASS; 1318 core/FLE PASS; 2 PyTorch PASS; Ruff/static/frontend build PASS.
+
+Decision: F2-A PASS parcial. F2 permanece aberta e sem nova live authority.
