@@ -221,6 +221,26 @@ def build_phase_state(
     phase2_delivery_actuator_runner=(
         phase2_delivery_actuator_runner_path.exists()
     )
+    phase2_delivery_actuator_canary_path=(
+        state_root
+        / "runs"
+        / "audits"
+        / "cortex_f2f4c_structural_canary.json"
+    )
+    phase2_delivery_actuator_canary=(
+        phase2_delivery_actuator_canary_path.exists()
+    )
+    phase2_delivery_actuator_canary_payload: dict[str, Any]={}
+    phase2_delivery_actuator_canary_error: str | None=None
+    if phase2_delivery_actuator_canary:
+        try:
+            phase2_delivery_actuator_canary_payload=_load(
+                phase2_delivery_actuator_canary_path
+            )
+        except (OSError,json.JSONDecodeError,TypeError) as exc:
+            phase2_delivery_actuator_canary_error=(
+                f"{type(exc).__name__}: {exc}"
+            )
     phase2_functional_canary_path=(
         state_root / "runs" / "audits" / "cortex_f2f_structural_canary.json"
     )
@@ -340,6 +360,91 @@ def build_phase_state(
         elif phase2_functional_canary_payload.get("status")=="failed":
             functional_canary_classification="experiment_failed"
 
+    delivery_canary_action_result=(
+        phase2_delivery_actuator_canary_payload.get("action_result")
+    )
+    if not isinstance(delivery_canary_action_result,dict):
+        delivery_canary_action_result={}
+    delivery_canary_measurements=delivery_canary_action_result.get(
+        "measurements"
+    )
+    if not isinstance(delivery_canary_measurements,dict):
+        delivery_canary_measurements={}
+    delivery_canary_candidate=delivery_canary_measurements.get(
+        "candidate_after"
+    )
+    if not isinstance(delivery_canary_candidate,dict):
+        delivery_canary_candidate={}
+    delivery_canary_refusal=delivery_canary_action_result.get("refusal")
+    if not isinstance(delivery_canary_refusal,dict):
+        delivery_canary_refusal={}
+    delivery_canary_revision=(
+        phase2_delivery_actuator_canary_payload.get("code_revision")
+    )
+    if not isinstance(delivery_canary_revision,dict):
+        delivery_canary_revision={}
+    delivery_dependency=(
+        phase2_delivery_actuator_canary_payload.get(
+            "delivery_actuator_dependency"
+        )
+    )
+    if not isinstance(delivery_dependency,dict):
+        delivery_dependency={}
+    delivery_dependency_row=delivery_dependency.get("dependency")
+    if not isinstance(delivery_dependency_row,dict):
+        delivery_dependency_row={}
+    actuator_fuel_dependency=delivery_dependency_row.get(
+        "fuel_dependency"
+    )
+    if not isinstance(actuator_fuel_dependency,dict):
+        actuator_fuel_dependency={}
+    actuator_fuel=actuator_fuel_dependency.get("fuel")
+    if not isinstance(actuator_fuel,dict):
+        actuator_fuel={}
+    delivery_power=(
+        phase2_delivery_actuator_canary_payload.get(
+            "delivery_power_capability"
+        )
+    )
+    if not isinstance(delivery_power,dict):
+        delivery_power={}
+
+    delivery_canary_classification=None
+    if phase2_delivery_actuator_canary:
+        if delivery_canary_action_result.get("status")=="accepted":
+            delivery_canary_classification="functional_accept"
+        elif (
+            delivery_canary_action_result.get("status")=="rejected"
+            and phase2_delivery_actuator_canary_payload.get(
+                "rollback_observed"
+            ) is True
+            and delivery_canary_candidate.get("processor_status")
+            == "no_ingredients"
+        ):
+            delivery_canary_classification=(
+                "material_delivery_failed_with_rollback"
+            )
+        elif (
+            delivery_canary_action_result.get("status")=="rejected"
+            and phase2_delivery_actuator_canary_payload.get(
+                "rollback_observed"
+            ) is True
+            and delivery_canary_candidate.get("processor_status")
+            == "no_fuel"
+        ):
+            delivery_canary_classification=(
+                "energy_dependency_failed_with_rollback"
+            )
+        elif (
+            delivery_canary_action_result.get("status")=="rejected"
+            and phase2_delivery_actuator_canary_payload.get(
+                "rollback_observed"
+            ) is True
+        ):
+            delivery_canary_classification="rejected_with_rollback"
+        elif phase2_delivery_actuator_canary_payload.get("status")=="failed":
+            delivery_canary_classification="experiment_failed"
+
     if blocked_running:
         action=f"monitor seed {exploratory['running'][0]}"
     elif blocked_invalid:
@@ -359,6 +464,7 @@ def build_phase_state(
 
     phase2_checkpoint=None
     for checkpoint,enabled in (
+        ("F2-F4C",phase2_delivery_actuator_canary),
         ("F2-F4B",phase2_delivery_actuator_runner),
         ("F2-F4A",phase2_delivery_actuator),
         ("F2-F3",phase2_functional_canary),
@@ -441,6 +547,67 @@ def build_phase_state(
         "phase2_delivery_actuator_runner":{
             "path":str(phase2_delivery_actuator_runner_path),
             "exists":phase2_delivery_actuator_runner,
+        },
+        "phase2_delivery_actuator_canary":{
+            "path":str(phase2_delivery_actuator_canary_path),
+            "exists":phase2_delivery_actuator_canary,
+            "status":phase2_delivery_actuator_canary_payload.get(
+                "status"
+            ),
+            "run_id":phase2_delivery_actuator_canary_payload.get(
+                "run_id"
+            ),
+            "authority":phase2_delivery_actuator_canary_payload.get(
+                "authority"
+            ),
+            "continuous_authority":(
+                phase2_delivery_actuator_canary_payload.get(
+                    "continuous_authority"
+                )
+            ),
+            "code_commit":delivery_canary_revision.get("commit"),
+            "transaction_committed":(
+                phase2_delivery_actuator_canary_payload.get(
+                    "transaction_committed"
+                )
+            ),
+            "rollback_observed":(
+                phase2_delivery_actuator_canary_payload.get(
+                    "rollback_observed"
+                )
+            ),
+            "action_status":delivery_canary_action_result.get("status"),
+            "refusal":delivery_canary_refusal.get("code"),
+            "classification":delivery_canary_classification,
+            "processor_status":delivery_canary_candidate.get(
+                "processor_status"
+            ),
+            "processor_output":delivery_canary_candidate.get(
+                "processor_output"
+            ),
+            "candidate_after":delivery_canary_candidate,
+            "measurement_before":(
+                phase2_delivery_actuator_canary_payload.get(
+                    "measurement_before"
+                )
+            ),
+            "measurement_final":(
+                phase2_delivery_actuator_canary_payload.get(
+                    "measurement_final"
+                )
+            ),
+            "postconditions":delivery_canary_action_result.get(
+                "postconditions"
+            ),
+            "delivery_dependency_ready":delivery_dependency.get("ready"),
+            "actuator":delivery_dependency_row.get("actuator"),
+            "actuator_fuel":actuator_fuel.get("name"),
+            "power_available":delivery_power.get("available"),
+            "power_status":delivery_power.get("status"),
+            "failure":phase2_delivery_actuator_canary_payload.get(
+                "failure"
+            ),
+            "read_error":phase2_delivery_actuator_canary_error,
         },
         "phase2_functional_canary":{
             "path":str(phase2_functional_canary_path),

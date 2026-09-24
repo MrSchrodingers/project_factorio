@@ -798,3 +798,69 @@ def test_phase_state_advances_to_f2f3_and_exposes_functional_canary(tmp_path) ->
     )
     assert f2f4b["phase2_checkpoint"] == "F2-F4B"
     assert f2f4b["phase2_delivery_actuator_runner"]["exists"] is True
+
+    delivery_canary_path=(
+        tmp_path/"runs"/"audits"/"cortex_f2f4c_structural_canary.json"
+    )
+    delivery_canary_path.parent.mkdir(parents=True,exist_ok=True)
+    delivery_canary_path.write_text(json.dumps({
+        "status":"completed",
+        "run_id":"f2f4c-test",
+        "authority":"execute",
+        "continuous_authority":False,
+        "code_revision":{"commit":"cafe1234","dirty":False},
+        "transaction_committed":False,
+        "rollback_observed":True,
+        "delivery_power_capability":{
+            "available":False,
+            "status":"observed_absent_topology",
+        },
+        "delivery_actuator_dependency":{
+            "ready":True,
+            "dependency":{
+                "actuator":"burner-inserter",
+                "fuel_dependency":{
+                    "fuel":{"name":"coal"},
+                },
+            },
+        },
+        "measurement_before":{
+            "processor_status":None,
+            "processor_output":0.0,
+        },
+        "measurement_final":{
+            "processor_status":None,
+            "processor_output":0.0,
+        },
+        "action_result":{
+            "status":"rejected",
+            "refusal":{"code":"structural_postcondition_failed"},
+            "measurements":{
+                "candidate_after":{
+                    "physical_processing_coverage":1.0,
+                    "processor_exists":True,
+                    "processor_status":"no_ingredients",
+                    "processor_output":0.0,
+                    "producers_reaching_processor":1,
+                },
+            },
+            "postconditions":[],
+        },
+    })+"\n")
+
+    f2f4c=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert f2f4c["phase2_checkpoint"] == "F2-F4C"
+    canary4c=f2f4c["phase2_delivery_actuator_canary"]
+    assert canary4c["exists"] is True
+    assert canary4c["classification"] == (
+        "material_delivery_failed_with_rollback"
+    )
+    assert canary4c["code_commit"] == "cafe1234"
+    assert canary4c["actuator"] == "burner-inserter"
+    assert canary4c["actuator_fuel"] == "coal"
+    assert canary4c["power_available"] is False
+    assert canary4c["power_status"] == "observed_absent_topology"
+    assert canary4c["rollback_observed"] is True
