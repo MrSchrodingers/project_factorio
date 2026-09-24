@@ -5,7 +5,7 @@ STATE_ROOT="${FACTORIO_AI_STATE_ROOT:-/srv/factorio-ai-lab}"
 CHROMIUM_BIN="${FACTORIO_AI_CHROMIUM_BIN:-chromium}"
 CAPTURE_HOME="${FACTORIO_AI_CAPTURE_HOME:-/home/ti}"
 TIMEOUT_SECONDS="${FACTORIO_AI_CAPTURE_TIMEOUT_SECONDS:-30}"
-VIRTUAL_TIME_BUDGET="${FACTORIO_AI_CAPTURE_VIRTUAL_TIME_BUDGET:-5000}"
+VIRTUAL_TIME_BUDGET="${FACTORIO_AI_CAPTURE_VIRTUAL_TIME_BUDGET:-0}"
 OUT="${1:-$STATE_ROOT/runs/audits/dashboard.png}"
 URL="${2:-http://127.0.0.1:8765/}"
 
@@ -34,15 +34,27 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+CHROMIUM_ARGS=(
+  --headless
+  --no-sandbox
+  --disable-gpu
+  --disable-dev-shm-usage
+  --disable-background-networking
+  --disable-component-update
+  --disable-sync
+  --no-first-run
+  --no-default-browser-check
+  --user-data-dir="$PROFILE"
+  --disk-cache-dir="$CACHE"
+  --window-size=1600,900
+)
+if [[ "$VIRTUAL_TIME_BUDGET" =~ ^[0-9]+$ ]] && (( VIRTUAL_TIME_BUDGET > 0 )); then
+  CHROMIUM_ARGS+=(--virtual-time-budget="$VIRTUAL_TIME_BUDGET")
+fi
+
+rm -f "$OUT"
 set +e
-timeout --signal=TERM --kill-after=2s "${TIMEOUT_SECONDS}s" \
-  env HOME="$CAPTURE_HOME" TMPDIR="$TMP" XDG_RUNTIME_DIR="$TMP" \
-  "$CHROMIUM_BIN" \
-    --headless --no-sandbox --disable-gpu --disable-dev-shm-usage \
-    --no-first-run --no-default-browser-check \
-    --user-data-dir="$PROFILE" --disk-cache-dir="$CACHE" \
-    --window-size=1600,900 --virtual-time-budget="$VIRTUAL_TIME_BUDGET" \
-    --screenshot="$OUT" "$URL" >"$LOG" 2>&1
+timeout --signal=TERM --kill-after=2s "${TIMEOUT_SECONDS}s"   env HOME="$CAPTURE_HOME" TMPDIR="$TMP" XDG_RUNTIME_DIR="$TMP"   "$CHROMIUM_BIN" "${CHROMIUM_ARGS[@]}"   --screenshot="$OUT" "$URL" >"$LOG" 2>&1
 rc=$?
 set -e
 
