@@ -71,6 +71,14 @@ branch.
 Next run: seed 20261002, mode exploratory, using the same explicit release root and PYTHONPATH.
 Validate result and isolation before 20261003.
 
+Dashboard deploy validado:
+
+- dashboard release: 8ce05ba3a4eb48ed681fcaba1103913aa7505708;
+- agent/baseline release: 95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac;
+- responsive preview: 1366x768, 1600x900 e 1920x1080 gerados;
+- bundle hash app.js: d9f75008e955;
+- runner ativo: false após seed 20261001.
+
 Dashboard contract for F1-B:
 
 - scope: baseline:cortex_baseline_protocol_v1:exploratory:auto;

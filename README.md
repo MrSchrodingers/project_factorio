@@ -122,6 +122,7 @@ trocado atomicamente; estado mutável permanece em /srv/factorio-ai-lab/runs.
 O dashboard possui runtime separado em /srv/factorio-ai-dashboard-runtime. Durante F1-B ele pode
 avançar sem alterar o runtime científico congelado da baseline. O evidence scope é declarado por
 FACTORIO_AI_DASHBOARD_SCOPE; mundo físico e evidência experimental são rotulados separadamente.
+Dashboard F1-B atualmente deployado em 8ce05ba3; a baseline científica permanece pinada em 95c34a53.
 
 ## Estrutura
 

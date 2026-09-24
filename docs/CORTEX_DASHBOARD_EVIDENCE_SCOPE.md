@@ -1,6 +1,6 @@
 # F1-B — Dashboard Evidence Scope e Verdade do Mundo
 
-**Status:** implementação validada em preview; deployment pendente neste checkpoint.
+**Status:** PASS — dashboard corrigido, versionado e deployado separadamente do runtime científico.
 
 ## 1. Incidente observado
 
@@ -141,3 +141,29 @@ Após qualquer interrupção ou perda de conexão, verificar nesta ordem:
 8. somente então executar a próxima seed.
 
 A UI nunca é autoridade para decidir o que rodar; ela é uma projeção verificável dos artefatos canônicos.
+
+
+## 13. Deployment efetivo
+
+Dashboard release ativa:
+
+    8ce05ba3a4eb48ed681fcaba1103913aa7505708
+
+Runtime científico mantido sem alteração:
+
+    95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac
+
+Validação viva após restart:
+
+- factorio-ai-dashboard: active;
+- research runner: inactive;
+- experiment context: seed 20261001;
+- research status: partial_success;
+- bottleneck: Logistic science;
+- logistic science output: 0;
+- champion: null;
+- app.js stamp: d9f75008e955;
+- bundle servido contém baseline seed completed;
+- bundle servido substitui a frase herdada de incumbent por semântica cold-start.
+
+O runtime científico não foi movido durante nenhuma dessas operações.
