@@ -1747,7 +1747,9 @@ function renderExperimentContext() {
     const cortexPhase = context.cortex_phase || {};
     const phase2Checkpoint = String(cortexPhase.phase2_checkpoint || "F2");
     const functionalCanary = phase2Checkpoint === "F2-F3";
-    const canary = functionalCanary
+    const deliveryActuatorShadow = phase2Checkpoint === "F2-F4";
+    const useFunctionalCanaryEvidence = functionalCanary || deliveryActuatorShadow;
+    const canary = useFunctionalCanaryEvidence
       ? (cortexPhase.phase2_functional_canary || {})
       : (cortexPhase.phase2_canary || {});
     const candidate = canary.candidate_after || {};
@@ -1761,24 +1763,28 @@ function renderExperimentContext() {
     setText(
       "cortexPhaseTitle",
       seriesComplete
-        ? (functionalCanary
-          ? "F2-F3 · dependency-complete canary evidence"
-          : (controlledExecution
+        ? (deliveryActuatorShadow
+          ? "F2-F4 · delivery actuator dependency · SHADOW"
+          : (functionalCanary
+            ? "F2-F3 · dependency-complete canary evidence"
+            : (controlledExecution
             ? phase2Checkpoint + " · controlled transaction evidence"
             : (dependencyComposed
             ? "F2-F2 · fuel dependency composed · canary pending"
-            : phase2Checkpoint + " · Cortex research · SHADOW")))
+            : phase2Checkpoint + " · Cortex research · SHADOW"))))
         : "F1-B · baseline corrigida em execução · "
           + (context.mode === "exploratory" ? "exploratória" : String(context.mode || ""))
     );
     setClassText(
       "cortexPhaseBadge",
       seriesComplete
-        ? (functionalCanary
-          ? "F2-F3 · rollback evidence"
-          : (dependencyComposed
+        ? (deliveryActuatorShadow
+          ? "F2-F4 · actuator energy · v3"
+          : (functionalCanary
+            ? "F2-F3 · rollback evidence"
+            : (dependencyComposed
             ? "F2-F2 · typed fuel · v2"
-            : phase2Checkpoint + (controlledExecution ? " · evidence" : " · shadow")))
+            : phase2Checkpoint + (controlledExecution ? " · evidence" : " · shadow"))))
         : (configured
           ? "F1-B · " + completed + "/" + configured
           : "F1-B · seed " + seed),
@@ -1789,8 +1795,8 @@ function renderExperimentContext() {
 
     setText(
       "cortexCanaryLabel",
-      functionalCanary
-        ? "F2-F3 · CANÁRIO FUNCIONAL"
+      useFunctionalCanaryEvidence
+        ? "F2-F3 · ÚLTIMO CANÁRIO FUNCIONAL"
         : "F2-E · TRANSAÇÃO CONTROLADA"
     );
 
@@ -1809,7 +1815,7 @@ function renderExperimentContext() {
           + String(candidate.processor_status || "--")
           + " · output "
           + formatNumber(candidate.processor_output, 2)
-          + (functionalCanary && canary.fuel
+          + (useFunctionalCanaryEvidence && canary.fuel
             ? " · fuel " + String(canary.fuel)
               + " x" + String(canary.fuel_units == null ? "--" : canary.fuel_units)
             : "")

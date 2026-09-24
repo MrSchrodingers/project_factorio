@@ -6,7 +6,7 @@
 ## Estado atual
 
 - Programa: Cortex Research Architecture v0.1
-- Fase: **F2-F3 concluída como counterexample válido — F2-F4 autorizada; F3 bloqueada**
+- Fase: **F2-F4A concluída em SHADOW — F2-F4B autorizada; novo canário e F3 bloqueados**
 - Branch: `research/cortex-v1`
 - Baseline imutável de origem: `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 - Tag baseline publicada: `cortex-pre-research-baseline-20260923`
@@ -46,66 +46,54 @@ silenciosamente pelo commit da F0**.
 
 ## Próxima ação
 
-**F2-F4 — delivery actuator dependency / energy-aware delivery.**
+**F2-F4B — integrar delivery actuator dependency ao one-shot runner, ainda sem canário real.**
 
-F2-F3 já produziu um experimento válido em Factorio real no commit
-e1aad03dafa8604a002ca11641f0000b69cbefa0, seed 424242.
+F2-F4A está implementada em SHADOW.
 
-Resultado causal:
+Capabilities F2-F4A:
 
-- functional_dependency.ready = true;
-- fuel selecionado = coal;
-- fuel units = 1;
-- carried_only = true;
-- operação fuel_processor presente;
-- producers_reaching_processor: 0 -> 1;
-- physical_processing_coverage: 0.0 -> 1.0;
-- processor_exists: false -> true;
-- processor_status: no_ingredients;
-- processor_output: 0.0;
-- ActionResult = rejected;
-- structural_postcondition_failed;
-- transaction_committed = false;
-- rollback_observed = true.
+- RuntimeFactorioCatalog expõe machine_names_by_type() a partir do type observado;
+- FactorioObserver.game_knowledge preserva todo energy actor, não apenas crafting/mining;
+- live read-only probe em Factorio 2.0.73 observou cinco inserters com energia medida;
+- plan_burner_fuel_dependency() reutiliza o fuel planner F2-F2 para qualquer burner machine;
+- complete_delivery_actuator_dependency() avalia candidates type=inserter;
+- electric power é input tri-state explícito True/False/None;
+- power=None não licencia actuator elétrico;
+- actuator não carregado é refusal, sem craft silencioso;
+- burner actuator só fica ready quando fuel dependency está coberta;
+- contrato v3 adiciona fuel_delivery_actuator após connect_delivery;
+- TransactionalFLEExecutor permanece o único commit/rollback.
 
-Interpretação:
+Shadow replay real:
 
-F2-F2 resolveu a dependência de combustível do stone-furnace: o processor deixou de
-falhar por no_fuel. A nova falha é de alimentação de material.
+- source artifact: runs/audits/cortex_f2f_structural_canary.json;
+- output: runs/audits/cortex_f2f4_delivery_actuator_shadow.json;
+- world_mutation=false;
+- inserter elétrico: carried=50, recusado por delivery_actuator_power_unavailable;
+- burner-inserter: carried=50, burner measured, coal covered, ready=true;
+- selected actuator=burner-inserter;
+- compiled v3=true;
+- operation sequence contém connect_delivery -> fuel_delivery_actuator.
 
-A inspeção do contrato mostra:
+Focused evidence:
 
-- connect_delivery usa entities=["inserter"];
-- structural_prepare hardcodeia o inserter elétrico;
-- planning/delivery.py não modela power/energy;
-- o canário não cria uma rede elétrica;
-- burner-inserter também estava disponível no inventory.
+- 54 PASS no gate planner/compiler/runtime;
+- 22 PASS após correção do instrumento canônico + live read-only validation;
+- 26 PASS phase continuity/dashboard context;
+- Ruff/py_compile/node checks PASS.
 
-Portanto F2-F4 deve modelar a dependência funcional do actuator de delivery, não relaxar
-processor_output e não inserir um special-case de iron/green science.
-
-Artifact científico válido:
-runs/audits/cortex_f2f_structural_canary.json
-
-Uma execução posterior gravada em
-runs/audits/cortex_f2f3_structural_canary_attempt1_invalid_bootstrap.json
-falhou antes da capability por timing do fixture producer+buffer. Ela foi classificada como
-invalid experiment / fixture failure e não substitui o F2-F3 válido.
-
-O fixture foi endurecido com polling bounded 1 s / deadline 12 s e telemetria explícita.
-Hardening publicado em `0a747b99328bf084a82fdde79ee8259018ba7931` — `fix: estabiliza fixture do canário Cortex`.
+Documento canônico:
+docs/CORTEX_PHASE2_DELIVERY_ACTUATOR_DEPENDENCY.md
 
 Próximo bloco seguro:
 
-1. validar/deployar o dashboard F2-F3 e publicar a tag de fechamento;
-2. criar F2-F4 como planner puro de delivery actuator dependency;
-3. resolver actuator por energia observada/capability disponível, nunca por nome hardcoded;
-4. reutilizar MachineEnergy/runtime catalog e planners existentes;
-5. para actuator burner, compor fuel dependency tipada;
-6. para actuator elétrico, exigir power capability observada ou child option explícita;
-7. manter TransactionalFLEExecutor como único commit/rollback;
-8. manter processor_output INCREASE como hard gate;
-9. validar em shadow/replay antes de qualquer novo canário real.
+1. integrar complete_delivery_actuator_dependency() no runner após processor fuel completion;
+2. persistir power-capability evidence no artifact;
+3. persistir actuator evaluations/dependency/prepared v3;
+4. testes de runner/replay sem mutação;
+5. full repository gate;
+6. commit/push limpo;
+7. somente então decidir se um único F2-F4B canary real é autorizado.
 
 Não executar seeds 20261101–20261110.
 Não conceder continuous autonomous authority.

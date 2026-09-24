@@ -1104,9 +1104,37 @@ experiment / fixture timing failure. O bootstrap foi endurecido com polling boun
 deadline 12 s e telemetria de polls/elapsed/iron_buffered; isso não altera a capability Cortex.
 Hardening commit: `0a747b99328bf084a82fdde79ee8259018ba7931`.
 
-**Next:** F2-F4 — delivery actuator dependency / energy-aware delivery. Manter
-`processor_output INCREASE` inalterado, compor dependencies tipadas e validar primeiro em
-shadow/replay. F3 permanece bloqueada.
+**F2-F4A progress:** **PASS em SHADOW.** O counterexample `no_ingredients` foi decomposto em uma
+dependência funcional do actuator de delivery. O catálogo canônico foi ampliado para preservar
+qualquer prototype com energy_source observado/probeado; `machine_names_by_type("inserter")`
+agora permite descoberta por tipo runtime, sem string matching.
+
+`plan_burner_fuel_dependency()` tornou o fuel planner F2-F2 reutilizável por qualquer burner
+machine. `complete_delivery_actuator_dependency()` avalia candidates carregados por energia
+medida e power capability explícita. Power usa tri-state True/False/None: missing não vira zero.
+
+**Contract F2-F4A:** `cortex_structural_ops_v3`. Quando um burner actuator é selecionado,
+`connect_delivery` é reescrito para o prototype observado e `fuel_delivery_actuator` é inserido
+depois da colocação. World fuel draws continuam recusados sem provenance adapter.
+
+**Live canonical instrumentation:** Factorio 2.0.73 retornou cinco inserter prototypes com
+energia medida, incluindo `inserter` electric 245 J/tick e `burner-inserter` burner 2400 J/tick.
+
+**Shadow replay F2-F4A:** `runs/audits/cortex_f2f4_delivery_actuator_shadow.json`,
+`world_mutation=false`. Sobre o PreparedStructuralAction real do F2-F3: `inserter` electric foi
+recusado por power unavailable; `burner-inserter` carried=50 + coal covered foi selecionado;
+v3 compilou com `connect_delivery -> fuel_delivery_actuator`.
+
+**Tests F2-F4A:** 54 focused PASS no planner/compiler/runtime; 22 PASS após canonical instrument
+expansion + live read-only validation; 26 PASS continuity/dashboard context; Ruff/py_compile/node
+checks PASS.
+
+**Decision F2-F4A:** **PASS parcial de F2.** A dependência energética do actuator agora é
+representável e compilável em SHADOW. Nenhum novo canário real foi executado por F2-F4A.
+
+**Next:** F2-F4B — integrar a dependency ao one-shot runner, persistir power evidence e v3
+prepared action, validar replay/full gate e só depois considerar um único canário real.
+F3 permanece bloqueada.
 
 **Exit Gate F2:** o agente pode montar uma cadeia funcional escolhendo primitivas/options por uma
 API genérica, sem caminho codificado por estágio.
