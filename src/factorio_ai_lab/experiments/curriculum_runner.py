@@ -14,7 +14,10 @@ from typing import Any
 from factorio_ai_lab.agents.evolution_advisor import propose_evolution_advice
 from factorio_ai_lab.agents.llm_router import default_free_router
 from factorio_ai_lab.domain.state import GridPoint
-from factorio_ai_lab.instrumentation.runtime import runtime_entity_footprints
+from factorio_ai_lab.instrumentation.runtime import (
+    runtime_entity_footprints,
+    runtime_game_ticks,
+)
 from factorio_ai_lab.integrations.fle import (
     TransactionalFLEExecutor,
     fast_reposition,
@@ -980,12 +983,9 @@ FUEL_CHAIN_RESERVE_COAL = BURNER_MINING_DRILL.coal_for_seconds(
 
 
 def _game_ticks(env: Any) -> int | None:
-    """Elapsed game ticks, or None when the counter is unavailable."""
-    try:
-        return int(env.unwrapped.instance.get_elapsed_ticks())
-    except (AttributeError, OSError, TypeError, ValueError):
-        return None
+    """Legacy compatibility wrapper around generic tick instrumentation."""
 
+    return runtime_game_ticks(env)
 
 class _StageClock:
     """Game clock bracketing the step a stage measures.
