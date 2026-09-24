@@ -17,15 +17,20 @@ com experiência sem receber do programador a sequência de ações que constitu
 > **F1-B — seed 20261002:** [docs/CORTEX_PHASE1_BASELINE_SEED_20261002.md](docs/CORTEX_PHASE1_BASELINE_SEED_20261002.md)
 > **F1-B — seed 20261003:** [docs/CORTEX_PHASE1_BASELINE_SEED_20261003.md](docs/CORTEX_PHASE1_BASELINE_SEED_20261003.md)
 > **F1-B — seed 20261004:** [docs/CORTEX_PHASE1_BASELINE_SEED_20261004.md](docs/CORTEX_PHASE1_BASELINE_SEED_20261004.md)
+> **F1-B — seed 20261005:** [docs/CORTEX_PHASE1_BASELINE_SEED_20261005.md](docs/CORTEX_PHASE1_BASELINE_SEED_20261005.md)
+> **F1 — relatório estatístico:** [docs/CORTEX_PHASE1_BASELINE_STATISTICAL_REPORT.md](docs/CORTEX_PHASE1_BASELINE_STATISTICAL_REPORT.md)
 > **F1-B — storage hardening:** [docs/CORTEX_F1_STORAGE_HARDENING.md](docs/CORTEX_F1_STORAGE_HARDENING.md)
 > **Dashboard / evidence scope:** [docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md](docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md)
 > **Continuidade / retomada:** [docs/CORTEX_CONTINUITY_PROTOCOL.md](docs/CORTEX_CONTINUITY_PROTOCOL.md)
 
 ## Estado do programa
 
-**Cortex Research Architecture v0.1 — F1-A concluída; G37 aposentada. F1-B está em execução:
-4/5 seeds exploratórias válidas (20261001–20261004), com runtime científico congelado em
-95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac.**
+**Cortex Research Architecture v0.1 — F1 concluída: baseline exploratória corrigida 5/5 válida,
+G37 aposentada e runtime científico congelado em
+95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac. F2 está autorizada.**
+
+As seeds confirmatórias 20261101–20261110 permanecem congeladas e não executadas; serão usadas
+posteriormente para avaliação pareada do Cortex, sem tuning nelas.
 
 A arquitetura anterior permanece disponível como baseline. Ela possui excelente instrumentação,
 solvers e mecanismos de segurança, mas o caminho de decisão principal ainda é dominado por

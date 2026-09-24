@@ -169,6 +169,16 @@ def build_phase_state(
     blocked_invalid=bool(exploratory["invalid"])
     blocked_running=bool(exploratory["running"])
     blocked_release=bool(mismatched_commits) or protocol_commit is None
+    exploratory_complete=(
+        exploratory["valid_completed"] == exploratory["configured"]
+        and not exploratory["running"]
+        and not exploratory["pending"]
+        and not exploratory["invalid"]
+    )
+    statistical_report_path=(
+        state_root / "docs" / "CORTEX_PHASE1_BASELINE_STATISTICAL_REPORT.md"
+    )
+    statistical_report_exists=statistical_report_path.exists()
 
     if blocked_running:
         action=f"monitor seed {exploratory['running'][0]}"
@@ -180,13 +190,20 @@ def build_phase_state(
         action="halt: scientific release provenance mismatch"
     elif exploratory["next_seed"] is not None:
         action=f"run seed {exploratory['next_seed']}"
+    elif exploratory_complete and statistical_report_exists:
+        action="F1 complete; follow docs/CORTEX_HANDOFF.md"
     else:
         action="exploratory series complete; produce statistical report"
 
     return {
         "schema_version":"cortex_phase_state_v1",
         "generated_at":datetime.now(UTC).isoformat(),
-        "phase":"F1-B",
+        "phase":"F1" if exploratory_complete and statistical_report_exists else "F1-B",
+        "phase_status":(
+            "complete"
+            if exploratory_complete and statistical_report_exists
+            else "active"
+        ),
         "protocol":protocol_id,
         "scientific_release_commit":protocol_commit,
         "baseline_release_commits":sorted(release_commits),
@@ -195,6 +212,11 @@ def build_phase_state(
         "global_champion_exists":(state_root/"runs"/"evolution_champion.json").exists(),
         "evolution_service_required_state":"inactive",
         "dashboard_deployment":dashboard_deployment,
+        "exploratory_complete":exploratory_complete,
+        "statistical_report":{
+            "path":str(statistical_report_path),
+            "exists":statistical_report_exists,
+        },
         "modes":modes,
         "resume":{
             "action":action,

@@ -806,7 +806,7 @@ a baseline corrigida e o isolamento operacional estarem concluídos.
 - [x] finalizar/validar mudanças logísticas já não commitadas;
 - [x] snapshot de runs e artefatos históricos;
 - [x] desativar G37 como baseline confirmatória;
-- [ ] reexecutar baseline com factory graph corrigido;
+- [x] reexecutar baseline com factory graph corrigido;
 - [x] separar código “deployed” de edição live;
 - [x] impedir geração com working tree suja de ser promoted;
 - [x] declarar build/revision no relatório de toda geração;
@@ -825,19 +825,18 @@ a baseline corrigida e o isolamento operacional estarem concluídos.
 - [x] impedir avanço para nova seed quando uma seed estiver running;
 - [x] bloquear launch com armazenamento crítico;
 - [x] limitar logs Docker do cluster Factorio;
-- [ ] produzir relatório estatístico da baseline.
+- [x] produzir relatório estatístico da baseline.
 
-**Status F1-A:** **PASS — integridade e isolamento concluídos.** Evidência técnica em
-docs/CORTEX_PHASE1_INTEGRITY.md. G37 já foi aposentada; permanecem abertos a execução da
-baseline corrigida e o relatório estatístico. Protocolo pré-registrado em
-docs/CORTEX_PHASE1_BASELINE_PROTOCOL.md.
+**Status F1:** **PASS — instrumentação, isolamento e baseline exploratória corrigida concluídos.**
 
-**F1-B progress:** 4/5 exploratory seeds valid. All four are partial_success and fail at
-Logistic science with zero green-science output. Coverage ranges from 33.3% to 50%; manual
-logistics is 53–55 calls; closed-loop autonomy remains false. Isolation PASS in all four.
-Evidence: docs/CORTEX_PHASE1_BASELINE_SEED_20261001.md,
-docs/CORTEX_PHASE1_BASELINE_SEED_20261002.md, docs/CORTEX_PHASE1_BASELINE_SEED_20261003.md,
-docs/CORTEX_PHASE1_BASELINE_SEED_20261004.md and docs/CORTEX_PHASE1_BASELINE_RESULTS.md.
+**F1-B result:** 5/5 exploratory seeds valid. All five are partial_success and fail at
+Logistic science with zero green-science output; closed-loop autonomy is 0/5. Median autonomy
+score = 0.50; median physical processing coverage = 0.50; median manual logistics = 55 calls.
+Isolation PASS in all five. The structural placement repair is repeatedly diagnosed but cannot
+execute because the inherited runner has no_runner_binding_for_intent.
+
+The confirmatory seeds 20261101–20261110 remain frozen and unspent. They are reserved for future
+paired pre-Cortex vs Cortex evaluation and must not be used for tuning.
 
 **Observability hardening:** dashboard evidence scope, map truth labels and component-isolated
 deployment are specified in docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md.
@@ -857,6 +856,22 @@ Ruff, compileall, bash -n e diff-check aprovados.
 
 **Exit Gate F1:** baseline reproduzível, instrumentação válida e nenhuma promoção dependente de
 código não identificado.
+
+**Evidence F1:** docs/CORTEX_PHASE1_INTEGRITY.md; docs/CORTEX_PHASE1_BASELINE_PROTOCOL.md;
+docs/CORTEX_PHASE1_BASELINE_RESULTS.md; docs/CORTEX_PHASE1_BASELINE_STATISTICAL_REPORT.md;
+docs/CORTEX_PHASE1_BASELINE_SEED_20261001.md até CORTEX_PHASE1_BASELINE_SEED_20261005.md;
+runs/audits/cortex_baseline_exploratory_summary.json; isolation snapshots por seed.
+
+**Tests F1 closure:** 74 testes focados dashboard/baseline/continuity PASS; analyzer enriquecido
+6/6 PASS; full gate 1308 core/FLE PASS + 2 PyTorch PASS; Ruff/static/frontend TypeScript/Vite
+build PASS; provenance e isolation PASS em 5/5 seeds.
+
+**Commit F1 evidence:** `9cffaca5401bcfb97d5c8472ec619a34abfa563f` —
+`feat: conclui baseline exploratória da fase um`.
+
+**Decision F1:** **PASS.** A baseline pré-Cortex está causalmente caracterizada e reproduzível.
+F2 está autorizada. Claims confirmatórios de superioridade permanecem bloqueados até avaliação
+pareada nas seeds confirmatórias congeladas.
 
 ---
 

@@ -6,7 +6,7 @@
 ## Estado atual
 
 - Programa: Cortex Research Architecture v0.1
-- Fase: **F1-A concluída; F1-B ativa — 4/5 seeds exploratórias válidas**
+- Fase: **F1 concluída — F2 autorizada**
 - Branch: `research/cortex-v1`
 - Baseline imutável de origem: `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 - Tag baseline publicada: `cortex-pre-research-baseline-20260923`
@@ -46,26 +46,31 @@ silenciosamente pelo commit da F0**.
 
 ## Próxima ação
 
-**F1-B — executar seed exploratória 20261005.**
+**F2 — Action/Option Ontology e Universal Executor.**
 
-Seeds válidas:
+F1 fechou com 5/5 seeds exploratórias válidas e 0/5 green-science successes. O bottleneck foi
+Logistic science em todas as seeds. O achado causal mais importante é que o sistema diagnostica
+producer_output_unprocessed e propõe place_processing_for_buffered_output, mas a ação não executa
+por no_runner_binding_for_intent.
 
-- 20261001: partial_success · Logistic science · autonomy 0.50 · coverage 33.3% · manual 53 · fuel-starved 0;
-- 20261002: partial_success · Logistic science · autonomy 0.375 · coverage 50% · manual 53 · fuel-starved 1;
-- 20261003: partial_success · Logistic science · autonomy 0.375 · coverage 50% · manual 55 · fuel-starved 5;
-- 20261004: partial_success · Logistic science · autonomy 0.50 · coverage 50% · manual 55 · fuel-starved 0.
+Baseline descritiva F1:
 
-Padrão replicado 4/4:
+- closed-loop autonomy: 0/5;
+- green-science success: 0/5;
+- bottleneck Logistic science: 5/5;
+- autonomy score: mediana 0.50, média 0.45;
+- physical processing coverage: mediana 0.50, média 0.4667;
+- manual logistics: mediana 55, média 54.2;
+- scientific runtime: 95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac;
+- provenance/isolation: PASS em 5/5.
 
-- logistic_science_output = 0;
-- closed_loop_autonomy = false;
-- bottleneck = Logistic science;
-- scientific runtime = 95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac;
-- global isolation = PASS.
+As seeds 20261101–20261110 são holdout confirmatório. Não executá-las em F2 development/tuning.
 
-A seed 20261004 terminou sem fuel/power starvation, mas green science continuou zero e o repair estrutural continuou não executável por no_runner_binding_for_intent. Isso reforça que a fronteira não é explicada apenas por energia/combustível.
+**Primeiro bloco seguro de F2:** documentar e implementar os schemas de ActionRequest,
+ActionResult, Refusal e EvidenceRef e a facade do Universal Executor em shadow/no-authority mode.
+Não remover nem alterar o runner baseline até o Exit Gate F2.
 
-Próxima execução autorizável: somente 20261005, após commit/push deste checkpoint e phase-state regenerado.
+Artifact commit de fechamento F1: 9cffaca5401bcfb97d5c8472ec619a34abfa563f.
 
 ## Protocolo de retomada após interrupção
 

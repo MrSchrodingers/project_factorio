@@ -260,3 +260,37 @@ def test_phase_state_blocks_release_mismatch_even_when_seed_is_valid(tmp_path) -
     assert state["baseline_release_consistent"] is False
     assert state["resume"]["do_not_start_another_seed"] is True
     assert state["resume"]["action"]=="halt: scientific release provenance mismatch"
+
+def test_phase_state_marks_f1_complete_when_exploratory_series_and_report_exist(tmp_path) -> None:
+    module=_module("cortex_phase_state.py")
+    protocol=tmp_path/"protocol.json"
+    _protocol(protocol)
+
+    for seed in (11,12):
+        seed_dir=tmp_path/"baseline_runs"/"p1"/"exploratory"/str(seed)
+        seed_dir.mkdir(parents=True)
+        (seed_dir/"manifest.json").write_text(json.dumps({
+            "status":"completed",
+            "returncode":0,
+            "release":{"commit":"abc"},
+            "finished_at":"2026-01-01T00:00:00+00:00",
+        })+"\n")
+        (seed_dir/"result.json").write_text(json.dumps({
+            "code_revision":{"commit":"abc","dirty":False},
+            "challenger":{
+                "run_id":f"run-{seed}",
+                "fitness":{"autonomy_score":0.5,"closed_loop_autonomy":False},
+            },
+        })+"\n")
+
+    docs=tmp_path/"docs"
+    docs.mkdir()
+    (docs/"CORTEX_PHASE1_BASELINE_STATISTICAL_REPORT.md").write_text("# report\n")
+
+    state=module.build_phase_state(state_root=tmp_path,protocol_path=protocol)
+
+    assert state["exploratory_complete"] is True
+    assert state["statistical_report"]["exists"] is True
+    assert state["phase"] == "F1"
+    assert state["phase_status"] == "complete"
+    assert state["resume"]["action"] == "F1 complete; follow docs/CORTEX_HANDOFF.md"
