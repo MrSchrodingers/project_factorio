@@ -208,6 +208,46 @@ def build_phase_state(
             phase2_canary_payload=_load(phase2_canary_path)
         except (OSError,json.JSONDecodeError,TypeError) as exc:
             phase2_canary_error=f"{type(exc).__name__}: {exc}"
+    phase2_action_result=phase2_canary_payload.get("action_result")
+    if not isinstance(phase2_action_result,dict):
+        phase2_action_result={}
+    phase2_action_measurements=phase2_action_result.get("measurements")
+    if not isinstance(phase2_action_measurements,dict):
+        phase2_action_measurements={}
+    phase2_code_revision=phase2_canary_payload.get("code_revision")
+    if not isinstance(phase2_code_revision,dict):
+        phase2_code_revision={}
+
+    action_result=phase2_canary_payload.get("action_result")
+    if not isinstance(action_result,dict):
+        action_result={}
+    action_measurements=action_result.get("measurements")
+    if not isinstance(action_measurements,dict):
+        action_measurements={}
+    candidate_after=action_measurements.get("candidate_after")
+    if not isinstance(candidate_after,dict):
+        candidate_after={}
+    action_refusal=action_result.get("refusal")
+    if not isinstance(action_refusal,dict):
+        action_refusal={}
+
+    canary_classification=None
+    if phase2_canary:
+        if action_result.get("status")=="accepted":
+            canary_classification="functional_accept"
+        elif (
+            action_result.get("status")=="rejected"
+            and phase2_canary_payload.get("rollback_observed") is True
+            and candidate_after.get("processor_status")=="no_fuel"
+        ):
+            canary_classification="functional_dependency_missing"
+        elif (
+            action_result.get("status")=="rejected"
+            and phase2_canary_payload.get("rollback_observed") is True
+        ):
+            canary_classification="rejected_with_rollback"
+        elif phase2_canary_payload.get("status")=="failed":
+            canary_classification="experiment_failed"
 
     if blocked_running:
         action=f"monitor seed {exploratory['running'][0]}"
@@ -302,28 +342,33 @@ def build_phase_state(
             "exists":phase2_canary,
             "status":phase2_canary_payload.get("status"),
             "run_id":phase2_canary_payload.get("run_id"),
+            "authority":phase2_canary_payload.get("authority"),
+            "continuous_authority":phase2_canary_payload.get(
+                "continuous_authority"
+            ),
+            "code_commit":phase2_code_revision.get("commit"),
             "transaction_committed":phase2_canary_payload.get(
                 "transaction_committed"
             ),
             "rollback_observed":phase2_canary_payload.get(
                 "rollback_observed"
             ),
-            "action_status":(
-                (phase2_canary_payload.get("action_result") or {}).get("status")
-                if isinstance(phase2_canary_payload.get("action_result"),dict)
-                else None
-            ),
-            "refusal":(
-                (
-                    (phase2_canary_payload.get("action_result") or {}).get(
-                        "refusal"
-                    )
-                    or {}
-                ).get("code")
-                if isinstance(phase2_canary_payload.get("action_result"),dict)
-                else None
-            ),
+            "action_status":action_result.get("status"),
+            "refusal":action_refusal.get("code"),
+            "classification":canary_classification,
+            "processor_status":candidate_after.get("processor_status"),
+            "processor_output":candidate_after.get("processor_output"),
             "failure":phase2_canary_payload.get("failure"),
+            "candidate_after":phase2_action_measurements.get(
+                "candidate_after"
+            ),
+            "measurement_before":phase2_canary_payload.get(
+                "measurement_before"
+            ),
+            "measurement_final":phase2_canary_payload.get(
+                "measurement_final"
+            ),
+            "postconditions":phase2_action_result.get("postconditions"),
             "read_error":phase2_canary_error,
         },
         "modes":modes,

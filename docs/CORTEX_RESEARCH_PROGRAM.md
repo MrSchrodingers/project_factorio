@@ -982,17 +982,47 @@ tests/test_cortex_structural_canary_contract.py.
 
 **Decision F2-E1:** **PASS parcial de F2.** F2-E2 está autorizado somente como one-shot controlled Factorio canary em seed 424242, partindo de árvore clean e evolution inactive/disabled.
 
-**F2-E2 attempt 1:** executado em seed 424242 a partir de 564cfbb54489ce2c6690adafcc629ec036bd4720. O experimento terminou antes de EXECUTE com zero ready branches. O artifact foi preservado como runs/audits/cortex_f2e_structural_canary_attempt1.json.
+**F2-E2 attempt 1:** instrumentation counterexample preservado em
+runs/audits/cortex_f2e_structural_canary_attempt1.json. O experimento terminou antes de EXECUTE
+porque _save_entity_state não fornecia o schema científico esperado pelo planner. Não houve
+ActionResult nem structural transaction.
 
-**Causa:** instrumentation/schema mismatch. _save_entity_state mediu iron ore em inventories.chest, mas não forneceu contents nem resource rows; o planner F2-D recebeu evidence insuficiente e recusou corretamente. Não houve ActionResult nem structural transaction.
+**Instrumentation fix:** commit 4a0558e3a4c6b7795d618f4cdcda3a22e53074d8 alinha o canário ao
+FactorioObserver.snapshot/resource_overview/game_knowledge, restringe available ao inventory do
+character e mede processor_output pelo craft_output observado.
 
-**Correção F2-E2:** planning agora usa FactorioObserver.snapshot/resource_overview/game_knowledge; available usa exclusivamente inventory do character; output funcional usa craft_output observado. O artifact passa a gravar plan/targets/instruments antes do ready gate.
+**F2-E2 attempt 2:** executado em seed 424242 a partir do commit limpo 4a0558e3a4c6b7795d618f4cdcda3a22e53074d8.
 
-**Tests da correção:** 34 focused PASS; full gate 1367 core/FLE PASS + 2 PyTorch PASS; static PASS.
+**Candidate measurements:**
 
-**Decision attempt 1:** instrumentation counterexample, não falsificação da structural hypothesis. Retry bloqueado até commit clean da correção.
+- producers_reaching_processor: 0 -> 1;
+- physical_processing_coverage: 0.0 -> 1.0;
+- processor_exists: false -> true;
+- processor_status: no_fuel;
+- processor_output: 0.0 -> 0.0.
 
-**Next:** versionar a correção e repetir um único canário seed 424242. Continuous autonomous authority continua proibida.
+**ActionResult:** rejected / structural_postcondition_failed. As hard conditions topológicas
+passaram, mas processor_output INCREASE falhou. transaction_committed=false e
+rollback_observed=true. A medição final retornou ao estado before.
+
+**Evidence attempt 2:** runs/audits/cortex_f2e_structural_canary.json e cópia imutável
+runs/audits/cortex_f2e_structural_canary_attempt2.json, SHA-256
+2783803e228cf59b2048aeac9a4c5c28a27c0b8ac51eb5a89cea5d97d2d4770e.
+
+**Decision F2-E:** **PASS para controlled transactional execution; FAIL para suficiência funcional
+da opção estrutural atual.** O sistema demonstrou EXECUTE explícito, medição pós-ação e rollback
+real no Factorio. O counterexample mostra que placement+material delivery não bastam: o processor
+precisa de fuel/energy dependency explícita. O output gate não será relaxado.
+
+**Closure gate F2-E2:** 1368 core/FLE PASS + 2 PyTorch PASS; continuity/outcome PASS;
+Ruff/static + frontend TypeScript/Vite + node PASS; runtime F1 unchanged; evolution
+inactive+disabled; rollback exactness PASS.
+
+
+**Next:** F2-F — dependency-complete structural option. Compor fuel/energy usando planners
+existentes, mantendo TransactionalFLEExecutor como única fronteira de rollback. Repetir um canário
+isolado apenas após novo gate/commit clean. Continuous autonomous authority e F3 permanecem
+bloqueadas.
 
 **Exit Gate F2:** o agente pode montar uma cadeia funcional escolhendo primitivas/options por uma
 API genérica, sem caminho codificado por estágio.

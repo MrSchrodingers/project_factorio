@@ -1,7 +1,7 @@
 # Cortex Research — F2-E Controlled Transactional Execution
 
 **Phase:** F2
-**Checkpoint:** F2-E1 — adapter transacional controlado validado; canário Factorio pendente
+**Checkpoint:** F2-E2 concluído — controlled execution validada; structural option rejeitada por no_fuel
 **Ambient authority:** proibida
 **Scientific F1 runtime:** 95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac
 **Confirmatory holdout:** 20261101–20261110 congelado e não utilizado
@@ -250,3 +250,130 @@ craft_output da máquina observada, não por variável transitória do namespace
 
 O canário também grava plan/targets/instruments antes de exigir branch ready, de forma que futuras
 recusas pré-EXECUTE preservem evidência completa.
+
+## 14. F2-E2 attempt 2 — functional counterexample with verified rollback
+
+O retry foi executado na seed 424242 a partir do commit limpo:
+
+4a0558e3a4c6b7795d618f4cdcda3a22e53074d8
+
+Artifact canônico:
+
+runs/audits/cortex_f2e_structural_canary.json
+
+Cópia imutável do retry:
+
+runs/audits/cortex_f2e_structural_canary_attempt2.json
+
+SHA-256 de ambos no momento da preservação:
+
+2783803e228cf59b2048aeac9a4c5c28a27c0b8ac51eb5a89cea5d97d2d4770e
+
+### Resultado
+
+- experiment status: completed;
+- ActionResult: rejected;
+- authority: execute;
+- changed_world: false;
+- transaction_committed: false;
+- rollback_observed: true;
+- refusal: structural_postcondition_failed;
+- continuous_authority: false.
+
+### Medição before
+
+- producers_reaching_processor = 0;
+- physical_processing_coverage = 0.0;
+- processor_exists = false;
+- processor_output = 0.0.
+
+### Candidate state
+
+- producers_reaching_processor = 1;
+- physical_processing_coverage = 1.0;
+- processor_exists = true;
+- processor_status = no_fuel;
+- processor_output = 0.0.
+
+As duas postconditions topológicas foram satisfeitas:
+
+- producers_reaching_processor INCREASE = satisfied;
+- processor_exists == true = satisfied.
+
+A hard postcondition funcional falhou:
+
+- processor_output INCREASE = unsatisfied.
+
+### Estado após rollback
+
+A medição final retornou ao estado pré-transação:
+
+- producers_reaching_processor = 0;
+- physical_processing_coverage = 0.0;
+- processor_exists = false;
+- processor_output = 0.0.
+
+Portanto o rollback transacional foi observado empiricamente no Factorio real.
+
+## 15. Interpretação causal
+
+O retry separa três proposições:
+
+1. o Cortex consegue compilar e enviar a structural action ao executor transacional;
+2. placement + delivery alteram corretamente a topologia física;
+3. a opção estrutural ainda é causalmente incompleta porque não satisfaz a dependência de fuel do stone-furnace.
+
+O resultado não falsifica TransactionalFLEExecutor nem o structural planner de placement/delivery.
+Ele falsifica a hipótese mais forte de que o branch atual, sozinho, seja suficiente para produzir.
+
+Esse é exatamente o tipo de counterexample que o programa Cortex deve preservar.
+
+O gate processor_output não será relaxado.
+
+## 16. Decision F2-E
+
+**PASS para a camada de execução transacional controlada.**
+
+Foi demonstrado em Factorio real que:
+
+- EXECUTE é explícito;
+- a candidate transaction pode alterar o mundo;
+- hard postconditions são medidas antes do commit;
+- uma hipótese funcional falsa é rejeitada;
+- rollback restaura o checkpoint;
+- o ActionResult preserva a causa da rejeição.
+
+**FAIL para suficiência funcional da opção estrutural atual.**
+
+F2 permanece aberta. F3 não está autorizada.
+
+## 17. Gate de fechamento F2-E2
+
+- 1368 core/FLE tests: PASS;
+- 2 PyTorch tests: PASS;
+- continuity/outcome tests: PASS;
+- Ruff/static checks: PASS;
+- frontend TypeScript/Vite build: PASS;
+- node --check: PASS;
+- scientific runtime F1: unchanged / dirty=false;
+- factorio-ai-evolution: inactive + disabled;
+- confirmatory seeds: unspent;
+- rollback exactness: PASS.
+
+## 18. Próximo checkpoint — F2-F
+
+F2-F deve tornar a opção estrutural dependency-complete.
+
+Para stone-furnace, isso significa modelar explicitamente fuel/energy como parte da capability,
+compondo planners existentes em vez de inserir carvão por special-case no executor.
+
+Requisitos:
+
+1. detectar energy/fuel requirement do processor a partir de catálogo/observação;
+2. representar a dependência como precondition/child option tipada;
+3. reutilizar resupply/fuel planning já existente;
+4. preparar processor + delivery + fuel dependency como uma opção composta;
+5. manter rollback único em TransactionalFLEExecutor;
+6. exigir processor_output > 0 no canário seguinte;
+7. continuar sem scheduler/continuous authority;
+8. não usar confirmatory seeds.

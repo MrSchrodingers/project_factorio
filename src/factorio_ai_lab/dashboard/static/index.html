@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Factorio AI Lab</title>
-  <link rel="stylesheet" href="/static/styles.css?v=3ecaadacce97">
+  <link rel="stylesheet" href="/static/styles.css?v=18540b5f600a">
   <link rel="stylesheet" href="/static/map/style.css?v=c71c7bfce507">
 </head>
 <body>
@@ -60,7 +60,7 @@
         <div>
           <span class="label">PROGRAMA CORTEX RESEARCH · CRA v0.1</span>
           <h2 id="cortexPhaseTitle">F2-B · resolvendo estado do programa…</h2>
-          <small>O runner herdado permanece baseline; nenhum módulo Cortex possui autoridade de controle nesta fase.</small>
+          <small id="cortexAuthorityDetail">Authority Cortex: resolvendo estado científico…</small>
         </div>
         <div class="cortex-program-badges">
           <span class="badge good">F1-A concluída</span><span class="badge good">G37 aposentada</span><span id="cortexPhaseBadge" class="badge neutral">F2-B · shadow parity</span>
@@ -82,6 +82,12 @@
           <span class="cortex-track-id">GOVERNANÇA</span>
           <strong>Claim só após evidência</strong>
           <small>baseline → holdout → multi-seed → ablação → CI → autoridade. Checkboxes exigem artefato, teste e commit.</small>
+        </article>
+        <article class="cortex-track canary">
+          <span class="cortex-track-id">F2-E · TRANSAÇÃO CONTROLADA</span>
+          <strong id="cortexCanaryStatus">canário --</strong>
+          <small id="cortexCanaryDetail">candidate e postconditions ainda não carregados</small>
+          <small id="cortexCanaryRollback">commit -- · rollback --</small>
         </article>
       </div>
       <div class="cortex-program-foot mono">Fonte canônica: docs/CORTEX_RESEARCH_PROGRAM.md · Retomada: docs/CORTEX_HANDOFF.md</div>
@@ -715,7 +721,7 @@
     </details>
   </main>
 
-  <script src="/static/app.js?v=f9d4139cb197"></script>
+  <script src="/static/app.js?v=d26e64e7d560"></script>
   <script src="/static/map/factory-map.js?v=fd8c84fe638e"></script>
 </body>
 </html>

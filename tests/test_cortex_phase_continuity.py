@@ -504,6 +504,12 @@ def test_phase_state_exposes_f2e_canary_outcome(tmp_path) -> None:
         "action_result":{
             "status":"rejected",
             "refusal":{"code":"structural_postcondition_failed"},
+            "measurements":{
+                "candidate_after":{
+                    "processor_status":"no_fuel",
+                    "processor_output":0.0,
+                },
+            },
         },
     })+"\n")
 
@@ -515,5 +521,87 @@ def test_phase_state_exposes_f2e_canary_outcome(tmp_path) -> None:
     assert canary["run_id"] == "canary-1"
     assert canary["action_status"] == "rejected"
     assert canary["refusal"] == "structural_postcondition_failed"
+    assert canary["classification"] == "functional_dependency_missing"
+    assert canary["processor_status"] == "no_fuel"
+    assert canary["processor_output"] == 0.0
     assert canary["transaction_committed"] is False
     assert canary["rollback_observed"] is True
+
+def test_phase_state_exposes_f2e_candidate_and_rollback_measurements(tmp_path) -> None:
+    module=_module("cortex_phase_state.py")
+    protocol=tmp_path/"protocol.json"
+    _protocol(protocol)
+
+    for seed in (11,12):
+        seed_dir=tmp_path/"baseline_runs"/"p1"/"exploratory"/str(seed)
+        seed_dir.mkdir(parents=True)
+        (seed_dir/"manifest.json").write_text(json.dumps({
+            "status":"completed",
+            "returncode":0,
+            "release":{"commit":"abc"},
+        })+"\n")
+        (seed_dir/"result.json").write_text(json.dumps({
+            "code_revision":{"commit":"abc","dirty":False},
+            "challenger":{"fitness":{}},
+        })+"\n")
+
+    docs=tmp_path/"docs"
+    docs.mkdir()
+    for name in (
+        "CORTEX_PHASE1_BASELINE_STATISTICAL_REPORT.md",
+        "CORTEX_PHASE2_ACTION_ONTOLOGY.md",
+        "CORTEX_PHASE2_TRANSACTIONAL_EXECUTION.md",
+    ):
+        (docs/name).write_text("# checkpoint\n")
+
+    before={
+        "producers_reaching_processor":0,
+        "physical_processing_coverage":0.0,
+        "processor_exists":False,
+        "processor_status":None,
+        "processor_output":0.0,
+    }
+    candidate={
+        "producers_reaching_processor":1,
+        "physical_processing_coverage":1.0,
+        "processor_exists":True,
+        "processor_status":"no_fuel",
+        "processor_output":0.0,
+    }
+    audit=tmp_path/"runs"/"audits"
+    audit.mkdir(parents=True)
+    (audit/"cortex_f2e_structural_canary.json").write_text(json.dumps({
+        "status":"completed",
+        "run_id":"canary-2",
+        "authority":"execute",
+        "continuous_authority":False,
+        "code_revision":{"commit":"deadbeef","dirty":False},
+        "transaction_committed":False,
+        "rollback_observed":True,
+        "measurement_before":before,
+        "measurement_final":before,
+        "action_result":{
+            "status":"rejected",
+            "refusal":{"code":"structural_postcondition_failed"},
+            "measurements":{"candidate_after":candidate},
+            "postconditions":[
+                {
+                    "name":"processor_output",
+                    "operator":"increase",
+                    "state":"unsatisfied",
+                    "hard":True,
+                },
+            ],
+        },
+    })+"\n")
+
+    state=module.build_phase_state(state_root=tmp_path,protocol_path=protocol)
+    canary=state["phase2_canary"]
+
+    assert canary["authority"] == "execute"
+    assert canary["continuous_authority"] is False
+    assert canary["code_commit"] == "deadbeef"
+    assert canary["candidate_after"]["processor_status"] == "no_fuel"
+    assert canary["candidate_after"]["physical_processing_coverage"] == 1.0
+    assert canary["measurement_final"] == before
+    assert canary["postconditions"][0]["state"] == "unsatisfied"

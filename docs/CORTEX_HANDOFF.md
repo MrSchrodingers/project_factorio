@@ -6,7 +6,7 @@
 ## Estado atual
 
 - Programa: Cortex Research Architecture v0.1
-- Fase: **F2-E2 attempt 1 preservado — instrumentation fix em validação; retry ainda bloqueado por working tree dirty**
+- Fase: **F2-E concluída para controlled execution; F2-F ativa — dependency-complete structural option**
 - Branch: `research/cortex-v1`
 - Baseline imutável de origem: `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 - Tag baseline publicada: `cortex-pre-research-baseline-20260923`
@@ -46,32 +46,47 @@ silenciosamente pelo commit da F0**.
 
 ## Próxima ação
 
-**Versionar o instrumentation fix F2-E2 e somente depois repetir o canário seed 424242.**
+**F2-F — tornar a opção estrutural dependency-complete.**
 
-Attempt 1 preservado: runs/audits/cortex_f2e_structural_canary_attempt1.json.
+F2-E2 attempt 2 foi executado em seed 424242 a partir do commit limpo
+4a0558e3a4c6b7795d618f4cdcda3a22e53074d8.
 
-Resultado attempt 1:
+Resultado observado:
 
-- commit limpo 564cfbb54489ce2c6690adafcc629ec036bd4720;
-- status failed antes de EXECUTE;
-- nenhum ActionResult;
-- nenhuma transação estrutural enviada;
-- causa: planner recebeu _save_entity_state, que expõe chest em inventories.chest e zero resource rows;
-- bootstrap havia medido iron ore corretamente;
-- refusal efetiva na reconstrução: structural_buffer_contents_unobserved.
+- ActionResult = rejected;
+- refusal = structural_postcondition_failed;
+- producers_reaching_processor: 0 -> 1 no candidate;
+- physical_processing_coverage: 0.0 -> 1.0 no candidate;
+- processor_exists: false -> true;
+- processor_status = no_fuel;
+- processor_output = 0.0;
+- transaction_committed = false;
+- rollback_observed = true;
+- estado final voltou aos valores before.
 
-Correção já implementada e full gateada:
+Artifact canônico:
+runs/audits/cortex_f2e_structural_canary.json
 
-- planning usa FactorioObserver.snapshot/resource_overview/game_knowledge;
-- on-hand available vem apenas do inventory do character;
-- post-action processor_output vem de craft_output observado;
-- plan/targets/instruments são persistidos antes do ready gate;
-- 34 focused PASS;
-- full gate 1367 core/FLE + 2 PyTorch PASS.
+Cópia preservada:
+runs/audits/cortex_f2e_structural_canary_attempt2.json
 
-Próximo passo: commit/push da correção, confirmar tree clean + evolution inactive/disabled, remover apenas o artifact canônico antigo (cópia attempt1 já preservada) e executar um único retry.
+Interpretation:
+a camada F2-E de controlled transactional execution funcionou corretamente; a opção estrutural
+atual é causalmente incompleta porque não satisfaz a dependência de fuel/energy do processor.
 
-F3 e continuous autonomous authority permanecem proibidas.
+Próximo bloco seguro:
+
+1. mapear energy/fuel requirements do processor;
+2. reutilizar planning/fuel.py + planning/resupply.py;
+3. representar fuel como child dependency/precondition da opção;
+4. compor processor + material delivery + fuel delivery;
+5. manter um único rollback em TransactionalFLEExecutor;
+6. repetir somente um canário isolado após novo gate/commit clean;
+7. exigir processor_output > 0; não relaxar o hard gate.
+
+Não usar seeds 20261101–20261110.
+Não conceder continuous autonomous authority.
+F3 permanece bloqueada.
 
 ## Protocolo de retomada após interrupção
 

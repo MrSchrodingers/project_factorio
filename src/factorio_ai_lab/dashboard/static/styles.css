@@ -475,7 +475,7 @@ small { line-height: 1.35; }
 .evidence-grid {
   min-width: 0;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 10px;
 }
@@ -2650,6 +2650,11 @@ small { line-height: 1.35; }
 }
 .cortex-track.fly { background: rgba(20,16,26,.96); }
 .cortex-track.governance { background: rgba(18,20,16,.96); }
+.cortex-track.canary {
+  background:
+    linear-gradient(180deg, rgba(18,24,18,.98), rgba(13,18,14,.98));
+  box-shadow: inset 0 2px 0 rgba(111,207,151,.16);
+}
 .cortex-track-id {
   display: block;
   margin-bottom: 6px;
@@ -2659,12 +2664,15 @@ small { line-height: 1.35; }
   letter-spacing: .16em;
 }
 .cortex-track.fly .cortex-track-id { color: var(--purple); }
-.cortex-track.governance .cortex-track-id { color: var(--green); }
+.cortex-track.governance .cortex-track-id,
+.cortex-track.canary .cortex-track-id { color: var(--green); }
 .cortex-track strong {
   display: block;
   margin-bottom: 5px;
   font-size: 13px;
 }
+
+#cortexCanaryStatus { color: var(--green); }
 .cortex-track small {
   color: var(--muted);
   font-size: 10px;

@@ -1746,17 +1746,26 @@ function renderExperimentContext() {
       && runningCount === 0;
     const cortexPhase = context.cortex_phase || {};
     const phase2Checkpoint = String(cortexPhase.phase2_checkpoint || "F2");
+    const canary = cortexPhase.phase2_canary || {};
+    const candidate = canary.candidate_after || {};
+    const controlledExecution = phase2Checkpoint.startsWith("F2-E");
+    const actionStatus = String(canary.action_status || canary.status || "--");
+    const canaryRejected = actionStatus === "rejected";
+    const canaryAccepted = actionStatus === "accepted";
+
     setText(
       "cortexPhaseTitle",
       seriesComplete
-        ? phase2Checkpoint + " · Cortex research · SHADOW"
+        ? (controlledExecution
+          ? phase2Checkpoint + " · controlled transaction evidence"
+          : phase2Checkpoint + " · Cortex research · SHADOW")
         : "F1-B · baseline corrigida em execução · "
           + (context.mode === "exploratory" ? "exploratória" : String(context.mode || ""))
     );
     setClassText(
       "cortexPhaseBadge",
       seriesComplete
-        ? phase2Checkpoint + " · shadow"
+        ? phase2Checkpoint + (controlledExecution ? " · evidence" : " · shadow")
         : (configured
           ? "F1-B · " + completed + "/" + configured
           : "F1-B · seed " + seed),
@@ -1764,6 +1773,53 @@ function renderExperimentContext() {
         ? "badge good"
         : "badge live"
     );
+
+    if (canary.exists) {
+      setClassText(
+        "cortexCanaryStatus",
+        actionStatus.toUpperCase()
+          + (canary.refusal ? " · " + String(canary.refusal) : ""),
+        canaryAccepted ? "good" : (canaryRejected ? "warn" : "neutral")
+      );
+      setText(
+        "cortexCanaryDetail",
+        "candidate: coverage "
+          + formatNumber(candidate.physical_processing_coverage, 2)
+          + " · processor "
+          + String(candidate.processor_status || "--")
+          + " · output "
+          + formatNumber(candidate.processor_output, 2)
+      );
+      setText(
+        "cortexCanaryRollback",
+        "commit "
+          + (canary.transaction_committed ? "SIM" : "NÃO")
+          + " · rollback "
+          + (canary.rollback_observed ? "PASS" : "--")
+          + " · run "
+          + String(canary.run_id || "--")
+      );
+      setText(
+        "cortexAuthorityDetail",
+        "EXECUTE concedido somente ao canário registrado"
+          + " · continuous authority "
+          + (canary.continuous_authority ? "ON" : "OFF")
+          + " · baseline/holdout separados."
+      );
+    } else {
+      setText("cortexCanaryStatus", "canário não executado");
+      setText(
+        "cortexCanaryDetail",
+        "nenhuma evidência transacional persistida neste checkpoint"
+      );
+      setText("cortexCanaryRollback", "commit -- · rollback --");
+      setText(
+        "cortexAuthorityDetail",
+        controlledExecution
+          ? "EXECUTE disponível somente por chamada explícita; sem authority persistente."
+          : "Cortex permanece em SHADOW; runner herdado é baseline."
+      );
+    }
     setClassText(
       "baselineRuntimeBadge",
       "runtime " + releaseCommit,
