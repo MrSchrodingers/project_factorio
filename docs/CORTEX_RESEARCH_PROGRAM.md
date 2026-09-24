@@ -886,7 +886,7 @@ pareada nas seeds confirmatórias congeladas.
 - [x] provenance por ação;
 - [x] refusals nomeadas;
 - [ ] transactional execution universal;
-- [ ] options iniciais;
+- [x] options iniciais;
 - [ ] teste que constrói cadeia funcional sem `curriculum_runner`;
 - [ ] runner antigo executável apenas como baseline.
 
