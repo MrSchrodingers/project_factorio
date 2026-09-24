@@ -216,6 +216,10 @@ This hardening changes only fixture timing/telemetry. It does not change:
 
 It does not justify another F2-F3 attempt.
 
+Hardening commit:
+
+    0a747b99328bf084a82fdde79ee8259018ba7931 — fix: estabiliza fixture do canário Cortex
+
 ## 9. Decision F2-F3
 
 **VALID NEGATIVE RESULT.**

@@ -93,11 +93,11 @@ falhou antes da capability por timing do fixture producer+buffer. Ela foi classi
 invalid experiment / fixture failure e não substitui o F2-F3 válido.
 
 O fixture foi endurecido com polling bounded 1 s / deadline 12 s e telemetria explícita.
-Esse hardening deve ser versionado separadamente.
+Hardening publicado em `0a747b99328bf084a82fdde79ee8259018ba7931` — `fix: estabiliza fixture do canário Cortex`.
 
 Próximo bloco seguro:
 
-1. publicar o hardening do bootstrap em commit isolado;
+1. validar/deployar o dashboard F2-F3 e publicar a tag de fechamento;
 2. criar F2-F4 como planner puro de delivery actuator dependency;
 3. resolver actuator por energia observada/capability disponível, nunca por nome hardcoded;
 4. reutilizar MachineEnergy/runtime catalog e planners existentes;

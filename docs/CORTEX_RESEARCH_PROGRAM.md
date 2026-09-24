@@ -1102,6 +1102,7 @@ Uma execução posterior falhou no fixture producer+buffer antes da capability. 
 como `cortex_f2f3_structural_canary_attempt1_invalid_bootstrap*.json` e classificada como invalid
 experiment / fixture timing failure. O bootstrap foi endurecido com polling bounded 1 s,
 deadline 12 s e telemetria de polls/elapsed/iron_buffered; isso não altera a capability Cortex.
+Hardening commit: `0a747b99328bf084a82fdde79ee8259018ba7931`.
 
 **Next:** F2-F4 — delivery actuator dependency / energy-aware delivery. Manter
 `processor_output INCREASE` inalterado, compor dependencies tipadas e validar primeiro em
