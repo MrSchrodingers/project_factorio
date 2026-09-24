@@ -26,6 +26,7 @@ com experiência sem receber do programador a sequência de ações que constitu
 > **F2-E — Controlled transactional execution:** [docs/CORTEX_PHASE2_TRANSACTIONAL_EXECUTION.md](docs/CORTEX_PHASE2_TRANSACTIONAL_EXECUTION.md)
 > **F2-F — Functional dependency completion:** [docs/CORTEX_PHASE2_FUNCTIONAL_DEPENDENCY.md](docs/CORTEX_PHASE2_FUNCTIONAL_DEPENDENCY.md)
 > **F2-F2 — Functional dependency composition:** [docs/CORTEX_PHASE2_FUNCTIONAL_DEPENDENCY_COMPOSITION.md](docs/CORTEX_PHASE2_FUNCTIONAL_DEPENDENCY_COMPOSITION.md)
+> **F2-F3 — Functional canary:** [docs/CORTEX_PHASE2_FUNCTIONAL_CANARY.md](docs/CORTEX_PHASE2_FUNCTIONAL_CANARY.md)
 > **F1-B — storage hardening:** [docs/CORTEX_F1_STORAGE_HARDENING.md](docs/CORTEX_F1_STORAGE_HARDENING.md)
 > **Dashboard / evidence scope:** [docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md](docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md)
 > **Dashboard / tmp hardening:** [docs/CORTEX_DASHBOARD_TMP_HARDENING.md](docs/CORTEX_DASHBOARD_TMP_HARDENING.md)
@@ -33,10 +34,10 @@ com experiência sem receber do programador a sequência de ações que constitu
 
 ## Estado do programa
 
-**Cortex Research Architecture v0.1 — F2-F2 concluída. O counterexample no_fuel de F2-E agora
-é tratado como dependência tipada: consumo e fuel compatibility são medidos, plan_supply decide
-cobertura real e carried fuel vira operação semântica fuel_processor. F2-F3 está autorizada como
-um único canário isolado; continuous authority e F3 seguem proibidas.**
+**Cortex Research Architecture v0.1 — F2-F3 produziu counterexample funcional válido. A dependência
+de fuel do processor foi resolvida: o stone-furnace saiu de no_fuel para no_ingredients, mas
+processor_output permaneceu zero e a transação fez rollback. F2-F4 está autorizada para modelar
+energia/capability do delivery actuator; continuous authority e F3 seguem proibidas.**
 
 As seeds confirmatórias 20261101–20261110 permanecem congeladas e não executadas; serão usadas
 posteriormente para avaliação pareada do Cortex, sem tuning nelas.

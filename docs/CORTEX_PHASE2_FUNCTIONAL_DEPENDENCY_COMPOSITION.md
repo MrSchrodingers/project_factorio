@@ -321,3 +321,24 @@ If F2-F3 still rejects, the next action is determined by the measured failure, n
 acceptance criteria.
 
 F3 remains blocked until F2 Exit Gate is satisfied.
+## 16. F2-F3 observed result
+
+The real Factorio canary on clean commit `e1aad03dafa8604a002ca11641f0000b69cbefa0` reached the dependency-completed option.
+
+Observed causal transition:
+
+- fuel dependency: ready;
+- selected fuel: coal;
+- processor fuel units: 1;
+- processor status changed from the previous F2-E2 `no_fuel` failure to `no_ingredients`;
+- physical processing coverage increased from 0.0 to 1.0;
+- processor existed;
+- processor output remained 0.0;
+- transaction was rejected;
+- rollback was observed.
+
+This validates the fuel-composition mechanism while falsifying the stronger hypothesis that processor fuel was the only missing functional dependency.
+
+The delivery contract still specifies the electric `inserter`, while `planning/delivery.py` has no power/energy contract and the canary creates no electrical network. F2-F4 must therefore model delivery-actuator energy/capability generically. The functional output gate remains unchanged.
+
+Artifact: `runs/audits/cortex_f2f_structural_canary.json`.

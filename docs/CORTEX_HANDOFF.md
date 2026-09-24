@@ -6,7 +6,7 @@
 ## Estado atual
 
 - Programa: Cortex Research Architecture v0.1
-- Fase: **F2-F2 concluída — F2-F3 one-shot canary autorizada; F3 ainda bloqueada**
+- Fase: **F2-F3 concluída como counterexample válido — F2-F4 autorizada; F3 bloqueada**
 - Branch: `research/cortex-v1`
 - Baseline imutável de origem: `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 - Tag baseline publicada: `cortex-pre-research-baseline-20260923`
@@ -46,49 +46,70 @@ silenciosamente pelo commit da F0**.
 
 ## Próxima ação
 
-**F2-F3 — um único canário funcional isolado na seed 424242.**
+**F2-F4 — delivery actuator dependency / energy-aware delivery.**
 
-F2-F2 está formalmente concluída.
+F2-F3 já produziu um experimento válido em Factorio real no commit
+e1aad03dafa8604a002ca11641f0000b69cbefa0, seed 424242.
 
-Evidence:
+Resultado causal:
 
-- implementation commit: 95ec3dfc23c3d39a88fc6b5abe64e9042902a413;
-- 83 focused PASS;
-- 1386 core/FLE PASS;
-- 2 PyTorch PASS;
-- Ruff/compileall/frontend TypeScript/Vite/node/diff check PASS;
-- phase_state = F2-F2;
-- runtime científico F1 permanece 95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac, dirty=false;
-- evolution permanece inactive + disabled.
+- functional_dependency.ready = true;
+- fuel selecionado = coal;
+- fuel units = 1;
+- carried_only = true;
+- operação fuel_processor presente;
+- producers_reaching_processor: 0 -> 1;
+- physical_processing_coverage: 0.0 -> 1.0;
+- processor_exists: false -> true;
+- processor_status: no_ingredients;
+- processor_output: 0.0;
+- ActionResult = rejected;
+- structural_postcondition_failed;
+- transaction_committed = false;
+- rollback_observed = true.
 
-Capability F2-F2:
+Interpretação:
 
-- MachineEnergy -> bounded fuel demand;
-- compatibility medida por fuel categories;
-- availability validada por plan_supply;
-- carried fuel -> typed FuelDependency + fuel_processor;
-- world fuel draw planejável, mas execution recusada sem adapter próprio;
-- processor_output INCREASE permanece hard gate.
+F2-F2 resolveu a dependência de combustível do stone-furnace: o processor deixou de
+falhar por no_fuel. A nova falha é de alimentação de material.
 
-Documentos:
-docs/CORTEX_PHASE2_FUNCTIONAL_DEPENDENCY.md
-docs/CORTEX_PHASE2_FUNCTIONAL_DEPENDENCY_COMPOSITION.md
+A inspeção do contrato mostra:
+
+- connect_delivery usa entities=["inserter"];
+- structural_prepare hardcodeia o inserter elétrico;
+- planning/delivery.py não modela power/energy;
+- o canário não cria uma rede elétrica;
+- burner-inserter também estava disponível no inventory.
+
+Portanto F2-F4 deve modelar a dependência funcional do actuator de delivery, não relaxar
+processor_output e não inserir um special-case de iron/green science.
+
+Artifact científico válido:
+runs/audits/cortex_f2f_structural_canary.json
+
+Uma execução posterior gravada em
+runs/audits/cortex_f2f3_structural_canary_attempt1_invalid_bootstrap.json
+falhou antes da capability por timing do fixture producer+buffer. Ela foi classificada como
+invalid experiment / fixture failure e não substitui o F2-F3 válido.
+
+O fixture foi endurecido com polling bounded 1 s / deadline 12 s e telemetria explícita.
+Esse hardening deve ser versionado separadamente.
 
 Próximo bloco seguro:
 
-1. reaplicar o runner F2-F3 preservado em runs/wip/run_cortex_structural_canary_f2f3.py;
-2. validar lint/compile + canary contract;
-3. commit/push do runner F2-F3 em árvore clean;
-4. confirmar evolution inactive+disabled;
-5. executar exatamente um canário seed 424242;
-6. comparar causalmente com F2-E2 attempt2;
-7. preservar artifact e atualizar docs/UI;
-8. não repetir automaticamente em caso de reject.
+1. publicar o hardening do bootstrap em commit isolado;
+2. criar F2-F4 como planner puro de delivery actuator dependency;
+3. resolver actuator por energia observada/capability disponível, nunca por nome hardcoded;
+4. reutilizar MachineEnergy/runtime catalog e planners existentes;
+5. para actuator burner, compor fuel dependency tipada;
+6. para actuator elétrico, exigir power capability observada ou child option explícita;
+7. manter TransactionalFLEExecutor como único commit/rollback;
+8. manter processor_output INCREASE como hard gate;
+9. validar em shadow/replay antes de qualquer novo canário real.
 
 Não executar seeds 20261101–20261110.
 Não conceder continuous autonomous authority.
 F3 permanece bloqueada.
-
 ## Protocolo de retomada após interrupção
 
 Não inferir continuidade pela tela. Executar na ordem:

@@ -1074,8 +1074,38 @@ tests/test_fuel.py.
 autorizada somente como one-shot isolated canary em seed 424242, com runner versionado e árvore
 clean. Continuous authority permanece proibida.
 
-**Next:** F2-F3 — repetir um único canário seed 424242 com a dependency-completed v2 option. A hard
-postcondition processor_output INCREASE permanece inalterada.
+**F2-F3 result:** **VALID COUNTEREXAMPLE / rollback PASS.** O canário real em
+`e1aad03dafa8604a002ca11641f0000b69cbefa0`, seed 424242, alcançou a capability F2-F2.
+FunctionalDependency ficou ready=true, selecionou coal por compatibilidade + disponibilidade,
+inseriu `fuel_processor` no contrato e removeu o erro `no_fuel`.
+
+Candidate state:
+
+- producers_reaching_processor: 0 -> 1;
+- physical_processing_coverage: 0.0 -> 1.0;
+- processor_exists: false -> true;
+- processor_status: `no_ingredients`;
+- processor_output: 0.0.
+
+A hard postcondition funcional `processor_output INCREASE` permaneceu unsatisfied, portanto a
+transação foi rejeitada e rollback_observed=true. O estado final retornou ao baseline do canário.
+
+**Scientific interpretation:** F2-F2 resolveu fuel do processor, mas a hipótese de que fuel era a
+única dependência funcional ausente foi falsificada. O delivery contract usa
+`entities=["inserter"]`; `structural_prepare.py` seleciona esse actuator explicitamente e
+`planning/delivery.py` não modela power. No canário não há power network. F2-F4 deve portanto
+modelar energia/capability do delivery actuator genericamente.
+
+**Artifact F2-F3 válido:** `runs/audits/cortex_f2f_structural_canary.json`.
+
+Uma execução posterior falhou no fixture producer+buffer antes da capability. Ela foi preservada
+como `cortex_f2f3_structural_canary_attempt1_invalid_bootstrap*.json` e classificada como invalid
+experiment / fixture timing failure. O bootstrap foi endurecido com polling bounded 1 s,
+deadline 12 s e telemetria de polls/elapsed/iron_buffered; isso não altera a capability Cortex.
+
+**Next:** F2-F4 — delivery actuator dependency / energy-aware delivery. Manter
+`processor_output INCREASE` inalterado, compor dependencies tipadas e validar primeiro em
+shadow/replay. F3 permanece bloqueada.
 
 **Exit Gate F2:** o agente pode montar uma cadeia funcional escolhendo primitivas/options por uma
 API genérica, sem caminho codificado por estágio.
