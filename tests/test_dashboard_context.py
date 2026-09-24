@@ -150,3 +150,28 @@ def test_missing_baseline_does_not_fall_back_silently(tmp_path) -> None:
     assert ctx["kind"] == "baseline_seed"
     assert ctx["status"] == "missing"
     assert "error" in ctx
+
+def test_baseline_context_exposes_mechanical_cortex_checkpoint(tmp_path) -> None:
+    path=_seed(
+        tmp_path,
+        seed=1,
+        status="completed",
+        started="2026-01-01T00:00:00+00:00",
+        finished="2026-01-01T01:00:00+00:00",
+    )
+    (path/"result.json").write_text("{}\n")
+    runs=tmp_path/"runs"
+    runs.mkdir()
+    (runs/"cortex_phase_state.json").write_text(json.dumps({
+        "phase":"F2",
+        "phase_status":"active",
+        "phase2_checkpoint":"F2-D",
+    })+"\n")
+
+    ctx=discover_experiment_context(
+        tmp_path,
+        scope="baseline:p1:exploratory:auto",
+    )
+
+    assert ctx["cortex_phase"]["phase"] == "F2"
+    assert ctx["cortex_phase"]["phase2_checkpoint"] == "F2-D"

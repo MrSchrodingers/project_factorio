@@ -1744,17 +1744,19 @@ function renderExperimentContext() {
     const seriesComplete = configured > 0
       && completed >= configured
       && runningCount === 0;
+    const cortexPhase = context.cortex_phase || {};
+    const phase2Checkpoint = String(cortexPhase.phase2_checkpoint || "F2");
     setText(
       "cortexPhaseTitle",
       seriesComplete
-        ? "F2-C · Structural processing planner · SHADOW"
+        ? phase2Checkpoint + " · Cortex research · SHADOW"
         : "F1-B · baseline corrigida em execução · "
           + (context.mode === "exploratory" ? "exploratória" : String(context.mode || ""))
     );
     setClassText(
       "cortexPhaseBadge",
       seriesComplete
-        ? "F2-C · structural shadow"
+        ? phase2Checkpoint + " · shadow"
         : (configured
           ? "F1-B · " + completed + "/" + configured
           : "F1-B · seed " + seed),

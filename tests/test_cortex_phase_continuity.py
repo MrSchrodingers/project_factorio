@@ -389,3 +389,37 @@ def test_phase_state_marks_f2c_when_structural_planning_document_exists(tmp_path
     assert state["phase2_checkpoint"] == "F2-C"
     assert state["phase2_structural"]["exists"] is True
     assert state["resume"]["action"] == "F2 active; follow docs/CORTEX_HANDOFF.md"
+
+def test_phase_state_marks_f2d_when_structural_preparation_document_exists(tmp_path) -> None:
+    module=_module("cortex_phase_state.py")
+    protocol=tmp_path/"protocol.json"
+    _protocol(protocol)
+
+    for seed in (11,12):
+        seed_dir=tmp_path/"baseline_runs"/"p1"/"exploratory"/str(seed)
+        seed_dir.mkdir(parents=True)
+        (seed_dir/"manifest.json").write_text(json.dumps({
+            "status":"completed",
+            "returncode":0,
+            "release":{"commit":"abc"},
+        })+"\n")
+        (seed_dir/"result.json").write_text(json.dumps({
+            "code_revision":{"commit":"abc","dirty":False},
+            "challenger":{"fitness":{}},
+        })+"\n")
+
+    docs=tmp_path/"docs"
+    docs.mkdir()
+    (docs/"CORTEX_PHASE1_BASELINE_STATISTICAL_REPORT.md").write_text("# report\n")
+    (docs/"CORTEX_PHASE2_ACTION_ONTOLOGY.md").write_text("# F2-A\n")
+    (docs/"CORTEX_PHASE2_LEGACY_PARITY.md").write_text("# F2-B\n")
+    (docs/"CORTEX_PHASE2_STRUCTURAL_PLANNING.md").write_text("# F2-C\n")
+    (docs/"CORTEX_PHASE2_STRUCTURAL_PREPARATION.md").write_text("# F2-D\n")
+
+    state=module.build_phase_state(state_root=tmp_path,protocol_path=protocol)
+
+    assert state["phase"] == "F2"
+    assert state["phase_status"] == "active"
+    assert state["phase2_checkpoint"] == "F2-D"
+    assert state["phase2_preparation"]["exists"] is True
+    assert state["resume"]["action"] == "F2 active; follow docs/CORTEX_HANDOFF.md"

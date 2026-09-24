@@ -38,6 +38,7 @@ from factorio_ai_lab.planning.footprints import blocked_tiles, entity_name, enti
 from factorio_ai_lab.planning.placement import (
     OUTCOME_REFUSE,
     PlacementPlan,
+    ResourceSurvey,
     plan_placement,
     scan_offsets,
 )
@@ -51,6 +52,7 @@ REFUSAL_BUFFER_ENTITY_UNREADABLE = "structural_buffer_entity_unreadable"
 REFUSAL_BUFFER_CONTENTS_UNOBSERVED = "structural_buffer_contents_unobserved"
 REFUSAL_BUFFER_EMPTY = "structural_buffer_empty"
 REFUSAL_BUFFER_MATERIAL_AMBIGUOUS = "structural_buffer_material_ambiguous"
+REFUSAL_MINING_MATERIAL_AMBIGUOUS = "structural_mining_material_ambiguous"
 REFUSAL_NO_DIRECT_PROCESSING_RECIPE = "structural_no_direct_processing_recipe"
 REFUSAL_NO_PROCESSOR_MACHINE = "structural_no_processor_machine"
 REFUSAL_NO_PLACEMENT_DELIVERY = "structural_no_placement_delivery"
@@ -81,8 +83,10 @@ class BufferedSource:
     material: str
     producer_id: str
     buffer_id: str
-    observed_count: float
+    observed_count: float | None
     evidence: EvidenceRef
+    identity_basis: str = "buffer_contents"
+    buffer_evidence: EvidenceRef | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -90,7 +94,13 @@ class BufferedSource:
             "producer_id": self.producer_id,
             "buffer_id": self.buffer_id,
             "observed_count": self.observed_count,
+            "identity_basis": self.identity_basis,
             "evidence": self.evidence.to_dict(),
+            "buffer_evidence": (
+                None
+                if self.buffer_evidence is None
+                else self.buffer_evidence.to_dict()
+            ),
         }
 
 
@@ -263,11 +273,69 @@ def _world_index(
     }
 
 
+def _mining_material_identity(
+    producer_id: str,
+    *,
+    world: Mapping[str, Mapping[str, Any]],
+    resources: ResourceSurvey | None,
+    footprints: Mapping[str, tuple[int, int]] | None,
+) -> tuple[str | None, EvidenceRef | None, Refusal | None]:
+    """Material causally under one producer, when the ground was surveyed.
+
+    Buffer contents are a downstream observation and may be contaminated by
+    bootstrap fuel or another line. A mining drill standing over exactly one
+    observed resource provides a stronger causal identity for its output.
+    Multiple resource kinds under the producer remain ambiguous; no majority
+    heuristic is allowed.
+    """
+
+    if resources is None:
+        return None, None, None
+    entity = world.get(producer_id)
+    if entity is None:
+        return None, None, None
+    tiles = entity_tiles(entity, footprints)
+    if not tiles:
+        return None, None, None
+    names = tuple(
+        sorted(
+            {
+                resources.tiles[tile]
+                for tile in tiles
+                if tile in resources.tiles
+            }
+        )
+    )
+    if len(names) > 1:
+        return (
+            None,
+            None,
+            Refusal(
+                code=REFUSAL_MINING_MATERIAL_AMBIGUOUS,
+                detail=(
+                    f"producer {producer_id} overlaps multiple observed resources: "
+                    + ", ".join(names)
+                ),
+            ),
+        )
+    if not names:
+        return None, None, None
+    material = names[0]
+    evidence = EvidenceRef(
+        source="resource_survey",
+        path=f"{producer_id}.footprint.{material}",
+        status=EvidenceStatus.OBSERVED,
+    )
+    return material, evidence, None
+
+
 def _infer_sources(
     request: ActionRequest,
     *,
     graph: Mapping[str, Any],
     world_entities: Sequence[Mapping[str, Any]],
+    resources: ResourceSurvey | None = None,
+    footprints: Mapping[str, tuple[int, int]] | None = None,
 ) -> tuple[tuple[BufferedSource, ...], tuple[Refusal, ...]]:
     nodes, adjacency = _graph_indexes(graph)
     world = _world_index(world_entities)
@@ -322,6 +390,42 @@ def _infer_sources(
                 if previous is None or count > previous[0]:
                     observed[material] = (count, buffer_id)
 
+        mined_material, mining_evidence, mining_refusal = _mining_material_identity(
+            producer_id,
+            world=world,
+            resources=resources,
+            footprints=footprints,
+        )
+        if mining_refusal is not None:
+            refusals.append(mining_refusal)
+            continue
+
+        if mined_material is not None and mining_evidence is not None:
+            measured = observed.get(mined_material)
+            if measured is None:
+                buffer_id = buffer_ids[0]
+                count = None
+                buffer_evidence = None
+            else:
+                count, buffer_id = measured
+                buffer_evidence = EvidenceRef(
+                    source="world.entities",
+                    path=f"{buffer_id}.contents.{mined_material}",
+                    status=EvidenceStatus.OBSERVED,
+                )
+            sources.append(
+                BufferedSource(
+                    material=mined_material,
+                    producer_id=producer_id,
+                    buffer_id=buffer_id,
+                    observed_count=count,
+                    evidence=mining_evidence,
+                    identity_basis="mining_resource",
+                    buffer_evidence=buffer_evidence,
+                )
+            )
+            continue
+
         if not observed:
             code = (
                 REFUSAL_BUFFER_CONTENTS_UNOBSERVED
@@ -362,6 +466,8 @@ def _infer_sources(
                 buffer_id=buffer_id,
                 observed_count=count,
                 evidence=evidence,
+                identity_basis="buffer_contents",
+                buffer_evidence=evidence,
             )
         )
 
@@ -513,6 +619,7 @@ def plan_processing_for_buffered_output(
     catalog: RuntimeFactorioCatalog,
     available: Mapping[str, Any] | None = None,
     footprints: Mapping[str, tuple[int, int]] | None = None,
+    resources: ResourceSurvey | None = None,
     placement_reach: int = 8,
     belt_budget: int = DEFAULT_BELT_BUDGET,
 ) -> StructuralProcessingPlan:
@@ -549,6 +656,8 @@ def plan_processing_for_buffered_output(
         request,
         graph=graph,
         world_entities=world_entities,
+        resources=resources,
+        footprints=footprints,
     )
     groups: dict[str, list[BufferedSource]] = defaultdict(list)
     for source in sources:
@@ -659,7 +768,7 @@ def plan_processing_for_buffered_output(
         machine_ready = machine_dependency.feasible
         preconditions = (
             ActionCondition(
-                name="buffer_material_observed",
+                name="producer_material_identity_observed",
                 operator=ConditionOperator.EXISTS,
                 state=ConditionState.SATISFIED,
                 expected=material,

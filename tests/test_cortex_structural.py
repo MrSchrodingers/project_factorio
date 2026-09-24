@@ -1,16 +1,29 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 
-from factorio_ai_lab.cortex.actions import ActionProvenance
+from factorio_ai_lab.cortex.actions import (
+    ActionCondition,
+    ActionProvenance,
+    ConditionOperator,
+    ConditionState,
+)
 from factorio_ai_lab.cortex.executor import request_from_repair_action
 from factorio_ai_lab.cortex.structural import (
     REFUSAL_BUFFER_CONTENTS_UNOBSERVED,
     REFUSAL_BUFFER_MATERIAL_AMBIGUOUS,
+    REFUSAL_MINING_MATERIAL_AMBIGUOUS,
     REFUSAL_NO_DIRECT_PROCESSING_RECIPE,
     STATUS_PARTIAL,
     STATUS_READY,
     plan_processing_for_buffered_output,
+)
+from factorio_ai_lab.cortex.structural_prepare import (
+    CONTRACT_VERSION,
+    PURPOSE_INFRASTRUCTURE,
+    REFUSAL_BRANCH_PRECONDITION,
+    prepare_structural_branch,
 )
 from factorio_ai_lab.learning.factory_graph import build_factory_graph
 from factorio_ai_lab.learning.repair_loop import (
@@ -19,6 +32,7 @@ from factorio_ai_lab.learning.repair_loop import (
     Prediction,
     RepairAction,
 )
+from factorio_ai_lab.planning.placement import ResourceSurvey
 from factorio_ai_lab.planning.runtime_catalog import RuntimeFactorioCatalog
 
 
@@ -295,3 +309,187 @@ def test_partial_plan_keeps_ready_ore_branch_and_refuses_ambiguous_coal_goal() -
     assert REFUSAL_NO_DIRECT_PROCESSING_RECIPE in {
         refusal.code for refusal in result.refusals
     }
+
+def resource_survey(*names: str) -> ResourceSurvey:
+    rows = []
+    positions = (
+        (-0.5, -0.5),
+        (0.5, 0.5),
+        (-0.5, 0.5),
+        (0.5, -0.5),
+    )
+    for name, (x, y) in zip(names, positions, strict=False):
+        rows.append({
+            "name": name,
+            "type": "resource",
+            "position": {"x": x, "y": y},
+        })
+    return ResourceSurvey.from_entities(rows, surveyed=(-10, -10, 10, 10))
+
+
+def test_resource_survey_disambiguates_contaminated_buffer_causally() -> None:
+    world = [
+        entity("character", -5, -5, unit=99),
+        entity("burner-mining-drill", 0, 0, unit=1, direction=8),
+        entity(
+            "wooden-chest",
+            0,
+            2,
+            unit=2,
+            contents=[
+                {"name": "iron-ore", "count": 10},
+                {"name": "coal", "count": 3},
+            ],
+        ),
+    ]
+
+    result = plan_processing_for_buffered_output(
+        request("u1"),
+        graph=build_factory_graph(world),
+        world_entities=world,
+        catalog=catalog(),
+        available={"stone": 5},
+        resources=resource_survey("iron-ore"),
+    )
+
+    assert result.status == STATUS_READY
+    assert len(result.branches) == 1
+    assert result.branches[0].material == "iron-ore"
+    assert result.sources[0].identity_basis == "mining_resource"
+    assert result.sources[0].evidence.source == "resource_survey"
+    assert result.sources[0].buffer_evidence is not None
+
+
+def test_resource_survey_resolves_identity_even_when_buffer_is_empty() -> None:
+    world = [
+        entity("character", -5, -5, unit=99),
+        entity("burner-mining-drill", 0, 0, unit=1, direction=8),
+        entity("wooden-chest", 0, 2, unit=2, contents=[]),
+    ]
+
+    result = plan_processing_for_buffered_output(
+        request("u1"),
+        graph=build_factory_graph(world),
+        world_entities=world,
+        catalog=catalog(),
+        available={"stone": 5},
+        resources=resource_survey("iron-ore"),
+    )
+
+    assert result.status == STATUS_READY
+    assert result.sources[0].material == "iron-ore"
+    assert result.sources[0].observed_count is None
+    assert result.sources[0].identity_basis == "mining_resource"
+
+
+def test_mixed_resource_footprint_is_refused_without_majority_heuristic() -> None:
+    world = [
+        entity("burner-mining-drill", 0, 0, unit=1, direction=8),
+        entity(
+            "wooden-chest",
+            0,
+            2,
+            unit=2,
+            contents=[{"name": "iron-ore", "count": 10}],
+        ),
+    ]
+
+    result = plan_processing_for_buffered_output(
+        request("u1"),
+        graph=build_factory_graph(world),
+        world_entities=world,
+        catalog=catalog(),
+        resources=resource_survey("iron-ore", "copper-ore"),
+    )
+
+    assert result.branches == ()
+    assert result.refusals[0].code == REFUSAL_MINING_MATERIAL_AMBIGUOUS
+
+
+def test_prepares_structural_branch_as_inert_versioned_operation_contract() -> None:
+    world = [
+        entity("character", -5, -5, unit=99),
+        entity("burner-mining-drill", 0, 0, unit=1, direction=8),
+        entity(
+            "wooden-chest",
+            0,
+            2,
+            unit=2,
+            contents=[
+                {"name": "iron-ore", "count": 10},
+                {"name": "coal", "count": 3},
+            ],
+        ),
+    ]
+    plan = plan_processing_for_buffered_output(
+        request("u1"),
+        graph=build_factory_graph(world),
+        world_entities=world,
+        catalog=catalog(),
+        available={"stone": 5},
+        resources=resource_survey("iron-ore"),
+    )
+    branch = plan.branches[0]
+
+    prepared = prepare_structural_branch(branch)
+
+    assert prepared.ready is True
+    assert prepared.prepared is not None
+    action = prepared.prepared
+    assert action.contract_version == CONTRACT_VERSION
+    assert action.purpose == PURPOSE_INFRASTRUCTURE
+    assert action.preflight["world_mutation"] is False
+    assert action.preflight["material"] == "iron-ore"
+    assert action.preflight["product"] == "iron-plate"
+    assert {
+        "producers_reaching_processor",
+        "physical_processing_coverage",
+        "processor_output",
+    }.issubset(action.measurement_keys)
+    assert [operation.op for operation in action.operations] == [
+        "ensure_item",
+        "place_processor",
+        "configure_processing",
+        "connect_delivery",
+        "verify_postconditions",
+    ]
+
+
+def test_prepared_structural_action_refuses_unsatisfied_hard_precondition() -> None:
+    world = [
+        entity("character", -5, -5, unit=99),
+        entity("burner-mining-drill", 0, 0, unit=1, direction=8),
+        entity(
+            "wooden-chest",
+            0,
+            2,
+            unit=2,
+            contents=[{"name": "iron-ore", "count": 10}],
+        ),
+    ]
+    plan = plan_processing_for_buffered_output(
+        request("u1"),
+        graph=build_factory_graph(world),
+        world_entities=world,
+        catalog=catalog(),
+        available={"stone": 5},
+    )
+    branch = plan.branches[0]
+    blocked = replace(
+        branch,
+        preconditions=branch.preconditions
+        + (
+            ActionCondition(
+                name="power_capacity_measured",
+                operator=ConditionOperator.EXISTS,
+                state=ConditionState.UNKNOWN,
+                hard=True,
+            ),
+        ),
+    )
+
+    prepared = prepare_structural_branch(blocked)
+
+    assert prepared.ready is False
+    assert prepared.refusal is not None
+    assert prepared.refusal.code == REFUSAL_BRANCH_PRECONDITION

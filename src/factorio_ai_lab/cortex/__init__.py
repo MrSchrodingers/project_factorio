@@ -32,6 +32,12 @@ from factorio_ai_lab.cortex.structural import (
     StructuralProcessingPlan,
     plan_processing_for_buffered_output,
 )
+from factorio_ai_lab.cortex.structural_prepare import (
+    PreparedStructuralAction,
+    StructuralOperation,
+    StructuralPreparationResult,
+    prepare_structural_branch,
+)
 
 __all__ = [
     "ActionAuthority",
@@ -48,10 +54,14 @@ __all__ = [
     "LegacyRepairParityAdapter",
     "PreparationResult",
     "PreparedLegacyAction",
+    "PreparedStructuralAction",
     "ProcessingBranch",
     "Refusal",
+    "StructuralOperation",
+    "StructuralPreparationResult",
     "StructuralProcessingPlan",
     "UniversalExecutor",
     "plan_processing_for_buffered_output",
+    "prepare_structural_branch",
     "request_from_repair_action",
 ]

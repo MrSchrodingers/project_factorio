@@ -15,6 +15,12 @@ def _load_object(path: Path) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
+def _phase_context(state_root: Path) -> dict[str, Any]:
+    """Mechanical Cortex phase state exposed to the dashboard."""
+
+    return _load_object(state_root/"runs"/"cortex_phase_state.json") or {}
+
+
 def _timestamp(value: object, fallback: float) -> float:
     if isinstance(value, str) and value:
         try:
@@ -87,6 +93,7 @@ def discover_experiment_context(
             "runs_dir":str(state_root/"runs"),
             "label":"GLOBAL / legacy research state",
             "world_source":"live_rcon",
+            "cortex_phase":_phase_context(state_root),
         }
 
     parts=raw.split(":")
@@ -98,6 +105,7 @@ def discover_experiment_context(
             "runs_dir":str(state_root/"runs"),
             "label":"INVALID DASHBOARD SCOPE",
             "world_source":"live_rcon",
+            "cortex_phase":_phase_context(state_root),
             "error":"expected baseline:<protocol>:<mode>:auto",
         }
 
@@ -123,6 +131,7 @@ def discover_experiment_context(
             "runs_dir":None,
             "label":f"BASELINE {mode} / no seed evidence",
             "world_source":"live_rcon",
+            "cortex_phase":_phase_context(state_root),
             "error":"no baseline manifest matched dashboard scope",
         }
 
@@ -172,6 +181,7 @@ def discover_experiment_context(
         f"BASELINE {mode.upper()} · seed {selected.get('seed')}"
     )
     selected["world_source"]="live_rcon"
+    selected["cortex_phase"]=_phase_context(state_root)
     selected["baseline_release"]=(selected.get("manifest") or {}).get("release")
     selected["result_summary"]={
         "run_id":(challenger or {}).get("run_id") if isinstance(challenger,dict) else research_state.get("run_id"),

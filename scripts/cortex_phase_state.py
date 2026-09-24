@@ -189,6 +189,10 @@ def build_phase_state(
         state_root / "docs" / "CORTEX_PHASE2_STRUCTURAL_PLANNING.md"
     )
     phase2_structural=phase2_structural_path.exists()
+    phase2_preparation_path=(
+        state_root / "docs" / "CORTEX_PHASE2_STRUCTURAL_PREPARATION.md"
+    )
+    phase2_preparation=phase2_preparation_path.exists()
 
     if blocked_running:
         action=f"monitor seed {exploratory['running'][0]}"
@@ -242,9 +246,13 @@ def build_phase_state(
             "exists":phase2_started,
         },
         "phase2_checkpoint":(
-            "F2-C"
-            if phase2_structural
-            else ("F2-B" if phase2_parity else ("F2-A" if phase2_started else None))
+            "F2-D"
+            if phase2_preparation
+            else (
+                "F2-C"
+                if phase2_structural
+                else ("F2-B" if phase2_parity else ("F2-A" if phase2_started else None))
+            )
         ),
         "phase2_parity":{
             "path":str(phase2_parity_path),
@@ -253,6 +261,10 @@ def build_phase_state(
         "phase2_structural":{
             "path":str(phase2_structural_path),
             "exists":phase2_structural,
+        },
+        "phase2_preparation":{
+            "path":str(phase2_preparation_path),
+            "exists":phase2_preparation,
         },
         "modes":modes,
         "resume":{
