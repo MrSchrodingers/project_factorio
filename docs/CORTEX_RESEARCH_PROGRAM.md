@@ -1259,6 +1259,43 @@ fake transacional. Reusar `StructuralTransactionalAdapter`/`TransactionalFLEExec
 ticks before/after e manter lineage Option -> Action -> transaction. Nenhum canário live é
 autorizado por F2-G2. F3 permanece bloqueada.
 
+**F2-G3 progress:** **PASS parcial de F2.** Um `ProcessingChainOptionPlan` agora cruza um
+`OptionExecutionBoundary` genérico que valida digest, lineage e termination antes de qualquer
+authority. SHADOW/PROPOSAL não chamam runtime. EXECUTE, validado somente em fake transacional,
+reutiliza `StructuralTransactionalAdapter -> TransactionalFLEExecutor` e não duplica rollback.
+
+**Authority F2-G3:** um `OptionExecutionGrant` é ligado ao option id, prepared action id, plan
+digest, code revision e run id. O mesmo plan digest só pode ser consumido uma vez dentro da mesma
+instância de boundary. Essa garantia é deliberadamente **process-local**; portanto live Option
+EXECUTE segue bloqueado até um ledger persistente existir.
+
+**Temporal semantics F2-G3:** EXECUTE exige tick source observável antes da mutação. Accepted fake
+execution mediu 600 ticks e devolveu o valor ao OptionBudget. Em reject com rollback que rebobinou
+1000 -> 1000, o resultado foi `observed_ticks=null` / `missing_after_rollback`, nunca zero
+fabricado.
+
+**Evidence F2-G3:** `docs/CORTEX_PHASE2_OPTION_EXECUTION_BOUNDARY.md`;
+`runs/audits/cortex_f2g3_option_execution_fake.json` SHA-256
+`3a2cdf621e2592766cdec3f5a83ca057b42f3b3c184ce356437a1795a4b97f65`.
+
+**Focused gates F2-G3:** 26 PASS boundary/composer/transaction; 53 PASS integrated
+continuity/dashboard; Ruff/py_compile/JavaScript PASS.
+
+**Full gate F2-G3:** 1421 core/FLE PASS + 2 PyTorch PASS;
+Ruff/compileall/JavaScript/TypeScript/Vite/whitespace PASS.
+
+**F2-G3 implementation commit:** `e25569db40d6e6186cc24b3c380ebdc9dc4e84cf` —
+`feat: adiciona boundary universal de execução de Options`.
+
+**Decision F2-G3:** **PASS parcial de F2.** O boundary universal existe e foi exercitado com
+transaction commit/rollback em fake determinístico, sem `curriculum_runner`. Transactional
+execution universal permanece aberta no checklist porque durable live one-shot authority ainda não
+foi provada. O teste funcional live por Option/API genérica e baseline-only enforcement também
+permanecem abertos.
+
+**Next:** F2-G4A — ledger persistente de grants + dry-run runner independente de
+`curriculum_runner`. Nenhum live Option canary é autorizado por F2-G3. F3 permanece bloqueada.
+
 **Exit Gate F2:** o agente pode montar uma cadeia funcional escolhendo primitivas/options por uma
 API genérica, sem caminho codificado por estágio.
 

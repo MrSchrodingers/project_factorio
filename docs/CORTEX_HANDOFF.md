@@ -6,7 +6,7 @@
 ## Estado atual
 
 - Programa: Cortex Research Architecture v0.1
-- Fase: **F2-G2 concluída — F2-G3 autorizada em SHADOW/replay; F3 bloqueada**
+- Fase: **F2-G3 concluída — F2-G4A autorizada para authority ledger persistente; F3 bloqueada**
 - Branch: `research/cortex-v1`
 - Baseline imutável de origem: `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 - Tag baseline publicada: `cortex-pre-research-baseline-20260923`
@@ -46,71 +46,73 @@ silenciosamente pelo commit da F0**.
 
 ## Próxima ação
 
-**F2-G3 — universal Option execution boundary, primeiro em SHADOW/replay.**
+**F2-G4A — persistent one-shot Option authority ledger + dry-run integration.**
 
-F2-G2 formalizou a primeira Option temporally extended do Cortex:
+F2-G3 fechou o boundary universal de execução da primeira Option:
 
-- kind: `establish_processing_chain`;
-- initiation = preconditions do branch estrutural;
-- children = structural planner -> prepare v1 -> processor energy v2 -> delivery actuator v3;
-- termination = reaching_processor + processor_exists + processor_output;
-- authority F2-G2 = SHADOW/PROPOSAL; EXECUTE recusado;
-- provenance explícita Option -> ActionRequest -> ProcessingBranch;
-- ambiguity entre múltiplos materiais é refusal, não escolha silenciosa;
-- requested ticks não viram observação;
-- observed game ticks, quando disponíveis, ampliam o horizon de energy planning;
-- `runtime_game_ticks()` está em instrumentation genérica; runner legado só mantém wrapper.
+- `ProcessingChainOptionPlan -> OptionExecutionBoundary -> StructuralTransactionalAdapter -> TransactionalFLEExecutor`;
+- digest SHA-256 do plano congelado;
+- grant ligado a option/prepared action/digest/SHA/run;
+- lineage Option -> ActionRequest -> Branch -> Prepared validado antes de authority;
+- termination funcional permanece reaching_processor + processor_exists + processor_output;
+- SHADOW/PROPOSAL não chamam runtime;
+- EXECUTE exige executor, measurement probe e tick source observável antes da mutação;
+- accepted fake transaction devolveu 600 observed ticks ao OptionBudget;
+- rejected fake transaction com rollback devolveu `observed_ticks=null` + `missing_after_rollback`;
+- nenhum import/dispatch de `curriculum_runner`;
+- `continuous_authority=false`.
 
-Gates F2-G2:
+Gates F2-G3:
 
-- focused composer/replay: 48 PASS;
-- full core/FLE: 1413 PASS;
+- 26 PASS boundary/composer/transaction focused;
+- 53 PASS integrated continuity/dashboard;
+- full core/FLE: 1421 PASS;
 - PyTorch: 2 PASS;
 - Ruff/compileall/JavaScript/TypeScript/Vite/whitespace: PASS.
 
 Implementation commit:
 
-`9c57b7b1fa8b804113d77044df8cf0c3feba4355`
+`e25569db40d6e6186cc24b3c380ebdc9dc4e84cf`
 
-Replay canônico:
+Artifact fake/replay:
 
-`runs/audits/cortex_f2g2_option_contract_replay.json`
+`runs/audits/cortex_f2g3_option_execution_fake.json`
 
 SHA-256:
 
-`b05b20cc0070dcb16180757b927702e790947bb686913522af30499a20a59d21`
+`3a2cdf621e2592766cdec3f5a83ca057b42f3b3c184ce356437a1795a4b97f65`
 
-Limitação do replay histórico:
+Limitação crítica:
 
-- F2-F4C preservou labels dos instrumentos, mas não os payloads crus world/catalog/resources/inventory;
-- portanto `planner_reexecuted=false` e `historical_inputs_replayable=false`;
-- full planner replay NÃO é reivindicado;
-- source output=13 e final no_fuel permanecem apenas como evidência histórica F2-F4C;
-- sustainability_evaluable=false porque observed ticks do ciclo completo não foram persistidos.
+- o consumo de grant é process-local;
+- reiniciar/recriar o boundary perde o estado de consumo;
+- portanto isso NÃO é durable live one-shot authority;
+- nenhum live Option EXECUTE foi executado em F2-G3;
+- último EXECUTE live continua sendo F2-F4C;
+- sustentabilidade live continua não provada.
 
 Documento canônico:
 
-`docs/CORTEX_PHASE2_OPTIONS.md`
+`docs/CORTEX_PHASE2_OPTION_EXECUTION_BOUNDARY.md`
 
-F2-G3 deve:
+F2-G4A deve:
 
-1. receber um `ProcessingChainOptionPlan` por API tipada;
-2. reutilizar `StructuralTransactionalAdapter` / `TransactionalFLEExecutor`;
-3. manter um único rollback abaixo do Cortex;
-4. medir `runtime_game_ticks()` before/after e devolver ticks observados ao OptionBudget;
-5. preservar lineage Option -> Action -> transaction;
-6. executar primeiro em fake/replay transacional, sem world live;
-7. provar integração funcional sem import/dispatch de `curriculum_runner`;
-8. manter termination funcional inalterada;
-9. só considerar one-shot EXECUTE live em checkpoint posterior.
+1. criar ledger persistente de grants;
+2. consumir grant atomicamente antes da mutação;
+3. recusar grant consumido/stale após restart;
+4. adicionar expiry/scope explícitos;
+5. manter continuous authority OFF;
+6. integrar um runner de Option independente de `curriculum_runner`, ainda em dry-run;
+7. não tocar seeds confirmatórias;
+8. manter evolution inactive+disabled.
 
 F2 NÃO está encerrada.
 
 Status dos requisitos originais:
 
 - initial Option: atendido em F2-G2;
-- transactional execution universal: ainda aberto;
-- cadeia funcional por Option/API genérica: ainda não executada;
+- transactional execution universal: boundary existe, mas durable live authority ainda aberto;
+- cadeia funcional por Option/API genérica: validada em fake/replay, ainda não em Factorio live;
 - runner legado baseline-only: ainda aberto.
 
 Não executar confirmatory seeds.

@@ -32,6 +32,7 @@ com experiência sem receber do programador a sequência de ações que constitu
 > **F2-F4C — Functional delivery canary:** [docs/CORTEX_PHASE2_DELIVERY_ACTUATOR_CANARY.md](docs/CORTEX_PHASE2_DELIVERY_ACTUATOR_CANARY.md)
 > **F2-G1 — Runtime instrumentation independence:** [docs/CORTEX_PHASE2_RUNNER_INDEPENDENCE.md](docs/CORTEX_PHASE2_RUNNER_INDEPENDENCE.md)
 > **F2-G2 — Processing Chain Option:** [docs/CORTEX_PHASE2_OPTIONS.md](docs/CORTEX_PHASE2_OPTIONS.md)
+> **F2-G3 — Universal Option execution boundary:** [docs/CORTEX_PHASE2_OPTION_EXECUTION_BOUNDARY.md](docs/CORTEX_PHASE2_OPTION_EXECUTION_BOUNDARY.md)
 > **F1-B — storage hardening:** [docs/CORTEX_F1_STORAGE_HARDENING.md](docs/CORTEX_F1_STORAGE_HARDENING.md)
 > **Dashboard / evidence scope:** [docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md](docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md)
 > **Dashboard / tmp hardening:** [docs/CORTEX_DASHBOARD_TMP_HARDENING.md](docs/CORTEX_DASHBOARD_TMP_HARDENING.md)
@@ -39,14 +40,14 @@ com experiência sem receber do programador a sequência de ações que constitu
 
 ## Estado do programa
 
-**Cortex Research Architecture v0.1 — F2-G2 formaliza a primeira Option temporally extended:
-`establish_processing_chain`. Ela compõe structural planning + processor fuel + delivery actuator
-em SHADOW/replay, preserva provenance, termination funcional e budget temporal em game ticks.
-F2-F4C continua sendo o último functional accept live (13 iron plates; sustentabilidade não
-provada). F2-G3 executará a Option por um boundary universal; F3 e continuous authority seguem
-bloqueadas.**
+**Cortex Research Architecture v0.1 — F2-G3 valida o boundary universal de execução da primeira
+Option em SHADOW + fake/replay transacional. O boundary preserva lineage, exige grant ligado ao
+digest exato do plano, reutiliza o rollback existente e mede game ticks sem transformar rollback em
+zero observado. Live Option EXECUTE continua bloqueado porque o consumo do grant ainda é
+process-local. F2-F4C permanece como último functional accept live (13 iron plates; sustentabilidade
+não provada). F3 e continuous authority seguem bloqueadas.**
 
-F2-G2 implementation: `9c57b7b1fa8b804113d77044df8cf0c3feba4355`. Full gate: 1413 core/FLE + 2 PyTorch PASS.
+F2-G3 implementation: `e25569db40d6e6186cc24b3c380ebdc9dc4e84cf`. Full gate: 1421 core/FLE + 2 PyTorch PASS.
 
 As seeds confirmatórias 20261101–20261110 permanecem congeladas e não executadas; serão usadas
 posteriormente para avaliação pareada do Cortex, sem tuning nelas.
