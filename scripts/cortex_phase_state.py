@@ -408,6 +408,11 @@ def build_phase_state(
     )
     if not isinstance(delivery_power,dict):
         delivery_power={}
+    delivery_final_measurement=(
+        phase2_delivery_actuator_canary_payload.get("measurement_final")
+    )
+    if not isinstance(delivery_final_measurement,dict):
+        delivery_final_measurement={}
 
     delivery_canary_classification=None
     if phase2_delivery_actuator_canary:
@@ -444,6 +449,20 @@ def build_phase_state(
             delivery_canary_classification="rejected_with_rollback"
         elif phase2_delivery_actuator_canary_payload.get("status")=="failed":
             delivery_canary_classification="experiment_failed"
+
+    delivery_sustained_operation=None
+    delivery_sustainability_classification="not_evaluated"
+    if delivery_canary_classification=="functional_accept":
+        final_status=delivery_final_measurement.get("processor_status")
+        if final_status=="no_fuel":
+            delivery_sustained_operation=False
+            delivery_sustainability_classification=(
+                "functional_accept_terminal_no_fuel"
+            )
+        else:
+            delivery_sustainability_classification=(
+                "functional_accept_sustainability_not_proven"
+            )
 
     if blocked_running:
         action=f"monitor seed {exploratory['running'][0]}"
@@ -584,6 +603,13 @@ def build_phase_state(
             ),
             "processor_output":delivery_canary_candidate.get(
                 "processor_output"
+            ),
+            "functional_accept":(
+                delivery_canary_classification=="functional_accept"
+            ),
+            "sustained_operation":delivery_sustained_operation,
+            "sustainability_classification":(
+                delivery_sustainability_classification
             ),
             "candidate_after":delivery_canary_candidate,
             "measurement_before":(

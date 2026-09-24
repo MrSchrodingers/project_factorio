@@ -1763,12 +1763,17 @@ function renderExperimentContext() {
     const actionStatus = String(canary.action_status || canary.status || "--");
     const canaryRejected = actionStatus === "rejected";
     const canaryAccepted = actionStatus === "accepted";
+    const canaryUnsustained = deliveryActuatorCanary
+      && canaryAccepted
+      && canary.sustained_operation === false;
 
     setText(
       "cortexPhaseTitle",
       seriesComplete
         ? (deliveryActuatorCanary
-          ? "F2-F4C · delivery actuator canary evidence"
+          ? (canaryUnsustained
+            ? "F2-F4C · functional accept · sustentabilidade não provada"
+            : "F2-F4C · delivery actuator canary evidence")
           : (deliveryActuatorRunner
             ? "F2-F4B · runner integrado · NO LIVE EXECUTE"
             : (deliveryActuatorPhase
@@ -1787,7 +1792,9 @@ function renderExperimentContext() {
       "cortexPhaseBadge",
       seriesComplete
         ? (deliveryActuatorCanary
-          ? "F2-F4C · canary evidence · v3"
+          ? (canaryUnsustained
+            ? "F2-F4C · output funcional · final no_fuel"
+            : "F2-F4C · canary evidence · v3")
           : (deliveryActuatorRunner
             ? "F2-F4B · v3 runner · dry-run only"
             : (deliveryActuatorPhase
@@ -1819,7 +1826,9 @@ function renderExperimentContext() {
         "cortexCanaryStatus",
         actionStatus.toUpperCase()
           + (canary.refusal ? " · " + String(canary.refusal) : ""),
-        canaryAccepted ? "good" : (canaryRejected ? "warn" : "neutral")
+        canaryUnsustained
+          ? "warn"
+          : (canaryAccepted ? "good" : (canaryRejected ? "warn" : "neutral"))
       );
       setText(
         "cortexCanaryDetail",
@@ -1832,6 +1841,9 @@ function renderExperimentContext() {
           + (deliveryActuatorCanary && canary.actuator
             ? " · actuator " + String(canary.actuator)
               + (canary.actuator_fuel ? " · fuel " + String(canary.actuator_fuel) : "")
+              + (canaryUnsustained
+                ? " · sustentabilidade não provada"
+                : "")
             : (useFunctionalCanaryEvidence && canary.fuel
               ? " · fuel " + String(canary.fuel)
                 + " x" + String(canary.fuel_units == null ? "--" : canary.fuel_units)

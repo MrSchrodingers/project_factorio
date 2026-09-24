@@ -864,3 +864,104 @@ def test_phase_state_advances_to_f2f3_and_exposes_functional_canary(tmp_path) ->
     assert canary4c["power_available"] is False
     assert canary4c["power_status"] == "observed_absent_topology"
     assert canary4c["rollback_observed"] is True
+    assert canary4c["functional_accept"] is False
+    assert canary4c["sustained_operation"] is None
+    assert canary4c["sustainability_classification"] == "not_evaluated"
+
+def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_fuel(
+    tmp_path,
+) -> None:
+    module=_module("cortex_phase_state.py")
+    protocol=tmp_path/"protocol.json"
+    _protocol(protocol)
+
+    for seed in (11,12):
+        seed_dir=tmp_path/"baseline_runs"/"p1"/"exploratory"/str(seed)
+        seed_dir.mkdir(parents=True)
+        (seed_dir/"manifest.json").write_text(json.dumps({
+            "status":"completed",
+            "returncode":0,
+            "release":{"commit":"abc"},
+        })+"\n")
+        (seed_dir/"result.json").write_text(json.dumps({
+            "code_revision":{"commit":"abc","dirty":False},
+            "challenger":{"fitness":{}},
+        })+"\n")
+
+    docs=tmp_path/"docs"
+    docs.mkdir()
+    for name in (
+        "CORTEX_PHASE1_BASELINE_STATISTICAL_REPORT.md",
+        "CORTEX_PHASE2_ACTION_ONTOLOGY.md",
+        "CORTEX_PHASE2_LEGACY_PARITY.md",
+        "CORTEX_PHASE2_STRUCTURAL_PLANNING.md",
+        "CORTEX_PHASE2_STRUCTURAL_PREPARATION.md",
+        "CORTEX_PHASE2_TRANSACTIONAL_EXECUTION.md",
+        "CORTEX_PHASE2_FUNCTIONAL_DEPENDENCY.md",
+        "CORTEX_PHASE2_FUNCTIONAL_DEPENDENCY_COMPOSITION.md",
+        "CORTEX_PHASE2_DELIVERY_ACTUATOR_DEPENDENCY.md",
+        "CORTEX_PHASE2_DELIVERY_ACTUATOR_RUNNER.md",
+    ):
+        (docs/name).write_text("# checkpoint\n")
+
+    audit=tmp_path/"runs"/"audits"
+    audit.mkdir(parents=True)
+    (audit/"cortex_f2f4c_structural_canary.json").write_text(json.dumps({
+        "status":"completed",
+        "run_id":"f2f4c-accept",
+        "authority":"execute",
+        "continuous_authority":False,
+        "code_revision":{"commit":"20aac7f","dirty":False},
+        "transaction_committed":True,
+        "rollback_observed":False,
+        "delivery_power_capability":{
+            "available":False,
+            "status":"derived_unavailable",
+        },
+        "delivery_actuator_dependency":{
+            "ready":True,
+            "dependency":{
+                "actuator":"burner-inserter",
+                "fuel_dependency":{"fuel":{"name":"coal"}},
+            },
+        },
+        "measurement_before":{
+            "processor_status":None,
+            "processor_output":0.0,
+        },
+        "measurement_final":{
+            "processor_status":"no_fuel",
+            "processor_output":13.0,
+        },
+        "action_result":{
+            "status":"accepted",
+            "refusal":None,
+            "measurements":{
+                "candidate_after":{
+                    "physical_processing_coverage":1.0,
+                    "processor_exists":True,
+                    "processor_status":"no_fuel",
+                    "processor_output":13.0,
+                    "producers_reaching_processor":1,
+                },
+            },
+            "postconditions":[],
+        },
+    })+"\n")
+
+    state=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    canary=state["phase2_delivery_actuator_canary"]
+
+    assert state["phase2_checkpoint"] == "F2-F4C"
+    assert canary["classification"] == "functional_accept"
+    assert canary["functional_accept"] is True
+    assert canary["transaction_committed"] is True
+    assert canary["rollback_observed"] is False
+    assert canary["processor_output"] == 13.0
+    assert canary["sustained_operation"] is False
+    assert canary["sustainability_classification"] == (
+        "functional_accept_terminal_no_fuel"
+    )
