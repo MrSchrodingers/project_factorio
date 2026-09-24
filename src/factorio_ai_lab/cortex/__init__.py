@@ -27,6 +27,11 @@ from factorio_ai_lab.cortex.legacy_parity import (
     PreparationResult,
     PreparedLegacyAction,
 )
+from factorio_ai_lab.cortex.structural import (
+    ProcessingBranch,
+    StructuralProcessingPlan,
+    plan_processing_for_buffered_output,
+)
 
 __all__ = [
     "ActionAuthority",
@@ -43,7 +48,10 @@ __all__ = [
     "LegacyRepairParityAdapter",
     "PreparationResult",
     "PreparedLegacyAction",
+    "ProcessingBranch",
     "Refusal",
+    "StructuralProcessingPlan",
     "UniversalExecutor",
+    "plan_processing_for_buffered_output",
     "request_from_repair_action",
 ]

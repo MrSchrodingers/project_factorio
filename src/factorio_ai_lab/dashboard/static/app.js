@@ -1747,14 +1747,14 @@ function renderExperimentContext() {
     setText(
       "cortexPhaseTitle",
       seriesComplete
-        ? "F2-B · Legacy parity adapters · SHADOW"
+        ? "F2-C · Structural processing planner · SHADOW"
         : "F1-B · baseline corrigida em execução · "
           + (context.mode === "exploratory" ? "exploratória" : String(context.mode || ""))
     );
     setClassText(
       "cortexPhaseBadge",
       seriesComplete
-        ? "F2-B · shadow parity"
+        ? "F2-C · structural shadow"
         : (configured
           ? "F1-B · " + completed + "/" + configured
           : "F1-B · seed " + seed),
