@@ -17,6 +17,8 @@ from factorio_ai_lab.cortex.structural import ProcessingBranch
 from factorio_ai_lab.planning.delivery import MODE_BELT, MODE_INSERTER
 
 CONTRACT_VERSION = "cortex_structural_ops_v1"
+FUNCTIONAL_CONTRACT_VERSION = "cortex_structural_ops_v2"
+SUPPORTED_CONTRACT_VERSIONS = frozenset({CONTRACT_VERSION, FUNCTIONAL_CONTRACT_VERSION})
 PURPOSE_INFRASTRUCTURE = "infrastructure"
 
 REFUSAL_BRANCH_PRECONDITION = "structural_branch_precondition_unsatisfied"
@@ -66,7 +68,7 @@ class PreparedStructuralAction:
         object.__setattr__(self, "preflight", dict(self.preflight))
         if self.purpose != PURPOSE_INFRASTRUCTURE:
             raise ValueError(f"unsupported structural purpose {self.purpose!r}")
-        if self.contract_version != CONTRACT_VERSION:
+        if self.contract_version not in SUPPORTED_CONTRACT_VERSIONS:
             raise ValueError(f"unsupported structural contract {self.contract_version!r}")
         if not self.operations:
             raise ValueError("prepared structural action requires operations")

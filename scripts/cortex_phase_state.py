@@ -201,6 +201,12 @@ def build_phase_state(
         state_root / "docs" / "CORTEX_PHASE2_FUNCTIONAL_DEPENDENCY.md"
     )
     phase2_functional=phase2_functional_path.exists()
+    phase2_functional_composition_path=(
+        state_root
+        / "docs"
+        / "CORTEX_PHASE2_FUNCTIONAL_DEPENDENCY_COMPOSITION.md"
+    )
+    phase2_functional_composition=phase2_functional_composition_path.exists()
     phase2_canary_path=(
         state_root / "runs" / "audits" / "cortex_f2e_structural_canary.json"
     )
@@ -270,6 +276,21 @@ def build_phase_state(
     else:
         action="exploratory series complete; produce statistical report"
 
+    phase2_checkpoint=None
+    for checkpoint,enabled in (
+        ("F2-F2",phase2_functional_composition),
+        ("F2-F1",phase2_functional),
+        ("F2-E2",phase2_canary),
+        ("F2-E1",phase2_execution),
+        ("F2-D",phase2_preparation),
+        ("F2-C",phase2_structural),
+        ("F2-B",phase2_parity),
+        ("F2-A",phase2_started),
+    ):
+        if enabled:
+            phase2_checkpoint=checkpoint
+            break
+
     return {
         "schema_version":"cortex_phase_state_v1",
         "generated_at":datetime.now(UTC).isoformat(),
@@ -304,31 +325,7 @@ def build_phase_state(
             "path":str(phase2_ontology_path),
             "exists":phase2_started,
         },
-        "phase2_checkpoint":(
-            "F2-F1"
-            if phase2_functional
-            else (
-                "F2-E2"
-                if phase2_canary
-                else (
-                    "F2-E1"
-                    if phase2_execution
-                    else (
-                        "F2-D"
-                        if phase2_preparation
-                        else (
-                            "F2-C"
-                            if phase2_structural
-                            else (
-                                "F2-B"
-                                if phase2_parity
-                                else ("F2-A" if phase2_started else None)
-                            )
-                        )
-                    )
-                )
-            )
-        ),
+        "phase2_checkpoint":phase2_checkpoint,
         "phase2_parity":{
             "path":str(phase2_parity_path),
             "exists":phase2_parity,
@@ -348,6 +345,10 @@ def build_phase_state(
         "phase2_functional":{
             "path":str(phase2_functional_path),
             "exists":phase2_functional,
+        },
+        "phase2_functional_composition":{
+            "path":str(phase2_functional_composition_path),
+            "exists":phase2_functional_composition,
         },
         "phase2_canary":{
             "path":str(phase2_canary_path),

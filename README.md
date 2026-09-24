@@ -25,6 +25,7 @@ com experiência sem receber do programador a sequência de ações que constitu
 > **F2-D — Resource identity / preparation:** [docs/CORTEX_PHASE2_STRUCTURAL_PREPARATION.md](docs/CORTEX_PHASE2_STRUCTURAL_PREPARATION.md)
 > **F2-E — Controlled transactional execution:** [docs/CORTEX_PHASE2_TRANSACTIONAL_EXECUTION.md](docs/CORTEX_PHASE2_TRANSACTIONAL_EXECUTION.md)
 > **F2-F — Functional dependency completion:** [docs/CORTEX_PHASE2_FUNCTIONAL_DEPENDENCY.md](docs/CORTEX_PHASE2_FUNCTIONAL_DEPENDENCY.md)
+> **F2-F2 — Functional dependency composition:** [docs/CORTEX_PHASE2_FUNCTIONAL_DEPENDENCY_COMPOSITION.md](docs/CORTEX_PHASE2_FUNCTIONAL_DEPENDENCY_COMPOSITION.md)
 > **F1-B — storage hardening:** [docs/CORTEX_F1_STORAGE_HARDENING.md](docs/CORTEX_F1_STORAGE_HARDENING.md)
 > **Dashboard / evidence scope:** [docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md](docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md)
 > **Dashboard / tmp hardening:** [docs/CORTEX_DASHBOARD_TMP_HARDENING.md](docs/CORTEX_DASHBOARD_TMP_HARDENING.md)
@@ -32,10 +33,10 @@ com experiência sem receber do programador a sequência de ações que constitu
 
 ## Estado do programa
 
-**Cortex Research Architecture v0.1 — F2-F1 concluída em observabilidade. O counterexample
-no_fuel de F2-E agora possui suporte factual no runtime: source type, consumo e fuel categories
-são medidos, e fuels compatíveis são catalogados por dados do jogo. F2-F2 comporá essa dependência
-na opção estrutural; continuous authority e F3 seguem bloqueadas.**
+**Cortex Research Architecture v0.1 — F2-F2 validada. O counterexample no_fuel de F2-E agora
+é tratado como dependência tipada: consumo e fuel compatibility são medidos, plan_supply decide
+cobertura real e carried fuel vira operação semântica fuel_processor. F2-F3 será autorizado somente
+após publicação do commit clean; continuous authority e F3 seguem proibidas.**
 
 As seeds confirmatórias 20261101–20261110 permanecem congeladas e não executadas; serão usadas
 posteriormente para avaliação pareada do Cortex, sem tuning nelas.

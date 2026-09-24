@@ -101,3 +101,35 @@ def test_an_unanswered_probe_has_no_profile() -> None:
     assert profile_from_energy_per_tick("boiler", 0) is None
     assert profile_from_energy_per_tick("boiler", -1) is None
     assert profile_from_energy_per_tick("boiler", "nope") is None
+
+def test_generic_fuel_sizing_uses_measured_energy_value() -> None:
+    furnace = profile_from_energy_per_tick("stone-furnace", 1500)
+    assert furnace is not None
+
+    coal = furnace.fuel_units_for_seconds(10, 4_000_000)
+    wood = furnace.fuel_units_for_seconds(10, 2_000_000)
+    solid = furnace.fuel_units_for_seconds(10, 12_000_000)
+
+    assert coal == 1
+    assert wood == 1
+    assert solid == 1
+    assert furnace.seconds_per_fuel_unit(4_000_000) == pytest.approx(
+        furnace.seconds_per_coal()
+    )
+
+
+def test_long_horizon_rewards_energy_density_without_hardcoded_fuel_name() -> None:
+    furnace = profile_from_energy_per_tick("stone-furnace", 1500)
+    assert furnace is not None
+
+    coal = furnace.fuel_units_for_seconds(120, 4_000_000)
+    wood = furnace.fuel_units_for_seconds(120, 2_000_000)
+    solid = furnace.fuel_units_for_seconds(120, 12_000_000)
+
+    assert wood > coal > solid
+
+
+@pytest.mark.parametrize("fuel_value", [0, -1, float("inf"), float("nan")])
+def test_invalid_fuel_value_is_not_sized(fuel_value: float) -> None:
+    with pytest.raises(ValueError):
+        STONE_FURNACE.fuel_units_for_seconds(10, fuel_value)

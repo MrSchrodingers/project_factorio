@@ -6,7 +6,7 @@
 ## Estado atual
 
 - Programa: Cortex Research Architecture v0.1
-- Fase: **F2-F1 concluída — energy/fuel observability; F2-F2 é a próxima ação**
+- Fase: **F2-F2 validada — publicação pendente; F2-F3 ainda bloqueada até commit clean**
 - Branch: `research/cortex-v1`
 - Baseline imutável de origem: `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 - Tag baseline publicada: `cortex-pre-research-baseline-20260923`
@@ -46,35 +46,37 @@ silenciosamente pelo commit da F0**.
 
 ## Próxima ação
 
-**F2-F2 — compor fuel/energy como dependência tipada da structural option.**
+**Fechar F2-F2 antes de qualquer novo canário.**
 
-F2-F1 mediu e validou no runtime Factorio 2.0.73:
+Estado já comprovado:
 
-- stone-furnace energy_source_type = burner;
-- energy_usage_per_tick_j = 1500.0;
-- fuel_categories = chemical;
-- 6 fuels runtime detectados;
-- chemical fuels compatíveis medidos: nuclear-fuel, rocket-fuel, solid-fuel, coal e wood;
-- item.fuel_categories não existe no 2.0.73; fallback medido item.fuel_category normaliza o schema;
-- 35 focused tests PASS;
-- live read-only game_knowledge probe PASS.
+- BurnerProfile generalizado para fuel_value_j medido;
+- demand = energy_usage_per_tick_j × 60 × horizon × margin;
+- fuels filtrados por categoria medida no runtime;
+- cada candidato é validado contra inventory/FuelSource via plan_supply;
+- fuel indisponível não é selecionado por densidade energética;
+- carried fuel vira child dependency tipada + operação fuel_processor;
+- contract version v2 preserva v1;
+- world fuel draws são planejáveis, porém recusados no compiler até adapter de provenance existir;
+- processor_output continua hard postcondition;
+- focused gate F2-F2: 83 PASS;
+- full gate: 1386 core/FLE + 2 PyTorch PASS;
+- Ruff/compileall/frontend TypeScript/Vite/node/diff check PASS;
+- runtime F1 permanece 95c34a53... dirty=false;
+- evolution permanece inactive + disabled;
+- continuity: phase_state = F2-F2.
 
-Documento canônico:
+Documentos:
 docs/CORTEX_PHASE2_FUNCTIONAL_DEPENDENCY.md
+docs/CORTEX_PHASE2_FUNCTIONAL_DEPENDENCY_COMPOSITION.md
 
-F2-F1 commit: 32ee7e0dfc74bf22d4aabb8b442b7683cb3f98ba
+Próximo passo obrigatório:
 
-Próximo bloco seguro:
-
-1. generalizar BurnerProfile para fuel_value arbitrário preservando wrappers de coal;
-2. derivar demanda do processor a partir de MachineEnergy;
-3. filtrar fuels por categoria medida;
-4. combinar cada candidato com inventory/sources reais via plan_supply;
-5. escolher apenas plano coberto; fuel indisponível é refusal, não fallback nominal;
-6. representar o resultado como child dependency/semantic operation fuel_processor;
-7. compilar inicialmente somente carried-fuel path;
-8. manter world-draw não suportado como refusal nomeada até existir adapter próprio;
-9. gate + commit clean antes de qualquer novo canário.
+1. commit/push da implementação F2-F2;
+2. atualizar Commit/Decision definitivos com SHA real;
+3. deployar somente dashboard;
+4. validar /api/context + UI F2-F2;
+5. só então reaplicar/versionar o runner F2-F3 e executar um único canário seed 424242.
 
 Não executar seeds 20261101–20261110.
 Não conceder continuous autonomous authority.

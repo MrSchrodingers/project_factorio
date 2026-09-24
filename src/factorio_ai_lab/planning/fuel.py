@@ -56,19 +56,41 @@ class BurnerProfile:
     name: str
     power_w: float
 
-    def seconds_per_coal(self) -> float:
-        return COAL_FUEL_VALUE_J / self.power_w
+    def seconds_per_fuel_unit(self, fuel_value_j: float) -> float:
+        """Game seconds one measured unit of fuel sustains this machine."""
 
-    def coal_for_seconds(self, seconds: float, *, margin: float = 1.25) -> int:
-        """Coal needed to run for `seconds` of game time, with headroom.
+        value = float(fuel_value_j)
+        if not isfinite(value) or value <= 0:
+            raise ValueError("fuel_value_j must be finite and positive")
+        return value / self.power_w
 
-        The margin covers the part of the window spent before the machine is
-        fuelled and the jitter in how long a step takes; running dry halfway
-        through is what turns a throughput measurement into a fuel measurement.
-        """
+    def fuel_units_for_seconds(
+        self,
+        seconds: float,
+        fuel_value_j: float,
+        *,
+        margin: float = 1.25,
+    ) -> int:
+        """Units of one measured fuel needed to cover a game-time horizon."""
+
         if seconds <= 0:
             return 0
-        return max(1, ceil(seconds * margin / self.seconds_per_coal()))
+        if not isfinite(float(margin)) or float(margin) <= 0:
+            raise ValueError("margin must be finite and positive")
+        seconds_per_unit = self.seconds_per_fuel_unit(fuel_value_j)
+        return max(1, ceil(float(seconds) * float(margin) / seconds_per_unit))
+
+    def seconds_per_coal(self) -> float:
+        return self.seconds_per_fuel_unit(COAL_FUEL_VALUE_J)
+
+    def coal_for_seconds(self, seconds: float, *, margin: float = 1.25) -> int:
+        """Backward-compatible coal wrapper over generic measured fuel sizing."""
+
+        return self.fuel_units_for_seconds(
+            seconds,
+            COAL_FUEL_VALUE_J,
+            margin=margin,
+        )
 
 
 BURNER_MINING_DRILL = BurnerProfile("burner-mining-drill", BURNER_MINING_DRILL_W)

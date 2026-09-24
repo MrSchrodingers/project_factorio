@@ -1045,9 +1045,33 @@ F2-F2 sem hardcodes de machine/fuel. Nenhuma nova authority de escrita foi criad
 
 **F2-F1 commit:** 32ee7e0dfc74bf22d4aabb8b442b7683cb3f98ba — feat: instrumenta dependências energéticas do Cortex.
 
-**Next after publication:** F2-F2 — compor fuel/energy como child dependency tipada usando
-planning/fuel.py + planning/resupply.py. O próximo canário continua proibido até novo gate/commit
-clean. Continuous autonomous authority e F3 permanecem bloqueadas.
+**F2-F2 progress:** **IMPLEMENTADO / full gate pendente.** Burner sizing foi generalizado para
+fuel values medidos; MachineEnergy gera demanda; RuntimeFactorioCatalog filtra fuels compatíveis;
+plan_supply decide cobertura usando carried inventory e FuelSource observado. Apenas candidato
+realmente coberto é selecionado.
+
+**Typed dependency:** FuelDependency preserva machine, MachineEnergy, horizon, FuelSpec, units_needed
+e SupplyPlan. O PreparedStructuralAction é promovido para cortex_structural_ops_v2 e recebe
+preflight.energy_dependency + operação semântica fuel_processor antes de connect_delivery.
+
+**Execution boundary:** carried-only fuel compila para insert_item no cortex_processor. SupplyPlan
+com world fuel draw continua sendo recusado por structural_world_fuel_draw_unsupported até existir
+adapter específico que preserve provenance.
+
+**Evidence F2-F2:** docs/CORTEX_PHASE2_FUNCTIONAL_DEPENDENCY_COMPOSITION.md;
+src/factorio_ai_lab/cortex/functional_dependency.py;
+src/factorio_ai_lab/cortex/structural_prepare.py;
+src/factorio_ai_lab/cortex/structural_execute.py;
+src/factorio_ai_lab/planning/fuel.py;
+tests/test_cortex_functional_dependency.py;
+tests/test_fuel.py.
+
+**Tests F2-F2:** 83 focused PASS; 1386 core/FLE PASS + 2 PyTorch PASS; Ruff/compileall/frontend TypeScript/Vite/node/diff check PASS; runtime F1 unchanged; evolution inactive+disabled.
+
+**Decision F2-F2:** **PASS técnico, publicação pendente.** A composição causal de fuel está validada; F2-F3 permanece bloqueada até commit/push clean + deploy/validação do dashboard.
+
+**Next after PASS:** F2-F3 — repetir um único canário seed 424242 com a dependency-completed v2
+option. A hard postcondition processor_output INCREASE permanece inalterada.
 
 **Exit Gate F2:** o agente pode montar uma cadeia funcional escolhendo primitivas/options por uma
 API genérica, sem caminho codificado por estágio.

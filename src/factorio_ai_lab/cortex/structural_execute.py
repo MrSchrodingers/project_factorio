@@ -26,7 +26,7 @@ from factorio_ai_lab.cortex.actions import (
     Refusal,
 )
 from factorio_ai_lab.cortex.structural_prepare import (
-    CONTRACT_VERSION,
+    SUPPORTED_CONTRACT_VERSIONS,
     PreparedStructuralAction,
     StructuralOperation,
 )
@@ -41,6 +41,7 @@ REFUSAL_POSTCONDITION_CONTRACT = "structural_postcondition_contract_invalid"
 REFUSAL_POSTCONDITION_FAILED = "structural_postcondition_failed"
 REFUSAL_MEASUREMENT_FAILED = "structural_measurement_failed"
 REFUSAL_TRANSACTION_FAILED = "structural_transaction_failed"
+REFUSAL_WORLD_FUEL_DRAW_UNSUPPORTED = "structural_world_fuel_draw_unsupported"
 
 DEFAULT_SETTLE_SECONDS = 8
 MAX_SETTLE_SECONDS = 60
@@ -184,6 +185,42 @@ def _compile_configure_processing(operation: StructuralOperation) -> list[str]:
     ]
 
 
+class _WorldFuelDrawUnsupported(RuntimeError):
+    pass
+
+
+def _compile_fuel_processor(operation: StructuralOperation) -> list[str]:
+    fuel_item = str(operation.parameters.get("fuel_item") or "")
+    quantity = operation.parameters.get("quantity")
+    if not isinstance(quantity, Real) or isinstance(quantity, bool):
+        raise TypeError("fuel_processor quantity must be numeric")
+    amount = int(quantity)
+    if amount <= 0 or float(quantity) != float(amount):
+        raise ValueError("fuel_processor quantity must be a positive integer")
+
+    supply_plan = operation.parameters.get("supply_plan")
+    if not isinstance(supply_plan, Mapping):
+        raise TypeError("fuel_processor requires supply_plan")
+    draws = supply_plan.get("fuel_draws")
+    if (
+        isinstance(draws, Sequence)
+        and not isinstance(draws, (str, bytes))
+        and len(draws) > 0
+    ):
+        raise _WorldFuelDrawUnsupported(
+            "fuel_processor world draws require a provenance-preserving adapter"
+        )
+
+    symbol = prototype_symbol(fuel_item)
+    return [
+        "cortex_processor=insert_item(",
+        f"    {symbol},",
+        "    cortex_processor,",
+        f"    quantity={amount},",
+        ")",
+    ]
+
+
 def _compile_delivery(operation: StructuralOperation) -> list[str]:
     mode = str(operation.parameters.get("mode") or "")
     if mode != MODE_INSERTER:
@@ -223,6 +260,7 @@ def _compile_operation(operation: StructuralOperation) -> list[str]:
         "place_processor": _compile_place_processor,
         "adopt_processor": _compile_adopt_processor,
         "configure_processing": _compile_configure_processing,
+        "fuel_processor": _compile_fuel_processor,
         "connect_delivery": _compile_delivery,
     }
     if operation.op == "verify_postconditions":
@@ -240,13 +278,14 @@ def compile_structural_action(
     *,
     settle_seconds: int = DEFAULT_SETTLE_SECONDS,
 ) -> StructuralCompilationResult:
-    if prepared.contract_version != CONTRACT_VERSION:
+    if prepared.contract_version not in SUPPORTED_CONTRACT_VERSIONS:
         return StructuralCompilationResult(
             prepared=prepared,
             refusal=Refusal(
                 code=REFUSAL_CONTRACT_UNSUPPORTED,
                 detail=(
-                    f"expected {CONTRACT_VERSION}, got "
+                    "expected one of "
+                    f"{sorted(SUPPORTED_CONTRACT_VERSIONS)!r}, got "
                     f"{prepared.contract_version}"
                 ),
             ),
@@ -272,6 +311,14 @@ def compile_structural_action(
     try:
         for operation in prepared.operations:
             lines.extend(_compile_operation(operation))
+    except _WorldFuelDrawUnsupported as exc:
+        return StructuralCompilationResult(
+            prepared=prepared,
+            refusal=Refusal(
+                code=REFUSAL_WORLD_FUEL_DRAW_UNSUPPORTED,
+                detail=str(exc),
+            ),
+        )
     except NotImplementedError as exc:
         return StructuralCompilationResult(
             prepared=prepared,

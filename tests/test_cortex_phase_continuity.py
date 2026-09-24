@@ -648,3 +648,43 @@ def test_phase_state_advances_to_f2f1_when_functional_dependency_doc_exists(tmp_
     assert state["phase2_functional"]["exists"] is True
     assert state["phase2_canary"]["exists"] is True
     assert state["resume"]["action"] == "F2 active; follow docs/CORTEX_HANDOFF.md"
+
+def test_phase_state_advances_from_f2f1_to_f2f2_when_composition_doc_exists(tmp_path) -> None:
+    module=_module("cortex_phase_state.py")
+    protocol=tmp_path/"protocol.json"
+    _protocol(protocol)
+
+    for seed in (11,12):
+        seed_dir=tmp_path/"baseline_runs"/"p1"/"exploratory"/str(seed)
+        seed_dir.mkdir(parents=True)
+        (seed_dir/"manifest.json").write_text(json.dumps({
+            "status":"completed",
+            "returncode":0,
+            "release":{"commit":"abc"},
+        })+"\n")
+        (seed_dir/"result.json").write_text(json.dumps({
+            "code_revision":{"commit":"abc","dirty":False},
+            "challenger":{"fitness":{}},
+        })+"\n")
+
+    docs=tmp_path/"docs"
+    docs.mkdir()
+    for name in (
+        "CORTEX_PHASE1_BASELINE_STATISTICAL_REPORT.md",
+        "CORTEX_PHASE2_ACTION_ONTOLOGY.md",
+        "CORTEX_PHASE2_TRANSACTIONAL_EXECUTION.md",
+        "CORTEX_PHASE2_FUNCTIONAL_DEPENDENCY.md",
+    ):
+        (docs/name).write_text("# checkpoint\n")
+
+    state=module.build_phase_state(state_root=tmp_path,protocol_path=protocol)
+    assert state["phase2_checkpoint"] == "F2-F1"
+    assert state["phase2_functional_composition"]["exists"] is False
+
+    (docs/"CORTEX_PHASE2_FUNCTIONAL_DEPENDENCY_COMPOSITION.md").write_text(
+        "# F2-F2\n"
+    )
+    state=module.build_phase_state(state_root=tmp_path,protocol_path=protocol)
+
+    assert state["phase2_checkpoint"] == "F2-F2"
+    assert state["phase2_functional_composition"]["exists"] is True
