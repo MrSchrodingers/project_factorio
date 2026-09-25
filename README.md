@@ -37,6 +37,7 @@ com experiência sem receber do programador a sequência de ações que constitu
 > **F2-G4A — Persistent one-shot Option authority:** [docs/CORTEX_PHASE2_PERSISTENT_OPTION_AUTHORITY.md](docs/CORTEX_PHASE2_PERSISTENT_OPTION_AUTHORITY.md)
 > **F2-G4B — Live one-shot Option canary:** [docs/CORTEX_PHASE2_LIVE_OPTION_CANARY.md](docs/CORTEX_PHASE2_LIVE_OPTION_CANARY.md)
 > **F2-G5 — Baseline-only enforcement / F2 closure:** [docs/CORTEX_PHASE2_BASELINE_ONLY_ENFORCEMENT.md](docs/CORTEX_PHASE2_BASELINE_ONLY_ENFORCEMENT.md)
+> **F3-A — Executive Shadow Kernel:** [docs/CORTEX_PHASE3_EXECUTIVE_SHADOW_KERNEL.md](docs/CORTEX_PHASE3_EXECUTIVE_SHADOW_KERNEL.md)
 > **F1-B — storage hardening:** [docs/CORTEX_F1_STORAGE_HARDENING.md](docs/CORTEX_F1_STORAGE_HARDENING.md)
 > **Dashboard / evidence scope:** [docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md](docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md)
 > **Dashboard / tmp hardening:** [docs/CORTEX_DASHBOARD_TMP_HARDENING.md](docs/CORTEX_DASHBOARD_TMP_HARDENING.md)
@@ -60,7 +61,13 @@ O hardening pós-fechamento do dashboard está no commit
 95254cc1b81cc75a90debf6ab93a01ddd0099485: observers read-only não dependem mais da existência
 de storage.agent_characters[1]. Gate do hotfix: 1469 core/FLE + 2 PyTorch PASS; 17/17 endpoints
 de bootstrap HTTP 200 e WebSocket live sem stream_error.
-F3 está READY / NOT STARTED; continuous authority e evolution permanecem OFF.
+F3 está ACTIVE em F3-A / SHADOW. O Executive Shadow Kernel agora possui BeliefState,
+GoalStack, GoalDiagnosis, múltiplas alternativas explícitas, hard-feasibility fail-closed,
+ChoicePolicy e prediction-before-action. Artifact F3-A SHA-256:
+c9b9d2c62a5a4dbd79a1937ae589e8abe5f4efcf6377a047b97f17f961203e65. Implementation:
+b54b3a41b797c90f1b0993e4b2eea9526a76bb70. O gate integral foi 1478 core/FLE + 2 PyTorch
+PASS. Verification-after-action, credit assignment, experiment ledger e comparação shadow pareada
+contra o runner ainda estão abertos. Continuous authority e evolution permanecem OFF.
 As seeds confirmatórias 20261101–20261110 permanecem congeladas e não executadas; serão usadas
 posteriormente para avaliação pareada do Cortex, sem tuning nelas.
 

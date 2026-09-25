@@ -7,7 +7,7 @@
 **Branch de transição:** `research/cortex-v1`
 **Baseline pré-Cortex:** `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 **Tag de baseline:** `cortex-pre-research-baseline-20260923`
-**Status:** F2 COMPLETE em F2-G5 — F3 READY / NOT STARTED; continuous authority e evolution OFF
+**Status:** F3 ACTIVE em F3-A / SHADOW — F2 COMPLETE; continuous authority e evolution OFF
 
 > Este arquivo é o contrato científico e operacional do Factorio AI Lab. Em caso de perda de
 > contexto de conversa, troca de operador, troca de modelo ou reinício do host, um operador sem
@@ -1400,8 +1400,8 @@ nova mutação Factorio.
 uma API genérica, sem caminho codificado por estágio, e o runner stage-coded remanescente está
 restrito a baseline.
 
-**Next:** F3 — Executive / Cognitive Loop. F3 está READY / NOT STARTED. A abertura deve começar em
-SHADOW e não herda autoridade contínua de F2.
+**Next:** F3-B — verification-after-action, credit assignment e experiment ledger. F3-A já está
+ativa em SHADOW e não possui authority live.
 
 **Post-F2 observability hardening:** commit
 95254cc1b81cc75a90debf6ab93a01ddd0099485 remove a dependência do avatar dos observers
@@ -1414,17 +1414,17 @@ stream_error, /api/world connected=true com observer_origin=world_fallback.
 
 ## Fase 3 — Executive / Cognitive Loop
 
-**Status F3:** READY / NOT STARTED. F2 Exit Gate concluído; nenhuma authority F3 foi concedida.
+**Status F3:** ACTIVE — F3-A Executive Shadow Kernel PASS parcial; authority permanece SHADOW.
 
 **Objetivo:** generalizar repair loop para decisão dirigida por objetivos.
 
-- [ ] BeliefState tipado;
-- [ ] GoalStack;
-- [ ] deficit/goal diagnosis unificado;
-- [ ] candidate generator;
-- [ ] hard feasibility filter;
-- [ ] choice policy interface;
-- [ ] prediction before action;
+- [x] BeliefState tipado;
+- [x] GoalStack;
+- [x] deficit/goal diagnosis unificado;
+- [x] candidate generator;
+- [x] hard feasibility filter;
+- [x] choice policy interface;
+- [x] prediction before action;
 - [ ] verification after action;
 - [ ] credit assignment;
 - [ ] experiment ledger;
@@ -1432,6 +1432,25 @@ stream_error, /api/world connected=true com observer_origin=world_fallback.
 
 **Exit Gate F3:** mesmo objetivo gera alternativas e escolhas observáveis; sequência não está
 embutida em um stage handler.
+
+**F3-A evidence:** docs/CORTEX_PHASE3_EXECUTIVE_SHADOW_KERNEL.md;
+runs/audits/cortex_f3a_executive_shadow_replay.json, SHA-256
+c9b9d2c62a5a4dbd79a1937ae589e8abe5f4efcf6377a047b97f17f961203e65.
+
+O replay usa um sintoma observado no repair ledger e mantém a expansão da segunda arm explicitamente
+counterfactual (observed_in_world=false). O mesmo goal/belief/candidate set foi avaliado por duas
+policies e produziu escolhas distintas. Prediction-before-action é registrada antes de qualquer
+execução.
+
+**Full gate F3-A:** 1478 core/FLE + 2 PyTorch PASS;
+Ruff/compileall/JavaScript/TypeScript/Vite/whitespace PASS.
+
+**Decision F3-A:** PASS parcial. F3 está ativa em SHADOW. Verification-after-action, credit
+assignment, experiment ledger e comparação shadow pareada contra o runner permanecem abertos.
+Nenhuma authority live F3 foi concedida.
+
+**Next F3-B:** verification-after-action + credit assignment + experiment ledger, primeiro sobre
+outcomes históricos medidos.
 
 ---
 

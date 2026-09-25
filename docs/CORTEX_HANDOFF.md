@@ -11,7 +11,7 @@
 ## Estado atual
 
 - Programa: Cortex Research Architecture v0.1
-- Fase: **F2 COMPLETE em F2-G5 — F3 READY / NOT STARTED; continuous authority OFF**
+- Fase: **F3 ACTIVE em F3-A / SHADOW — F2 COMPLETE; continuous authority OFF**
 - Branch: `research/cortex-v1`
 - Baseline imutável de origem: `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 - Tag baseline publicada: `cortex-pre-research-baseline-20260923`
@@ -51,50 +51,40 @@ silenciosamente pelo commit da F0**.
 
 ## Próxima ação
 
-**F3 — Executive / Cognitive Loop: preparar abertura explícita em SHADOW antes de qualquer nova
-authority live.**
+**F3-B — verification-after-action + credit assignment + persistent experiment ledger.**
 
-F2-G5 fechou o último item do Exit Gate F2:
+F3-A está validada em SHADOW:
 
-- implementation commit: 4fc7217d3e5e0fecb076bfd63305e5498eb52f4e;
-- canonical audit: runs/audits/cortex_f2g5_baseline_only_enforcement.json;
-- audit SHA-256: f7d796d1c406a7425fd3b14a783227364bb62ab42cef477a59960c41f4d721ae;
-- run_curriculum exige execution_role=baseline;
-- role incorreta recusa antes de gym/FLE/environment/WorldLease;
-- launchers legados autorizados se identificam como baseline;
-- AST audit confirma zero import de curriculum_runner em src/factorio_ai_lab/cortex;
-- world_mutation=false e factorio_rcon_used=false no audit;
-- full gate: 1467 core/FLE + 2 PyTorch PASS;
-- control-plane freeze commit: 581ed8c38de0a9ffdc908c250063ee9c9a0e8158;
-- G4B preflight test isolation: 4ef61eea2d1d6890cba257c5df1a5deaae2c31a0;
-- final closure gate após follow-ups: 1467 core/FLE + 2 PyTorch PASS; static/build gates PASS;
-- F2 complete mantém resume.do_not_start_another_seed=true;
-- Ruff/compileall/JavaScript/TypeScript/Vite/whitespace PASS.
+- implementation: b54b3a41b797c90f1b0993e4b2eea9526a76bb70;
+- canonical artifact: runs/audits/cortex_f3a_executive_shadow_replay.json;
+- artifact SHA-256:
+  c9b9d2c62a5a4dbd79a1937ae589e8abe5f4efcf6377a047b97f17f961203e65;
+- observed source: runs/repairs.jsonl, SHA-256
+  327be3b7f7b594449f52ff18d4dcfe7e750a9473a1cf8da8c65893d0bf2ce376;
+- observed symptom:
+  producer_output_unprocessed:output_buffered_not_processed;
+- two counterfactual candidates exposed over the same goal/candidate set;
+- two policies select different candidates without changing goal/belief/candidate generation;
+- prediction producers_reaching_processor -> increase exists before action;
+- authority=shadow;
+- world_mutation=false;
+- factorio_rcon_used=false;
+- fle_environment_created=false;
+- world_lease_acquired=false;
+- execution_grant_created=false;
+- continuous_authority=false;
+- full gate: 1478 core/FLE + 2 PyTorch PASS plus static/build gates.
 
-O Exit Gate F2 está mecanicamente validado: API genérica de Options, boundary transacional
-universal, cadeia funcional live sem curriculum_runner e runner legado baseline-only.
+F3-A does not claim a correct counterfactual outcome. The alternate arm was not executed in the
+historical world. The legacy row itself has executed=false and reward=null.
 
-A última evidência live continua sendo F2-G4B, run cortex-f2g4b-20260925T014418Z, com 13 iron
-plates e final no_fuel. Não repetir esse canário. Sustentabilidade autônoma continua não provada.
+F3-B must add verification and credit only where an outcome is actually measured. Prefer measured
+historical repair episodes first; do not fabricate reward for unexecuted counterfactuals.
 
-Dashboard pós-fechamento:
-
-- hardening base no commit F2-G5: stale RCON, bootstrap parcial e WebSocket resiliente;
-- hotfix world-without-avatar: 95254cc1b81cc75a90debf6ab93a01ddd0099485;
-- observers usam agent surface/force quando disponível e fallback read-only para
-  game.surfaces[1] + game.forces.player quando o avatar não existe;
-- gate do hotfix: 1469 core/FLE + 2 PyTorch PASS; static/build gates PASS;
-- validação live: 17/17 endpoints de bootstrap HTTP 200, WebSocket sem stream_error;
-- http://midasnet.tail106aa2.ts.net:8765/, /api/context e /api/world: HTTP 200;
-- /api/world: connected=true, observer_origin=world_fallback, entity_count=0;
-- /api/resource-overview: connected=true, 38 cells e 2562 resource points;
-- o zero de factory entities é estado físico observado da force player, não falha de conexão;
-- /api/context: global / Cortex, F2 complete, checkpoint F2-G5, Exit Gate validado.
-
-Não executar confirmatory seeds.
+Ainda não executar confirmatory seeds.
 Não habilitar evolution.
 Não conceder continuous autonomous authority.
-F3 está liberada pelo Exit Gate de F2, mas ainda não foi iniciada.
+Não executar novo canário Factorio apenas para fechar F3-B.
 
 ## Protocolo de retomada após interrupção
 

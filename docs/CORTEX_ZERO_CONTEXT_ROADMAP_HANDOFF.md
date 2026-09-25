@@ -5,8 +5,8 @@
 **Repository:** `MrSchrodingers/project_factorio`
 **Live checkout:** `/srv/factorio-ai-lab`
 **Transition branch:** `research/cortex-v1`
-**Current scientific phase:** **F2 COMPLETE — F2-G5 COMPLETE — F3 READY / NOT STARTED**
-**F3:** READY / NOT STARTED
+**Current scientific phase:** **F3 ACTIVE — F3-A EXECUTIVE SHADOW KERNEL**
+**F3:** ACTIVE / SHADOW
 **Continuous autonomous authority:** OFF
 **Confirmatory seeds:** untouched / frozen
 **SentinelX context:** sxc_4557STHZ — always resume latest revision
@@ -1332,17 +1332,26 @@ It is historical evidence, not a running Cortex experiment.
 
 Current UI/control-plane state:
 
-- F2 COMPLETE;
+- F2 COMPLETE remains the validated execution substrate;
 - phase2_checkpoint = F2-G5;
 - F2 Exit Gate validated;
-- F3 READY / NOT STARTED;
+- F3 ACTIVE in SHADOW;
+- phase3_checkpoint = F3-A;
+- Executive Shadow Kernel validated;
 - continuous authority OFF;
 - evolution inactive+disabled;
 - confirmatory seeds frozen.
 
-The last live Cortex evidence remains F2-G4B. The dashboard world observer may use
-observer_origin=world_fallback when no agent character exists; that is an observation-mode label,
-not execution authority.
+F3-A exposes BeliefState, GoalStack, diagnosis, multiple alternatives, hard feasibility, policy
+selection and prediction-before-action. The canonical replay is
+runs/audits/cortex_f3a_executive_shadow_replay.json with SHA-256
+c9b9d2c62a5a4dbd79a1937ae589e8abe5f4efcf6377a047b97f17f961203e65.
+
+The observed legacy symptom is real. The second arm is explicitly counterfactual and was not
+executed in the historical world.
+
+The last live Cortex mutation evidence remains F2-G4B. F3-A itself uses no RCON/FLE/WorldLease or
+execution grant.
 
 ## 10.4 Important UI ambiguity
 
@@ -1747,9 +1756,9 @@ Published post-F2 observability hotfix:
 The dashboard main scope is global, not the historical exploratory baseline. A fresh operator
 should expect the Cortex control plane to show:
 
-- F2 COMPLETE / G5 baseline-only enforcement;
+- F3-A / Executive Shadow Kernel / SHADOW;
+- F2 COMPLETE / G5 remains the execution substrate;
 - F2 Exit Gate validated;
-- F3 READY / NOT STARTED;
 - continuous authority OFF;
 - last live Cortex evidence = F2-G4B;
 - F2-G4B output = 13 iron plates, final processor no_fuel;
@@ -2057,7 +2066,7 @@ At this checkpoint:
 - F2-G4B COMPLETE;
 - F2-G5 COMPLETE: legacy runner baseline-only enforcement;
 - G5 implementation = 4fc7217d3e5e0fecb076bfd63305e5498eb52f4e; control-plane freeze = 581ed8c38de0a9ffdc908c250063ee9c9a0e8158;
-- F3 READY / NOT STARTED;
+- F3 ACTIVE / F3-A SHADOW;
 - continuous authority OFF;
 - evolution service OFF;
 - confirmatory seeds untouched;
@@ -2089,7 +2098,7 @@ A fresh operator should leave its first turn with one conclusion:
 
 After publication, this zero-context handoff should be discoverable through the immutable tag:
 
-`cortex-zero-context-handoff-v0.2.1`
+`cortex-zero-context-handoff-v0.3.0`
 
 A fresh chat should still revalidate the branch HEAD because later scientific work may legitimately
 advance beyond this tag.
@@ -2146,7 +2155,7 @@ estruturado contendo:
 - plano proposto para o próximo checkpoint com testes, evidências e critérios de aceite.
 
 Estado esperado do handoff publicado: F0 PASS, F1 PASS, F2 COMPLETE, F2-G4B e F2-G5 concluídas,
-F3 READY / NOT STARTED, evolution inactive+disabled, confirmatory seeds intactas e
+F3 ACTIVE em F3-A / SHADOW, evolution inactive+disabled, confirmatory seeds intactas e
 resume.do_not_start_another_seed=true. Exatamente um live Option EXECUTE pós-G4A ocorreu em G4B e
 não deve ser repetido. Se o estado vivo divergir, audite commits/artifacts e siga o estado persistente
 mais recente.
