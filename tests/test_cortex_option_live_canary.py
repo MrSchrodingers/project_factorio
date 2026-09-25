@@ -156,6 +156,7 @@ def test_preflight_refuses_active_persisted_world_lease(
             artifact=tmp_path / "g4b.json",
             revision=_revision(),
             service_state_reader=_evolution_off,
+            phase_state_reader=_g4a_phase_state,
             lease_state_path=lease,
         )
 
