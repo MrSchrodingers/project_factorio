@@ -1817,6 +1817,136 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
         "consolidation, and decay"
     )
 
+    f4a_sha=module._sha256(f4a_audit)
+    database_snapshot={
+        "schema_version":"cortex_cognitive_memory_v1",
+        "quick_check":"ok",
+        "item_count":4,
+        "occurrence_count":4,
+        "manifest_sha256":"a"*64
+    }
+    retrieval_keys=(
+        "semantic-smelting-output",
+        "semantic-smelting-placement-error",
+        "cross-kind-fuel-procedure",
+        "counterexample-electric-route-buffer",
+    )
+    f4b_payload={
+        "schema_version":"cortex_f4b_memory_retrieval_v1",
+        "status":"pass",
+        "run_id":"f4b-shadow",
+        "code_revision":{
+            "commit":"f4b-sha",
+            "branch":"research/cortex-v1",
+            "dirty":False
+        },
+        "authority":"shadow",
+        "world_mutation":False,
+        "factorio_rcon_used":False,
+        "fle_environment_created":False,
+        "world_lease_acquired":False,
+        "execution_grant_created":False,
+        "continuous_authority":False,
+        "source":{
+            "memory_path":"runs/ledger/cortex_cognitive_memory.sqlite3",
+            "database_before":database_snapshot,
+            "database_after":database_snapshot,
+            "f4a_artifact_path":"runs/audits/cortex_f4a_memory_substrate_migration.json",
+            "f4a_artifact_sha256":f4a_sha
+        },
+        "retrievals":{
+            key:{
+                "query":{"query_id":key},
+                "policy_version":"cortex_hybrid_retrieval_v1",
+                "records_considered":4,
+                "records_compatible":1,
+                "results":[{"memory_id":"memory-"+str(index)}]
+            }
+            for index,key in enumerate(retrieval_keys)
+        },
+        "consolidation":{
+            "policy_version":"cortex_memory_consolidation_v1",
+            "repeated_semantic_items":1,
+            "semantic_duplicate_support":3,
+            "repeated_counterexample_items":1,
+            "procedural_confidence_items":1,
+            "snapshot_sha256":"b"*64
+        },
+        "decay_probe":{
+            "policy_version":"cortex_non_destructive_decay_v1",
+            "destructive_deletion":False,
+            "low_support":{"weight":0.2},
+            "high_support":{"weight":0.9}
+        },
+        "checks":{
+            "memory_database_quick_check_ok":True,
+            "memory_database_unchanged_by_replay":True,
+            "memory_database_has_multiple_kinds":True,
+            "semantic_stage_scope_enforced":True,
+            "lexical_component_changes_top_memory_same_stage":True,
+            "procedural_memory_ranked_first_by_symptom":True,
+            "counterexample_scope_enforced":True,
+            "semantic_duplicate_support_consolidated":True,
+            "counterexample_repetition_visible":True,
+            "procedural_confidence_visible":True,
+            "decay_is_non_destructive_and_support_protective":True,
+            "f4a_artifact_present":True,
+            "no_live_authority":True
+        }
+    }
+    f4b_audit=audits/"cortex_f4b_memory_retrieval.json"
+    f4b_audit.write_text(json.dumps(f4b_payload)+"\n")
+
+    f4b_artifact_only=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert f4b_artifact_only["phase"]=="F4"
+    assert f4b_artifact_only["phase_status"]=="active"
+    assert f4b_artifact_only["phase4_checkpoint"]=="F4-A"
+    assert f4b_artifact_only["phase4_memory_retrieval"]["validated"] is False
+
+    f4b_doc=docs/"CORTEX_PHASE4_MEMORY_RETRIEVAL.md"
+    f4b_doc.write_text("# F4-B\n")
+    f4b=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert f4b["phase"]=="F4"
+    assert f4b["phase_status"]=="active"
+    assert f4b["phase4_checkpoint"]=="F4-B"
+    retrieval=f4b["phase4_memory_retrieval"]
+    assert retrieval["validated"] is True
+    assert retrieval["database_read_only_replay"] is True
+    assert retrieval["f4a_artifact_hash_matches"] is True
+    assert f4b["phase4_memory_substrate"]["validated"] is True
+    assert f4b["resume"]["do_not_start_another_seed"] is True
+    assert f4b["resume"]["action"] == (
+        "F4-B active in SHADOW; design causal memory ablation "
+        "and cross-seed transfer experiment"
+    )
+
+    f4b_payload["source"]["f4a_artifact_sha256"]="wrong"
+    f4b_audit.write_text(json.dumps(f4b_payload)+"\n")
+    f4b_wrong_source=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert f4b_wrong_source["phase4_checkpoint"]=="F4-A"
+    assert (
+        f4b_wrong_source["phase4_memory_retrieval"]["validated"]
+        is False
+    )
+    f4b_audit.write_text(
+        json.dumps({
+            **f4b_payload,
+            "source":{
+                **f4b_payload["source"],
+                "f4a_artifact_sha256":f4a_sha
+            }
+        })+"\n"
+    )
+
     connection=sqlite3.connect(memory_path)
     connection.execute(
         "UPDATE memory_items SET item_digest=? WHERE memory_id=?",

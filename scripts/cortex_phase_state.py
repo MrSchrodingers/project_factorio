@@ -1086,6 +1086,109 @@ def build_phase_state(
         and all(value is True for value in phase4_memory_checks.values())
     )
 
+    phase4_retrieval_doc_path=(
+        state_root / "docs" / "CORTEX_PHASE4_MEMORY_RETRIEVAL.md"
+    )
+    phase4_retrieval_doc=phase4_retrieval_doc_path.exists()
+    phase4_retrieval_audit_path=(
+        state_root
+        / "runs"
+        / "audits"
+        / "cortex_f4b_memory_retrieval.json"
+    )
+    phase4_retrieval_audit=phase4_retrieval_audit_path.exists()
+    phase4_retrieval_payload: dict[str, Any]={}
+    phase4_retrieval_error: str | None=None
+    if phase4_retrieval_audit:
+        try:
+            phase4_retrieval_payload=_load(phase4_retrieval_audit_path)
+        except (OSError,json.JSONDecodeError,TypeError) as exc:
+            phase4_retrieval_error=f"{type(exc).__name__}: {exc}"
+
+    phase4_retrieval_revision=phase4_retrieval_payload.get("code_revision")
+    if not isinstance(phase4_retrieval_revision,dict):
+        phase4_retrieval_revision={}
+    phase4_retrieval_source=phase4_retrieval_payload.get("source")
+    if not isinstance(phase4_retrieval_source,dict):
+        phase4_retrieval_source={}
+    phase4_retrieval_before=phase4_retrieval_source.get("database_before")
+    if not isinstance(phase4_retrieval_before,dict):
+        phase4_retrieval_before={}
+    phase4_retrieval_after=phase4_retrieval_source.get("database_after")
+    if not isinstance(phase4_retrieval_after,dict):
+        phase4_retrieval_after={}
+    phase4_retrievals=phase4_retrieval_payload.get("retrievals")
+    if not isinstance(phase4_retrievals,dict):
+        phase4_retrievals={}
+    phase4_consolidation=phase4_retrieval_payload.get("consolidation")
+    if not isinstance(phase4_consolidation,dict):
+        phase4_consolidation={}
+    phase4_decay_probe=phase4_retrieval_payload.get("decay_probe")
+    if not isinstance(phase4_decay_probe,dict):
+        phase4_decay_probe={}
+    phase4_retrieval_checks=phase4_retrieval_payload.get("checks")
+    if not isinstance(phase4_retrieval_checks,dict):
+        phase4_retrieval_checks={}
+    phase4_f4a_sha=(
+        _sha256(phase4_memory_audit_path)
+        if phase4_memory_audit_path.exists()
+        else None
+    )
+    phase4_expected_queries={
+        "semantic-smelting-output",
+        "semantic-smelting-placement-error",
+        "cross-kind-fuel-procedure",
+        "counterexample-electric-route-buffer",
+    }
+    phase4_retrieval_valid=(
+        phase4_memory_valid
+        and phase4_retrieval_doc
+        and phase4_retrieval_audit
+        and phase4_retrieval_error is None
+        and phase4_retrieval_payload.get("schema_version")
+        =="cortex_f4b_memory_retrieval_v1"
+        and phase4_retrieval_payload.get("status")=="pass"
+        and phase4_retrieval_revision.get("dirty") is False
+        and isinstance(phase4_retrieval_revision.get("commit"),str)
+        and bool(phase4_retrieval_revision.get("commit"))
+        and phase4_retrieval_payload.get("authority")=="shadow"
+        and phase4_retrieval_payload.get("world_mutation") is False
+        and phase4_retrieval_payload.get("factorio_rcon_used") is False
+        and phase4_retrieval_payload.get("fle_environment_created") is False
+        and phase4_retrieval_payload.get("world_lease_acquired") is False
+        and phase4_retrieval_payload.get("execution_grant_created") is False
+        and phase4_retrieval_payload.get("continuous_authority") is False
+        and phase4_retrieval_before==phase4_retrieval_after
+        and phase4_retrieval_before.get("quick_check")=="ok"
+        and phase4_retrieval_before.get("schema_version")
+        =="cortex_cognitive_memory_v1"
+        and isinstance(phase4_retrieval_before.get("item_count"),int)
+        and phase4_retrieval_before.get("item_count",0)>0
+        and isinstance(phase4_retrieval_before.get("occurrence_count"),int)
+        and phase4_retrieval_before.get("occurrence_count",0)>0
+        and isinstance(
+            phase4_retrieval_before.get("manifest_sha256"),
+            str,
+        )
+        and len(phase4_retrieval_before.get("manifest_sha256",""))==64
+        and phase4_retrieval_source.get("f4a_artifact_sha256")
+        ==phase4_f4a_sha
+        and set(phase4_retrievals)==phase4_expected_queries
+        and all(
+            isinstance(row,dict)
+            and isinstance(row.get("results"),list)
+            and bool(row.get("results"))
+            for row in phase4_retrievals.values()
+        )
+        and phase4_consolidation.get("repeated_semantic_items",0)>0
+        and phase4_consolidation.get("semantic_duplicate_support",0)>0
+        and phase4_consolidation.get("repeated_counterexample_items",0)>0
+        and phase4_consolidation.get("procedural_confidence_items",0)>0
+        and phase4_decay_probe.get("destructive_deletion") is False
+        and bool(phase4_retrieval_checks)
+        and all(value is True for value in phase4_retrieval_checks.values())
+    )
+
     phase2_delivery_actuator_canary_path=(
         state_root
         / "runs"
@@ -1329,7 +1432,12 @@ def build_phase_state(
                 "functional_accept_sustainability_not_proven"
             )
 
-    if phase4_memory_valid:
+    if phase4_retrieval_valid:
+        action=(
+            "F4-B active in SHADOW; design causal memory ablation "
+            "and cross-seed transfer experiment"
+        )
+    elif phase4_memory_valid:
         action=(
             "F4-A active in SHADOW; implement hybrid retrieval, "
             "consolidation, and decay"
@@ -1394,7 +1502,7 @@ def build_phase_state(
             phase2_checkpoint=checkpoint
             break
 
-    if phase4_memory_valid:
+    if phase4_retrieval_valid or phase4_memory_valid:
         phase_name="F4"
         phase_status="active"
     elif phase3_comparison_valid:
@@ -1437,8 +1545,50 @@ def build_phase_state(
         },
         "phase2_checkpoint":phase2_checkpoint,
         "phase4_checkpoint":(
-            "F4-A" if phase4_memory_valid else None
+            "F4-B"
+            if phase4_retrieval_valid
+            else ("F4-A" if phase4_memory_valid else None)
         ),
+        "phase4_memory_retrieval":{
+            "document_path":str(phase4_retrieval_doc_path),
+            "document_exists":phase4_retrieval_doc,
+            "audit_path":str(phase4_retrieval_audit_path),
+            "audit_exists":phase4_retrieval_audit,
+            "validated":phase4_retrieval_valid,
+            "status":phase4_retrieval_payload.get("status"),
+            "run_id":phase4_retrieval_payload.get("run_id"),
+            "code_commit":phase4_retrieval_revision.get("commit"),
+            "authority":phase4_retrieval_payload.get("authority"),
+            "world_mutation":phase4_retrieval_payload.get("world_mutation"),
+            "factorio_rcon_used":phase4_retrieval_payload.get(
+                "factorio_rcon_used"
+            ),
+            "fle_environment_created":phase4_retrieval_payload.get(
+                "fle_environment_created"
+            ),
+            "world_lease_acquired":phase4_retrieval_payload.get(
+                "world_lease_acquired"
+            ),
+            "execution_grant_created":phase4_retrieval_payload.get(
+                "execution_grant_created"
+            ),
+            "continuous_authority":phase4_retrieval_payload.get(
+                "continuous_authority"
+            ),
+            "source":phase4_retrieval_source,
+            "retrievals":phase4_retrievals,
+            "consolidation":phase4_consolidation,
+            "decay_probe":phase4_decay_probe,
+            "checks":phase4_retrieval_checks,
+            "f4a_artifact_hash_matches":(
+                phase4_retrieval_source.get("f4a_artifact_sha256")
+                ==phase4_f4a_sha
+            ),
+            "database_read_only_replay":(
+                phase4_retrieval_before==phase4_retrieval_after
+            ),
+            "read_error":phase4_retrieval_error,
+        },
         "phase4_memory_substrate":{
             "document_path":str(phase4_memory_doc_path),
             "document_exists":phase4_memory_doc,

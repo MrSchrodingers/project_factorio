@@ -1752,14 +1752,17 @@ function renderExperimentContext() {
     const verificationCreditPhase = phase3Checkpoint === "F3-B";
     const pairedShadowPhase = phase3Checkpoint === "F3-C";
     const memorySubstratePhase = phase4Checkpoint === "F4-A";
+    const memoryRetrievalPhase = phase4Checkpoint === "F4-B";
+    const phase4ShadowActive = memorySubstratePhase || memoryRetrievalPhase;
     const phase3ShadowActive = executiveShadowPhase
       || verificationCreditPhase
       || pairedShadowPhase;
-    const cortexShadowState = phase3ShadowActive || memorySubstratePhase;
+    const cortexShadowState = phase3ShadowActive || phase4ShadowActive;
     const executiveShadow = cortexPhase.phase3_executive_shadow_kernel || {};
     const verificationCredit = cortexPhase.phase3_verification_credit_ledger || {};
     const pairedShadow = cortexPhase.phase3_paired_shadow_comparison || {};
     const memorySubstrate = cortexPhase.phase4_memory_substrate || {};
+    const memoryRetrieval = cortexPhase.phase4_memory_retrieval || {};
     const functionalCanary = phase2Checkpoint === "F2-F3";
     const deliveryActuatorPhase = phase2Checkpoint.startsWith("F2-F4");
     const deliveryActuatorRunner = phase2Checkpoint === "F2-F4B";
@@ -1807,6 +1810,9 @@ function renderExperimentContext() {
       phaseBadge = configured
         ? "F1-B · " + completed + "/" + configured
         : "F1-B · seed " + seed;
+    } else if (memoryRetrievalPhase) {
+      phaseTitle = "F4-B · Hybrid Retrieval + Consolidation · SHADOW";
+      phaseBadge = "F4-B · retrieval/decay validados · ablation ainda aberta";
     } else if (memorySubstratePhase) {
       phaseTitle = "F4-A · Typed Memory Substrate · SHADOW";
       phaseBadge = "F4-A · memória tipada · retrieval/ablation ainda abertos";
@@ -1924,7 +1930,20 @@ function renderExperimentContext() {
           + String(canary.run_id || "--")
       );
       let authorityDetail;
-      if (memorySubstratePhase) {
+      if (memoryRetrievalPhase) {
+        const retrievals = memoryRetrieval.retrievals || {};
+        const consolidation = memoryRetrieval.consolidation || {};
+        authorityDetail = "F4-B SHADOW: hybrid structural+lexical retrieval + consolidation + non-destructive decay. "
+          + "Artifact " + String(memoryRetrieval.status || "--").toUpperCase()
+          + " · queries " + String(Object.keys(retrievals).length || "--")
+          + " · repeated semantic "
+          + String(consolidation.repeated_semantic_items ?? "--")
+          + " · repeated counterexamples "
+          + String(consolidation.repeated_counterexample_items ?? "--")
+          + " · DB read-only "
+          + (memoryRetrieval.database_read_only_replay ? "PASS" : "--")
+          + " · causal ablation/transfer ainda não provados · continuous authority OFF.";
+      } else if (memorySubstratePhase) {
         const memorySnapshot = memorySubstrate.store?.snapshot || {};
         authorityDetail = "F4-A SHADOW: working + episodic + semantic + procedural + counterexample memory. "
           + "Artifact " + String(memorySubstrate.status || "--").toUpperCase()

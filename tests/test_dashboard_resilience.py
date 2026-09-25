@@ -128,3 +128,17 @@ def test_dashboard_renders_f4a_memory_substrate_without_memory_claim_inflation()
     assert "retrieval/ablation ainda não provados" in app
     assert "continuous authority OFF" in app
     assert "F2-G4B · ÚLTIMA EVIDÊNCIA LIVE VIA OPTION" in app
+
+
+def test_dashboard_renders_f4b_retrieval_without_causal_claim() -> None:
+    app=(
+        Path(__file__).parents[1]
+        / "src/factorio_ai_lab/dashboard/static/app.js"
+    ).read_text()
+
+    assert 'phase4Checkpoint === "F4-B"' in app
+    assert "F4-B · Hybrid Retrieval + Consolidation · SHADOW" in app
+    assert "retrieval/decay validados · ablation ainda aberta" in app
+    assert "hybrid structural+lexical retrieval" in app
+    assert "causal ablation/transfer ainda não provados" in app
+    assert "continuous authority OFF" in app
