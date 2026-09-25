@@ -5,8 +5,8 @@
 **Repository:** `MrSchrodingers/project_factorio`
 **Live checkout:** `/srv/factorio-ai-lab`
 **Transition branch:** `research/cortex-v1`
-**Current scientific phase:** **F3 ACTIVE — F3-A EXECUTIVE SHADOW KERNEL**
-**F3:** ACTIVE / SHADOW
+**Current scientific phase:** **F3 ACTIVE — F3-B VERIFICATION / CREDIT / LEDGER**
+**F3:** ACTIVE / F3-B SHADOW
 **Continuous autonomous authority:** OFF
 **Confirmatory seeds:** untouched / frozen
 **SentinelX context:** sxc_4557STHZ — always resume latest revision
@@ -1336,22 +1336,29 @@ Current UI/control-plane state:
 - phase2_checkpoint = F2-G5;
 - F2 Exit Gate validated;
 - F3 ACTIVE in SHADOW;
-- phase3_checkpoint = F3-A;
-- Executive Shadow Kernel validated;
+- phase3_checkpoint = F3-B;
+- F3-A Executive Shadow Kernel validated;
+- F3-B verification/credit/experiment ledger validated;
 - continuous authority OFF;
 - evolution inactive+disabled;
 - confirmatory seeds frozen.
 
 F3-A exposes BeliefState, GoalStack, diagnosis, multiple alternatives, hard feasibility, policy
-selection and prediction-before-action. The canonical replay is
-runs/audits/cortex_f3a_executive_shadow_replay.json with SHA-256
-c9b9d2c62a5a4dbd79a1937ae589e8abe5f4efcf6377a047b97f17f961203e65.
+selection and prediction-before-action.
 
-The observed legacy symptom is real. The second arm is explicitly counterfactual and was not
-executed in the historical world.
+F3-B reverified 54 historical executed/measured episodes, with 45 held and 9 did_not_hold; all
+54 recomputed outcomes match the recorded evidence. The persistent executive ledger contains 54
+episodes, quick_check=ok, and phase-state independently verifies their payload digests.
 
-The last live Cortex mutation evidence remains F2-G4B. F3-A itself uses no RCON/FLE/WorldLease or
+Canonical F3-B artifact:
+runs/audits/cortex_f3b_verification_credit_replay.json
+SHA-256:
+a8d76b2b1385606843c19c0fb7e221ccd17ae935d377888ac58a8ea3b89b74c1.
+
+The last live Cortex mutation evidence remains F2-G4B. F3-A and F3-B use no RCON/FLE/WorldLease or
 execution grant.
+
+Next checkpoint: F3-C paired shadow comparison against the legacy runner.
 
 ## 10.4 Important UI ambiguity
 
@@ -1756,7 +1763,8 @@ Published post-F2 observability hotfix:
 The dashboard main scope is global, not the historical exploratory baseline. A fresh operator
 should expect the Cortex control plane to show:
 
-- F3-A / Executive Shadow Kernel / SHADOW;
+- F3-B / Verification + Credit Ledger / SHADOW;
+- F3-A Executive Shadow Kernel remains validated;
 - F2 COMPLETE / G5 remains the execution substrate;
 - F2 Exit Gate validated;
 - continuous authority OFF;
@@ -2098,7 +2106,7 @@ A fresh operator should leave its first turn with one conclusion:
 
 After publication, this zero-context handoff should be discoverable through the immutable tag:
 
-`cortex-zero-context-handoff-v0.3.0`
+`cortex-zero-context-handoff-v0.4.0`
 
 A fresh chat should still revalidate the branch HEAD because later scientific work may legitimately
 advance beyond this tag.
@@ -2155,7 +2163,7 @@ estruturado contendo:
 - plano proposto para o próximo checkpoint com testes, evidências e critérios de aceite.
 
 Estado esperado do handoff publicado: F0 PASS, F1 PASS, F2 COMPLETE, F2-G4B e F2-G5 concluídas,
-F3 ACTIVE em F3-A / SHADOW, evolution inactive+disabled, confirmatory seeds intactas e
+F3 ACTIVE em F3-B / SHADOW, evolution inactive+disabled, confirmatory seeds intactas e
 resume.do_not_start_another_seed=true. Exatamente um live Option EXECUTE pós-G4A ocorreu em G4B e
 não deve ser repetido. Se o estado vivo divergir, audite commits/artifacts e siga o estado persistente
 mais recente.

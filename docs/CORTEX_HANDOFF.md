@@ -11,7 +11,7 @@
 ## Estado atual
 
 - Programa: Cortex Research Architecture v0.1
-- Fase: **F3 ACTIVE em F3-A / SHADOW — F2 COMPLETE; continuous authority OFF**
+- Fase: **F3 ACTIVE em F3-B / SHADOW — F2 COMPLETE; continuous authority OFF**
 - Branch: `research/cortex-v1`
 - Baseline imutável de origem: `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 - Tag baseline publicada: `cortex-pre-research-baseline-20260923`
@@ -51,40 +51,42 @@ silenciosamente pelo commit da F0**.
 
 ## Próxima ação
 
-**F3-B — verification-after-action + credit assignment + persistent experiment ledger.**
+**F3-C — paired shadow comparison contra o legacy runner sobre os mesmos objetivos observados.**
 
-F3-A está validada em SHADOW:
+F3-B está validada em SHADOW:
 
-- implementation: b54b3a41b797c90f1b0993e4b2eea9526a76bb70;
-- canonical artifact: runs/audits/cortex_f3a_executive_shadow_replay.json;
-- artifact SHA-256:
-  c9b9d2c62a5a4dbd79a1937ae589e8abe5f4efcf6377a047b97f17f961203e65;
-- observed source: runs/repairs.jsonl, SHA-256
-  327be3b7f7b594449f52ff18d4dcfe7e750a9473a1cf8da8c65893d0bf2ce376;
-- observed symptom:
-  producer_output_unprocessed:output_buffered_not_processed;
-- two counterfactual candidates exposed over the same goal/candidate set;
-- two policies select different candidates without changing goal/belief/candidate generation;
-- prediction producers_reaching_processor -> increase exists before action;
+- implementation commit: 8b9330545407138fa4340c695988643e2256fb17;
+- canonical artifact: runs/audits/cortex_f3b_verification_credit_replay.json;
+- artifact SHA-256: a8d76b2b1385606843c19c0fb7e221ccd17ae935d377888ac58a8ea3b89b74c1;
+- persistent ledger: runs/ledger/cortex_executive_episodes.sqlite3;
+- selected measured/executed historical episodes: 54;
+- recomputed outcomes matching recorded: 54 / 54;
+- held: 45;
+- did_not_hold: 9;
+- unmeasured among selected: 0;
+- credit eligible: 54 / 54;
+- reward sum: 45.0;
+- mean reward: 0.8333333333333334;
+- ledger quick_check=ok;
+- 54 episode payload digests independently revalidated by phase-state;
 - authority=shadow;
 - world_mutation=false;
 - factorio_rcon_used=false;
 - fle_environment_created=false;
-- world_lease_acquired=false;
 - execution_grant_created=false;
 - continuous_authority=false;
-- full gate: 1478 core/FLE + 2 PyTorch PASS plus static/build gates.
+- full gate: 1489 core/FLE + 2 PyTorch PASS plus static/build gates.
 
-F3-A does not claim a correct counterfactual outcome. The alternate arm was not executed in the
-historical world. The legacy row itself has executed=false and reward=null.
+F3-C deve comparar decisões estruturais, não inventar performance para ações que nunca foram
+executadas. O histórico possui 29 decisões de cadeia relevantes: 28
+producer_output_unprocessed escolhendo placement e 1 producer_chain_reaches_no_sink escolhendo
+rebuild; todas executed=false. Portanto a comparação pode medir candidate coverage, agreement,
+divergence e separação da policy, mas não causal superiority de outcome.
 
-F3-B must add verification and credit only where an outcome is actually measured. Prefer measured
-historical repair episodes first; do not fabricate reward for unexecuted counterfactuals.
-
-Ainda não executar confirmatory seeds.
+Não executar confirmatory seeds.
 Não habilitar evolution.
 Não conceder continuous autonomous authority.
-Não executar novo canário Factorio apenas para fechar F3-B.
+Não rodar novo canário Factorio para fechar F3-C.
 
 ## Protocolo de retomada após interrupção
 

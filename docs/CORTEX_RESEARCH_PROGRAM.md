@@ -7,7 +7,7 @@
 **Branch de transição:** `research/cortex-v1`
 **Baseline pré-Cortex:** `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 **Tag de baseline:** `cortex-pre-research-baseline-20260923`
-**Status:** F3 ACTIVE em F3-A / SHADOW — F2 COMPLETE; continuous authority e evolution OFF
+**Status:** F3 ACTIVE em F3-B / SHADOW — F2 COMPLETE; continuous authority e evolution OFF
 
 > Este arquivo é o contrato científico e operacional do Factorio AI Lab. Em caso de perda de
 > contexto de conversa, troca de operador, troca de modelo ou reinício do host, um operador sem
@@ -1400,8 +1400,8 @@ nova mutação Factorio.
 uma API genérica, sem caminho codificado por estágio, e o runner stage-coded remanescente está
 restrito a baseline.
 
-**Next:** F3-B — verification-after-action, credit assignment e experiment ledger. F3-A já está
-ativa em SHADOW e não possui authority live.
+**Next:** F3-C — comparação shadow pareada contra o runner legado. F3-B já está validada em
+SHADOW e não possui authority live.
 
 **Post-F2 observability hardening:** commit
 95254cc1b81cc75a90debf6ab93a01ddd0099485 remove a dependência do avatar dos observers
@@ -1414,7 +1414,7 @@ stream_error, /api/world connected=true com observer_origin=world_fallback.
 
 ## Fase 3 — Executive / Cognitive Loop
 
-**Status F3:** ACTIVE — F3-A Executive Shadow Kernel PASS parcial; authority permanece SHADOW.
+**Status F3:** ACTIVE — F3-B Verification/Credit/Ledger PASS parcial; authority permanece SHADOW.
 
 **Objetivo:** generalizar repair loop para decisão dirigida por objetivos.
 
@@ -1425,9 +1425,9 @@ stream_error, /api/world connected=true com observer_origin=world_fallback.
 - [x] hard feasibility filter;
 - [x] choice policy interface;
 - [x] prediction before action;
-- [ ] verification after action;
-- [ ] credit assignment;
-- [ ] experiment ledger;
+- [x] verification after action;
+- [x] credit assignment;
+- [x] experiment ledger;
 - [ ] shadow comparison contra runner.
 
 **Exit Gate F3:** mesmo objetivo gera alternativas e escolhas observáveis; sequência não está
@@ -1449,8 +1449,33 @@ Ruff/compileall/JavaScript/TypeScript/Vite/whitespace PASS.
 assignment, experiment ledger e comparação shadow pareada contra o runner permanecem abertos.
 Nenhuma authority live F3 foi concedida.
 
-**Next F3-B:** verification-after-action + credit assignment + experiment ledger, primeiro sobre
-outcomes históricos medidos.
+**F3-A transition target (completed by F3-B):** verification-after-action + credit assignment +
+experiment ledger sobre outcomes históricos medidos.
+
+
+**F3-B evidence:** docs/CORTEX_PHASE3_VERIFICATION_CREDIT_LEDGER.md;
+runs/audits/cortex_f3b_verification_credit_replay.json, SHA-256
+a8d76b2b1385606843c19c0fb7e221ccd17ae935d377888ac58a8ea3b89b74c1.
+
+O replay selecionou somente episódios históricos executed=true com prediction + before/after +
+verdict + reward numérico. Foram 54 episódios; 45 held e 9 did_not_hold. A recomputação independente
+coincidiu com 54/54 registros. Todos os 54 ficaram elegíveis para crédito; unmeasured permaneceu
+fora da seleção e nunca foi convertido em reward zero.
+
+O ledger persistente runs/ledger/cortex_executive_episodes.sqlite3 usa WAL, synchronous=FULL,
+BEGIN IMMEDIATE, episode IDs estáveis e payload SHA-256. O phase-state confirma quick_check=ok e
+os 54 payload digests publicados, sem depender de whole-file hash mutável.
+
+**Full gate F3-B:** 1489 core/FLE + 2 PyTorch PASS;
+Ruff/compileall/JavaScript/TypeScript/Vite/whitespace PASS.
+
+**Decision F3-B:** PASS parcial. Verification-after-action, credit assignment e experiment ledger
+estão atendidos em SHADOW sobre evidência medida. Não há claim de superioridade de policy nem
+authority live.
+
+**Next F3-C:** comparação shadow pareada contra o runner legado sobre os mesmos objetivos/candidate
+sets. Medir estrutura de decisão, agreement/divergence e coverage; não atribuir outcome causal às
+arms não executadas.
 
 ---
 
