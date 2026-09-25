@@ -778,7 +778,7 @@ def build_phase_state(
         and statistical_report_exists
         and phase2_exit_gate_valid
     ):
-        action="F2 complete; F3 remains blocked until explicitly opened"
+        action="F2 complete; F3 ready but not started"
     elif exploratory_complete and statistical_report_exists and phase2_started:
         action="F2 active; follow docs/CORTEX_HANDOFF.md"
     elif exploratory_complete and statistical_report_exists:
@@ -1168,7 +1168,10 @@ def build_phase_state(
         "resume":{
             "action":action,
             "do_not_start_another_seed":(
-                blocked_running or blocked_invalid or blocked_release
+                blocked_running
+                or blocked_invalid
+                or blocked_release
+                or phase2_exit_gate_valid
             ),
         },
     }

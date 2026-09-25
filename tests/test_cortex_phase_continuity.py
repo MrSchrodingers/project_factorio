@@ -1207,6 +1207,7 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
     assert g5["phase2_baseline_only_enforcement"]["validated"] is True
     assert g5["phase2_exit_gate"]["validated"] is True
     assert g5["phase2_exit_gate"]["legacy_runner_baseline_only"] is True
+    assert g5["resume"]["do_not_start_another_seed"] is True
     assert g5["resume"]["action"] == (
-        "F2 complete; F3 remains blocked until explicitly opened"
+        "F2 complete; F3 ready but not started"
     )
