@@ -520,6 +520,82 @@ def build_phase_state(
         and phase2_baseline_only_valid
     )
 
+    phase3_executive_doc_path=(
+        state_root / "docs" / "CORTEX_PHASE3_EXECUTIVE_SHADOW_KERNEL.md"
+    )
+    phase3_executive_doc=phase3_executive_doc_path.exists()
+    phase3_executive_audit_path=(
+        state_root
+        / "runs"
+        / "audits"
+        / "cortex_f3a_executive_shadow_replay.json"
+    )
+    phase3_executive_audit=phase3_executive_audit_path.exists()
+    phase3_executive_payload: dict[str, Any]={}
+    phase3_executive_error: str | None=None
+    if phase3_executive_audit:
+        try:
+            phase3_executive_payload=_load(phase3_executive_audit_path)
+        except (OSError,json.JSONDecodeError,TypeError) as exc:
+            phase3_executive_error=f"{type(exc).__name__}: {exc}"
+
+    phase3_revision=phase3_executive_payload.get("code_revision")
+    if not isinstance(phase3_revision,dict):
+        phase3_revision={}
+    phase3_observed=phase3_executive_payload.get("observed_evidence")
+    if not isinstance(phase3_observed,dict):
+        phase3_observed={}
+    phase3_counterfactual=phase3_executive_payload.get(
+        "counterfactual_expansion"
+    )
+    if not isinstance(phase3_counterfactual,dict):
+        phase3_counterfactual={}
+    phase3_policy_replays=phase3_executive_payload.get("policy_replays")
+    if not isinstance(phase3_policy_replays,dict):
+        phase3_policy_replays={}
+    phase3_checks=phase3_executive_payload.get("checks")
+    if not isinstance(phase3_checks,dict):
+        phase3_checks={}
+    phase3_repairs_path=state_root / "runs" / "repairs.jsonl"
+    phase3_repairs_sha=(
+        _sha256(phase3_repairs_path)
+        if phase3_repairs_path.exists()
+        else None
+    )
+    phase3_candidate_count=phase3_counterfactual.get("candidate_count")
+    phase3_executive_valid=(
+        phase2_exit_gate_valid
+        and phase3_executive_doc
+        and phase3_executive_audit
+        and phase3_executive_error is None
+        and phase3_executive_payload.get("schema_version")
+        =="cortex_f3a_executive_shadow_replay_v1"
+        and phase3_executive_payload.get("status")=="pass"
+        and phase3_revision.get("dirty") is False
+        and isinstance(phase3_revision.get("commit"),str)
+        and bool(phase3_revision.get("commit"))
+        and phase3_executive_payload.get("authority")=="shadow"
+        and phase3_executive_payload.get("world_mutation") is False
+        and phase3_executive_payload.get("factorio_rcon_used") is False
+        and phase3_executive_payload.get("fle_environment_created") is False
+        and phase3_executive_payload.get("world_lease_acquired") is False
+        and phase3_executive_payload.get("execution_grant_created") is False
+        and phase3_executive_payload.get("continuous_authority") is False
+        and phase3_observed.get("source")=="runs/repairs.jsonl"
+        and phase3_repairs_sha is not None
+        and phase3_observed.get("source_sha256")==phase3_repairs_sha
+        and phase3_observed.get("symptom")
+        =="producer_output_unprocessed:output_buffered_not_processed"
+        and phase3_counterfactual.get("observed_in_world") is False
+        and isinstance(phase3_candidate_count,int)
+        and not isinstance(phase3_candidate_count,bool)
+        and phase3_candidate_count>=2
+        and set(phase3_policy_replays)
+        =={"prefer_build","prefer_reroute"}
+        and bool(phase3_checks)
+        and all(value is True for value in phase3_checks.values())
+    )
+
     phase2_delivery_actuator_canary_path=(
         state_root
         / "runs"
@@ -763,7 +839,12 @@ def build_phase_state(
                 "functional_accept_sustainability_not_proven"
             )
 
-    if blocked_running:
+    if phase3_executive_valid:
+        action=(
+            "F3-A active in SHADOW; implement verification, credit assignment, "
+            "and experiment ledger"
+        )
+    elif blocked_running:
         action=f"monitor seed {exploratory['running'][0]}"
     elif blocked_invalid:
         action="investigate invalid seed(s): "+",".join(
@@ -815,20 +896,38 @@ def build_phase_state(
         "schema_version":"cortex_phase_state_v1",
         "generated_at":datetime.now(UTC).isoformat(),
         "phase":(
-            "F2"
-            if exploratory_complete and statistical_report_exists and phase2_started
-            else ("F1" if exploratory_complete and statistical_report_exists else "F1-B")
+            "F3"
+            if phase3_executive_valid
+            else (
+                "F2"
+                if exploratory_complete
+                and statistical_report_exists
+                and phase2_started
+                else (
+                    "F1"
+                    if exploratory_complete and statistical_report_exists
+                    else "F1-B"
+                )
+            )
         ),
         "phase_status":(
-            "complete"
-            if phase2_exit_gate_valid
+            "active"
+            if phase3_executive_valid
             else (
-                "active"
-                if phase2_started and exploratory_complete and statistical_report_exists
+                "complete"
+                if phase2_exit_gate_valid
                 else (
-                    "complete"
-                    if exploratory_complete and statistical_report_exists
-                    else "active"
+                    "active"
+                    if (
+                        phase2_started
+                        and exploratory_complete
+                        and statistical_report_exists
+                    )
+                    else (
+                        "complete"
+                        if exploratory_complete and statistical_report_exists
+                        else "active"
+                    )
                 )
             )
         ),
@@ -850,6 +949,40 @@ def build_phase_state(
             "exists":phase2_started,
         },
         "phase2_checkpoint":phase2_checkpoint,
+        "phase3_checkpoint":(
+            "F3-A" if phase3_executive_valid else None
+        ),
+        "phase3_executive_shadow_kernel":{
+            "document_path":str(phase3_executive_doc_path),
+            "document_exists":phase3_executive_doc,
+            "audit_path":str(phase3_executive_audit_path),
+            "audit_exists":phase3_executive_audit,
+            "validated":phase3_executive_valid,
+            "status":phase3_executive_payload.get("status"),
+            "run_id":phase3_executive_payload.get("run_id"),
+            "code_commit":phase3_revision.get("commit"),
+            "authority":phase3_executive_payload.get("authority"),
+            "world_mutation":phase3_executive_payload.get("world_mutation"),
+            "factorio_rcon_used":phase3_executive_payload.get(
+                "factorio_rcon_used"
+            ),
+            "fle_environment_created":phase3_executive_payload.get(
+                "fle_environment_created"
+            ),
+            "world_lease_acquired":phase3_executive_payload.get(
+                "world_lease_acquired"
+            ),
+            "execution_grant_created":phase3_executive_payload.get(
+                "execution_grant_created"
+            ),
+            "continuous_authority":phase3_executive_payload.get(
+                "continuous_authority"
+            ),
+            "observed_evidence":phase3_observed,
+            "counterfactual_expansion":phase3_counterfactual,
+            "checks":phase3_checks,
+            "read_error":phase3_executive_error,
+        },
         "phase2_parity":{
             "path":str(phase2_parity_path),
             "exists":phase2_parity,

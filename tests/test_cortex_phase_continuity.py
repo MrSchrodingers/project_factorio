@@ -1211,3 +1211,101 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
     assert g5["resume"]["action"] == (
         "F2 complete; F3 ready but not started"
     )
+    assert g5["phase3_checkpoint"] is None
+    assert g5["phase3_executive_shadow_kernel"]["validated"] is False
+
+    repairs=tmp_path/"runs"/"repairs.jsonl"
+    repairs.write_text(
+        json.dumps({
+            "run_id":"legacy-observed",
+            "generation":96,
+            "stage":"Logistic science",
+            "symptom":(
+                "producer_output_unprocessed:"
+                "output_buffered_not_processed"
+            ),
+            "action_key":"placement:place_processing_for_buffered_output",
+            "executed":False,
+            "targets":["u1","u2"]
+        })+"\n"
+    )
+    repairs_sha=module._sha256(repairs)
+    f3_payload={
+        "schema_version":"cortex_f3a_executive_shadow_replay_v1",
+        "status":"pass",
+        "run_id":"f3a-shadow",
+        "code_revision":{
+            "commit":"f3a-sha",
+            "branch":"research/cortex-v1",
+            "dirty":False
+        },
+        "authority":"shadow",
+        "world_mutation":False,
+        "factorio_rcon_used":False,
+        "fle_environment_created":False,
+        "world_lease_acquired":False,
+        "execution_grant_created":False,
+        "continuous_authority":False,
+        "observed_evidence":{
+            "source":"runs/repairs.jsonl",
+            "source_sha256":repairs_sha,
+            "symptom":(
+                "producer_output_unprocessed:"
+                "output_buffered_not_processed"
+            )
+        },
+        "counterfactual_expansion":{
+            "observed_in_world":False,
+            "candidate_count":2
+        },
+        "policy_replays":{
+            "prefer_build":{},
+            "prefer_reroute":{}
+        },
+        "checks":{
+            "observed_symptom_present":True,
+            "observed_targets_present":True,
+            "candidate_count_at_least_two":True,
+            "same_goal_same_candidate_set":True,
+            "different_policy_different_choice":True,
+            "predictions_exist_before_action":True,
+            "all_candidates_hard_feasible":True,
+            "build_choice_is_placement":True,
+            "reroute_choice_is_rebuild":True,
+            "shadow_only":True,
+            "world_mutation_false":True,
+            "execute_authorized_false":True
+        }
+    }
+    f3_audit=audits/"cortex_f3a_executive_shadow_replay.json"
+    f3_audit.write_text(json.dumps(f3_payload)+"\n")
+
+    f3_artifact_only=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert f3_artifact_only["phase"] == "F2"
+    assert f3_artifact_only["phase_status"] == "complete"
+    assert f3_artifact_only["phase3_checkpoint"] is None
+    assert (
+        f3_artifact_only["phase3_executive_shadow_kernel"]["validated"]
+        is False
+    )
+
+    f3_doc=docs/"CORTEX_PHASE3_EXECUTIVE_SHADOW_KERNEL.md"
+    f3_doc.write_text("# F3-A\n")
+    f3=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert f3["phase"] == "F3"
+    assert f3["phase_status"] == "active"
+    assert f3["phase2_checkpoint"] == "F2-G5"
+    assert f3["phase2_exit_gate"]["validated"] is True
+    assert f3["phase3_checkpoint"] == "F3-A"
+    assert f3["phase3_executive_shadow_kernel"]["validated"] is True
+    assert f3["resume"]["do_not_start_another_seed"] is True
+    assert f3["resume"]["action"] == (
+        "F3-A active in SHADOW; implement verification, credit assignment, "
+        "and experiment ledger"
+    )

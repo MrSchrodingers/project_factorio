@@ -75,3 +75,16 @@ def test_snapshot_preserves_observation_origin_and_experiment_tick(monkeypatch) 
     assert payload["experiment_tick"] == 7
     assert payload["observer_origin"] == "world_fallback"
     assert payload["entity_count"] == 0
+
+
+def test_dashboard_renders_f3a_as_shadow_and_keeps_g4b_as_live_evidence() -> None:
+    app=(
+        Path(__file__).parents[1]
+        / "src/factorio_ai_lab/dashboard/static/app.js"
+    ).read_text()
+
+    assert "cortexPhase.phase3_checkpoint" in app
+    assert "F3-A · Executive Shadow Kernel · SHADOW" in app
+    assert "F3-A · alternativas explícitas · no live authority" in app
+    assert "F2-G4B · ÚLTIMA EVIDÊNCIA LIVE VIA OPTION" in app
+    assert "G4B permanece a última evidência live" in app

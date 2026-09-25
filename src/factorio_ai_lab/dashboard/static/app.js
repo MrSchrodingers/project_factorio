@@ -1746,6 +1746,9 @@ function renderExperimentContext() {
       ? configured > 0 && completed >= configured && runningCount === 0
       : true;
     const phase2Checkpoint = String(cortexPhase.phase2_checkpoint || "F2");
+    const phase3Checkpoint = String(cortexPhase.phase3_checkpoint || "");
+    const executiveShadowPhase = phase3Checkpoint === "F3-A";
+    const executiveShadow = cortexPhase.phase3_executive_shadow_kernel || {};
     const functionalCanary = phase2Checkpoint === "F2-F3";
     const deliveryActuatorPhase = phase2Checkpoint.startsWith("F2-F4");
     const deliveryActuatorRunner = phase2Checkpoint === "F2-F4B";
@@ -1756,7 +1759,9 @@ function renderExperimentContext() {
     const persistentAuthorityPhase = phase2Checkpoint === "F2-G4A";
     const liveOptionCanaryPhase = phase2Checkpoint === "F2-G4B";
     const baselineOnlyPhase = phase2Checkpoint === "F2-G5";
-    const useLiveOptionEvidence = liveOptionCanaryPhase || baselineOnlyPhase;
+    const useLiveOptionEvidence = executiveShadowPhase
+      || liveOptionCanaryPhase
+      || baselineOnlyPhase;
     const useDeliveryCanaryEvidence = deliveryActuatorCanary
       || runnerIndependencePhase
       || optionCompositionPhase
@@ -1791,6 +1796,9 @@ function renderExperimentContext() {
       phaseBadge = configured
         ? "F1-B · " + completed + "/" + configured
         : "F1-B · seed " + seed;
+    } else if (executiveShadowPhase) {
+      phaseTitle = "F3-A · Executive Shadow Kernel · SHADOW";
+      phaseBadge = "F3-A · alternativas explícitas · no live authority";
     } else if (baselineOnlyPhase) {
       phaseTitle = "F2 · COMPLETE · G5 baseline-only enforcement";
       phaseBadge = "F2 COMPLETE · generic Option API · legacy baseline-only";
@@ -1847,7 +1855,7 @@ function renderExperimentContext() {
 
     setText(
       "cortexCanaryLabel",
-      baselineOnlyPhase
+      executiveShadowPhase || baselineOnlyPhase
         ? "F2-G4B · ÚLTIMA EVIDÊNCIA LIVE VIA OPTION"
         : (liveOptionCanaryPhase
           ? "F2-G4B · CANÁRIO LIVE VIA OPTION"
@@ -1897,7 +1905,13 @@ function renderExperimentContext() {
       );
       setText(
         "cortexAuthorityDetail",
-        baselineOnlyPhase
+        executiveShadowPhase
+          ? "F3-A SHADOW: BeliefState/GoalStack + múltiplas alternativas + hard feasibility + policy/prediction-before-action. "
+            + "Artifact " + String(executiveShadow.status || "--").toUpperCase()
+            + " · candidates "
+            + String((executiveShadow.counterfactual_expansion || {}).candidate_count || "--")
+            + " · G4B permanece a última evidência live · continuous authority OFF."
+          : (baselineOnlyPhase
           ? "F2-G5: runner legado fail-closed fora de baseline; F2 Exit Gate completo. G4B permanece a última evidência live · continuous authority OFF."
           : (liveOptionCanaryPhase
             ? "F2-G4B: uma única Option live aceita sob grant persistente + WorldLease atestado; temporal epoch auditado · continuous authority OFF."
@@ -1912,7 +1926,7 @@ function renderExperimentContext() {
             : ("EXECUTE concedido somente ao canário registrado"
               + " · continuous authority "
               + (canary.continuous_authority ? "ON" : "OFF")
-              + " · baseline/holdout separados."))))))
+              + " · baseline/holdout separados.")))))))
       );
     } else {
       setText("cortexCanaryStatus", "canário não executado");
