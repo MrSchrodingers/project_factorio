@@ -5,8 +5,9 @@
 **Repository:** `MrSchrodingers/project_factorio`
 **Live checkout:** `/srv/factorio-ai-lab`
 **Transition branch:** `research/cortex-v1`
-**Current scientific phase:** **F3 COMPLETE — F3-C PAIRED SHADOW COMPARISON — F4 READY / NOT STARTED**
+**Current scientific phase:** **F4 ACTIVE — F4-A TYPED COGNITIVE MEMORY SUBSTRATE**
 **F3:** COMPLETE / F3-C
+**F4:** ACTIVE / F4-A SHADOW
 **Continuous autonomous authority:** OFF
 **Confirmatory seeds:** untouched / frozen
 **SentinelX context:** sxc_4557STHZ — always resume latest revision
@@ -1338,31 +1339,39 @@ Current UI/control-plane state:
 - F3 COMPLETE;
 - phase3_checkpoint = F3-C;
 - F3 Exit Gate validated;
-- F3-A Executive Shadow Kernel validated;
-- F3-B verification/credit/experiment ledger validated;
-- F3-C paired shadow comparison validated;
-- F4 READY / NOT STARTED;
+- F4 ACTIVE in SHADOW;
+- phase4_checkpoint = F4-A;
+- typed cognitive-memory substrate validated;
 - continuous authority OFF;
 - evolution inactive+disabled;
 - confirmatory seeds frozen.
 
-F3-C canonical evidence:
+F4-A canonical memory state:
 
-- 29 paired historical objectives;
-- 29 / 29 with multiple candidates;
-- canonical fixed rule without historical action label: 29 / 29 agreement;
-- alternative rebuild-preference policy divergence: 28 / 29;
-- all 29 historical structural actions executed=false;
-- observed numeric rewards: 0;
-- artifact: runs/audits/cortex_f3c_paired_shadow_comparison.json;
-- SHA-256: 13b00f67b7014a5f3af3bf068e9381bc563100c4a984688ca88ab23795ba5f01.
+- working memory capacity=3, bounded/non-persistent;
+- episodic: 54 items / 54 occurrences;
+- semantic: 134 items / 566 occurrences / 530 qualified;
+- procedural: 1 item / 54 executed supports;
+- counterexample: 33 items / 85 occurrences;
+- total durable memory items: 222;
+- canonical batch occurrences: 759;
+- procedure success/failure: 45 / 9;
+- procedure mean reward: 0.8333333333333334;
+- Wilson lower-95: 0.7126323220121027;
+- memory SQLite quick_check=ok;
+- artifact:
+  runs/audits/cortex_f4a_memory_substrate_migration.json;
+- artifact SHA-256:
+  f45e31785c17cd6222a57937564036dbdd4976ee1d6376b61f340a9d70066228;
+- canonical batch manifest SHA-256:
+  cfe4472fc53d8f20f9ee4bf3e16951d8689d3bd7d381e7c5d663ae4f61637e71.
 
-This closes decision-structure requirements only. It does not establish learned-policy superiority
-or counterfactual outcome quality.
+F4-A does not establish memory benefit. Retrieval, consolidation, decay and causal ablation remain
+open.
 
-The last live Cortex mutation evidence remains F2-G4B. F3-A/B/C use no live executive authority.
+The last live Cortex mutation evidence remains F2-G4B. F3 and F4-A use no live executive authority.
 
-Next phase: F4 cognitive memory and consolidation. Its Exit Gate is causal ablation on transfer.
+Next checkpoint: F4-B hybrid retrieval + consolidation + decay.
 
 ## 10.4 Important UI ambiguity
 
@@ -1767,9 +1776,9 @@ Published post-F2 observability hotfix:
 The dashboard main scope is global, not the historical exploratory baseline. A fresh operator
 should expect the Cortex control plane to show:
 
+- F4 ACTIVE / F4-A typed cognitive memory substrate;
 - F3 COMPLETE / F3-C paired shadow comparison;
 - F3 Exit Gate validated;
-- F4 READY / NOT STARTED;
 - F2 COMPLETE / G5 remains the execution substrate;
 - F2 Exit Gate validated;
 - continuous authority OFF;
@@ -2111,7 +2120,7 @@ A fresh operator should leave its first turn with one conclusion:
 
 After publication, this zero-context handoff should be discoverable through the immutable tag:
 
-`cortex-zero-context-handoff-v0.5.0`
+`cortex-zero-context-handoff-v0.6.0`
 
 A fresh chat should still revalidate the branch HEAD because later scientific work may legitimately
 advance beyond this tag.
@@ -2168,7 +2177,7 @@ estruturado contendo:
 - plano proposto para o próximo checkpoint com testes, evidências e critérios de aceite.
 
 Estado esperado do handoff publicado: F0 PASS, F1 PASS, F2 COMPLETE, F2-G4B e F2-G5 concluídas,
-F3 COMPLETE em F3-C, F4 READY / NOT STARTED, evolution inactive+disabled, confirmatory seeds intactas e
+F3 COMPLETE em F3-C, F4 ACTIVE em F4-A / SHADOW, evolution inactive+disabled, confirmatory seeds intactas e
 resume.do_not_start_another_seed=true. Exatamente um live Option EXECUTE pós-G4A ocorreu em G4B e
 não deve ser repetido. Se o estado vivo divergir, audite commits/artifacts e siga o estado persistente
 mais recente.

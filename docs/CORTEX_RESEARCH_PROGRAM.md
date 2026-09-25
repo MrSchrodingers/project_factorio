@@ -7,7 +7,7 @@
 **Branch de transição:** `research/cortex-v1`
 **Baseline pré-Cortex:** `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 **Tag de baseline:** `cortex-pre-research-baseline-20260923`
-**Status:** F3 COMPLETE em F3-C — F4 READY / NOT STARTED; continuous authority e evolution OFF
+**Status:** F4 ACTIVE em F4-A / SHADOW — F3 COMPLETE; continuous authority e evolution OFF
 
 > Este arquivo é o contrato científico e operacional do Factorio AI Lab. Em caso de perda de
 > contexto de conversa, troca de operador, troca de modelo ou reinício do host, um operador sem
@@ -1499,20 +1499,19 @@ Nenhuma authority live contínua foi concedida.
 
 **Exit Gate F3:** PASS.
 
-**Next:** F4 — Cognitive Memory and Consolidation. Memória só fecha F4 quando uma ablação mostrar
-perda estatisticamente detectável em transferência; logging isolado não conta.
+**Status F4:** ACTIVE — F4-A Typed Cognitive Memory Substrate PASS parcial; authority permanece SHADOW.
 
 ---
 
 ## Fase 4 — Memória cognitiva e consolidação
 
-- [ ] working memory;
-- [ ] episodic store;
-- [ ] semantic store versionado;
-- [ ] procedural skill library;
+- [x] working memory;
+- [x] episodic store;
+- [x] semantic store versionado;
+- [x] procedural skill library;
 - [ ] retrieval híbrido estrutural + similaridade;
-- [ ] counterexamples como primeira classe;
-- [ ] confidence/support/validity scope;
+- [x] counterexamples como primeira classe;
+- [x] confidence/support/validity scope;
 - [ ] consolidation job;
 - [ ] forgetting/decay policy;
 - [ ] memória ablation experiment;
@@ -1520,6 +1519,35 @@ perda estatisticamente detectável em transferência; logging isolado não conta
 
 **Exit Gate F4:** remover memória causa perda estatisticamente detectável em tarefas de
 transferência; memória deixa de ser apenas logging.
+
+
+**F4-A evidence:** docs/CORTEX_PHASE4_MEMORY_SUBSTRATE.md;
+runs/audits/cortex_f4a_memory_substrate_migration.json, SHA-256
+f45e31785c17cd6222a57937564036dbdd4976ee1d6376b61f340a9d70066228.
+
+O batch canônico migrou 759 ocorrências para 222 identidades duráveis com provenance individual:
+54 episodic; 134 semantic/566 occurrences, sendo 530 qualified; 1 procedural/54 outcomes executados;
+33 counterexamples/85 occurrences.
+
+Procedural confidence é empírica: 45 success, 9 failure, mean reward 0.8333333333333334 e Wilson
+lower-95 0.7126323220121027. Semantic occurrences sem evidence_keys permanecem armazenadas, mas
+fora de qualified support.
+
+O store usa schema versionado cortex_cognitive_memory_v1, source snapshots, item/payload digests e
+batch manifests. O phase-state revalida o manifest original diretamente no SQLite, permitindo novos
+batches sem invalidar F4-A.
+
+**Full gate F4-A:** 1508 core/FLE + 2 PyTorch PASS;
+Ruff/compileall/JavaScript/TypeScript/Vite/whitespace PASS.
+
+**Decision F4-A:** PASS parcial. O substrato de memória está validado; retrieval,
+consolidation/decay, ablação causal e transferência continuam abertos.
+
+**Next F4-B:** retrieval híbrido estrutural + similaridade, consolidation e decay/forgetting policy,
+em SHADOW/replay e desacoplado do curriculum_runner.
+
+O Exit Gate F4 continua sendo causal: remover memória deve produzir perda estatisticamente
+detectável em transferência.
 
 ---
 

@@ -11,7 +11,7 @@
 ## Estado atual
 
 - Programa: Cortex Research Architecture v0.1
-- Fase: **F3 COMPLETE em F3-C — F4 READY / NOT STARTED; continuous authority OFF**
+- Fase: **F4 ACTIVE em F4-A / SHADOW — F3 COMPLETE; continuous authority OFF**
 - Branch: `research/cortex-v1`
 - Baseline imutável de origem: `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 - Tag baseline publicada: `cortex-pre-research-baseline-20260923`
@@ -51,54 +51,45 @@ silenciosamente pelo commit da F0**.
 
 ## Próxima ação
 
-**F4 — Cognitive Memory and Consolidation. F4 está READY / NOT STARTED.**
+**F4-B — hybrid structural/similarity retrieval + consolidation + decay policy.**
 
-F3-C fechou o Exit Gate F3 em SHADOW:
+F4-A está validada em SHADOW:
 
-- implementation: 6a209527a14cc9a8eebb12c4d8ac403884fde281;
-- canonical artifact: runs/audits/cortex_f3c_paired_shadow_comparison.json;
-- artifact SHA-256: 13b00f67b7014a5f3af3bf068e9381bc563100c4a984688ca88ab23795ba5f01;
-- paired historical objectives: 29;
-- every pair exposes at least two candidates;
-- candidate set invariant across compared policies: 29 / 29;
-- canonical fixed rule, computed without historical action label: 29 / 29 agreement;
-- fixed legacy-preference policy: 29 / 29 agreement;
-- rebuild-preference policy: 1 / 29 agreement;
-- observable policy divergence: 28 / 29;
-- observed structural actions executed: 0 / 29;
-- observed numeric rewards: 0 / 29;
+- implementation: 756702bb6961fe8c989b2658b0a020200b7632bf;
+- canonical artifact: runs/audits/cortex_f4a_memory_substrate_migration.json;
+- artifact SHA-256: f45e31785c17cd6222a57937564036dbdd4976ee1d6376b61f340a9d70066228;
+- persistent store: runs/ledger/cortex_cognitive_memory.sqlite3;
+- canonical batch: cortex-f4a-af2a612bb1327f0b2fb2;
+- batch occurrences: 759;
+- batch manifest SHA-256:
+  cfe4472fc53d8f20f9ee4bf3e16951d8689d3bd7d381e7c5d663ae4f61637e71;
+- durable memory items: 222;
+- episodic: 54 items / 54 occurrences;
+- semantic: 134 items / 566 occurrences / 530 qualified;
+- procedural: 1 item / 54 executed supports;
+- counterexample: 33 items / 85 occurrences;
+- procedure mean reward: 0.8333333333333334;
+- procedure Wilson lower-95: 0.7126323220121027;
+- working memory bounded capacity=3 and non-persistent;
+- memory DB quick_check=ok;
 - authority=shadow;
 - world_mutation=false;
-- FLE/RCON/WorldLease/execution grant: unused;
-- full gate: 1493 core/FLE + 2 PyTorch PASS plus static/build gates.
+- FLE/RCON/WorldLease/execution grant unused;
+- full gate: 1508 core/FLE + 2 PyTorch PASS plus static/build gates.
 
-F3 Exit Gate: PASS.
-The sequence is no longer required to live inside a stage handler for the compared decisions.
+F4-A is a memory substrate result, not a causal-memory result. It does not prove retrieval quality or
+that memory changes outcomes.
 
-This does not claim that the divergent policy is better. Learned-policy superiority belongs to F5
-and requires holdout evidence.
+F4-B must move Cortex recall out of the legacy stage/recency-only JSONL path and provide explicit
+structural + similarity ranking, provenance/support-aware retrieval, consolidation and a defensible
+decay/forgetting policy. Preserve original occurrences; do not destructively erase evidence.
 
-F4 contract:
-
-- working memory;
-- episodic store;
-- semantic store versioned;
-- procedural skill library;
-- hybrid structural/similarity retrieval;
-- counterexamples as first-class memory;
-- confidence/support/validity scope;
-- consolidation;
-- forgetting/decay;
-- memory ablation;
-- cross-seed transfer.
-
-F4 Exit Gate requires statistically detectable transfer loss when memory is removed. Logging alone
-is insufficient.
+F4 Exit Gate remains an ablation/transfer criterion and is not satisfied by F4-A.
 
 Ainda não executar confirmatory seeds.
 Não habilitar evolution.
 Não conceder continuous autonomous authority.
-Não iniciar live Cortex execution apenas para abrir F4.
+Não iniciar live Cortex execution para fechar F4-B.
 
 ## Protocolo de retomada após interrupção
 
