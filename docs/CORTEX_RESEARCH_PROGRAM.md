@@ -1403,6 +1403,13 @@ restrito a baseline.
 **Next:** F3 — Executive / Cognitive Loop. F3 está READY / NOT STARTED. A abertura deve começar em
 SHADOW e não herda autoridade contínua de F2.
 
+**Post-F2 observability hardening:** commit
+95254cc1b81cc75a90debf6ab93a01ddd0099485 remove a dependência do avatar dos observers
+read-only do dashboard. Sem storage.agent_characters[1], world/map/resources/production/catalog
+usam surface/force de fallback sem criar player nem mutar Factorio. Gate: 1469 core/FLE + 2
+PyTorch PASS e static/build gates PASS. Validação live: 17/17 endpoints HTTP 200, WebSocket sem
+stream_error, /api/world connected=true com observer_origin=world_fallback.
+
 ---
 
 ## Fase 3 — Executive / Cognitive Loop

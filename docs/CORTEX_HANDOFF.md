@@ -77,8 +77,19 @@ universal, cadeia funcional live sem curriculum_runner e runner legado baseline-
 A última evidência live continua sendo F2-G4B, run cortex-f2g4b-20260925T014418Z, com 13 iron
 plates e final no_fuel. Não repetir esse canário. Sustentabilidade autônoma continua não provada.
 
-O mesmo commit endureceu o dashboard contra stale RCON e falha parcial de endpoints. Após deploy,
-validar BUILD_INFO, /api/context, /api/world e /ws/live antes de confiar na tela.
+Dashboard pós-fechamento:
+
+- hardening base no commit F2-G5: stale RCON, bootstrap parcial e WebSocket resiliente;
+- hotfix world-without-avatar: 95254cc1b81cc75a90debf6ab93a01ddd0099485;
+- observers usam agent surface/force quando disponível e fallback read-only para
+  game.surfaces[1] + game.forces.player quando o avatar não existe;
+- gate do hotfix: 1469 core/FLE + 2 PyTorch PASS; static/build gates PASS;
+- validação live: 17/17 endpoints de bootstrap HTTP 200, WebSocket sem stream_error;
+- http://midasnet.tail106aa2.ts.net:8765/, /api/context e /api/world: HTTP 200;
+- /api/world: connected=true, observer_origin=world_fallback, entity_count=0;
+- /api/resource-overview: connected=true, 38 cells e 2562 resource points;
+- o zero de factory entities é estado físico observado da force player, não falha de conexão;
+- /api/context: global / Cortex, F2 complete, checkpoint F2-G5, Exit Gate validado.
 
 Não executar confirmatory seeds.
 Não habilitar evolution.

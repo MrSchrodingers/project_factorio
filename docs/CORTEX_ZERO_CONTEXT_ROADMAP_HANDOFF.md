@@ -1330,15 +1330,19 @@ It is historical evidence, not a running Cortex experiment.
 
 ## 10.3 CORTEX CURRENT CONTROL PLANE
 
-Current UI label:
+Current UI/control-plane state:
 
-`F2-G4A · persistent one-shot authority · DRY-RUN`
+- F2 COMPLETE;
+- phase2_checkpoint = F2-G5;
+- F2 Exit Gate validated;
+- F3 READY / NOT STARTED;
+- continuous authority OFF;
+- evolution inactive+disabled;
+- confirmatory seeds frozen.
 
-and:
-
-`durable ledger · no live EXECUTE`
-
-This is the current research-program state.
+The last live Cortex evidence remains F2-G4B. The dashboard world observer may use
+observer_origin=world_fallback when no agent character exists; that is an observation-mode label,
+not execution authority.
 
 ## 10.4 Important UI ambiguity
 
@@ -1736,26 +1740,44 @@ Do not store secrets.
 
 # 20. Current live UI interpretation
 
-A fresh chat should expect approximately:
+Published post-F2 observability hotfix:
 
-- `F2-G4A · persistent one-shot authority · DRY-RUN`;
-- `durable ledger · no live EXECUTE`;
-- current Cortex canary card showing F2-F4C accepted;
-- 13 iron plates;
-- final processor status no_fuel;
-- sustainability not proven.
+95254cc1b81cc75a90debf6ab93a01ddd0099485
 
-The live map should show the small F2-F4C cell if no later experiment changed the world.
+The dashboard main scope is global, not the historical exploratory baseline. A fresh operator
+should expect the Cortex control plane to show:
 
-The baseline evidence side may still show:
+- F2 COMPLETE / G5 baseline-only enforcement;
+- F2 Exit Gate validated;
+- F3 READY / NOT STARTED;
+- continuous authority OFF;
+- last live Cortex evidence = F2-G4B;
+- F2-G4B output = 13 iron plates, final processor no_fuel;
+- sustainability still unproven.
 
-- seed 20261005;
-- Logistic science failure;
-- UCB placement trials;
-- rejected baseline challenger;
-- no champion.
+Live WORLD state after the post-F2 dashboard hotfix:
 
-That is historical evidence, not current Cortex control.
+- /api/world: HTTP 200;
+- connected=true;
+- observer_origin=world_fallback;
+- entity_count=0;
+- the player-force factory graph currently has zero nodes/edges;
+- /api/resource-overview remains connected and observed 38 resource cells / 2562 resource points.
+
+The zero factory count is therefore an observed physical state of the current player force, not the
+old UI failure. The observer no longer equates a missing storage.agent_characters[1] with a
+disconnected Factorio world.
+
+Operational UI validation at closure:
+
+- all 17 initial bootstrap endpoints returned HTTP 200;
+- /ws/live delivered a payload with no stream_error and world.connected=true;
+- http://midasnet.tail106aa2.ts.net:8765/ returned HTTP 200;
+- the same Tailscale host returned HTTP 200 for /api/context and /api/world;
+- dashboard service was active with NRestarts=0.
+
+The baseline evidence side remains historical evidence only. Do not infer active evolution,
+learning, or a live factory from old baseline cards.
 
 ---
 
@@ -2048,6 +2070,9 @@ At this checkpoint:
 - exactly one post-G4A live Option EXECUTE occurred; it is already consumed/audited and MUST NOT be repeated;
 - G4B implementation commit = 794963b435bff616042ca0a6e6f278ead315e5e0;
 - G4A dry-run artifact SHA-256 = 94b60b7b8a298252edcb37b4435854c97f83e0f6832de9ec46aec05aff1e1ec6;
+- dashboard world-without-avatar hotfix = 95254cc1b81cc75a90debf6ab93a01ddd0099485;
+- live UI validation: 17/17 bootstrap endpoints 200, WebSocket healthy, Tailscale root/context/world 200;
+- current WORLD: connected=true via world_fallback, 0 player-force factory entities, resources still observable;
 - published closure/dashboard SHA must be revalidated from Git/tag/BUILD_INFO;
 - frozen baseline runtime = `95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac`;
 - SentinelX context = sxc_4557STHZ; resume latest revision.
@@ -2064,7 +2089,7 @@ A fresh operator should leave its first turn with one conclusion:
 
 After publication, this zero-context handoff should be discoverable through the immutable tag:
 
-`cortex-zero-context-handoff-v0.2.0`
+`cortex-zero-context-handoff-v0.2.1`
 
 A fresh chat should still revalidate the branch HEAD because later scientific work may legitimately
 advance beyond this tag.

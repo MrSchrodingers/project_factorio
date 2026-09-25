@@ -56,6 +56,10 @@ separada, sem rerun.
 G5 implementation: 4fc7217d3e5e0fecb076bfd63305e5498eb52f4e. Audit SHA-256:
 f7d796d1c406a7425fd3b14a783227364bb62ab42cef477a59960c41f4d721ae. O gate final ficou em
 1467 core/FLE + 2 PyTorch PASS, com Ruff/compileall/JavaScript/TypeScript/Vite/whitespace PASS.
+O hardening pós-fechamento do dashboard está no commit
+95254cc1b81cc75a90debf6ab93a01ddd0099485: observers read-only não dependem mais da existência
+de storage.agent_characters[1]. Gate do hotfix: 1469 core/FLE + 2 PyTorch PASS; 17/17 endpoints
+de bootstrap HTTP 200 e WebSocket live sem stream_error.
 F3 está READY / NOT STARTED; continuous authority e evolution permanecem OFF.
 As seeds confirmatórias 20261101–20261110 permanecem congeladas e não executadas; serão usadas
 posteriormente para avaliação pareada do Cortex, sem tuning nelas.
