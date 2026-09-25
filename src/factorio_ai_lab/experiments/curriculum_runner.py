@@ -10050,6 +10050,23 @@ def _journal_repair(journal: ResearchJournal, record: Mapping[str, Any]) -> None
     )
 
 
+
+LEGACY_RUNNER_BASELINE_ROLE = "baseline"
+LEGACY_RUNNER_REFUSAL = "legacy_runner_baseline_only"
+
+
+class LegacyRunnerAuthorityError(RuntimeError):
+    """Raised before environment creation when legacy authority is not baseline."""
+
+
+def require_legacy_baseline_role(execution_role: str) -> None:
+    if execution_role != LEGACY_RUNNER_BASELINE_ROLE:
+        raise LegacyRunnerAuthorityError(
+            f"{LEGACY_RUNNER_REFUSAL}: curriculum_runner requires "
+            f"execution_role={LEGACY_RUNNER_BASELINE_ROLE!r}"
+        )
+
+
 def run_curriculum(
     *,
     seed: int,
@@ -10064,6 +10081,7 @@ def run_curriculum(
     copper_mine_settle: int,
     copper_smelt_settle: int,
     exploration: float,
+    execution_role: str,
     inherited_capabilities: InheritedCapabilities | None = None,
 ) -> dict[str, Any]:
     """Run one lab generation.
@@ -10073,6 +10091,7 @@ def run_curriculum(
     ancestor. None is the cold start: nothing was inherited, so every
     capability reached is this genome's.
     """
+    require_legacy_baseline_role(execution_role)
     import gym
 
     list_environments()
@@ -10553,6 +10572,11 @@ def main() -> None:
     parser.add_argument("--copper-mine-settle", type=int, default=16)
     parser.add_argument("--copper-smelt-settle", type=int, default=24)
     parser.add_argument("--exploration", type=float, default=2.0)
+    parser.add_argument(
+        "--execution-role",
+        choices=(LEGACY_RUNNER_BASELINE_ROLE,),
+        required=True,
+    )
     args = parser.parse_args()
 
     result = run_curriculum(
@@ -10568,6 +10592,7 @@ def main() -> None:
         copper_mine_settle=args.copper_mine_settle,
         copper_smelt_settle=args.copper_smelt_settle,
         exploration=args.exploration,
+        execution_role=args.execution_role,
     )
     print(json.dumps(result, indent=2, sort_keys=True, default=str))
 

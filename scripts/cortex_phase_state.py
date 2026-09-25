@@ -462,6 +462,64 @@ def build_phase_state(
         and temporal_claim.get("old_artifact_rewritten") is False
         and temporal_claim.get("second_live_canary_executed") is False
     )
+    phase2_baseline_only_doc_path=(
+        state_root
+        / "docs"
+        / "CORTEX_PHASE2_BASELINE_ONLY_ENFORCEMENT.md"
+    )
+    phase2_baseline_only_doc=phase2_baseline_only_doc_path.exists()
+    phase2_baseline_only_audit_path=(
+        state_root
+        / "runs"
+        / "audits"
+        / "cortex_f2g5_baseline_only_enforcement.json"
+    )
+    phase2_baseline_only_audit=phase2_baseline_only_audit_path.exists()
+    phase2_baseline_only_audit_payload: dict[str, Any]={}
+    phase2_baseline_only_audit_error: str | None=None
+    if phase2_baseline_only_audit:
+        try:
+            phase2_baseline_only_audit_payload=_load(
+                phase2_baseline_only_audit_path
+            )
+        except (OSError,json.JSONDecodeError,TypeError) as exc:
+            phase2_baseline_only_audit_error=f"{type(exc).__name__}: {exc}"
+    baseline_only_checks=phase2_baseline_only_audit_payload.get("checks")
+    if not isinstance(baseline_only_checks,dict):
+        baseline_only_checks={}
+    baseline_only_revision=phase2_baseline_only_audit_payload.get(
+        "code_revision"
+    )
+    if not isinstance(baseline_only_revision,dict):
+        baseline_only_revision={}
+    phase2_baseline_only_valid=(
+        phase2_baseline_only_doc
+        and phase2_baseline_only_audit
+        and phase2_baseline_only_audit_error is None
+        and phase2_baseline_only_audit_payload.get("status")=="pass"
+        and baseline_only_revision.get("dirty") is False
+        and isinstance(baseline_only_revision.get("commit"),str)
+        and bool(baseline_only_revision.get("commit"))
+        and phase2_baseline_only_audit_payload.get("legacy_runner_role")
+        =="baseline"
+        and phase2_baseline_only_audit_payload.get(
+            "fail_closed_before_environment_creation"
+        ) is True
+        and phase2_baseline_only_audit_payload.get(
+            "cortex_imports_legacy_runner"
+        ) is False
+        and phase2_baseline_only_audit_payload.get("world_mutation") is False
+        and phase2_baseline_only_audit_payload.get("factorio_rcon_used") is False
+        and bool(baseline_only_checks)
+        and all(value is True for value in baseline_only_checks.values())
+    )
+    phase2_exit_gate_valid=(
+        phase2_live_option_canary_valid
+        and phase2_options
+        and phase2_option_execution
+        and phase2_baseline_only_valid
+    )
+
     phase2_delivery_actuator_canary_path=(
         state_root
         / "runs"
@@ -715,6 +773,12 @@ def build_phase_state(
         action="halt: scientific release provenance mismatch"
     elif exploratory["next_seed"] is not None:
         action=f"run seed {exploratory['next_seed']}"
+    elif (
+        exploratory_complete
+        and statistical_report_exists
+        and phase2_exit_gate_valid
+    ):
+        action="F2 complete; F3 remains blocked until explicitly opened"
     elif exploratory_complete and statistical_report_exists and phase2_started:
         action="F2 active; follow docs/CORTEX_HANDOFF.md"
     elif exploratory_complete and statistical_report_exists:
@@ -724,6 +788,7 @@ def build_phase_state(
 
     phase2_checkpoint=None
     for checkpoint,enabled in (
+        ("F2-G5",phase2_baseline_only_valid),
         ("F2-G4B",phase2_live_option_canary_valid),
         ("F2-G4A",phase2_persistent_authority_valid),
         ("F2-G3",phase2_option_execution),
@@ -755,12 +820,16 @@ def build_phase_state(
             else ("F1" if exploratory_complete and statistical_report_exists else "F1-B")
         ),
         "phase_status":(
-            "active"
-            if phase2_started and exploratory_complete and statistical_report_exists
+            "complete"
+            if phase2_exit_gate_valid
             else (
-                "complete"
-                if exploratory_complete and statistical_report_exists
-                else "active"
+                "active"
+                if phase2_started and exploratory_complete and statistical_report_exists
+                else (
+                    "complete"
+                    if exploratory_complete and statistical_report_exists
+                    else "active"
+                )
             )
         ),
         "protocol":protocol_id,
@@ -848,6 +917,43 @@ def build_phase_state(
                 )
             ),
             "read_error":phase2_authority_dry_run_error,
+        },
+        "phase2_exit_gate":{
+            "validated":phase2_exit_gate_valid,
+            "generic_option_api":phase2_options,
+            "universal_transactional_execution":phase2_option_execution,
+            "live_functional_chain":phase2_live_option_canary_valid,
+            "legacy_runner_baseline_only":phase2_baseline_only_valid,
+        },
+        "phase2_baseline_only_enforcement":{
+            "document_path":str(phase2_baseline_only_doc_path),
+            "document_exists":phase2_baseline_only_doc,
+            "audit_path":str(phase2_baseline_only_audit_path),
+            "audit_exists":phase2_baseline_only_audit,
+            "validated":phase2_baseline_only_valid,
+            "status":phase2_baseline_only_audit_payload.get("status"),
+            "code_commit":baseline_only_revision.get("commit"),
+            "legacy_runner_role":phase2_baseline_only_audit_payload.get(
+                "legacy_runner_role"
+            ),
+            "fail_closed_before_environment_creation":(
+                phase2_baseline_only_audit_payload.get(
+                    "fail_closed_before_environment_creation"
+                )
+            ),
+            "cortex_imports_legacy_runner":(
+                phase2_baseline_only_audit_payload.get(
+                    "cortex_imports_legacy_runner"
+                )
+            ),
+            "world_mutation":phase2_baseline_only_audit_payload.get(
+                "world_mutation"
+            ),
+            "factorio_rcon_used":phase2_baseline_only_audit_payload.get(
+                "factorio_rcon_used"
+            ),
+            "checks":baseline_only_checks,
+            "read_error":phase2_baseline_only_audit_error,
         },
         "phase2_live_option_canary":{
             "path":str(phase2_live_option_canary_path),

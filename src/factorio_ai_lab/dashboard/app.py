@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,7 @@ from factorio_ai_lab.dashboard.sprites import (
 from factorio_ai_lab.dashboard.state import DashboardState, json_finite
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+logger = logging.getLogger(__name__)
 state = DashboardState()
 sprites = SpriteLibrary()
 tiles = TileLibrary()
@@ -404,7 +406,14 @@ async def websocket_live(websocket: WebSocket) -> None:
     await websocket.accept()
     try:
         while True:
-            payload = await asyncio.to_thread(state.sample)
+            try:
+                payload = await asyncio.to_thread(state.sample)
+            except Exception as exc:
+                logger.exception("dashboard live sample failed")
+                payload = {
+                    "stream_error": f"{type(exc).__name__}: {exc}",
+                    "experiment_context": state.experiment_context_data(),
+                }
             await websocket.send_json(json_finite(payload))
             interval = float(state.config.read().get("poll_interval_s", 1.5))
             await asyncio.sleep(max(0.25, min(interval, 30.0)))

@@ -50,10 +50,7 @@ def test_dashboard_reads_state_but_executes_its_own_release_code() -> None:
         if line.startswith("Environment=")
     )
     assert "FACTORIO_AI_STATE_ROOT=/srv/factorio-ai-lab" in environment
-    assert (
-        "FACTORIO_AI_DASHBOARD_SCOPE="
-        "baseline:cortex_baseline_protocol_v1:exploratory:auto"
-    ) in environment
+    assert "FACTORIO_AI_DASHBOARD_SCOPE=global" in environment
 
 
 def test_llm_has_a_host_memory_guard() -> None:

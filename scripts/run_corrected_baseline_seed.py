@@ -58,6 +58,8 @@ def build_plan(
         "factorio_ai_lab.experiments.curriculum_runner",
         "--seed",
         str(seed),
+        "--execution-role",
+        "baseline",
     ]
     return {
         "schema_version": "corrected_baseline_seed_plan_v1",
@@ -65,6 +67,7 @@ def build_plan(
         "protocol_path": str(protocol_path),
         "mode": mode,
         "seed": seed,
+        "execution_role": "baseline",
         "release": build,
         "release_root": str(release_root),
         "sandbox_state_root": str(sandbox),

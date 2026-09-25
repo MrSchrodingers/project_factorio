@@ -1161,3 +1161,52 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
         "functional_accept_tick_epoch_reset_explained"
     )
     assert live["sustained_operation"] is False
+
+    (docs/"CORTEX_PHASE2_BASELINE_ONLY_ENFORCEMENT.md").write_text(
+        "# F2-G5\n"
+    )
+    g5_doc_only=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert g5_doc_only["phase2_checkpoint"] == "F2-G4B"
+    assert g5_doc_only["phase_status"] == "active"
+    assert g5_doc_only["phase2_exit_gate"]["validated"] is False
+    assert g5_doc_only["phase2_baseline_only_enforcement"]["validated"] is False
+
+    (audits/"cortex_f2g5_baseline_only_enforcement.json").write_text(
+        json.dumps({
+            "schema_version":"cortex_f2g5_baseline_only_audit_v1",
+            "status":"pass",
+            "code_revision":{"commit":"g5-sha","branch":"research/cortex-v1","dirty":False},
+            "legacy_runner_role":"baseline",
+            "fail_closed_before_environment_creation":True,
+            "cortex_imports_legacy_runner":False,
+            "cortex_import_offenders":[],
+            "world_mutation":False,
+            "factorio_rcon_used":False,
+            "checks":{
+                "run_curriculum_requires_execution_role":True,
+                "guard_precedes_environment_creation":True,
+                "role_constant_is_baseline":True,
+                "cli_requires_execution_role":True,
+                "corrected_baseline_labels_role":True,
+                "legacy_shell_labels_role":True,
+                "evolution_legacy_call_labels_role":True,
+                "cortex_imports_legacy_runner":True
+            }
+        })+"\n"
+    )
+    g5=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert g5["phase"] == "F2"
+    assert g5["phase_status"] == "complete"
+    assert g5["phase2_checkpoint"] == "F2-G5"
+    assert g5["phase2_baseline_only_enforcement"]["validated"] is True
+    assert g5["phase2_exit_gate"]["validated"] is True
+    assert g5["phase2_exit_gate"]["legacy_runner_baseline_only"] is True
+    assert g5["resume"]["action"] == (
+        "F2 complete; F3 remains blocked until explicitly opened"
+    )

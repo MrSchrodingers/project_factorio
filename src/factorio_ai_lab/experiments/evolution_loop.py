@@ -1191,6 +1191,7 @@ def run_loop(
                         copper_mine_settle=16,
                         copper_smelt_settle=24,
                         exploration=2.0,
+                        execution_role="baseline",
                     )
 
             final_world_state, attribution = _lifelong_attribution(

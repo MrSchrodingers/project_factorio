@@ -91,7 +91,7 @@ def discover_experiment_context(
             "scope":"global",
             "status":"active",
             "runs_dir":str(state_root/"runs"),
-            "label":"GLOBAL / legacy research state",
+            "label":"GLOBAL / Cortex research state",
             "world_source":"live_rcon",
             "cortex_phase":_phase_context(state_root),
         }

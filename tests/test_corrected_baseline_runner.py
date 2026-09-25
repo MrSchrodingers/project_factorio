@@ -65,6 +65,9 @@ def test_plan_is_seed_isolated_and_uses_clean_release(tmp_path) -> None:
     assert plan["release"]["commit"] == "abc123456789"
     assert plan["sandbox_state_root"].endswith("/test_baseline_v1/exploratory/11")
     assert "--seed" in plan["command"]
+    assert plan["execution_role"] == "baseline"
+    role_index=plan["command"].index("--execution-role")
+    assert plan["command"][role_index+1] == "baseline"
 
 
 def test_seed_not_in_frozen_protocol_is_rejected(tmp_path) -> None:

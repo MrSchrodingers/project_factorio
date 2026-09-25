@@ -14,6 +14,8 @@ from math import ceil, isfinite
 from pathlib import Path
 from typing import Any, ClassVar
 
+from factorio_rcon.factorio_rcon import RCONNetworkError
+
 from factorio_ai_lab.dashboard.context import discover_experiment_context
 from factorio_ai_lab.dashboard.rendering import WorldFrameRenderer
 from factorio_ai_lab.learning.autonomy import evaluate_factory_autonomy
@@ -2209,11 +2211,13 @@ local bottom=viewport_cy+viewport_radius
                     self._map_cache_at = now
                 return payload
             except (
+                RCONNetworkError,
                 OSError,
                 RuntimeError,
                 ValueError,
                 json.JSONDecodeError,
             ) as exc:
+                self._client = None
                 return {
                     "connected": False,
                     "resources": [],
@@ -2248,6 +2252,7 @@ local bottom=viewport_cy+viewport_radius
                 self._resource_overview_cache_at = now
                 return payload
             except (
+                RCONNetworkError,
                 OSError,
                 RuntimeError,
                 TypeError,
@@ -2320,6 +2325,7 @@ local bottom=viewport_cy+viewport_radius
                     pass
                 return payload
             except (
+                RCONNetworkError,
                 OSError,
                 RuntimeError,
                 TypeError,
@@ -2429,6 +2435,7 @@ rcon.print(helpers.table_to_json({{
                 self._production_cache[precision_key] = (now, payload)
                 return payload
             except (
+                RCONNetworkError,
                 OSError,
                 RuntimeError,
                 TypeError,
@@ -2505,6 +2512,7 @@ rcon.print(helpers.table_to_json({connected=true,count=#rows,prototypes=rows}))
                 self._entity_prototype_cache_at = now
                 return payload
             except (
+                RCONNetworkError,
                 OSError,
                 RuntimeError,
                 TypeError,
@@ -2565,6 +2573,7 @@ rcon.print(helpers.table_to_json({connected=true,count=#rows,prototypes=rows}))
                     "error": payload.get("error"),
                 }
             except (
+                RCONNetworkError,
                 OSError,
                 RuntimeError,
                 ValueError,

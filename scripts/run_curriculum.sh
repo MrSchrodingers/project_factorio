@@ -15,4 +15,4 @@ if ! flock -n 9; then
   exit 75
 fi
 
-exec env   HOME=/home/ti   PYTHONPATH="$CODE_ROOT/src"   FACTORIO_AI_STATE_ROOT="$STATE_ROOT"   FACTORIO_AI_REQUIRE_CLEAN_PROMOTION=1   FACTORIO_SERVER_ADDRESS=127.0.0.1   FACTORIO_SERVER_PORT=27000   "$VENV_FLE/bin/python"   -m factorio_ai_lab.experiments.curriculum_runner   --seed 20260921   --placement-episodes 8   --baseline-settle 16   --trial-settle 8   --scale-settle 14   --smelt-settle 24   --logistics-settle 30   --belt-smelt-settle 32   --exploration 2.0
+exec env   HOME=/home/ti   PYTHONPATH="$CODE_ROOT/src"   FACTORIO_AI_STATE_ROOT="$STATE_ROOT"   FACTORIO_AI_REQUIRE_CLEAN_PROMOTION=1   FACTORIO_SERVER_ADDRESS=127.0.0.1   FACTORIO_SERVER_PORT=27000   "$VENV_FLE/bin/python"   -m factorio_ai_lab.experiments.curriculum_runner   --seed 20260921   --placement-episodes 8   --baseline-settle 16   --trial-settle 8   --scale-settle 14   --smelt-settle 24   --logistics-settle 30   --belt-smelt-settle 32   --exploration 2.0   --execution-role baseline

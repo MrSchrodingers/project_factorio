@@ -1713,7 +1713,7 @@ function renderExperimentContext() {
     "experimentContextTitle",
     baseline
       ? "Baseline isolada · seed " + seed + " · " + String(context.status || "--")
-      : String(context.label || "Global / legacy")
+      : String(context.label || "Global / Cortex")
   );
   setText(
     "experimentContextDetail",
@@ -1727,7 +1727,7 @@ function renderExperimentContext() {
         + (context.status === "completed"
           ? " · mundo continua tickando após o snapshot final"
           : "")
-      : "estado global legado; não confundir com uma seed isolada"
+      : "estado global do Cortex · baselines permanecem isoladas como evidência"
   );
   setClassText(
     "evidenceTruthBadge",
@@ -1736,15 +1736,15 @@ function renderExperimentContext() {
   );
   setClassText("worldTruthBadge", "WORLD · LIVE RCON", "badge live");
 
-  if (baseline) {
+  if (baseline || context.kind === "global") {
     const series = context.series_progress || {};
     const completed = Number(series.completed || 0);
     const configured = Number(series.configured || 0);
     const runningCount = Number(series.running || 0);
-    const seriesComplete = configured > 0
-      && completed >= configured
-      && runningCount === 0;
     const cortexPhase = context.cortex_phase || {};
+    const seriesComplete = baseline
+      ? configured > 0 && completed >= configured && runningCount === 0
+      : true;
     const phase2Checkpoint = String(cortexPhase.phase2_checkpoint || "F2");
     const functionalCanary = phase2Checkpoint === "F2-F3";
     const deliveryActuatorPhase = phase2Checkpoint.startsWith("F2-F4");
@@ -1755,13 +1755,15 @@ function renderExperimentContext() {
     const optionExecutionPhase = phase2Checkpoint === "F2-G3";
     const persistentAuthorityPhase = phase2Checkpoint === "F2-G4A";
     const liveOptionCanaryPhase = phase2Checkpoint === "F2-G4B";
+    const baselineOnlyPhase = phase2Checkpoint === "F2-G5";
+    const useLiveOptionEvidence = liveOptionCanaryPhase || baselineOnlyPhase;
     const useDeliveryCanaryEvidence = deliveryActuatorCanary
       || runnerIndependencePhase
       || optionCompositionPhase
       || optionExecutionPhase
       || persistentAuthorityPhase;
     const useFunctionalCanaryEvidence = functionalCanary || deliveryActuatorPhase;
-    const canary = liveOptionCanaryPhase
+    const canary = useLiveOptionEvidence
       ? (cortexPhase.phase2_live_option_canary || {})
       : (useDeliveryCanaryEvidence
       ? (cortexPhase.phase2_delivery_actuator_canary || {})
@@ -1775,7 +1777,7 @@ function renderExperimentContext() {
     const actionStatus = String(canary.action_status || canary.status || "--");
     const canaryRejected = actionStatus === "rejected";
     const canaryAccepted = actionStatus === "accepted";
-    const canaryUnsustained = useDeliveryCanaryEvidence
+    const canaryUnsustained = (useDeliveryCanaryEvidence || useLiveOptionEvidence)
       && canaryAccepted
       && canary.sustained_operation === false;
 
@@ -1789,6 +1791,9 @@ function renderExperimentContext() {
       phaseBadge = configured
         ? "F1-B · " + completed + "/" + configured
         : "F1-B · seed " + seed;
+    } else if (baselineOnlyPhase) {
+      phaseTitle = "F2 · COMPLETE · G5 baseline-only enforcement";
+      phaseBadge = "F2 COMPLETE · generic Option API · legacy baseline-only";
     } else if (liveOptionCanaryPhase) {
       phaseTitle = "F2-G4B · live Option functional accept · epoch auditado";
       phaseBadge = "F2-G4B · one-shot live PASS · sustentabilidade aberta";
@@ -1842,13 +1847,15 @@ function renderExperimentContext() {
 
     setText(
       "cortexCanaryLabel",
-      liveOptionCanaryPhase
-        ? "F2-G4B · CANÁRIO LIVE VIA OPTION"
-        : (useDeliveryCanaryEvidence
+      baselineOnlyPhase
+        ? "F2-G4B · ÚLTIMA EVIDÊNCIA LIVE VIA OPTION"
+        : (liveOptionCanaryPhase
+          ? "F2-G4B · CANÁRIO LIVE VIA OPTION"
+          : (useDeliveryCanaryEvidence
         ? "F2-F4C · ÚLTIMO CANÁRIO FUNCIONAL"
         : (useFunctionalCanaryEvidence
           ? "F2-F3 · ÚLTIMO CANÁRIO FUNCIONAL"
-          : "F2-E · TRANSAÇÃO CONTROLADA"))
+          : "F2-E · TRANSAÇÃO CONTROLADA")))
     );
 
     if (canary.exists) {
@@ -1890,9 +1897,11 @@ function renderExperimentContext() {
       );
       setText(
         "cortexAuthorityDetail",
-        liveOptionCanaryPhase
-          ? "F2-G4B: uma única Option live aceita sob grant persistente + WorldLease atestado; temporal epoch auditado · continuous authority OFF."
-          : (persistentAuthorityPhase
+        baselineOnlyPhase
+          ? "F2-G5: runner legado fail-closed fora de baseline; F2 Exit Gate completo. G4B permanece a última evidência live · continuous authority OFF."
+          : (liveOptionCanaryPhase
+            ? "F2-G4B: uma única Option live aceita sob grant persistente + WorldLease atestado; temporal epoch auditado · continuous authority OFF."
+            : (persistentAuthorityPhase
           ? "F2-G4A: grant one-shot persistente/restart-safe validado em dry-run; live Option EXECUTE bloqueado · continuous authority OFF."
           : (optionExecutionPhase
             ? "F2-G3 validado apenas em fake/replay; live Option EXECUTE bloqueado · continuous authority OFF."
@@ -1903,7 +1912,7 @@ function renderExperimentContext() {
             : ("EXECUTE concedido somente ao canário registrado"
               + " · continuous authority "
               + (canary.continuous_authority ? "ON" : "OFF")
-              + " · baseline/holdout separados.")))))
+              + " · baseline/holdout separados."))))))
       );
     } else {
       setText("cortexCanaryStatus", "canário não executado");
@@ -4168,46 +4177,50 @@ async function loadConfig() {
 }
 
 async function loadInitialState() {
-  const paths = [
-    "/api/status",
-    "/api/world",
-    "/api/history",
-    "/api/learning",
-    "/api/run",
-    "/api/research",
-    "/api/progression",
-    "/api/production-plan",
-    "/api/machine-diagnostics",
-    "/api/autonomy",
-    "/api/resource-overview",
-    "/api/factory-graph",
-    "/api/game-graph/summary",
-    "/api/evolution",
-    "/api/knowledge",
-    "/api/datasets",
-    "/api/context",
+  const endpoints = [
+    ["/api/status", "status"],
+    ["/api/world", "world"],
+    ["/api/history", "history"],
+    ["/api/learning", "learning"],
+    ["/api/run", "run"],
+    ["/api/research", "research"],
+    ["/api/progression", "progression"],
+    ["/api/production-plan", "production_plan"],
+    ["/api/machine-diagnostics", "machine_diagnostics"],
+    ["/api/autonomy", "autonomy"],
+    ["/api/resource-overview", "resource_overview"],
+    ["/api/factory-graph", "factory_graph"],
+    ["/api/game-graph/summary", "game_graph_summary"],
+    ["/api/evolution", "evolution"],
+    ["/api/knowledge", "knowledge"],
+    ["/api/datasets", "datasets"],
+    ["/api/context", "experiment_context"],
   ];
-  const responses = await Promise.all(paths.map((path) => fetch(path)));
-  const payloads = await Promise.all(responses.map((response) => response.json()));
-  applyPayload({
-    status: payloads[0],
-    world: payloads[1],
-    history: payloads[2],
-    learning: payloads[3],
-    run: payloads[4],
-    research: payloads[5],
-    progression: payloads[6],
-    production_plan: payloads[7],
-    machine_diagnostics: payloads[8],
-    autonomy: payloads[9],
-    resource_overview: payloads[10],
-    factory_graph: payloads[11],
-    game_graph_summary: payloads[12],
-    evolution: payloads[13],
-    knowledge: payloads[14],
-    datasets: payloads[15],
-    experiment_context: payloads[16],
+  const settled = await Promise.allSettled(
+    endpoints.map(async ([path, key]) => {
+      const response = await fetch(path);
+      if (!response.ok) {
+        throw new Error(path + " returned HTTP " + response.status);
+      }
+      return [key, await response.json()];
+    })
+  );
+  const payload = {};
+  const failures = [];
+  settled.forEach((result, index) => {
+    if (result.status === "fulfilled") {
+      payload[result.value[0]] = result.value[1];
+    } else {
+      failures.push(endpoints[index][0] + ": " + String(result.reason));
+    }
   });
+  if (Object.keys(payload).length) {
+    applyPayload(payload);
+  }
+  if (failures.length) {
+    console.warn("dashboard partial bootstrap", failures);
+    setClassText("socketBadge", "degraded · partial", "badge dead");
+  }
 }
 
 $("configForm").addEventListener("submit", async (event) => {
@@ -4246,7 +4259,14 @@ function connectSocket() {
 
   socket.addEventListener("message", (event) => {
     try {
-      applyPayload(JSON.parse(event.data));
+      const payload = JSON.parse(event.data);
+      if (payload.stream_error) {
+        console.error("live sample degraded", payload.stream_error);
+        setClassText("socketBadge", "degraded · live", "badge dead");
+      } else {
+        setClassText("socketBadge", "live", "badge live");
+      }
+      applyPayload(payload);
     } catch (error) {
       console.error("live payload error", error);
     }
@@ -4272,10 +4292,13 @@ installWorldControls();
 installWorldModeControls();
 installProductionControls();
 
-Promise.all([loadConfig(), loadInitialState(), loadProduction()])
-  .catch((error) => {
-    console.error("dashboard bootstrap failed", error);
-    setClassText("socketBadge", "degraded", "badge dead");
+Promise.allSettled([loadConfig(), loadInitialState(), loadProduction()])
+  .then((results) => {
+    const failures = results.filter((result) => result.status === "rejected");
+    if (failures.length) {
+      console.error("dashboard bootstrap degraded", failures);
+      setClassText("socketBadge", "degraded", "badge dead");
+    }
   })
   .finally(connectSocket);
 
