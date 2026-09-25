@@ -7,7 +7,7 @@
 **Branch de transição:** `research/cortex-v1`
 **Baseline pré-Cortex:** `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 **Tag de baseline:** `cortex-pre-research-baseline-20260923`
-**Status:** F2-G3 concluída — F2-G4A autorizada; F2 ativa; F3 e continuous authority bloqueadas
+**Status:** F2-G4A concluída — F2-G4B é o próximo checkpoint; F2 ativa; F3 e continuous authority bloqueadas
 
 > Este arquivo é o contrato científico e operacional do Factorio AI Lab. Em caso de perda de
 > contexto de conversa, troca de operador, troca de modelo ou reinício do host, um operador sem
@@ -1294,9 +1294,39 @@ execution universal permanece aberta no checklist porque durable live one-shot a
 foi provada. O teste funcional live por Option/API genérica e baseline-only enforcement também
 permanecem abertos.
 
-**Next:** F2-G4A — ledger persistente de grants + dry-run runner independente de
-`curriculum_runner`. Nenhum live Option canary é autorizado por F2-G3. F3 permanece bloqueada.
+**F2-G4A progress:** **PASS parcial de F2.** O consumo process-local de grants foi substituído por
+um ledger SQLite persistente. Grants agora possuem grant id, exact plan digest, prepared action,
+code revision, run id obrigatório, issued/expiry timestamps e scope não-wildcard com
+max_executions=1. O boundary exige o ledger para EXECUTE.
 
+**Atomic authority F2-G4A:** o ledger usa BEGIN IMMEDIATE, WAL e synchronous=FULL. A decisão de
+consumo revalida o grant persistido e grava consumed_at/consume_result antes da delegação ao
+StructuralTransactionalAdapter. Após restart, grant consumido continua recusado. Uma janela de
+crash após consume e antes da mutação permanece fail-closed: a execução pode ser perdida, mas a
+authority não é reutilizada. Não se reivindica exactly-once distribuído entre SQLite e Factorio.
+
+**Concurrency F2-G4A:** double-consume foi testado com conexões independentes e processos OS
+spawned; em cada corrida existe exatamente um consumed e um already_consumed. Expiry, wrong
+digest/prepared action/code revision/run id/scope, wildcard scope e ausência de ledger são
+fail-closed.
+
+**Dry-run evidence F2-G4A:** runs/audits/cortex_f2g4a_option_authority_dry_run.json, SHA-256
+94b60b7b8a298252edcb37b4435854c97f83e0f6832de9ec46aec05aff1e1ec6. O artifact foi gerado a
+partir do implementation commit f567bf453c9e3c0e8dfb319adfeef266b4926af8 com dirty=false.
+status=pass, factorio_environment_created=false, factorio_rcon_used=false,
+factorio_world_mutation=false, continuous_authority=false, live_option_execute_authorized=false e
+consumed_at=null. O negative control de world scope foi recusado.
+
+**Full gate F2-G4A:** 1440 core/FLE PASS + 2 PyTorch PASS;
+Ruff/compileall/JavaScript/TypeScript/Vite/whitespace PASS.
+
+**Decision F2-G4A:** **PASS parcial de F2.** Durable one-shot authority existe e sobrevive a
+reconstruction/concurrency em dry-run. Ainda não existe evidência de live Option-controlled
+functional chain; o runner legado também ainda não está formalmente baseline-only.
+
+**Next:** F2-G4B — um único canário live não-confirmatório através da Option API, com persistent
+one-shot grant, scope ligado ao WorldLease real, sem retry automático e sem continuous authority.
+F3 permanece bloqueada.
 **Exit Gate F2:** o agente pode montar uma cadeia funcional escolhendo primitivas/options por uma
 API genérica, sem caminho codificado por estágio.
 

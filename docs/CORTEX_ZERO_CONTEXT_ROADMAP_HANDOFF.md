@@ -1,15 +1,15 @@
 # Factorio AI Lab — Cortex Research
 # Zero-Context Roadmap + Academic/Operational Handoff
 
-**Purpose:** canonical restart document for a new AI/operator with zero conversational context.  
-**Repository:** `MrSchrodingers/project_factorio`  
-**Live checkout:** `/srv/factorio-ai-lab`  
-**Transition branch:** `research/cortex-v1`  
-**Current scientific phase:** **F2-G3 COMPLETE — F2-G4A NEXT**  
-**F3:** BLOCKED  
-**Continuous autonomous authority:** OFF  
-**Confirmatory seeds:** untouched / frozen  
-**SentinelX context:** `sxc_4557STHZ`, revision 21 at this checkpoint
+**Purpose:** canonical restart document for a new AI/operator with zero conversational context.
+**Repository:** `MrSchrodingers/project_factorio`
+**Live checkout:** `/srv/factorio-ai-lab`
+**Transition branch:** `research/cortex-v1`
+**Current scientific phase:** **F2-G4A COMPLETE — F2-G4B NEXT**
+**F3:** BLOCKED
+**Continuous autonomous authority:** OFF
+**Confirmatory seeds:** untouched / frozen
+**SentinelX context:** sxc_4557STHZ — always resume latest revision
 
 > This document is intentionally redundant with the canonical research program, phase documents,
 > machine-readable state and SentinelX continuity context. The redundancy is deliberate: a fresh
@@ -56,11 +56,15 @@ git -c safe.directory=/srv/factorio-ai-lab rev-parse origin/research/cortex-v1
 git -c safe.directory=/srv/factorio-ai-lab log -10 --pretty=format:'%H %cI %s'
 ```
 
-Expected at the time this handoff was written:
+Expected invariant after a published checkpoint:
 
-- HEAD = `5b3fb7db4c18b804d94701888c8f1aebfe01138b`
-- origin/research/cortex-v1 = same SHA
-- working tree = clean
+- branch = research/cortex-v1;
+- local HEAD = origin/research/cortex-v1;
+- working tree = clean;
+- resolve the published checkpoint SHA from Git/GitHub and the immutable tag.
+
+F2-G4A implementation evidence is anchored to f567bf453c9e3c0e8dfb319adfeef266b4926af8.
+The closure/deploy SHA must be resolved from the live repository and BUILD_INFO.
 
 If these differ, STOP and audit recent commits before continuing.
 
@@ -84,7 +88,7 @@ Expected checkpoint at this handoff:
 
 `phase=F2`
 `phase_status=active`
-`phase2_checkpoint=F2-G3`
+`phase2_checkpoint=F2-G4A`
 
 Machine-readable state outranks remembered conversation state.
 
@@ -102,9 +106,10 @@ Dashboard runtime:
 
 `/srv/factorio-ai-dashboard-runtime/current/BUILD_INFO.json`
 
-Expected current dashboard/source commit at this checkpoint:
+Expected dashboard/source rule:
 
-`5b3fb7db4c18b804d94701888c8f1aebfe01138b`
+the deployed dashboard BUILD_INFO commit must equal the current published G4A closure commit.
+Resolve that SHA from Git/tag plus BUILD_INFO rather than from a hardcoded value in this document.
 
 This separation is intentional. The dashboard/source may advance while the frozen baseline runtime
 remains unchanged.
@@ -157,7 +162,7 @@ The UI is a projection. Persistent artifacts + Git + machine-readable state are 
 8. `docs/CORTEX_CONTINUITY_PROTOCOL.md` — interruption/restart rules.
 9. `docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md` — world vs evidence semantics.
 
-Only then begin F2-G4A.
+Only then plan F2-G4B; do not execute a live canary before revalidating the published G4A checkpoint.
 
 ---
 
@@ -853,7 +858,7 @@ for full planner re-execution, so the replay does not fabricate them from curren
 
 ### F2-G3 — universal Option execution boundary
 
-**CURRENT COMPLETED CHECKPOINT.**
+**PREVIOUS COMPLETED CHECKPOINT.**
 
 Implementation commit:
 
@@ -915,9 +920,64 @@ Therefore:
 
 **F2-G3 DOES NOT AUTHORIZE LIVE OPTION EXECUTE.**
 
-### F2-G4A — next authorized checkpoint
+### F2-G4A — persistent one-shot Option authority
 
-See Section 13.
+**CURRENT COMPLETED CHECKPOINT.**
+
+Implementation commit:
+
+f567bf453c9e3c0e8dfb319adfeef266b4926af8
+
+Canonical document:
+
+docs/CORTEX_PHASE2_PERSISTENT_OPTION_AUTHORITY.md
+
+Canonical dry-run artifact:
+
+runs/audits/cortex_f2g4a_option_authority_dry_run.json
+
+SHA-256:
+
+94b60b7b8a298252edcb37b4435854c97f83e0f6832de9ec46aec05aff1e1ec6
+
+G4A replaces process-local grant memory with a persistent SQLite authority ledger.
+
+Proven at this checkpoint:
+
+- exact grant id plus Option/prepared-action/plan-digest/code/run binding;
+- mandatory non-empty run id;
+- issued_at and expires_at;
+- exact non-wildcard execution scope;
+- max_executions=1;
+- duplicate grant id is not silently upserted;
+- BEGIN IMMEDIATE plus synchronous=FULL consume path;
+- durable consume-before-mutation ordering;
+- consumed grant remains refused after process reconstruction;
+- expired and mismatched grants fail closed;
+- spawned-process double-consume yields exactly one winner;
+- dry-run validation does not consume a grant;
+- phase-state does not promote from documentation alone.
+
+Dry-run evidence explicitly records factorio_environment_created=false,
+factorio_rcon_used=false, factorio_world_mutation=false,
+continuous_authority=false, live_option_execute_authorized=false and consumed_at=null.
+
+G4A provides at-most-once authority, not distributed exactly-once world effect. A process crash
+after durable consumption and before Factorio mutation leaves the grant consumed and the execution
+lost rather than automatically replayed.
+
+Therefore:
+
+**F2-G4A DOES NOT CLAIM LIVE OPTION EXECUTION.**
+
+### F2-G4B — next checkpoint
+
+One explicit non-confirmatory live Option canary may be considered only after the G4A tag, dashboard
+deploy, machine-readable checkpoint and evolution-off state are revalidated.
+
+G4B must bind the persistent grant to the actual experiment and FactorioWorldLease, keep the hard
+functional termination contract unchanged, forbid automatic retry and preserve
+continuous_authority=false.
 
 ## F3 — Executive / Cognitive Loop
 
@@ -1101,7 +1161,7 @@ a third operator can reproduce the primary claims from a frozen release.
 
 # 9. Current live operational state
 
-At the time this handoff was created:
+After G4A publication, reconstruct volatile state from Git, BUILD_INFO, phase-state and services.
 
 ## Git / source
 
@@ -1111,7 +1171,7 @@ Branch:
 
 HEAD and origin:
 
-`5b3fb7db4c18b804d94701888c8f1aebfe01138b`
+resolve from origin/research/cortex-v1 and the immutable G4A tag; local HEAD must match origin.
 
 Tree:
 
@@ -1134,7 +1194,7 @@ runtime.
 
 Current deployed build at this checkpoint:
 
-`5b3fb7db4c18b804d94701888c8f1aebfe01138b`
+resolve from /srv/factorio-ai-dashboard-runtime/current/BUILD_INFO.json and require it to match the published G4A closure SHA.
 
 ## Services
 
@@ -1205,11 +1265,11 @@ It is historical evidence, not a running Cortex experiment.
 
 Current UI label:
 
-`F2-G3 · Option execution boundary · FAKE/REPLAY`
+`F2-G4A · persistent one-shot authority · DRY-RUN`
 
 and:
 
-`boundary universal · no live EXECUTE`
+`durable ledger · no live EXECUTE`
 
 This is the current research-program state.
 
@@ -1319,152 +1379,73 @@ Before retrying any mutation, check:
 
 ---
 
-# 13. NEXT WORK — F2-G4A
+# 13. F2-G4A closure and F2-G4B next work
 
-This is the next authorized scientific/engineering checkpoint.
+F2-G4A is complete as a partial F2 checkpoint.
 
-**Goal:** make one-shot Option authority durable across process restart, still without live Option
-execution.
+## 13.1 G4A authority result
 
-F2-G3 proved a universal boundary, but its consumed-grant set is process-local.
+Authority state is now persisted in SQLite rather than Python instance memory. Grants are one-shot,
+expiring, exact-scope and bound to the frozen Option lineage.
 
-That is insufficient for live authority.
+## 13.2 G4A causal ordering
 
-## 13.1 Required persistent grant ledger
+Required and tested ordering:
 
-Implement a durable ledger keyed by at least:
+validate digest
+→ validate lineage
+→ validate code/run/scope
+→ validate runtime preconditions
+→ validate expiry
+→ atomically consume grant
+→ persist consumption
+→ only then allow runtime mutation
 
-- grant_id;
-- option_id;
-- prepared_action_id;
-- exact plan_digest;
-- code_revision;
-- run_id;
-- issued_at;
-- expires_at;
-- scope;
-- consumed_at;
-- consume_result;
-- optional operator/issuer identity;
-- schema_version.
+The G4A dry-run stops before consume and mutation.
 
-Recommended storage properties:
+## 13.3 G4A restart/concurrency result
 
-- SQLite or another transactional local store;
-- explicit migration/version;
-- durable fsync semantics appropriate to the experiment;
-- atomic unique constraint around grant consumption;
-- no silent “upsert consumed to fresh.”
+Restart/reconstruction and concurrent double-consume are fail-closed. Spawned-process races admit
+exactly one consumer.
 
-## 13.2 Atomic consume-before-mutation
+## 13.4 G4A evidence
 
-Required semantic ordering:
+Implementation commit:
 
-1. validate plan digest;
-2. validate lineage;
-3. validate code revision/run scope;
-4. validate grant not expired;
-5. atomically consume grant;
-6. persist consume state;
-7. only then call transactional runtime mutation.
+f567bf453c9e3c0e8dfb319adfeef266b4926af8
 
-If runtime mutation never starts, consumption state must still be auditable.
+Artifact:
 
-Do NOT consume after mutation.
+runs/audits/cortex_f2g4a_option_authority_dry_run.json
 
-## 13.3 Restart safety
+Artifact SHA-256:
 
-Mandatory tests:
+94b60b7b8a298252edcb37b4435854c97f83e0f6832de9ec46aec05aff1e1ec6
 
-- create grant;
-- reconstruct boundary/process;
-- consume once;
-- reconstruct again;
-- second consume refused;
-- stale grant refused;
-- expired grant refused;
-- wrong plan digest refused;
-- wrong prepared action refused;
-- wrong code revision refused;
-- wrong run id refused.
+Full implementation gate:
 
-## 13.4 Scope
+- 1440 core/FLE PASS;
+- 2 PyTorch PASS;
+- Ruff PASS;
+- compileall PASS;
+- JavaScript PASS;
+- TypeScript/Vite PASS;
+- whitespace PASS.
 
-Grant scope must prevent accidental broad authority.
+## 13.5 G4A epistemic boundary
 
-Examples of scope dimensions:
+G4A proves durable one-shot authority semantics, not live Factorio execution and not sustainable
+autonomy.
 
-- exact Option kind;
-- exact plan digest;
-- exact experiment id;
-- exact world/lease id;
-- exact code revision;
-- maximum number of executions = 1.
+The consume-before-mutation design is fail-closed. A crash after consume can lose an execution; it
+must not reopen authority automatically.
 
-There is no continuous grant in G4A.
+## 13.6 G4B
 
-## 13.5 Dry-run Option runner
+G4B is separate and may execute at most one explicit non-confirmatory live Option canary using the
+persistent grant ledger and an actual WorldLease-bound scope.
 
-Create a controlled runner independent of `curriculum_runner`.
-
-Requirements:
-
-- build/receive Option plan;
-- show exact plan digest;
-- resolve grant;
-- dry-run validation only;
-- persist planned lineage;
-- persist refusal;
-- acquire/check WorldLease without mutation if useful;
-- no live EXECUTE in G4A;
-- no confirmatory seed use.
-
-The runner must import Cortex APIs, not the legacy curriculum stage dispatcher.
-
-## 13.6 F2-G4A evidence
-
-Before closing G4A require:
-
-- deterministic ledger tests;
-- restart/reconstruction tests;
-- concurrency test for double consume;
-- dry-run runner artifact;
-- phase-state update;
-- UI state update;
-- README/program/handoff update;
-- full core/FLE profile;
-- PyTorch profile;
-- Ruff;
-- compileall;
-- JavaScript syntax;
-- TypeScript/Vite build;
-- whitespace check;
-- clean Git tree;
-- commit;
-- push;
-- immutable tag;
-- dashboard deploy;
-- live /api/context verification;
-- evolution remains inactive/disabled.
-
-## 13.7 G4B is separate
-
-Only after G4A PASS may F2-G4B be considered.
-
-G4B would be:
-
-- one explicit non-confirmatory live Option canary;
-- exact persistent one-shot grant;
-- no automatic retry;
-- WorldLease protection;
-- hard termination contract;
-- commit/rollback;
-- tick evidence;
-- no continuous authority.
-
-A failed canary is evidence, not permission to loosen gates.
-
----
+No automatic retry, scheduler or continuous authority is allowed.
 
 # 14. F2 Exit Gate
 
@@ -1653,7 +1634,7 @@ Context:
 
 At this handoff:
 
-revision 21.
+resume the latest revision; revision numbers are operational state, not a document constant.
 
 Use:
 
@@ -1690,8 +1671,8 @@ Do not store secrets.
 
 A fresh chat should expect approximately:
 
-- `F2-G3 · Option execution boundary · FAKE/REPLAY`;
-- `boundary universal · no live EXECUTE`;
+- `F2-G4A · persistent one-shot authority · DRY-RUN`;
+- `durable ledger · no live EXECUTE`;
 - current Cortex canary card showing F2-F4C accepted;
 - 13 iron plates;
 - final processor status no_fuel;
@@ -1805,11 +1786,14 @@ The strongest target metric is:
 - first processing-chain Option exists;
 - Option has explicit temporal budget semantics;
 - generic Option execution boundary works in deterministic fake/replay;
-- rollback tick rewind is not misclassified as zero observed duration.
+- rollback tick rewind is not misclassified as zero observed duration;
+- persistent one-shot grant authority survives restart/reconstruction in dry-run;
+- double-consume is fail-closed across independent connections and spawned processes;
+- exact expiry/run/code/digest/prepared-action/scope mismatches are refused before mutation.
 
 ## Not proven
 
-- durable live one-shot Option authority;
+- live execution through the persistent Option authority path;
 - live Option-controlled processing chain;
 - sustainable autonomous operation;
 - closed-loop Cortex executive;
@@ -1819,81 +1803,78 @@ The strongest target metric is:
 - automatic morphology discovery;
 - program-search superiority;
 - connectome benefit;
-- integrated zero-intervention open play.
+- integrated zero-intervention open play;
+- distributed exactly-once world effect across a post-consume process crash.
 
 Do not phrase these as completed capabilities.
 
 ---
 
-# 24. Files that matter most for F2-G4A
+# 24. Files that matter most for F2-G4B
 
-Read before editing:
+Read before any live execution:
 
-- `src/factorio_ai_lab/cortex/options.py`
-- `src/factorio_ai_lab/cortex/option_execute.py`
-- `src/factorio_ai_lab/cortex/actions.py`
-- `src/factorio_ai_lab/cortex/structural.py`
-- `src/factorio_ai_lab/cortex/structural_prepare.py`
-- `src/factorio_ai_lab/cortex/structural_execute.py`
-- `src/factorio_ai_lab/integrations/fle.py`
-- `src/factorio_ai_lab/instrumentation/runtime.py`
-- `scripts/cortex_phase_state.py`
-- `tests/test_cortex_option_execute.py`
-- `tests/test_cortex_options.py`
-- `tests/test_cortex_phase_continuity.py`
+- src/factorio_ai_lab/cortex/grant_ledger.py
+- src/factorio_ai_lab/cortex/option_execute.py
+- src/factorio_ai_lab/cortex/options.py
+- src/factorio_ai_lab/cortex/structural_execute.py
+- src/factorio_ai_lab/integrations/fle.py
+- src/factorio_ai_lab/runtime.py
+- scripts/run_cortex_option_authority_dry_run.py
+- scripts/run_cortex_structural_canary.py
+- tests/test_cortex_option_grant_ledger.py
+- tests/test_cortex_option_execute.py
+- docs/CORTEX_PHASE2_PERSISTENT_OPTION_AUTHORITY.md
+- docs/CORTEX_CONTINUITY_PROTOCOL.md
 
-Do not start by editing `curriculum_runner.py`.
+Do not start by editing curriculum_runner.py.
 
-The entire point of G4 is to keep the Cortex execution path independent of stage-coded legacy
-control.
-
----
-
-# 25. Suggested F2-G4A implementation sequence
-
-1. Revalidate zero-context state using Section 0.
-2. Read G3 implementation/tests.
-3. Define grant-ledger schema separately from execution boundary.
-4. Write persistence/restart/concurrency tests first.
-5. Implement ledger.
-6. Integrate OptionExecutionBoundary with an injected ledger interface.
-7. Preserve pure SHADOW behavior.
-8. Ensure EXECUTE cannot mutate before atomic consume.
-9. Build dry-run Option runner independent of curriculum_runner.
-10. Persist dry-run artifact.
-11. Add phase-state hook but do not advance live checkpoint until documentation/evidence exists.
-12. Run focused tests.
-13. Run full gates.
-14. Commit implementation.
-15. Generate evidence artifact from clean versioned code.
-16. Write/update canonical docs, README and handoff.
-17. Commit closure.
-18. Push branch.
-19. Create immutable G4A tag.
-20. Deploy dashboard from final clean SHA.
-21. Validate /api/context.
-22. Verify evolution remains inactive+disabled.
-23. Save SentinelX continuity context revision.
-24. Only then consider whether G4B can be authorized.
+G4B must remain on the generic Cortex Option boundary.
 
 ---
 
-# 26. Prohibited shortcuts in F2-G4A
+# 25. Suggested F2-G4B validation sequence
+
+1. Revalidate Git, tag, phase-state, dashboard BUILD_INFO and services.
+2. Verify G4A artifact/hash and persistent ledger schema.
+3. Confirm confirmatory seeds remain untouched.
+4. Confirm WorldLease has no active writer.
+5. Define one non-confirmatory canary run id and exact world/lease scope.
+6. Build the Option plan without mutation.
+7. Freeze exact plan digest and lineage.
+8. Issue exactly one persistent grant with short expiry.
+9. Acquire the real FactorioWorldLease for that run.
+10. Revalidate grant, scope, tick source and runtime preconditions.
+11. Atomically consume the grant.
+12. Execute exactly once through OptionExecutionBoundary.
+13. Preserve existing transactional commit/rollback and hard functional postconditions.
+14. Persist tick/provenance/result artifact.
+15. On timeout, inspect ledger/lease/process/artifact/result before any retry; default is no retry.
+16. Verify evolution remains inactive/disabled.
+17. Run focused and full gates from clean versioned code.
+18. Update phase-state/docs/UI only from persisted evidence.
+19. Commit, push, tag and deploy only if the canary evidence is coherent.
+
+---
+
+# 26. Prohibited shortcuts in F2-G4B
 
 Do NOT:
 
-- execute a live Option;
-- use confirmatory seeds;
+- use a confirmatory seed;
 - enable evolution;
 - add a scheduler;
-- add a reusable wildcard grant;
-- permit grant reuse after restart;
+- add reusable or wildcard grants;
+- issue a second grant because a remote call timed out;
+- reuse a consumed grant after restart;
+- execute without an actual WorldLease-bound scope;
 - weaken F2-F4C functional hard gates;
-- hardcode a specific stage into the Option runner;
+- bypass StructuralTransactionalAdapter / TransactionalFLEExecutor;
+- hardcode a stage-specific path into the Option runner;
 - derive authority from UI state;
 - silently migrate missing measurements to zero;
-- fill missing historical replay inputs with current live state;
-- mark transactional execution universal complete merely because fake tests pass.
+- claim exactly-once world effect from SQLite one-shot authority;
+- mark F2 complete from one live canary alone.
 
 ---
 
@@ -1983,7 +1964,8 @@ At this checkpoint:
 - F1 PASS;
 - F2 ACTIVE;
 - F2-G3 COMPLETE;
-- F2-G4A NEXT;
+- F2-G4A COMPLETE;
+- F2-G4B NEXT;
 - F3 BLOCKED;
 - continuous authority OFF;
 - evolution service OFF;
@@ -1993,17 +1975,19 @@ At this checkpoint:
 - sustainable autonomy not proven;
 - first Option exists;
 - universal Option boundary exists;
-- persistent one-shot authority does not yet exist;
-- live Option EXECUTE is not authorized;
-- source/dashboard HEAD = `5b3fb7db4c18b804d94701888c8f1aebfe01138b` at document creation;
+- persistent one-shot authority exists and is restart/concurrency validated in dry-run;
+- no post-G4A live Option EXECUTE has been performed; G4B requires explicit preflight and exact persistent scope;
+- G4A implementation commit = f567bf453c9e3c0e8dfb319adfeef266b4926af8;
+- G4A dry-run artifact SHA-256 = 94b60b7b8a298252edcb37b4435854c97f83e0f6832de9ec46aec05aff1e1ec6;
+- published closure/dashboard SHA must be revalidated from Git/tag/BUILD_INFO;
 - frozen baseline runtime = `95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac`;
-- SentinelX context = `sxc_4557STHZ`, revision 21.
+- SentinelX context = sxc_4557STHZ; resume latest revision.
 
 A fresh operator should leave its first turn with one conclusion:
 
-> **Do not try to make the agent “more autonomous” by turning services back on. The next scientific
-> task is to make Option authority durable, one-shot, replay-safe and auditable. Only then may one
-> controlled live Option canary be considered.**
+> **G4A removed process-local authority as the blocker. The next scientific task is one controlled
+> G4B live Option canary under an exact persistent grant and actual WorldLease, with no automatic
+> retry or continuous authority. That canary is evidence for F2, not permission to skip its Exit Gate.**
 
 ---
 
@@ -2043,6 +2027,7 @@ Primeiro, use SentinelX para:
    - docs/CORTEX_RESEARCH_PROGRAM.md
    - docs/CORTEX_HANDOFF.md
    - docs/CORTEX_PHASE2_OPTION_EXECUTION_BOUNDARY.md
+   - docs/CORTEX_PHASE2_PERSISTENT_OPTION_AUTHORITY.md
    - docs/CORTEX_PHASE2_OPTIONS.md
    - docs/CORTEX_CONTINUITY_PROTOCOL.md.
 
@@ -2064,9 +2049,9 @@ estruturado contendo:
 - arquivos que precisam ser lidos antes de editar;
 - plano proposto para o próximo checkpoint com testes, evidências e critérios de aceite.
 
-Estado esperado do handoff publicado: F0 PASS, F1 PASS, F2 ACTIVE, F2-G3 concluída, F2-G4A próxima,
-F3 bloqueada, evolution inactive+disabled, confirmatory seeds intactas, live Option EXECUTE ainda
-não autorizado. Isso é apenas expectativa histórica: se o estado vivo divergir, audite os commits
+Estado esperado do handoff publicado: F0 PASS, F1 PASS, F2 ACTIVE, F2-G4A concluída, F2-G4B próxima,
+F3 bloqueada, evolution inactive+disabled, confirmatory seeds intactas e nenhum live Option EXECUTE
+pós-G4A executado ainda. Isso é apenas expectativa histórica: se o estado vivo divergir, audite os commits
 e siga o estado persistente mais recente.
 
 Não habilite evolution, não use seeds confirmatórias, não conceda continuous authority e não
@@ -2076,6 +2061,6 @@ repita uma execução após timeout sem checar processo/lease/artifact/manifest/
 Expected behavior of the new chat:
 
 - first turn = reconstruction and diagnosis;
-- second phase = proposal for F2-G4A;
+- second phase = F2-G4B preflight and scope/lease/grant reconciliation;
 - mutation only after the live state and scope are reconciled.
 

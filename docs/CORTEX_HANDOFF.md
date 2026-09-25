@@ -11,7 +11,7 @@
 ## Estado atual
 
 - Programa: Cortex Research Architecture v0.1
-- Fase: **F2-G3 concluída — F2-G4A autorizada para authority ledger persistente; F3 bloqueada**
+- Fase: **F2-G4A concluída — F2-G4B próximo checkpoint; F2 ativa; F3 bloqueada**
 - Branch: `research/cortex-v1`
 - Baseline imutável de origem: `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 - Tag baseline publicada: `cortex-pre-research-baseline-20260923`
@@ -51,79 +51,70 @@ silenciosamente pelo commit da F0**.
 
 ## Próxima ação
 
-**F2-G4A — persistent one-shot Option authority ledger + dry-run integration.**
+**F2-G4B — um único live Option canary não-confirmatório, somente após publicação/deploy de G4A.**
 
-F2-G3 fechou o boundary universal de execução da primeira Option:
+F2-G4A fechou a limitação process-local de F2-G3:
 
-- `ProcessingChainOptionPlan -> OptionExecutionBoundary -> StructuralTransactionalAdapter -> TransactionalFLEExecutor`;
-- digest SHA-256 do plano congelado;
-- grant ligado a option/prepared action/digest/SHA/run;
-- lineage Option -> ActionRequest -> Branch -> Prepared validado antes de authority;
-- termination funcional permanece reaching_processor + processor_exists + processor_output;
-- SHADOW/PROPOSAL não chamam runtime;
-- EXECUTE exige executor, measurement probe e tick source observável antes da mutação;
-- accepted fake transaction devolveu 600 observed ticks ao OptionBudget;
-- rejected fake transaction com rollback devolveu `observed_ticks=null` + `missing_after_rollback`;
-- nenhum import/dispatch de `curriculum_runner`;
-- `continuous_authority=false`.
+- implementation commit: f567bf453c9e3c0e8dfb319adfeef266b4926af8;
+- ledger SQLite persistente com schema versionado;
+- grant_id + option/prepared/digest/SHA/run + issued/expiry + scope;
+- run_id obrigatório;
+- scope exato, sem wildcard, max_executions=1;
+- duplicate grant id não é upsert;
+- BEGIN IMMEDIATE + synchronous=FULL;
+- consumo persistido antes de qualquer runtime mutation;
+- grant consumido continua recusado após reconstruction/restart;
+- crash após consume e antes da mutação permanece fail-closed;
+- double-consume concorrente testado também com processos spawned;
+- SHADOW/PROPOSAL continuam sem runtime;
+- EXECUTE sem ledger persistente é recusado;
+- nenhum scheduler ou continuous grant.
 
-Gates F2-G3:
+Dry-run oficial:
 
-- 26 PASS boundary/composer/transaction focused;
-- 53 PASS integrated continuity/dashboard;
-- full core/FLE: 1421 PASS;
+- artifact: runs/audits/cortex_f2g4a_option_authority_dry_run.json;
+- SHA-256: 94b60b7b8a298252edcb37b4435854c97f83e0f6832de9ec46aec05aff1e1ec6;
+- run: cortex-f2g4a-dry-20260925T011524Z;
+- code revision: f567bf453c9e3c0e8dfb319adfeef266b4926af8, dirty=false;
+- status=pass;
+- factorio_environment_created=false;
+- factorio_rcon_used=false;
+- factorio_world_mutation=false;
+- continuous_authority=false;
+- live_option_execute_authorized=false;
+- exact grant valid;
+- scope-mismatch negative control refused;
+- consumed_at=null / consume_result=null.
+
+Gates F2-G4A:
+
+- full core/FLE: 1440 PASS;
 - PyTorch: 2 PASS;
-- Ruff/compileall/JavaScript/TypeScript/Vite/whitespace: PASS.
-
-Implementation commit:
-
-`e25569db40d6e6186cc24b3c380ebdc9dc4e84cf`
-
-Artifact fake/replay:
-
-`runs/audits/cortex_f2g3_option_execution_fake.json`
-
-SHA-256:
-
-`3a2cdf621e2592766cdec3f5a83ca057b42f3b3c184ce356437a1795a4b97f65`
-
-Limitação crítica:
-
-- o consumo de grant é process-local;
-- reiniciar/recriar o boundary perde o estado de consumo;
-- portanto isso NÃO é durable live one-shot authority;
-- nenhum live Option EXECUTE foi executado em F2-G3;
-- último EXECUTE live continua sendo F2-F4C;
-- sustentabilidade live continua não provada.
+- Ruff/compileall/JavaScript/TypeScript/Vite/whitespace: PASS;
+- phase-state não promove G4A apenas pela existência do documento; exige artifact válido e
+  explicitamente não-mutante.
 
 Documento canônico:
 
-`docs/CORTEX_PHASE2_OPTION_EXECUTION_BOUNDARY.md`
-
-F2-G4A deve:
-
-1. criar ledger persistente de grants;
-2. consumir grant atomicamente antes da mutação;
-3. recusar grant consumido/stale após restart;
-4. adicionar expiry/scope explícitos;
-5. manter continuous authority OFF;
-6. integrar um runner de Option independente de `curriculum_runner`, ainda em dry-run;
-7. não tocar seeds confirmatórias;
-8. manter evolution inactive+disabled.
+docs/CORTEX_PHASE2_PERSISTENT_OPTION_AUTHORITY.md
 
 F2 NÃO está encerrada.
 
-Status dos requisitos originais:
+Ainda abertos:
 
-- initial Option: atendido em F2-G2;
-- transactional execution universal: boundary existe, mas durable live authority ainda aberto;
-- cadeia funcional por Option/API genérica: validada em fake/replay, ainda não em Factorio live;
-- runner legado baseline-only: ainda aberto.
+- live functional chain através de Option/API genérica;
+- universal transactional execution demonstrada em live sob grant durável;
+- enforcement formal do runner legado como baseline-only;
+- sustained autonomous operation.
+
+F2-G4B deve usar exatamente um grant persistente, scope ligado ao experimento/WorldLease real,
+nenhum retry automático, hard functional termination inalterado, commit/rollback transacional,
+tick evidence e continuous_authority=false.
 
 Não executar confirmatory seeds.
+Não habilitar evolution.
 Não conceder continuous autonomous authority.
 F3 permanece bloqueada.
-
 ## Protocolo de retomada após interrupção
 
 Não inferir continuidade pela tela. Executar na ordem:
