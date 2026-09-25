@@ -171,6 +171,8 @@ def test_dashboard_separates_live_cortex_from_frozen_baseline_evidence() -> None
     assert "historicalReplayNotice" in index
     assert "paired evaluation harness before any pilot seed" in app
     assert "CORTEX PAUSADO · HARNESS PENDENTE" in app
+    assert "F4-C · harness simulado PASS · adapters reais pendentes" in app
+    assert "CORTEX PAUSADO · PREFLIGHT SINTÉTICO PASS" in app
     assert "FROZEN · EVOLUTION OFF" in app
     assert "Replay do último curriculum baseline" in app
     assert "WORLD LIVE conectado, porém vazio" in app

@@ -1300,6 +1300,115 @@ def build_phase_state(
         and all(value is True for value in phase4_causal_checks.values())
     )
 
+    phase4_harness_doc_path=(
+        state_root / "docs" / "CORTEX_PHASE4_CAUSAL_HARNESS.md"
+    )
+    phase4_harness_module_path=(
+        state_root / "src" / "factorio_ai_lab" / "cortex" / "causal_harness.py"
+    )
+    phase4_harness_validator_path=(
+        state_root / "scripts" / "validate_cortex_f4c_harness.py"
+    )
+    phase4_harness_tests_path=(
+        state_root / "tests" / "test_cortex_f4c_causal_harness.py"
+    )
+    phase4_harness_audit_path=(
+        state_root / "runs" / "audits" / "cortex_f4c_harness_validation.json"
+    )
+    phase4_harness_audit=phase4_harness_audit_path.exists()
+    phase4_harness_payload: dict[str,Any]={}
+    phase4_harness_error: str | None=None
+    if phase4_harness_audit:
+        try:
+            phase4_harness_payload=_load(phase4_harness_audit_path)
+        except (OSError,json.JSONDecodeError,TypeError) as exc:
+            phase4_harness_error=f"{type(exc).__name__}: {exc}"
+
+    phase4_harness_revision=phase4_harness_payload.get("code_revision")
+    if not isinstance(phase4_harness_revision,dict):
+        phase4_harness_revision={}
+    phase4_harness_protocol=phase4_harness_payload.get("protocol")
+    if not isinstance(phase4_harness_protocol,dict):
+        phase4_harness_protocol={}
+    phase4_harness_source=phase4_harness_payload.get("source")
+    if not isinstance(phase4_harness_source,dict):
+        phase4_harness_source={}
+    phase4_harness_before=phase4_harness_source.get("database_before")
+    if not isinstance(phase4_harness_before,dict):
+        phase4_harness_before={}
+    phase4_harness_after=phase4_harness_source.get("database_after")
+    if not isinstance(phase4_harness_after,dict):
+        phase4_harness_after={}
+    phase4_harness_checks=phase4_harness_payload.get("checks")
+    if not isinstance(phase4_harness_checks,dict):
+        phase4_harness_checks={}
+
+    phase4_harness_expected_hashes={
+        "harness_module_sha256":(
+            _sha256(phase4_harness_module_path)
+            if phase4_harness_module_path.exists() else None
+        ),
+        "validator_script_sha256":(
+            _sha256(phase4_harness_validator_path)
+            if phase4_harness_validator_path.exists() else None
+        ),
+        "tests_sha256":(
+            _sha256(phase4_harness_tests_path)
+            if phase4_harness_tests_path.exists() else None
+        ),
+        "document_sha256":(
+            _sha256(phase4_harness_doc_path)
+            if phase4_harness_doc_path.exists() else None
+        ),
+    }
+    phase4_harness_preflight_valid=(
+        phase4_causal_protocol_valid
+        and phase4_harness_doc_path.exists()
+        and phase4_harness_module_path.exists()
+        and phase4_harness_validator_path.exists()
+        and phase4_harness_tests_path.exists()
+        and phase4_harness_audit
+        and phase4_harness_error is None
+        and phase4_harness_payload.get("schema_version")
+        =="cortex_f4c_harness_validation_v1"
+        and phase4_harness_payload.get("status")=="pass"
+        and phase4_harness_payload.get("mode")=="synthetic_preflight"
+        and phase4_harness_payload.get("authority")=="shadow"
+        and phase4_harness_payload.get("world_mutation") is False
+        and phase4_harness_payload.get("factorio_rcon_used") is False
+        and phase4_harness_payload.get("fle_environment_created") is False
+        and phase4_harness_payload.get("world_lease_acquired") is False
+        and phase4_harness_payload.get("execution_grant_created") is False
+        and phase4_harness_payload.get("continuous_authority") is False
+        and phase4_harness_payload.get("experimental_seed_executed") is False
+        and phase4_harness_revision.get("dirty") is False
+        and isinstance(phase4_harness_revision.get("commit"),str)
+        and bool(phase4_harness_revision.get("commit"))
+        and phase4_harness_protocol.get("protocol_id")
+        =="cortex-f4c-memory-ablation-transfer-v1"
+        and phase4_harness_protocol.get("manifest_file_sha256")
+        ==phase4_causal_manifest_sha
+        and phase4_harness_protocol.get("manifest_sha256")
+        ==phase4_causal_protocol.get("manifest_sha256")
+        and phase4_harness_before==phase4_harness_after
+        and phase4_harness_before.get("manifest_sha256")
+        ==phase4_retrieval_before.get("manifest_sha256")
+        and phase4_harness_before.get("item_count")
+        ==phase4_retrieval_before.get("item_count")
+        and phase4_harness_before.get("occurrence_count")
+        ==phase4_retrieval_before.get("occurrence_count")
+        and all(
+            phase4_harness_source.get(key)==value
+            for key,value in phase4_harness_expected_hashes.items()
+        )
+        and bool(phase4_harness_checks)
+        and all(value is True for value in phase4_harness_checks.values())
+    )
+    phase4_real_task_adapters_valid=False
+    phase4_execution_ready=(
+        phase4_harness_preflight_valid and phase4_real_task_adapters_valid
+    )
+
     phase2_delivery_actuator_canary_path=(
         state_root
         / "runs"
@@ -1543,7 +1652,13 @@ def build_phase_state(
                 "functional_accept_sustainability_not_proven"
             )
 
-    if phase4_causal_protocol_valid:
+    if phase4_harness_preflight_valid:
+        action=(
+            "F4-C paired harness synthetic preflight PASS; implement and "
+            "validate real family adapters in a disposable non-protocol world; "
+            "do not launch any pilot seed yet"
+        )
+    elif phase4_causal_protocol_valid:
         action=(
             "F4-C causal protocol frozen and eligible; implement and validate "
             "the paired evaluation harness before launching any pilot seed"
@@ -1678,7 +1793,9 @@ def build_phase_state(
             "audit_exists":phase4_causal_audit,
             "validated":phase4_causal_protocol_valid,
             "eligible":phase4_causal_protocol_valid,
-            "execution_ready":False,
+            "harness_preflight_validated":phase4_harness_preflight_valid,
+            "real_task_adapters_validated":phase4_real_task_adapters_valid,
+            "execution_ready":phase4_execution_ready,
             "status":phase4_causal_payload.get("status"),
             "protocol_id":phase4_causal_protocol.get("protocol_id"),
             "manifest_sha256":phase4_causal_protocol.get("manifest_sha256"),
@@ -1704,6 +1821,21 @@ def build_phase_state(
             "manifest_read_error":phase4_causal_manifest_error,
             "audit_read_error":phase4_causal_error,
         },
+        "phase4_causal_harness":{
+            "document_path":str(phase4_harness_doc_path),
+            "audit_path":str(phase4_harness_audit_path),
+            "audit_exists":phase4_harness_audit,
+            "preflight_validated":phase4_harness_preflight_valid,
+            "mode":phase4_harness_payload.get("mode"),
+            "execution_ready":phase4_execution_ready,
+            "real_task_adapters_validated":phase4_real_task_adapters_valid,
+            "code_commit":phase4_harness_revision.get("commit"),
+            "source_memory_manifest_sha256":phase4_harness_before.get(
+                "manifest_sha256"
+            ),
+            "checks":phase4_harness_checks,
+            "read_error":phase4_harness_error,
+        },
         "phase4_exit_gate":{
             "memory_substrate":phase4_memory_valid,
             "hybrid_retrieval_consolidation_decay":phase4_retrieval_valid,
@@ -1712,9 +1844,13 @@ def build_phase_state(
         },
         "phase4_blocker":{
             "code":(
-                "causal_transfer_evaluation_harness_not_validated"
-                if phase4_causal_protocol_valid
-                else "causal_transfer_protocol_not_frozen"
+                "causal_transfer_real_task_adapters_not_validated"
+                if phase4_harness_preflight_valid
+                else (
+                    "causal_transfer_evaluation_harness_not_validated"
+                    if phase4_causal_protocol_valid
+                    else "causal_transfer_protocol_not_frozen"
+                )
             ),
             "status":(
                 "blocked"
@@ -1723,19 +1859,29 @@ def build_phase_state(
             ),
             "detail":(
                 (
-                    "F4-C protocol is frozen and causally eligible, but no paired "
-                    "evaluation harness has yet demonstrated checkpoint restore, "
-                    "arm isolation, matched budgets, and outcome extraction. "
-                    "Do not launch pilot or evaluation seeds yet."
+                    "F4-C paired harness passed synthetic preflight for exact "
+                    "checkpoint restore, retrieval-only ablation, arm isolation, "
+                    "matched budgets, quarantined writes, and recomputable J. "
+                    "Real Factorio adapters for the four frozen task families "
+                    "remain unvalidated; do not launch pilot or evaluation seeds."
                 )
-                if phase4_causal_protocol_valid
+                if phase4_harness_preflight_valid
                 else (
+                    (
+                        "F4-C protocol is frozen and causally eligible, but no paired "
+                        "evaluation harness has yet demonstrated checkpoint restore, "
+                        "arm isolation, matched budgets, and outcome extraction. "
+                        "Do not launch pilot or evaluation seeds yet."
+                    )
+                    if phase4_causal_protocol_valid
+                    else (
                     "F4-C needs source/evaluation separation, explicit memory ON versus "
                     "memory-ablated conditions, leakage control, paired metrics and "
                     "predeclared statistical inference on a sufficiently diverse "
                     "non-confirmatory held-out benchmark. Confirmatory seeds remain frozen."
-                    if phase4_retrieval_valid
-                    else None
+                        if phase4_retrieval_valid
+                        else None
+                    )
                 )
             ),
         },

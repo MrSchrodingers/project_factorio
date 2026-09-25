@@ -134,6 +134,7 @@ function cortexOperationalView() {
   const runner = ((state.status || {}).research_runner) || {};
   const phase = String(cortexPhase.phase || "");
   const phase4Checkpoint = String(cortexPhase.phase4_checkpoint || "");
+  const phase4Harness = cortexPhase.phase4_causal_harness || {};
   const globalCortex = context.kind === "global" && ["F3", "F4"].includes(phase);
   const liveAgent = !!runner.active;
   const paused = globalCortex && !liveAgent;
@@ -148,6 +149,7 @@ function cortexOperationalView() {
     cortexPhase,
     phase,
     phase4Checkpoint,
+    phase4Harness,
     liveAgent,
     paused,
     historicalEvidenceMode: paused,
@@ -1811,7 +1813,9 @@ function renderExperimentContext() {
       );
       setText(
         "operationalModeDetail",
-        "F4-B está fechado e o pré-registro F4-C está congelado. Evolution e runners permanecem OFF. A UI pode reproduzir visualmente eventos históricos reais, mas replay visual não executa Factorio, não cria outcome e não conta como evidência F4-C."
+        operational.phase4Harness.preflight_validated
+          ? "F4-B e o pré-registro F4-C estão fechados; o harness pareado passou apenas o preflight sintético. Evolution e runners permanecem OFF. Replay visual e simulação de harness não executam Factorio, não criam outcome experimental e não contam como evidência F4-C."
+          : "F4-B está fechado e o pré-registro F4-C está congelado. Evolution e runners permanecem OFF. A UI pode reproduzir visualmente eventos históricos reais, mas replay visual não executa Factorio, não cria outcome e não conta como evidência F4-C."
       );
       setClassText(
         "operationalModeBadge",
@@ -4129,17 +4133,36 @@ function updateMission() {
 
   if (operational.historicalEvidenceMode && operational.phase4Checkpoint === "F4-B") {
     const blocker = operational.cortexPhase.phase4_blocker || {};
+    const harnessPreflight = !!operational.phase4Harness.preflight_validated;
     setText("missionTitle", "F4-C — causal memory ablation + held-out transfer");
     setText(
       "missionDetail",
-      "Pré-registro causal F4-C congelado e elegível. Nenhum outcome F4-C foi observado; validar o paired evaluation harness antes de qualquer pilot seed."
+      harnessPreflight
+        ? "Harness pareado validado em simulação sintética: restore, isolamento, ablação retrieval-only, budgets, quarentena e J recomputável passaram. Nenhum outcome F4-C foi observado; adapters reais continuam bloqueados."
+        : "Pré-registro causal F4-C congelado e elegível. Nenhum outcome F4-C foi observado; validar o paired evaluation harness antes de qualquer pilot seed."
     );
-    setText("stageName", "F4-C · protocol frozen · harness validation");
-    setText("nextAction", operational.cortexPhase.resume?.action
-      || "validate paired evaluation harness before any pilot seed");
-    $("stageProgressBar").style.width = "0%";
+    setText(
+      "stageName",
+      harnessPreflight
+        ? "F4-C · harness simulado PASS · adapters reais pendentes"
+        : "F4-C · protocol frozen · harness validation"
+    );
+    setText(
+      "nextAction",
+      operational.cortexPhase.resume?.action
+        || (harnessPreflight
+          ? "validate real task adapters in disposable non-protocol world"
+          : "validate paired evaluation harness before any pilot seed")
+    );
+    $("stageProgressBar").style.width = harnessPreflight ? "25%" : "0%";
     setText("stageProgressText", String(blocker.status || "blocked").toUpperCase());
-    setClassText("researchBadge", "CORTEX PAUSADO · HARNESS PENDENTE", "badge warn");
+    setClassText(
+      "researchBadge",
+      harnessPreflight
+        ? "CORTEX PAUSADO · PREFLIGHT SINTÉTICO PASS"
+        : "CORTEX PAUSADO · HARNESS PENDENTE",
+      "badge warn"
+    );
     return;
   }
 

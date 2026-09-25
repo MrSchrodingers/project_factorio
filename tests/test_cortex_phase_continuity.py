@@ -2016,6 +2016,98 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
     assert f4c_ready["resume"]["do_not_start_another_seed"] is True
     assert "paired evaluation harness" in f4c_ready["resume"]["action"]
 
+    harness_doc=docs/"CORTEX_PHASE4_CAUSAL_HARNESS.md"
+    harness_doc.write_text("# F4-C harness synthetic preflight\n")
+    harness_module=(
+        tmp_path/"src"/"factorio_ai_lab"/"cortex"/"causal_harness.py"
+    )
+    harness_module.parent.mkdir(parents=True,exist_ok=True)
+    harness_module.write_text("SCHEMA_VERSION='fixture'\n")
+    harness_validator=tmp_path/"scripts"/"validate_cortex_f4c_harness.py"
+    harness_validator.parent.mkdir(parents=True,exist_ok=True)
+    harness_validator.write_text("# fixture validator\n")
+    harness_tests=tmp_path/"tests"/"test_cortex_f4c_causal_harness.py"
+    harness_tests.parent.mkdir(parents=True,exist_ok=True)
+    harness_tests.write_text("# fixture tests\n")
+    harness_payload={
+        "schema_version":"cortex_f4c_harness_validation_v1",
+        "status":"pass",
+        "mode":"synthetic_preflight",
+        "authority":"shadow",
+        "world_mutation":False,
+        "factorio_rcon_used":False,
+        "fle_environment_created":False,
+        "world_lease_acquired":False,
+        "execution_grant_created":False,
+        "continuous_authority":False,
+        "experimental_seed_executed":False,
+        "code_revision":{
+            "commit":"f4c-harness-sha",
+            "branch":"research/cortex-v1",
+            "dirty":False,
+        },
+        "protocol":{
+            "protocol_id":"cortex-f4c-memory-ablation-transfer-v1",
+            "manifest_file_sha256":f4c_manifest_file_sha,
+            "manifest_sha256":"b"*64,
+        },
+        "source":{
+            "database_before":database_snapshot,
+            "database_after":database_snapshot,
+            "harness_module_sha256":module._sha256(harness_module),
+            "validator_script_sha256":module._sha256(harness_validator),
+            "tests_sha256":module._sha256(harness_tests),
+            "document_sha256":module._sha256(harness_doc),
+        },
+        "checks":{
+            "protocol_matches_frozen_v1":True,
+            "source_memory_quick_check_ok":True,
+            "source_memory_matches_frozen_manifest":True,
+            "source_memory_unchanged_by_preflight":True,
+            "four_task_families_exercised":True,
+            "all_synthetic_pairs_valid":True,
+            "checkpoint_restore_exact":True,
+            "retrieval_only_ablation_enforced":True,
+            "matched_budget_and_surface_enforced":True,
+            "quarantined_writes_do_not_touch_source":True,
+            "outcome_J_and_delta_recomputable":True,
+            "missing_primary_component_fails_closed":True,
+            "budget_overrun_fails_closed":True,
+            "no_live_authority":True,
+        },
+    }
+    harness_audit=audits/"cortex_f4c_harness_validation.json"
+    harness_audit.write_text(json.dumps(harness_payload)+"\n")
+    f4c_harness_ready=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert (
+        f4c_harness_ready["phase4_causal_protocol"][
+            "harness_preflight_validated"
+        ]
+        is True
+    )
+    assert f4c_harness_ready["phase4_causal_protocol"]["execution_ready"] is False
+    assert (
+        f4c_harness_ready["phase4_causal_harness"]["preflight_validated"]
+        is True
+    )
+    assert (
+        f4c_harness_ready["phase4_causal_harness"][
+            "real_task_adapters_validated"
+        ]
+        is False
+    )
+    assert (
+        f4c_harness_ready["phase4_blocker"]["code"]
+        =="causal_transfer_real_task_adapters_not_validated"
+    )
+    assert f4c_harness_ready["resume"]["do_not_start_another_seed"] is True
+    assert "do not launch any pilot seed yet" in (
+        f4c_harness_ready["resume"]["action"]
+    )
+
     f4b_payload["source"]["f4a_artifact_sha256"]="wrong"
     f4b_audit.write_text(json.dumps(f4b_payload)+"\n")
     f4b_wrong_source=module.build_phase_state(
