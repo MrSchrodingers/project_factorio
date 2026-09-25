@@ -7,7 +7,7 @@
 **Branch de transição:** `research/cortex-v1`
 **Baseline pré-Cortex:** `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 **Tag de baseline:** `cortex-pre-research-baseline-20260923`
-**Status:** F3 ACTIVE em F3-B / SHADOW — F2 COMPLETE; continuous authority e evolution OFF
+**Status:** F3 COMPLETE em F3-C — F4 READY / NOT STARTED; continuous authority e evolution OFF
 
 > Este arquivo é o contrato científico e operacional do Factorio AI Lab. Em caso de perda de
 > contexto de conversa, troca de operador, troca de modelo ou reinício do host, um operador sem
@@ -1400,8 +1400,8 @@ nova mutação Factorio.
 uma API genérica, sem caminho codificado por estágio, e o runner stage-coded remanescente está
 restrito a baseline.
 
-**Next:** F3-C — comparação shadow pareada contra o runner legado. F3-B já está validada em
-SHADOW e não possui authority live.
+**Next:** F4 — memória cognitiva e consolidação. F3 Exit Gate está validado; nenhuma authority
+live contínua é herdada por F4.
 
 **Post-F2 observability hardening:** commit
 95254cc1b81cc75a90debf6ab93a01ddd0099485 remove a dependência do avatar dos observers
@@ -1414,7 +1414,7 @@ stream_error, /api/world connected=true com observer_origin=world_fallback.
 
 ## Fase 3 — Executive / Cognitive Loop
 
-**Status F3:** ACTIVE — F3-B Verification/Credit/Ledger PASS parcial; authority permanece SHADOW.
+**Status F3:** COMPLETE — F3-C paired shadow comparison PASS; authority permaneceu SHADOW.
 
 **Objetivo:** generalizar repair loop para decisão dirigida por objetivos.
 
@@ -1428,7 +1428,7 @@ stream_error, /api/world connected=true com observer_origin=world_fallback.
 - [x] verification after action;
 - [x] credit assignment;
 - [x] experiment ledger;
-- [ ] shadow comparison contra runner.
+- [x] shadow comparison contra runner.
 
 **Exit Gate F3:** mesmo objetivo gera alternativas e escolhas observáveis; sequência não está
 embutida em um stage handler.
@@ -1473,9 +1473,34 @@ Ruff/compileall/JavaScript/TypeScript/Vite/whitespace PASS.
 estão atendidos em SHADOW sobre evidência medida. Não há claim de superioridade de policy nem
 authority live.
 
-**Next F3-C:** comparação shadow pareada contra o runner legado sobre os mesmos objetivos/candidate
-sets. Medir estrutura de decisão, agreement/divergence e coverage; não atribuir outcome causal às
-arms não executadas.
+**F3-B transition target (completed by F3-C):** comparação shadow pareada contra o runner legado
+sobre os mesmos objetivos/candidate sets, medindo estrutura de decisão, agreement/divergence e
+coverage sem atribuir outcome causal às arms não executadas.
+
+
+**F3-C evidence:** docs/CORTEX_PHASE3_PAIRED_SHADOW_COMPARISON.md;
+runs/audits/cortex_f3c_paired_shadow_comparison.json, SHA-256
+13b00f67b7014a5f3af3bf068e9381bc563100c4a984688ca88ab23795ba5f01.
+
+O replay pareou 29 decisões históricas com choice_basis=fixed_rule_no_history. Todos os 29
+objetivos expuseram múltiplas alternatives. O select_action canônico com score=None, sem ler a
+ação histórica, reproduziu 29/29 decisões persistidas. Uma policy fixa alternativa priorizando
+rebuild divergiu em 28/29 pares sobre o mesmo candidate set.
+
+Todos os 29 registros estruturais observados tinham executed=false e reward ausente. Portanto F3-C
+é evidência de decision structure, não de performance causal.
+
+**Full gate F3-C:** 1493 core/FLE + 2 PyTorch PASS;
+Ruff/compileall/JavaScript/TypeScript/Vite/whitespace PASS.
+
+**Decision F3-C:** PASS. **F3 COMPLETE.** O mesmo objetivo produz alternativas e choices
+observáveis por uma policy separável; o replay não executa curriculum_runner nem stage handler.
+Nenhuma authority live contínua foi concedida.
+
+**Exit Gate F3:** PASS.
+
+**Next:** F4 — Cognitive Memory and Consolidation. Memória só fecha F4 quando uma ablação mostrar
+perda estatisticamente detectável em transferência; logging isolado não conta.
 
 ---
 

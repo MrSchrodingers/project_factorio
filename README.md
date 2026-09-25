@@ -39,6 +39,7 @@ com experiência sem receber do programador a sequência de ações que constitu
 > **F2-G5 — Baseline-only enforcement / F2 closure:** [docs/CORTEX_PHASE2_BASELINE_ONLY_ENFORCEMENT.md](docs/CORTEX_PHASE2_BASELINE_ONLY_ENFORCEMENT.md)
 > **F3-A — Executive Shadow Kernel:** [docs/CORTEX_PHASE3_EXECUTIVE_SHADOW_KERNEL.md](docs/CORTEX_PHASE3_EXECUTIVE_SHADOW_KERNEL.md)
 > **F3-B — Verification, credit and experiment ledger:** [docs/CORTEX_PHASE3_VERIFICATION_CREDIT_LEDGER.md](docs/CORTEX_PHASE3_VERIFICATION_CREDIT_LEDGER.md)
+> **F3-C — Paired shadow comparison / F3 closure:** [docs/CORTEX_PHASE3_PAIRED_SHADOW_COMPARISON.md](docs/CORTEX_PHASE3_PAIRED_SHADOW_COMPARISON.md)
 > **F1-B — storage hardening:** [docs/CORTEX_F1_STORAGE_HARDENING.md](docs/CORTEX_F1_STORAGE_HARDENING.md)
 > **Dashboard / evidence scope:** [docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md](docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md)
 > **Dashboard / tmp hardening:** [docs/CORTEX_DASHBOARD_TMP_HARDENING.md](docs/CORTEX_DASHBOARD_TMP_HARDENING.md)
@@ -62,15 +63,14 @@ O hardening pós-fechamento do dashboard está no commit
 95254cc1b81cc75a90debf6ab93a01ddd0099485: observers read-only não dependem mais da existência
 de storage.agent_characters[1]. Gate do hotfix: 1469 core/FLE + 2 PyTorch PASS; 17/17 endpoints
 de bootstrap HTTP 200 e WebSocket live sem stream_error.
-F3 está ACTIVE em F3-B / SHADOW. F3-A tornou belief/goal/candidates/choice/prediction explícitos.
-F3-B acrescentou verification-after-action, credit assignment fail-closed e ledger SQLite
-persistente/idempotente. O replay canônico revalidou 54 episódios históricos executados e medidos:
-45 held, 9 did_not_hold, 54/54 coerentes com o registro, reward médio 0.8333333333333334.
-Artifact F3-B SHA-256:
-a8d76b2b1385606843c19c0fb7e221ccd17ae935d377888ac58a8ea3b89b74c1. Implementation:
-8b9330545407138fa4340c695988643e2256fb17. O gate integral foi 1489 core/FLE + 2 PyTorch PASS.
-A comparação shadow pareada contra o runner ainda está aberta. Continuous authority e evolution
-permanecem OFF.
+F3 está COMPLETE em F3-C. F3-A tornou belief/goal/candidates/choice/prediction explícitos; F3-B
+adicionou verification-after-action, credit fail-closed e ledger persistente; F3-C comparou 29
+objetivos históricos pareados sobre o mesmo candidate surface. A regra canônica sem histórico
+reproduziu 29/29 escolhas observadas e uma policy alternativa divergiu em 28/29, sem executar
+nenhuma arm e sem atribuir outcome contrafactual. Artifact F3-C SHA-256:
+13b00f67b7014a5f3af3bf068e9381bc563100c4a984688ca88ab23795ba5f01. Implementation:
+6a209527a14cc9a8eebb12c4d8ac403884fde281. Full gate: 1493 core/FLE + 2 PyTorch PASS.
+F4 está READY / NOT STARTED. Continuous authority e evolution permanecem OFF.
 As seeds confirmatórias 20261101–20261110 permanecem congeladas e não executadas; serão usadas
 posteriormente para avaliação pareada do Cortex, sem tuning nelas.
 

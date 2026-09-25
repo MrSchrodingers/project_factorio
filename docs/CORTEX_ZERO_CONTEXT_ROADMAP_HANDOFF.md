@@ -5,8 +5,8 @@
 **Repository:** `MrSchrodingers/project_factorio`
 **Live checkout:** `/srv/factorio-ai-lab`
 **Transition branch:** `research/cortex-v1`
-**Current scientific phase:** **F3 ACTIVE — F3-B VERIFICATION / CREDIT / LEDGER**
-**F3:** ACTIVE / F3-B SHADOW
+**Current scientific phase:** **F3 COMPLETE — F3-C PAIRED SHADOW COMPARISON — F4 READY / NOT STARTED**
+**F3:** COMPLETE / F3-C
 **Continuous autonomous authority:** OFF
 **Confirmatory seeds:** untouched / frozen
 **SentinelX context:** sxc_4557STHZ — always resume latest revision
@@ -1335,30 +1335,34 @@ Current UI/control-plane state:
 - F2 COMPLETE remains the validated execution substrate;
 - phase2_checkpoint = F2-G5;
 - F2 Exit Gate validated;
-- F3 ACTIVE in SHADOW;
-- phase3_checkpoint = F3-B;
+- F3 COMPLETE;
+- phase3_checkpoint = F3-C;
+- F3 Exit Gate validated;
 - F3-A Executive Shadow Kernel validated;
 - F3-B verification/credit/experiment ledger validated;
+- F3-C paired shadow comparison validated;
+- F4 READY / NOT STARTED;
 - continuous authority OFF;
 - evolution inactive+disabled;
 - confirmatory seeds frozen.
 
-F3-A exposes BeliefState, GoalStack, diagnosis, multiple alternatives, hard feasibility, policy
-selection and prediction-before-action.
+F3-C canonical evidence:
 
-F3-B reverified 54 historical executed/measured episodes, with 45 held and 9 did_not_hold; all
-54 recomputed outcomes match the recorded evidence. The persistent executive ledger contains 54
-episodes, quick_check=ok, and phase-state independently verifies their payload digests.
+- 29 paired historical objectives;
+- 29 / 29 with multiple candidates;
+- canonical fixed rule without historical action label: 29 / 29 agreement;
+- alternative rebuild-preference policy divergence: 28 / 29;
+- all 29 historical structural actions executed=false;
+- observed numeric rewards: 0;
+- artifact: runs/audits/cortex_f3c_paired_shadow_comparison.json;
+- SHA-256: 13b00f67b7014a5f3af3bf068e9381bc563100c4a984688ca88ab23795ba5f01.
 
-Canonical F3-B artifact:
-runs/audits/cortex_f3b_verification_credit_replay.json
-SHA-256:
-a8d76b2b1385606843c19c0fb7e221ccd17ae935d377888ac58a8ea3b89b74c1.
+This closes decision-structure requirements only. It does not establish learned-policy superiority
+or counterfactual outcome quality.
 
-The last live Cortex mutation evidence remains F2-G4B. F3-A and F3-B use no RCON/FLE/WorldLease or
-execution grant.
+The last live Cortex mutation evidence remains F2-G4B. F3-A/B/C use no live executive authority.
 
-Next checkpoint: F3-C paired shadow comparison against the legacy runner.
+Next phase: F4 cognitive memory and consolidation. Its Exit Gate is causal ablation on transfer.
 
 ## 10.4 Important UI ambiguity
 
@@ -1763,8 +1767,9 @@ Published post-F2 observability hotfix:
 The dashboard main scope is global, not the historical exploratory baseline. A fresh operator
 should expect the Cortex control plane to show:
 
-- F3-B / Verification + Credit Ledger / SHADOW;
-- F3-A Executive Shadow Kernel remains validated;
+- F3 COMPLETE / F3-C paired shadow comparison;
+- F3 Exit Gate validated;
+- F4 READY / NOT STARTED;
 - F2 COMPLETE / G5 remains the execution substrate;
 - F2 Exit Gate validated;
 - continuous authority OFF;
@@ -2106,7 +2111,7 @@ A fresh operator should leave its first turn with one conclusion:
 
 After publication, this zero-context handoff should be discoverable through the immutable tag:
 
-`cortex-zero-context-handoff-v0.4.0`
+`cortex-zero-context-handoff-v0.5.0`
 
 A fresh chat should still revalidate the branch HEAD because later scientific work may legitimately
 advance beyond this tag.
@@ -2163,7 +2168,7 @@ estruturado contendo:
 - plano proposto para o próximo checkpoint com testes, evidências e critérios de aceite.
 
 Estado esperado do handoff publicado: F0 PASS, F1 PASS, F2 COMPLETE, F2-G4B e F2-G5 concluídas,
-F3 ACTIVE em F3-B / SHADOW, evolution inactive+disabled, confirmatory seeds intactas e
+F3 COMPLETE em F3-C, F4 READY / NOT STARTED, evolution inactive+disabled, confirmatory seeds intactas e
 resume.do_not_start_another_seed=true. Exatamente um live Option EXECUTE pós-G4A ocorreu em G4B e
 não deve ser repetido. Se o estado vivo divergir, audite commits/artifacts e siga o estado persistente
 mais recente.
