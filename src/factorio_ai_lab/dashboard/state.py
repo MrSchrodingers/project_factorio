@@ -1246,8 +1246,10 @@ class FactorioObserver:
     #: unread instead of as an entity that has nothing.
     _SNAPSHOT_COMMAND = r"""
 /c local p=storage.agent_characters and storage.agent_characters[1]
-if not p then
-  rcon.print(helpers.table_to_json({connected=false,error="agent character unavailable"}))
+local s=(p and p.valid and p.surface) or game.surfaces[1]
+local f=(p and p.valid and p.force) or game.forces.player
+if not s or not f then
+  rcon.print(helpers.table_to_json({connected=false,error="world surface/force unavailable"}))
   return
 end
 local reading_groups={"contents","fuel","crafting","fluids","power"}
@@ -1321,7 +1323,7 @@ local function inventory_rows(read)
   return stack_rows(contents),"measured"
 end
 local entities={}
-for _,e in pairs(p.surface.find_entities_filtered{force=p.force}) do
+for _,e in pairs(s.find_entities_filtered{force=f}) do
   if e.valid then
     local row={
       name=e.name,
@@ -1464,9 +1466,9 @@ for _,e in pairs(p.surface.find_entities_filtered{force=p.force}) do
   end
 end
 local production={produced={},consumed={},input={},output={}}
-local surface=p.surface
-local item_stats=p.force.get_item_production_statistics(surface)
-local fluid_stats=p.force.get_fluid_production_statistics(surface)
+local surface=s
+local item_stats=f.get_item_production_statistics(surface)
+local fluid_stats=f.get_fluid_production_statistics(surface)
 for name,count in pairs(item_stats.input_counts) do
   if count ~= 0 then
     production.produced[name]=count
@@ -1497,7 +1499,8 @@ rcon.print(helpers.table_to_json({
   experiment_tick=storage.elapsed_ticks or 0,
   entity_readings=reading_groups,
   entities=entities,
-  production=production
+  production=production,
+  observer_origin=(p and p.valid) and "agent_character" or "world_fallback"
 }))
 """
 
@@ -1528,16 +1531,27 @@ rcon.print(helpers.table_to_json({
 
     _MAP_COMMAND = r"""
 /c local p=storage.agent_characters and storage.agent_characters[1]
-if not p then
-  rcon.print(helpers.table_to_json({connected=false,error="agent character unavailable"}))
+local s=(p and p.valid and p.surface) or game.surfaces[1]
+local f=(p and p.valid and p.force) or game.forces.player
+if not s or not f then
+  rcon.print(helpers.table_to_json({connected=false,error="world surface/force unavailable"}))
   return
 end
-local s=p.surface
-local min_x=p.position.x
-local max_x=p.position.x
-local min_y=p.position.y
-local max_y=p.position.y
-for _,e in pairs(s.find_entities_filtered{force=p.force}) do
+local force_entities=s.find_entities_filtered{force=f}
+local anchor_x=0
+local anchor_y=0
+if p and p.valid then
+  anchor_x=p.position.x
+  anchor_y=p.position.y
+elseif force_entities[1] then
+  anchor_x=force_entities[1].position.x
+  anchor_y=force_entities[1].position.y
+end
+local min_x=anchor_x
+local max_x=anchor_x
+local min_y=anchor_y
+local max_y=anchor_y
+for _,e in pairs(force_entities) do
   if e.valid then
     min_x=math.min(min_x,e.position.x)
     max_x=math.max(max_x,e.position.x)
@@ -1639,7 +1653,7 @@ for _,row in pairs(terrain_rows) do
 end
 rcon.print(helpers.table_to_json({
   connected=true,
-  center={x=p.position.x,y=p.position.y},
+  center={x=anchor_x,y=anchor_y},
   bounds={
     left_top={x=left,y=top},
     right_bottom={x=right,y=bottom}
@@ -1648,21 +1662,33 @@ rcon.print(helpers.table_to_json({
   natural=natural,
   terrain_runs=terrain_runs,
   terrain_tile_count=terrain_tile_count,
-  water_tile_count=water_tile_count
+  water_tile_count=water_tile_count,
+  observer_origin=(p and p.valid) and "agent_character" or "world_fallback"
 }))
 """
     _RESOURCE_OVERVIEW_COMMAND = r"""
 /c local p=storage.agent_characters and storage.agent_characters[1]
-if not p then
-  rcon.print(helpers.table_to_json({connected=false,error="agent character unavailable"}))
+local s=(p and p.valid and p.surface) or game.surfaces[1]
+local f=(p and p.valid and p.force) or game.forces.player
+if not s or not f then
+  rcon.print(helpers.table_to_json({connected=false,error="world surface/force unavailable"}))
   return
 end
-local s=p.surface
+local force_entities=s.find_entities_filtered{force=f}
+local anchor_x=0
+local anchor_y=0
+if p and p.valid then
+  anchor_x=p.position.x
+  anchor_y=p.position.y
+elseif force_entities[1] then
+  anchor_x=force_entities[1].position.x
+  anchor_y=force_entities[1].position.y
+end
 local radius=192
 local cell_size=16
 local area={
-  left_top={x=p.position.x-radius,y=p.position.y-radius},
-  right_bottom={x=p.position.x+radius,y=p.position.y+radius}
+  left_top={x=anchor_x-radius,y=anchor_y-radius},
+  right_bottom={x=anchor_x+radius,y=anchor_y+radius}
 }
 local cells={}
 local totals={}
@@ -1706,8 +1732,8 @@ for _,e in pairs(s.find_entities_filtered{area=area,type="resource"}) do
     t.count=t.count+1
     t.amount=t.amount+(e.amount or 1)
 
-    local dx=e.position.x-p.position.x
-    local dy=e.position.y-p.position.y
+    local dx=e.position.x-anchor_x
+    local dy=e.position.y-anchor_y
     local d2=dx*dx+dy*dy
     local n=nearest[e.name]
     if not n or d2<n.d2 then
@@ -1736,20 +1762,22 @@ for _,n in pairs(nearest) do
 end
 rcon.print(helpers.table_to_json({
   connected=true,
-  center={x=p.position.x,y=p.position.y},
+  center={x=anchor_x,y=anchor_y},
   radius=radius,
   cell_size=cell_size,
   cells=packed,
   points=points,
   totals=totals,
-  nearest=nearest
+  nearest=nearest,
+  observer_origin=(p and p.valid) and "agent_character" or "world_fallback"
 }))
 """
 
     _GAME_KNOWLEDGE_COMMAND = r"""
 /c local p=storage.agent_characters and storage.agent_characters[1]
-if not p then
-  rcon.print(helpers.table_to_json({connected=false,error="agent character unavailable"}))
+local f=(p and p.valid and p.force) or game.forces.player
+if not f then
+  rcon.print(helpers.table_to_json({connected=false,error="player force unavailable"}))
   return
 end
 
@@ -1830,7 +1858,7 @@ end
 
 local recipes={}
 for name,recipe in pairs(prototypes.recipe) do
-  local force_recipe=p.force.recipes[name]
+  local force_recipe=f.recipes[name]
   local categories={}
   local ok_categories,raw_categories=pcall(function()
     return recipe.categories
@@ -1858,7 +1886,7 @@ table.sort(recipes,function(a,b) return a.name<b.name end)
 
 local technologies={}
 for name,technology in pairs(prototypes.technology) do
-  local force_technology=p.force.technologies[name]
+  local force_technology=f.technologies[name]
   local unlocks={}
   for _,effect in pairs(technology.effects or {}) do
     if effect.type=="unlock-recipe" and effect.recipe then
@@ -2123,11 +2151,11 @@ rcon.print(helpers.table_to_json({
             if cached is not None and now - cached[0] <= max_age_s:
                 return cached[1]
 
-            auto_block = """local min_x=p.position.x
-local max_x=p.position.x
-local min_y=p.position.y
-local max_y=p.position.y
-for _,e in pairs(s.find_entities_filtered{force=p.force}) do
+            auto_block = """local min_x=anchor_x
+local max_x=anchor_x
+local min_y=anchor_y
+local max_y=anchor_y
+for _,e in pairs(force_entities) do
   if e.valid then
     min_x=math.min(min_x,e.position.x)
     max_x=math.max(max_x,e.position.x)
@@ -2164,7 +2192,7 @@ local bottom=viewport_cy+viewport_radius
                 raise RuntimeError("map command viewport block not found")
             command = command.replace(auto_block, view_block, 1)
             command = command.replace(
-                "center={x=p.position.x,y=p.position.y},",
+                "center={x=anchor_x,y=anchor_y},",
                 (
                     "center={x=viewport_cx,y=viewport_cy},"
                     "viewport={center={x=viewport_cx,y=viewport_cy},"
@@ -2370,11 +2398,13 @@ local bottom=viewport_cy+viewport_radius
         names = ",".join(f'"{name}"' for name in self._PRODUCTION_ITEMS)
         command = f"""
 /c local p=storage.agent_characters and storage.agent_characters[1]
-if not p then
-  rcon.print(helpers.table_to_json({{connected=false,error="agent character unavailable"}}))
+local s=(p and p.valid and p.surface) or game.surfaces[1]
+local f=(p and p.valid and p.force) or game.forces.player
+if not s or not f then
+  rcon.print(helpers.table_to_json({{connected=false,error="world surface/force unavailable"}}))
   return
 end
-local stats=p.force.get_item_production_statistics(p.surface)
+local stats=f.get_item_production_statistics(s)
 local precision=defines.flow_precision_index.{precision_name}
 local names={{{names}}}
 local series={{}}
@@ -2555,6 +2585,8 @@ rcon.print(helpers.table_to_json({connected=true,count=#rows,prototypes=rows}))
                 return {
                     "connected": bool(payload.get("connected", True)),
                     "tick": payload.get("tick"),
+                    "experiment_tick": payload.get("experiment_tick"),
+                    "observer_origin": payload.get("observer_origin"),
                     "entities": entities,
                     "entity_count": len(entities),
                     # Which readings this sweep took, so a consumer can tell

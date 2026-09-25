@@ -37,3 +37,41 @@ def test_live_socket_keeps_a_degraded_state_instead_of_reconnect_storm() -> None
     source=(Path(__file__).parents[1]/"src/factorio_ai_lab/dashboard/app.py").read_text()
     assert 'logger.exception("dashboard live sample failed")' in source
     assert '"stream_error"' in source
+
+
+def test_read_only_observers_fallback_to_world_without_agent_character() -> None:
+    commands=(
+        FactorioObserver._SNAPSHOT_COMMAND,
+        FactorioObserver._MAP_COMMAND,
+        FactorioObserver._RESOURCE_OVERVIEW_COMMAND,
+    )
+    for command in commands:
+        assert "game.surfaces[1]" in command
+        assert "game.forces.player" in command
+        assert "agent character unavailable" not in command
+        assert "world_fallback" in command
+
+    knowledge=FactorioObserver._GAME_KNOWLEDGE_COMMAND
+    assert "game.forces.player" in knowledge
+    assert "agent character unavailable" not in knowledge
+
+
+def test_snapshot_preserves_observation_origin_and_experiment_tick(monkeypatch) -> None:
+    class _Client:
+        def send_command(self, _command: str) -> str:
+            return (
+                '{"connected":true,"tick":42,"experiment_tick":7,'
+                '"observer_origin":"world_fallback","entities":[]}'
+            )
+
+    observer=FactorioObserver()
+    observer._client=_Client()
+    monkeypatch.setattr(observer,"connected",lambda:True)
+
+    payload=observer.snapshot()
+
+    assert payload["connected"] is True
+    assert payload["tick"] == 42
+    assert payload["experiment_tick"] == 7
+    assert payload["observer_origin"] == "world_fallback"
+    assert payload["entity_count"] == 0
