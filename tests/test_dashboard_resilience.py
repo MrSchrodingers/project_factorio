@@ -142,3 +142,32 @@ def test_dashboard_renders_f4b_retrieval_without_causal_claim() -> None:
     assert "hybrid structural+lexical retrieval" in app
     assert "causal ablation/transfer ainda não provados" in app
     assert "continuous authority OFF" in app
+
+
+def test_dashboard_separates_live_cortex_from_frozen_baseline_evidence() -> None:
+    app=(
+        Path(__file__).parents[1]
+        / "src/factorio_ai_lab/dashboard/static/app.js"
+    ).read_text()
+    index=(
+        Path(__file__).parents[1]
+        / "src/factorio_ai_lab/dashboard/static/index.html"
+    ).read_text()
+    map_source=(
+        Path(__file__).parents[1]
+        / "frontend/src/map.ts"
+    ).read_text()
+
+    assert "function cortexOperationalView()" in app
+    assert "historicalEvidenceMode" in app
+    assert "CORTEX SHADOW · nenhum executor controla o mundo" in app
+    assert "IDLE INTENCIONAL · HISTÓRICO PRESERVADO" in app
+    assert "F4-C — causal memory ablation + held-out transfer" in app
+    assert "CORTEX SHADOW · IDLE INTENCIONAL" in app
+    assert "FROZEN · EVOLUTION OFF" in app
+    assert "Último curriculum baseline preservado" in app
+    assert "WORLD LIVE conectado, porém vazio" in app
+    assert 'id="operationalModeNotice"' in index
+    assert 'id="worldStateNotice"' in index
+    assert "Factorio ao vivo · mundo vazio" in map_source
+    assert "mundo live esvaziado · sem fábrica ativa" in map_source

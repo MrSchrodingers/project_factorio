@@ -1434,8 +1434,8 @@ def build_phase_state(
 
     if phase4_retrieval_valid:
         action=(
-            "F4-B active in SHADOW; design causal memory ablation "
-            "and cross-seed transfer experiment"
+            "F4-B complete in SHADOW; F4-C requires a frozen, diverse "
+            "non-confirmatory held-out memory-ablation transfer protocol"
         )
     elif phase4_memory_valid:
         action=(
@@ -1549,6 +1549,27 @@ def build_phase_state(
             if phase4_retrieval_valid
             else ("F4-A" if phase4_memory_valid else None)
         ),
+        "phase4_next_checkpoint":(
+            "F4-C" if phase4_retrieval_valid else ("F4-B" if phase4_memory_valid else "F4-A")
+        ),
+        "phase4_exit_gate":{
+            "memory_substrate":phase4_memory_valid,
+            "hybrid_retrieval_consolidation_decay":phase4_retrieval_valid,
+            "causal_memory_ablation_transfer":False,
+            "validated":False,
+        },
+        "phase4_blocker":{
+            "code":"causal_transfer_protocol_not_frozen",
+            "status":"blocked" if phase4_retrieval_valid else "not_reached",
+            "detail":(
+                "F4-C needs source/evaluation separation, explicit memory ON versus "
+                "memory-ablated conditions, leakage control, paired metrics and "
+                "predeclared statistical inference on a sufficiently diverse "
+                "non-confirmatory held-out benchmark. Confirmatory seeds remain frozen."
+                if phase4_retrieval_valid
+                else None
+            ),
+        },
         "phase4_memory_retrieval":{
             "document_path":str(phase4_retrieval_doc_path),
             "document_exists":phase4_retrieval_doc,

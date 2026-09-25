@@ -127,6 +127,24 @@ function statusLabel(value) {
   return statusLabelsPt[raw] || raw.replaceAll("_", " ");
 }
 
+function cortexOperationalView() {
+  const context = state.experimentContext || {};
+  const cortexPhase = context.cortex_phase || {};
+  const runner = ((state.status || {}).research_runner) || {};
+  const phase = String(cortexPhase.phase || "");
+  const phase4Checkpoint = String(cortexPhase.phase4_checkpoint || "");
+  const globalCortex = context.kind === "global" && ["F3", "F4"].includes(phase);
+  const liveAgent = !!runner.active;
+  return {
+    context,
+    cortexPhase,
+    phase,
+    phase4Checkpoint,
+    liveAgent,
+    historicalEvidenceMode: globalCortex && !liveAgent,
+  };
+}
+
 function repairReasonLabel(value) {
   return {
     route_capex_counterexample: "redução de CAPEX/rota antes de aumentar material",
@@ -206,7 +224,16 @@ function updateEntityMix() {
   $("entityTypes").innerHTML = pills.join("");
 
   if (!positions.length) {
-    setText("boundsText", "bounds --");
+    const world = state.world || {};
+    const operational = cortexOperationalView();
+    setText(
+      "boundsText",
+      world.connected
+        ? (operational.historicalEvidenceMode
+          ? "WORLD LIVE · 0 entidades · nenhum executor Cortex ativo"
+          : "WORLD LIVE · 0 entidades")
+        : "bounds --"
+    );
     return;
   }
   const xs = positions.map((p) => p.x);
@@ -1555,18 +1582,22 @@ function renderLearningObservatory() {
   );
   const causalBar = $("causalProgressBar");
   if (causalBar) causalBar.style.width = causalProgress + "%";
+  const operational = cortexOperationalView();
+  const historical = operational.historicalEvidenceMode;
   setClassText(
     "causalLearningBadge",
-    causalReady ? "elegível para treino" : "coletando",
-    causalReady ? "badge good" : "badge live"
+    historical ? "FROZEN DATASET" : causalReady ? "elegível para treino" : "coletando",
+    historical ? "badge neutral" : causalReady ? "badge good" : "badge live"
   );
 
   const holdout = recurrent.generation_holdout || {};
   const modelSelection = recurrent.model_selection || {};
   setText(
     "causalLearningDetail",
-    causalReady
-      ? (
+    historical
+      ? "evidência histórica preservada · nenhum treino/holdout ativo agora · F4-C exige novo protocolo causal"
+      : causalReady
+        ? (
           holdout.usable
             ? "Dados mínimos atingidos · holdout entre gerações disponível · "
               + String(modelSelection.reason || "aguardando seleção")
@@ -1595,12 +1626,14 @@ function renderLearningObservatory() {
   }
   setClassText(
     "robustnessBadge",
-    qualified
-      ? "qualificado"
-      : passCount
-        ? "em qualificação"
-        : "aguardando primeiro passe",
-    qualified ? "badge good" : passCount ? "badge live" : "badge neutral"
+    historical
+      ? "HISTÓRICO · FROZEN"
+      : qualified
+        ? "qualificado"
+        : passCount
+          ? "em qualificação"
+          : "aguardando primeiro passe",
+    historical ? "badge neutral" : qualified ? "badge good" : passCount ? "badge live" : "badge neutral"
   );
   const passSeeds = Array.isArray(robustness.distinct_pass_seeds)
     ? robustness.distinct_pass_seeds
@@ -1638,8 +1671,10 @@ function renderLearningObservatory() {
   }
   setClassText(
     "strategyBadge",
-    strategy.counterexample_run ? "adaptada" : "baseline",
-    strategy.counterexample_run ? "badge live" : "badge neutral"
+    historical
+      ? "HISTÓRICO · " + (strategy.counterexample_run ? "adaptada" : "baseline")
+      : strategy.counterexample_run ? "adaptada" : "baseline",
+    historical ? "badge neutral" : strategy.counterexample_run ? "badge live" : "badge neutral"
   );
 
   const repairs = Array.isArray(strategy.deterministic_repairs)
@@ -1734,7 +1769,40 @@ function renderExperimentContext() {
     baseline ? "EVIDENCE · SEED " + seed : "EVIDENCE · GLOBAL",
     baseline ? "badge good" : "badge neutral"
   );
-  setClassText("worldTruthBadge", "WORLD · LIVE RCON", "badge live");
+  const operational = cortexOperationalView();
+  const worldEmpty = Number((state.world || {}).entity_count || 0) === 0;
+  setClassText(
+    "worldTruthBadge",
+    worldEmpty ? "WORLD · LIVE RCON · EMPTY" : "WORLD · LIVE RCON",
+    worldEmpty ? "badge warn" : "badge live"
+  );
+
+  const modeNotice = $("operationalModeNotice");
+  if (modeNotice) {
+    modeNotice.hidden = !operational.historicalEvidenceMode;
+    if (operational.historicalEvidenceMode) {
+      setText(
+        "operationalModeTitle",
+        "CORTEX SHADOW · nenhum executor controla o mundo"
+      );
+      setText(
+        "operationalModeDetail",
+        "F4-B está fechado. Gerações, curriculum, UCB, modelos e timelines abaixo são evidência histórica congelada; evolution está OFF. O próximo trabalho é F4-C protocolar/causal, não uma geração live."
+      );
+      setClassText(
+        "operationalModeBadge",
+        "IDLE INTENCIONAL · HISTÓRICO PRESERVADO",
+        "badge warn"
+      );
+    }
+  }
+  const worldNotice = $("worldStateNotice");
+  if (worldNotice) {
+    worldNotice.hidden = !(operational.historicalEvidenceMode && worldEmpty);
+    if (!worldNotice.hidden) {
+      worldNotice.textContent = "WORLD LIVE conectado, porém vazio: 0 entidades é o estado físico observado do player force. Não há runner/evolution ativo construindo neste momento; o mapa não está travado.";
+    }
+  }
 
   if (baseline || context.kind === "global") {
     const series = context.series_progress || {};
@@ -2129,6 +2197,77 @@ function renderEvolution() {
     renderBaselineEvolution(experimentContext, evolution);
     return;
   }
+  const operational = cortexOperationalView();
+  if (operational.historicalEvidenceMode) {
+    const champion = evolution.champion;
+    const challenger = evolution.challenger || {};
+    const history = Array.isArray(evolution.history) ? evolution.history.slice(-10) : [];
+    setText("evolutionArenaLabel", "EVIDÊNCIA HISTÓRICA · EVOLUTION OFF");
+    setText("evolutionArenaTitle", "Arena histórica de gerações");
+    setText(
+      "evolutionArenaDetail",
+      "dados preservados para comparação · nenhum challenger/champion está executando ou sendo promovido agora"
+    );
+    setClassText(
+      "generationBadge",
+      generation ? "HISTÓRICO · G" + generation : "HISTÓRICO · generation --",
+      "badge neutral"
+    );
+    setClassText("validationBadge", "FROZEN · EVOLUTION OFF", "badge neutral");
+    setText("evolutionKpi", generation ? "HISTÓRICO · G" + generation : "HISTÓRICO");
+    setText(
+      "evolutionKpiDetail",
+      "último challenger registrado: " + String(challenger.run_id || "--")
+        + " · não está avaliando · source preservado para evidência"
+    );
+    setText(
+      "championLabel",
+      champion && champion.run_id
+        ? "histórico · G" + String(champion.generation || "?") + " · " + String(champion.run_id)
+        : "histórico · nenhum champion selecionado"
+    );
+    setText("championFitness", champion ? contenderSummary(champion) : "evolution OFF");
+    setText(
+      "challengerLabel",
+      challenger.run_id
+        ? "histórico · G" + String(generation || "?") + " · " + String(challenger.run_id)
+        : "histórico · no challenger"
+    );
+    setText(
+      "challengerFitness",
+      challenger.fitness
+        ? contenderSummary(challenger)
+        : "último estado persistido · não coletando fitness"
+    );
+    setClassText("promotionLabel", "frozen", "muted");
+    setText(
+      "promotionDetail",
+      "evolution inactive+disabled · nenhuma promoção em curso · F4-B/F4-C usam SHADOW/offline"
+    );
+    const gateContainer = $("survivalGates");
+    if (gateContainer) {
+      gateContainer.innerHTML =
+        '<span class="survival-gate proven">HISTÓRICO</span>'
+        + '<span class="survival-gate">não controla o mundo</span>';
+    }
+    const historyContainer = $("generationHistory");
+    if (historyContainer) {
+      historyContainer.innerHTML = history.length
+        ? history.map((row) => {
+            const candidate = row.challenger || {};
+            const decision = row.decision || {};
+            const fitness = candidate.fitness || {};
+            const caps = Array.isArray(fitness.capabilities) ? fitness.capabilities.length : 0;
+            return '<article class="generation-node rejected">'
+              + '<span>G' + escapeHtml(String(row.generation ?? "?")) + '</span>'
+              + '<strong>histórico · ' + (decision.promoted ? "promoted" : "rejected") + '</strong>'
+              + '<small>' + caps + ' caps · frozen evidence</small>'
+              + '</article>';
+          }).join("")
+        : '<span class="generation-empty">No historical generations recorded.</span>';
+    }
+    return;
+  }
   setClassText(
     "generationBadge",
     generation ? "generation " + generation : "generation --",
@@ -2400,42 +2539,53 @@ function renderResearchCockpit() {
   const totalStages = curriculum.length;
 
   const experimentContext = state.experimentContext || {};
+  const operational = cortexOperationalView();
+  const historical = operational.historicalEvidenceMode;
   const baselineSeed = experimentContext.kind === "baseline_seed"
     ? experimentContext.seed
     : null;
   setText(
     "generationHealthTitle",
-    baselineSeed !== null && baselineSeed !== undefined
-      ? "seed " + String(baselineSeed) + " · "
+    historical
+      ? "HISTÓRICO · " + (generation ? "G" + generation + " · " : "")
         + (activeStage ? String(activeStage.name) : String(research.status || "idle"))
-      : generation
-        ? "G" + generation + " · "
+      : baselineSeed !== null && baselineSeed !== undefined
+        ? "seed " + String(baselineSeed) + " · "
           + (activeStage ? String(activeStage.name) : String(research.status || "idle"))
-        : "G-- · waiting"
+        : generation
+          ? "G" + generation + " · "
+            + (activeStage ? String(activeStage.name) : String(research.status || "idle"))
+          : "G-- · waiting"
   );
-  const running = ["starting", "running", "learning", "validating"].includes(
+  const running = !historical && ["starting", "running", "learning", "validating"].includes(
     String(research.status || "")
   );
   setClassText(
     "generationHealthBadge",
-    running ? "live challenger" : promotion
-      ? (promotion.promoted ? "promoted" : "rejected")
-      : String(research.status || "--"),
-    running
-      ? "badge live"
-      : promotion && promotion.promoted
-        ? "badge good"
-        : promotion
-          ? "badge warn"
-          : "badge neutral"
+    historical
+      ? "FROZEN · NOT RUNNING"
+      : running ? "live challenger" : promotion
+        ? (promotion.promoted ? "promoted" : "rejected")
+        : String(research.status || "--"),
+    historical
+      ? "badge neutral"
+      : running
+        ? "badge live"
+        : promotion && promotion.promoted
+          ? "badge good"
+          : promotion
+            ? "badge warn"
+            : "badge neutral"
   );
   setText(
     "generationStageText",
-    activeStage
-      ? String(activeStage.name)
-      : failedStage
-        ? "failed · " + String(failedStage.name)
-        : "generation closed"
+    historical
+      ? "last recorded · " + (activeStage ? String(activeStage.name) : String(research.stage || "--"))
+      : activeStage
+        ? String(activeStage.name)
+        : failedStage
+          ? "failed · " + String(failedStage.name)
+          : "generation closed"
   );
   setText(
     "generationStageProgress",
@@ -2491,8 +2641,11 @@ function renderResearchCockpit() {
     validated ? "good" : champion ? "warn" : "muted"
   );
 
-  const healthDetail = running
-    ? (baselineSeed !== null && baselineSeed !== undefined
+  const healthDetail = historical
+    ? "evidência histórica congelada · nenhum processo G" + String(generation || "?")
+      + " está ativo · current Cortex work = F4-C protocol design"
+    : running
+      ? (baselineSeed !== null && baselineSeed !== undefined
         ? "seed " + String(baselineSeed) + " is collecting isolated evidence · "
         : "G" + String(generation || "?") + " is collecting evidence · ")
       + (activeStage
@@ -2609,8 +2762,8 @@ function renderResearchCockpit() {
   );
   setClassText(
     "modelArenaBadge",
-    acceptedModels + "/3 passed",
-    acceptedModels >= 2 ? "badge good" : "badge warn"
+    (historical ? "HISTÓRICO · " : "") + acceptedModels + "/3 passed",
+    historical ? "badge neutral" : acceptedModels >= 2 ? "badge good" : "badge warn"
   );
 
   const history = Array.isArray(evolution.history)
@@ -2633,10 +2786,12 @@ function renderResearchCockpit() {
     );
     setText(
       "researchSummaryTitle",
-      running
-        ? "G" + String(generation || "?") + " is challenging G"
-          + String(champion && champion.generation || "?")
-        : "Last selection: G" + String(closedGeneration)
+      historical
+        ? "Historical last selection: G" + String(closedGeneration)
+        : running
+          ? "G" + String(generation || "?") + " is challenging G"
+            + String(champion && champion.generation || "?")
+          : "Last selection: G" + String(closedGeneration)
     );
 
     const improvements = Array.isArray(decision.improvements)
@@ -2680,18 +2835,22 @@ function renderResearchCockpit() {
 
   setText(
     "currentBottleneck",
-    activeStage
-      ? String(activeStage.name)
-      : failedStage
-        ? String(failedStage.name)
-        : "no active failure"
+    historical
+      ? "historical last stage · " + (activeStage ? String(activeStage.name) : String(research.stage || "--"))
+      : activeStage
+        ? String(activeStage.name)
+        : failedStage
+          ? String(failedStage.name)
+          : "no active failure"
   );
   const nextGoal = progression.next_goal;
   setText(
     "summaryNextFrontier",
-    nextGoal && nextGoal.label
-      ? String(nextGoal.label)
-      : String(research.next_action || "--")
+    historical
+      ? "F4-C · freeze diverse held-out memory-ablation protocol"
+      : nextGoal && nextGoal.label
+        ? String(nextGoal.label)
+        : String(research.next_action || "--")
   );
 }
 
@@ -3577,6 +3736,10 @@ function renderResearchAnalytics() {
 
 function renderCurriculum() {
   const list = $("curriculumList");
+  const operational = cortexOperationalView();
+  const historical = operational.historicalEvidenceMode;
+  setText("curriculumLabel", historical ? "EVIDÊNCIA HISTÓRICA" : "EXECUÇÃO AUTÔNOMA");
+  setText("curriculumTitle", historical ? "Último curriculum baseline preservado" : "Curriculum");
   const curriculum = Array.isArray(state.research && state.research.curriculum)
     ? state.research.curriculum
     : [];
@@ -3589,15 +3752,16 @@ function renderCurriculum() {
     const status = String(stage.status || "pending");
     const cls = status === "completed" || status === "success"
       ? "done"
-      : status === "running" || status === "learning" || status === "validating"
+      : !historical && (status === "running" || status === "learning" || status === "validating")
         ? "active"
         : "";
+    const displayStatus = historical ? "histórico · " + status : status;
     const detail = stage.detail || stage.objective || "";
     return '<div class="stage-row ' + cls + '">'
       + '<span class="stage-index">' + (index + 1) + '</span>'
       + '<div class="stage-copy"><strong>' + escapeHtml(stage.name || ("stage " + (index + 1)))
       + '</strong><small>' + escapeHtml(detail) + '</small></div>'
-      + '<span class="stage-status">' + escapeHtml(status) + '</span>'
+      + '<span class="stage-status">' + escapeHtml(displayStatus) + '</span>'
       + '</div>';
   }).join("");
 }
@@ -3607,6 +3771,10 @@ function eventTime(event) {
 }
 
 function renderTimeline() {
+  const operational = cortexOperationalView();
+  const historical = operational.historicalEvidenceMode;
+  setText("timelineLabel", historical ? "EVIDÊNCIA HISTÓRICA" : "RASTRO DE DECISÕES");
+  setText("timelineTitle", historical ? "Última timeline persistida" : "Linha do tempo");
   const events = [];
   const seen = new Set();
   const appendUnique = (event, source) => {
@@ -3647,7 +3815,8 @@ function renderTimeline() {
     const when = eventTime(event);
     return '<div class="timeline-row ' + escapeHtml(type) + '">'
       + '<strong>' + escapeHtml(message) + '</strong>'
-      + '<small>' + escapeHtml(type) + (when ? " · " + escapeHtml(when) : "") + '</small>'
+      + '<small>' + escapeHtml((historical ? "histórico · " : "") + type)
+        + (when ? " · " + escapeHtml(when) : "") + '</small>'
       + '</div>';
   }).join("");
 }
@@ -3657,7 +3826,12 @@ function renderKnowledge() {
     ? state.knowledge.lessons
     : [];
   const count = Number((state.knowledge && state.knowledge.count) || lessons.length || 0);
-  setText("knowledgeCount", count + " lesson" + (count === 1 ? "" : "s"));
+  const historical = cortexOperationalView().historicalEvidenceMode;
+  setText(
+    "knowledgeCount",
+    count + " lesson" + (count === 1 ? "" : "s")
+      + (historical ? " · histórico baseline" : "")
+  );
 
   if (!lessons.length) {
     setText("knowledgeLatest", "no learned lesson yet");
@@ -3693,10 +3867,13 @@ function renderTruthTable() {
     offlineEpisodes > 0 ? offlineEpisodes + " episodes" : "not trained",
     offlineEpisodes > 0 ? "good" : "muted"
   );
+  const historical = cortexOperationalView().historicalEvidenceMode;
   setClassText(
     "truthOnline",
-    onlineHistory.length ? onlineHistory.length + " trials" : "not started",
-    onlineHistory.length ? "good" : "warn"
+    onlineHistory.length
+      ? (historical ? "histórico · " : "") + onlineHistory.length + " trials"
+      : "not started",
+    historical ? "muted" : onlineHistory.length ? "good" : "warn"
   );
   setClassText(
     "truthKnowledge",
@@ -3723,9 +3900,10 @@ function renderTruthTable() {
         ? "G" + String(champion.generation || "?")
           + " lab champion · autonomy unvalidated"
         : challenger
-          ? "G" + String(evolution.generation || "?") + " evaluating"
+          ? (historical ? "histórico · G" : "G") + String(evolution.generation || "?")
+            + (historical ? " frozen" : " evaluating")
           : "no champion",
-    validatedChampion ? "good" : champion || challenger ? "warn" : "muted"
+    historical ? "muted" : validatedChampion ? "good" : champion || challenger ? "warn" : "muted"
   );
   const progression = state.progression || {};
   const technologyMode = String(progression.technology_mode || "unknown");
@@ -3762,9 +3940,10 @@ function renderTruthTable() {
 
   setClassText(
     "truthDataset",
-    spatialDemos + " demo" + (spatialDemos === 1 ? "" : "s")
-      + (datasets.training_ready ? " · ready" : " · collecting"),
-    datasets.training_ready ? "good" : spatialDemos ? "warn" : "muted"
+    (historical ? "histórico · " : "")
+      + spatialDemos + " demo" + (spatialDemos === 1 ? "" : "s")
+      + (historical ? " · frozen" : datasets.training_ready ? " · ready" : " · collecting"),
+    historical ? "muted" : datasets.training_ready ? "good" : spatialDemos ? "warn" : "muted"
   );
 
   const neuralStatus = capabilities.neural_policy && capabilities.neural_policy.status;
@@ -3857,6 +4036,23 @@ function updateMission() {
   const current = research.current_stage
     || curriculum.find((stage) => ["running", "learning", "validating"].includes(stage.status))
     || null;
+  const operational = cortexOperationalView();
+
+  if (operational.historicalEvidenceMode && operational.phase4Checkpoint === "F4-B") {
+    const blocker = operational.cortexPhase.phase4_blocker || {};
+    setText("missionTitle", "F4-C — causal memory ablation + held-out transfer");
+    setText(
+      "missionDetail",
+      "F4-B está concluído em SHADOW. O corpus exploratório atual não deve ser tratado como prova causal; nenhum agente está executando no Factorio."
+    );
+    setText("stageName", "F4-C · protocol design");
+    setText("nextAction", operational.cortexPhase.resume?.action
+      || "freeze a diverse non-confirmatory held-out transfer benchmark");
+    $("stageProgressBar").style.width = "0%";
+    setText("stageProgressText", String(blocker.status || "blocked").toUpperCase());
+    setClassText("researchBadge", "CORTEX SHADOW · IDLE INTENCIONAL", "badge warn");
+    return;
+  }
 
   setText(
     "missionTitle",
@@ -4000,24 +4196,29 @@ function updateKpis() {
   const arena = research.arena || {};
   const context = state.experimentContext || {};
   const baselineContext = context.kind === "baseline_seed";
+  const operational = cortexOperationalView();
   const arenaMode = String(arena.mode || "unknown");
-  const arenaLabel = baselineContext
-    ? "BASELINE · seed " + String(context.seed ?? "--")
-    : arenaMode === "open_play"
-      ? "OPEN PLAY · tech tree real"
-      : arenaMode === "lab_play"
-        ? "LAB ARENA · accelerated"
-        : "arena --";
+  const arenaLabel = operational.historicalEvidenceMode
+    ? "CORTEX SHADOW · " + (operational.phase4Checkpoint || operational.phase || "--")
+    : baselineContext
+      ? "BASELINE · seed " + String(context.seed ?? "--")
+      : arenaMode === "open_play"
+        ? "OPEN PLAY · tech tree real"
+        : arenaMode === "lab_play"
+          ? "LAB ARENA · accelerated"
+          : "arena --";
   setClassText(
     "arenaBadge",
     arenaLabel,
-    baselineContext
-      ? "badge good"
-      : arenaMode === "open_play"
-        ? "badge live"
-        : arenaMode === "lab_play"
-          ? "badge neutral"
-          : "badge neutral"
+    operational.historicalEvidenceMode
+      ? "badge warn"
+      : baselineContext
+        ? "badge good"
+        : arenaMode === "open_play"
+          ? "badge live"
+          : arenaMode === "lab_play"
+            ? "badge neutral"
+            : "badge neutral"
   );
   const updatedAt = Date.parse(research.updated_at || "");
   const researchAgeS = Number.isFinite(updatedAt)
@@ -4041,9 +4242,11 @@ function updateKpis() {
     && researchPromotion
     && !researchPromotion.promoted;
   const baselineCompleted = baselineContext && context.status === "completed";
-  const loopLabel = baselineCompleted
-    ? "baseline seed completed"
-    : runnerStalled
+  const loopLabel = operational.historicalEvidenceMode
+    ? "idle · by design"
+    : baselineCompleted
+      ? "baseline seed completed"
+      : runnerStalled
       ? "stalled"
       : runner.active
         ? runnerPhase === "model_training"
@@ -4067,8 +4270,10 @@ function updateKpis() {
   );
   setText(
     "researchLoopDetail",
-    baselineCompleted
-      ? "seed " + String(context.seed ?? "--")
+    operational.historicalEvidenceMode
+      ? "no active agent process · evolution OFF · F4-C protocol design is the current research task"
+      : baselineCompleted
+        ? "seed " + String(context.seed ?? "--")
         + " closed · " + String(research.status || context.status || "--")
         + " · next: " + String(research.next_action || "--")
       : runnerStalled
@@ -4097,7 +4302,13 @@ function updateKpis() {
   const nextGoal = progression.next_goal || null;
   const frontier = Array.isArray(progression.frontier) ? progression.frontier : [];
   const achievedGoals = Array.isArray(progression.achieved) ? progression.achieved : [];
-  if (nextGoal) {
+  if (operational.historicalEvidenceMode) {
+    setText("engineeringGoal", "F4-C · causal memory transfer benchmark");
+    setText(
+      "engineeringGoalDetail",
+      "protocol not frozen · memory ON vs explicit ablation · held-out non-confirmatory tasks · leakage control + paired inference"
+    );
+  } else if (nextGoal) {
     setText("engineeringGoal", nextGoal.label || nextGoal.goal_id || "next capability");
     const alternatives = frontier
       .slice(1, 3)
@@ -4131,13 +4342,36 @@ function updateKpis() {
   }
 
   const onlineStatus = online.status || (onlineRows.length ? "learning" : "idle");
-  setText("onlineLearner", online.algorithm ? online.algorithm + " · " + onlineStatus : onlineStatus);
-  setText(
-    "onlineLearnerDetail",
-    onlineRows.length
-      ? onlineRows.length + " real-world trials · best " + String(online.best_arm ?? "--")
-      : "no real-world trials yet"
-  );
+  if (operational.historicalEvidenceMode) {
+    setText(
+      "onlineLearner",
+      onlineRows.length
+        ? "HISTÓRICO · " + String(online.algorithm || "online learner")
+        : "HISTÓRICO · sem learner ativo"
+    );
+    setText(
+      "onlineLearnerDetail",
+      onlineRows.length
+        ? onlineRows.length + " trials preservados · último best " + String(online.best_arm ?? "--") + " · não está aprendendo agora"
+        : "nenhum processo de aprendizado online ativo"
+    );
+  } else {
+    setText("onlineLearner", online.algorithm ? online.algorithm + " · " + onlineStatus : onlineStatus);
+    setText(
+      "onlineLearnerDetail",
+      onlineRows.length
+        ? onlineRows.length + " real-world trials · best " + String(online.best_arm ?? "--")
+        : "no real-world trials yet"
+    );
+  }
+
+  if (operational.historicalEvidenceMode && Number(world.entity_count || 0) === 0) {
+    setText("productionPrimary", "no active factory");
+    setText(
+      "productionSecondary",
+      "WORLD LIVE vazio · qualquer série abaixo é observação/estatística preservada, não produção autônoma atual"
+    );
+  }
 
   const recentTicks = (state.history || [])
     .slice(-4)
@@ -4179,7 +4413,10 @@ function updateKpis() {
   setText(
     "llmDetail",
     llm.connected
-      ? ((llm.models && llm.models.length ? llm.models.join(", ") : "qwen") + " · weights static · knowledge memory learns")
+      ? ((llm.models && llm.models.length ? llm.models.join(", ") : "qwen")
+        + (operational.historicalEvidenceMode
+          ? " · weights static · inference available · no active Cortex writer"
+          : " · weights static · knowledge memory learns"))
       : "llama.cpp :18081"
   );
   setClassText("routeLocal", llm.connected ? "ready" : "offline", llm.connected ? "good" : "bad");
@@ -4192,14 +4429,24 @@ function updateKpis() {
   }
 
   const runStatus = String((state.run && state.run.status) || "--");
-  setClassText(
-    "runStatus",
-    statusLabel(runStatus),
-    ["success", "completed", "generation_complete"].includes(runStatus) ? "badge good"
-      : ["running", "starting", "learning", "validating"].includes(runStatus) ? "badge live"
-      : runStatus === "--" ? "badge neutral" : "badge warn"
-  );
-  setText("runId", (state.run && state.run.run_id) || "no run");
+  if (operational.historicalEvidenceMode) {
+    setClassText("runStatus", "FROZEN · " + statusLabel(runStatus), "badge neutral");
+    setText(
+      "runId",
+      state.run && state.run.run_id
+        ? "última run · " + String(state.run.run_id)
+        : "no active run"
+    );
+  } else {
+    setClassText(
+      "runStatus",
+      statusLabel(runStatus),
+      ["success", "completed", "generation_complete"].includes(runStatus) ? "badge good"
+        : ["running", "starting", "learning", "validating"].includes(runStatus) ? "badge live"
+        : runStatus === "--" ? "badge neutral" : "badge warn"
+    );
+    setText("runId", (state.run && state.run.run_id) || "no run");
+  }
   setText(
     "runSummary",
     state.run && Object.keys(state.run).length ? JSON.stringify(state.run, null, 2) : "No active run yet."

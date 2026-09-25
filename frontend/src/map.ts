@@ -129,7 +129,7 @@ export class FactoryMap {
         <span class="fmap-chip" data-el="status">conectando</span>
         <span class="fmap-chip fmap-mono" data-el="viewport">--</span>
         <span class="fmap-chip fmap-mono" data-el="counts">--</span>
-        <span class="fmap-chip fmap-warn" data-el="reset" hidden>geracao reiniciou o mundo</span>
+        <span class="fmap-chip fmap-warn" data-el="reset" hidden>mundo live esvaziado · sem fábrica ativa</span>
       </div>
       <div class="fmap-toolbar" role="group" aria-label="Camadas do mapa">
         ${overlayButton("status", "Status")}
@@ -603,7 +603,9 @@ export class FactoryMap {
     const scene = this.scene;
     if (!scene) return;
 
-    if (scene.connected) {
+    if (scene.connected && scene.entity_count === 0) {
+      this.setChip("status", "Factorio ao vivo · mundo vazio", "fmap-warn");
+    } else if (scene.connected) {
       this.setChip("status", "Factorio ao vivo", "fmap-good");
     } else {
       this.setChip("status", "Factorio offline", "fmap-bad");

@@ -1922,8 +1922,23 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
     assert f4b["phase4_memory_substrate"]["validated"] is True
     assert f4b["resume"]["do_not_start_another_seed"] is True
     assert f4b["resume"]["action"] == (
-        "F4-B active in SHADOW; design causal memory ablation "
-        "and cross-seed transfer experiment"
+        "F4-B complete in SHADOW; F4-C requires a frozen, diverse "
+        "non-confirmatory held-out memory-ablation transfer protocol"
+    )
+    assert f4b["phase4_next_checkpoint"]=="F4-C"
+    assert f4b["phase4_exit_gate"] == {
+        "memory_substrate":True,
+        "hybrid_retrieval_consolidation_decay":True,
+        "causal_memory_ablation_transfer":False,
+        "validated":False,
+    }
+    assert f4b["phase4_blocker"]["status"]=="blocked"
+    assert (
+        f4b["phase4_blocker"]["code"]
+        =="causal_transfer_protocol_not_frozen"
+    )
+    assert "Confirmatory seeds remain frozen" in (
+        f4b["phase4_blocker"]["detail"] or ""
     )
 
     f4b_payload["source"]["f4a_artifact_sha256"]="wrong"

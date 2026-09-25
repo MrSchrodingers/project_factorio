@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Factorio AI Lab</title>
-  <link rel="stylesheet" href="/static/styles.css?v=18540b5f600a">
+  <link rel="stylesheet" href="/static/styles.css?v=6d8355e157e7">
   <link rel="stylesheet" href="/static/map/style.css?v=c71c7bfce507">
 </head>
 <body>
@@ -53,6 +53,15 @@
         <span id="worldTruthBadge" class="badge live">WORLD · LIVE RCON</span>
         <span id="evidenceTruthBadge" class="badge neutral">EVIDENCE · --</span>
       </div>
+    </section>
+
+    <section id="operationalModeNotice" class="card operational-mode-notice" hidden aria-live="polite">
+      <div>
+        <span class="label">ESTADO OPERACIONAL</span>
+        <strong id="operationalModeTitle">resolvendo autoridade…</strong>
+        <small id="operationalModeDetail">separando estado live de evidência histórica…</small>
+      </div>
+      <span id="operationalModeBadge" class="badge neutral">--</span>
     </section>
 
     <section class="card cortex-program" aria-label="Programa Cortex Research">
@@ -139,9 +148,9 @@
     <section class="card evolution-arena">
       <div class="arena-head">
         <div>
-          <span class="label">SELEÇÃO EVOLUTIVA</span>
-          <h2>Arena de gerações</h2>
-          <small>Seleção preserva o incumbente · sobrevivência de capacidades antes da promoção</small>
+          <span id="evolutionArenaLabel" class="label">SELEÇÃO EVOLUTIVA</span>
+          <h2 id="evolutionArenaTitle">Arena de gerações</h2>
+          <small id="evolutionArenaDetail">Seleção preserva o incumbente · sobrevivência de capacidades antes da promoção</small>
         </div>
         <div class="arena-badges">
           <span id="validationBadge" class="badge neutral">open-play pending</span>
@@ -371,6 +380,7 @@
         </div>
 
         <div class="world-stage" id="worldStage" data-factory-map></div>
+        <div id="worldStateNotice" class="world-state-notice" hidden></div>
 
         <div class="factory-footer">
           <div>
@@ -389,8 +399,8 @@
         <article class="card execution-card">
           <div class="card-head compact">
             <div>
-              <span class="label">EXECUÇÃO AUTÔNOMA</span>
-              <h2>Curriculum</h2>
+              <span id="curriculumLabel" class="label">EXECUÇÃO AUTÔNOMA</span>
+              <h2 id="curriculumTitle">Curriculum</h2>
             </div>
             <span id="runStatus" class="badge neutral">--</span>
           </div>
@@ -402,8 +412,8 @@
         <article class="card execution-card">
           <div class="card-head compact">
             <div>
-              <span class="label">RASTRO DE DECISÕES</span>
-              <h2>Linha do tempo</h2>
+              <span id="timelineLabel" class="label">RASTRO DE DECISÕES</span>
+              <h2 id="timelineTitle">Linha do tempo</h2>
             </div>
             <span id="runId" class="mono">no run</span>
           </div>
@@ -721,7 +731,7 @@
     </details>
   </main>
 
-  <script src="/static/app.js?v=6bfe8d52ff5b"></script>
-  <script src="/static/map/factory-map.js?v=fd8c84fe638e"></script>
+  <script src="/static/app.js?v=684d91d12550"></script>
+  <script src="/static/map/factory-map.js?v=3dc0844d0d2d"></script>
 </body>
 </html>

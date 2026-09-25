@@ -2721,3 +2721,27 @@ small { line-height: 1.35; }
   .experiment-context { align-items: flex-start; flex-direction: column; }
   .experiment-context-truth { justify-content: flex-start; }
 }
+
+
+.operational-mode-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border-color: rgba(240, 163, 58, .35);
+  background: linear-gradient(135deg, rgba(240, 163, 58, .075), rgba(106, 181, 247, .035));
+}
+.operational-mode-notice[hidden] { display: none; }
+.operational-mode-notice strong { display: block; margin-top: 3px; }
+.operational-mode-notice small { display: block; margin-top: 4px; color: var(--muted); }
+.world-state-notice {
+  margin: 8px 12px 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(240, 163, 58, .24);
+  border-radius: 8px;
+  background: rgba(240, 163, 58, .055);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.world-state-notice[hidden] { display: none; }
