@@ -11,7 +11,7 @@
 ## Estado atual
 
 - Programa: Cortex Research Architecture v0.1
-- Fase: **F4 ACTIVE em F4-A / SHADOW — F3 COMPLETE; continuous authority OFF**
+- Fase: **F4 ACTIVE em F4-B / SHADOW — F3 COMPLETE; continuous authority OFF**
 - Branch: `research/cortex-v1`
 - Baseline imutável de origem: `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 - Tag baseline publicada: `cortex-pre-research-baseline-20260923`
@@ -51,45 +51,51 @@ silenciosamente pelo commit da F0**.
 
 ## Próxima ação
 
-**F4-B — hybrid structural/similarity retrieval + consolidation + decay policy.**
+**F4-C — causal memory ablation + held-out transfer benchmark.**
 
-F4-A está validada em SHADOW:
+F4-B está validada em SHADOW:
 
-- implementation: 756702bb6961fe8c989b2658b0a020200b7632bf;
-- canonical artifact: runs/audits/cortex_f4a_memory_substrate_migration.json;
-- artifact SHA-256: f45e31785c17cd6222a57937564036dbdd4976ee1d6376b61f340a9d70066228;
-- persistent store: runs/ledger/cortex_cognitive_memory.sqlite3;
-- canonical batch: cortex-f4a-af2a612bb1327f0b2fb2;
-- batch occurrences: 759;
-- batch manifest SHA-256:
-  cfe4472fc53d8f20f9ee4bf3e16951d8689d3bd7d381e7c5d663ae4f61637e71;
-- durable memory items: 222;
-- episodic: 54 items / 54 occurrences;
-- semantic: 134 items / 566 occurrences / 530 qualified;
-- procedural: 1 item / 54 executed supports;
-- counterexample: 33 items / 85 occurrences;
-- procedure mean reward: 0.8333333333333334;
-- procedure Wilson lower-95: 0.7126323220121027;
-- working memory bounded capacity=3 and non-persistent;
-- memory DB quick_check=ok;
+- implementation: a4ff558eccd9df0898fef4138a75fa1b55976a8d;
+- canonical artifact: runs/audits/cortex_f4b_memory_retrieval.json;
+- artifact SHA-256:
+  5fc37b0cee5f121c5ff6b6054fc45f4b0a09bad851e34793958bdd3dc1c5a801;
+- F4-A source artifact hash matches exactly;
+- canonical memory DB: 222 items / 759 occurrences;
+- DB quick_check=ok;
+- database manifest before=after:
+  e6aa69816fe992f6b2a6afc8aff529fa5f1572106ca0939cee830af5a6cf3399;
+- four canonical retrieval queries PASS;
+- structural scope mismatch is fail-closed;
+- lexical similarity changes rank inside the same stage scope;
+- exact symptom retrieval ranks the empirical fuel-resupply procedure first;
+- counterexamples obey explicit stage+phase scope;
+- repeated semantic items=70;
+- semantic duplicate support=432;
+- repeated counterexample items=10;
+- procedural confidence items=1;
+- non-destructive decay probe:
+  low-support weight=0.3339200384203678,
+  high-support weight=0.998542956000045;
 - authority=shadow;
 - world_mutation=false;
 - FLE/RCON/WorldLease/execution grant unused;
-- full gate: 1508 core/FLE + 2 PyTorch PASS plus static/build gates.
+- full gate: 1520 core/FLE + 2 PyTorch PASS plus static/build gates.
 
-F4-A is a memory substrate result, not a causal-memory result. It does not prove retrieval quality or
-that memory changes outcomes.
+F4-B proves retrieval/consolidation/decay mechanics, not memory benefit.
 
-F4-B must move Cortex recall out of the legacy stage/recency-only JSONL path and provide explicit
-structural + similarity ranking, provenance/support-aware retrieval, consolidation and a defensible
-decay/forgetting policy. Preserve original occurrences; do not destructively erase evidence.
+F4-C must define the same held-out transfer tasks under two conditions:
 
-F4 Exit Gate remains an ablation/transfer criterion and is not satisfied by F4-A.
+1. memory available;
+2. explicit memory ablation.
+
+The split must prevent future-data leakage and must separate training/source runs from evaluation
+runs. F4 closes only if memory removal causes statistically detectable performance loss. A lookup
+benchmark alone is insufficient evidence of game-level benefit.
 
 Ainda não executar confirmatory seeds.
 Não habilitar evolution.
 Não conceder continuous autonomous authority.
-Não iniciar live Cortex execution para fechar F4-B.
+Não usar as seeds 20261101–20261110 para tuning do protocolo.
 
 ## Protocolo de retomada após interrupção
 

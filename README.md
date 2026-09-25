@@ -41,6 +41,7 @@ com experiência sem receber do programador a sequência de ações que constitu
 > **F3-B — Verification, credit and experiment ledger:** [docs/CORTEX_PHASE3_VERIFICATION_CREDIT_LEDGER.md](docs/CORTEX_PHASE3_VERIFICATION_CREDIT_LEDGER.md)
 > **F3-C — Paired shadow comparison / F3 closure:** [docs/CORTEX_PHASE3_PAIRED_SHADOW_COMPARISON.md](docs/CORTEX_PHASE3_PAIRED_SHADOW_COMPARISON.md)
 > **F4-A — Typed cognitive memory substrate:** [docs/CORTEX_PHASE4_MEMORY_SUBSTRATE.md](docs/CORTEX_PHASE4_MEMORY_SUBSTRATE.md)
+> **F4-B — Hybrid retrieval, consolidation and decay:** [docs/CORTEX_PHASE4_MEMORY_RETRIEVAL.md](docs/CORTEX_PHASE4_MEMORY_RETRIEVAL.md)
 > **F1-B — storage hardening:** [docs/CORTEX_F1_STORAGE_HARDENING.md](docs/CORTEX_F1_STORAGE_HARDENING.md)
 > **Dashboard / evidence scope:** [docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md](docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md)
 > **Dashboard / tmp hardening:** [docs/CORTEX_DASHBOARD_TMP_HARDENING.md](docs/CORTEX_DASHBOARD_TMP_HARDENING.md)
@@ -71,14 +72,15 @@ reproduziu 29/29 escolhas observadas e uma policy alternativa divergiu em 28/29,
 nenhuma arm e sem atribuir outcome contrafactual. Artifact F3-C SHA-256:
 13b00f67b7014a5f3af3bf068e9381bc563100c4a984688ca88ab23795ba5f01. Implementation:
 6a209527a14cc9a8eebb12c4d8ac403884fde281. Full gate: 1493 core/FLE + 2 PyTorch PASS.
-F4 está ACTIVE em F4-A / SHADOW. O substrato tipado contém 222 memórias duráveis e 759
-ocorrências: 54 episodic, 134 semantic com 566 supports (530 qualified), 1 procedural com 54
-outcomes executados e 33 counterexamples com 85 ocorrências. O batch canônico SHA-256
-cfe4472fc53d8f20f9ee4bf3e16951d8689d3bd7d381e7c5d663ae4f61637e71 é revalidado diretamente
-no SQLite; artifact F4-A SHA-256
-f45e31785c17cd6222a57937564036dbdd4976ee1d6376b61f340a9d70066228. Retrieval híbrido,
-consolidation/decay e ablação causal continuam abertos. Continuous authority e evolution permanecem
-OFF.
+F4 está ACTIVE em F4-B / SHADOW. F4-A estabeleceu 222 memórias duráveis / 759 ocorrências.
+F4-B adicionou retrieval híbrido estrutural+lexical, consolidation read-only e decay não destrutivo.
+O replay preservou exatamente o manifest do DB antes/depois
+(e6aa69816fe992f6b2a6afc8aff529fa5f1572106ca0939cee830af5a6cf3399), encontrou 70 semantic
+memories repetidas, 432 supports semânticos duplicados e 10 counterexamples repetidos. Artifact
+F4-B SHA-256: 5fc37b0cee5f121c5ff6b6054fc45f4b0a09bad851e34793958bdd3dc1c5a801.
+Implementation: a4ff558eccd9df0898fef4138a75fa1b55976a8d. Full gate: 1520 core/FLE + 2 PyTorch
+PASS. A ablação causal e transferência held-out continuam abertas; portanto o Exit Gate F4 ainda
+não está satisfeito. Continuous authority e evolution permanecem OFF.
 As seeds confirmatórias 20261101–20261110 permanecem congeladas e não executadas; serão usadas
 posteriormente para avaliação pareada do Cortex, sem tuning nelas.
 

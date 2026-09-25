@@ -7,7 +7,7 @@
 **Branch de transição:** `research/cortex-v1`
 **Baseline pré-Cortex:** `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 **Tag de baseline:** `cortex-pre-research-baseline-20260923`
-**Status:** F4 ACTIVE em F4-A / SHADOW — F3 COMPLETE; continuous authority e evolution OFF
+**Status:** F4 ACTIVE em F4-B / SHADOW — F3 COMPLETE; continuous authority e evolution OFF
 
 > Este arquivo é o contrato científico e operacional do Factorio AI Lab. Em caso de perda de
 > contexto de conversa, troca de operador, troca de modelo ou reinício do host, um operador sem
@@ -1499,7 +1499,7 @@ Nenhuma authority live contínua foi concedida.
 
 **Exit Gate F3:** PASS.
 
-**Status F4:** ACTIVE — F4-A Typed Cognitive Memory Substrate PASS parcial; authority permanece SHADOW.
+**Status F4:** ACTIVE — F4-B Hybrid Retrieval/Consolidation/Decay PASS parcial; authority permanece SHADOW.
 
 ---
 
@@ -1509,11 +1509,11 @@ Nenhuma authority live contínua foi concedida.
 - [x] episodic store;
 - [x] semantic store versionado;
 - [x] procedural skill library;
-- [ ] retrieval híbrido estrutural + similaridade;
+- [x] retrieval híbrido estrutural + similaridade;
 - [x] counterexamples como primeira classe;
 - [x] confidence/support/validity scope;
-- [ ] consolidation job;
-- [ ] forgetting/decay policy;
+- [x] consolidation job;
+- [x] forgetting/decay policy;
 - [ ] memória ablation experiment;
 - [ ] transferência entre seeds.
 
@@ -1543,11 +1543,34 @@ Ruff/compileall/JavaScript/TypeScript/Vite/whitespace PASS.
 **Decision F4-A:** PASS parcial. O substrato de memória está validado; retrieval,
 consolidation/decay, ablação causal e transferência continuam abertos.
 
-**Next F4-B:** retrieval híbrido estrutural + similaridade, consolidation e decay/forgetting policy,
-em SHADOW/replay e desacoplado do curriculum_runner.
+**F4-A transition target (completed by F4-B):** retrieval híbrido estrutural + similaridade,
+consolidation e decay/forgetting policy em SHADOW/replay e desacoplado do curriculum_runner.
 
 O Exit Gate F4 continua sendo causal: remover memória deve produzir perda estatisticamente
 detectável em transferência.
+
+
+**F4-B evidence:** docs/CORTEX_PHASE4_MEMORY_RETRIEVAL.md;
+runs/audits/cortex_f4b_memory_retrieval.json, SHA-256
+5fc37b0cee5f121c5ff6b6054fc45f4b0a09bad851e34793958bdd3dc1c5a801.
+
+O replay canônico manteve o memory DB logicamente idêntico antes/depois: 222 itens, 759 ocorrências,
+quick_check=ok e manifest SHA-256
+e6aa69816fe992f6b2a6afc8aff529fa5f1572106ca0939cee830af5a6cf3399.
+
+Quatro queries fixas provaram scope gating, reranking lexical dentro do mesmo stage, procedural
+retrieval por symptom e counterexample retrieval por stage+phase. Consolidation encontrou 70
+semantic items repetidos, 432 supports semânticos duplicados e 10 counterexamples repetidos sem
+apagar provenance. O decay baseline foi não destrutivo e support-protective.
+
+**Full gate F4-B:** 1520 core/FLE + 2 PyTorch PASS;
+Ruff/compileall/JavaScript/TypeScript/Vite/whitespace PASS.
+
+**Decision F4-B:** PASS parcial. Retrieval, consolidation e decay estão atendidos em SHADOW.
+Não há claim de melhoria de outcome nem de causalidade.
+
+**Next F4-C:** ablação causal de memória em tarefas de transferência held-out, com leakage control,
+paired evaluation e inferência estatística. O Exit Gate F4 permanece aberto.
 
 ---
 

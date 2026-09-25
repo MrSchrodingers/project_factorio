@@ -5,9 +5,9 @@
 **Repository:** `MrSchrodingers/project_factorio`
 **Live checkout:** `/srv/factorio-ai-lab`
 **Transition branch:** `research/cortex-v1`
-**Current scientific phase:** **F4 ACTIVE — F4-A TYPED COGNITIVE MEMORY SUBSTRATE**
+**Current scientific phase:** **F4 ACTIVE — F4-B HYBRID MEMORY RETRIEVAL**
 **F3:** COMPLETE / F3-C
-**F4:** ACTIVE / F4-A SHADOW
+**F4:** ACTIVE / F4-B SHADOW
 **Continuous autonomous authority:** OFF
 **Confirmatory seeds:** untouched / frozen
 **SentinelX context:** sxc_4557STHZ — always resume latest revision
@@ -1340,8 +1340,9 @@ Current UI/control-plane state:
 - phase3_checkpoint = F3-C;
 - F3 Exit Gate validated;
 - F4 ACTIVE in SHADOW;
-- phase4_checkpoint = F4-A;
-- typed cognitive-memory substrate validated;
+- phase4_checkpoint = F4-B;
+- F4-A typed cognitive-memory substrate validated;
+- F4-B hybrid retrieval/consolidation/decay validated;
 - continuous authority OFF;
 - evolution inactive+disabled;
 - confirmatory seeds frozen.
@@ -1355,23 +1356,28 @@ F4-A canonical memory state:
 - counterexample: 33 items / 85 occurrences;
 - total durable memory items: 222;
 - canonical batch occurrences: 759;
-- procedure success/failure: 45 / 9;
-- procedure mean reward: 0.8333333333333334;
-- Wilson lower-95: 0.7126323220121027;
-- memory SQLite quick_check=ok;
+- memory SQLite quick_check=ok.
+
+F4-B canonical retrieval state:
+
 - artifact:
-  runs/audits/cortex_f4a_memory_substrate_migration.json;
+  runs/audits/cortex_f4b_memory_retrieval.json;
 - artifact SHA-256:
-  f45e31785c17cd6222a57937564036dbdd4976ee1d6376b61f340a9d70066228;
-- canonical batch manifest SHA-256:
-  cfe4472fc53d8f20f9ee4bf3e16951d8689d3bd7d381e7c5d663ae4f61637e71.
+  5fc37b0cee5f121c5ff6b6054fc45f4b0a09bad851e34793958bdd3dc1c5a801;
+- memory DB manifest before=after:
+  e6aa69816fe992f6b2a6afc8aff529fa5f1572106ca0939cee830af5a6cf3399;
+- four canonical retrieval queries PASS;
+- repeated semantic items=70;
+- semantic duplicate support=432;
+- repeated counterexample items=10;
+- decay is non-destructive and support-protective;
+- no live authority.
 
-F4-A does not establish memory benefit. Retrieval, consolidation, decay and causal ablation remain
-open.
+F4-B does not establish causal memory benefit. Memory ablation and held-out transfer remain open.
 
-The last live Cortex mutation evidence remains F2-G4B. F3 and F4-A use no live executive authority.
+The last live Cortex mutation evidence remains F2-G4B. F3/F4-A/F4-B use no live executive authority.
 
-Next checkpoint: F4-B hybrid retrieval + consolidation + decay.
+Next checkpoint: F4-C causal memory ablation + transfer benchmark.
 
 ## 10.4 Important UI ambiguity
 
@@ -1776,7 +1782,7 @@ Published post-F2 observability hotfix:
 The dashboard main scope is global, not the historical exploratory baseline. A fresh operator
 should expect the Cortex control plane to show:
 
-- F4 ACTIVE / F4-A typed cognitive memory substrate;
+- F4 ACTIVE / F4-B hybrid memory retrieval;
 - F3 COMPLETE / F3-C paired shadow comparison;
 - F3 Exit Gate validated;
 - F2 COMPLETE / G5 remains the execution substrate;
@@ -2120,7 +2126,7 @@ A fresh operator should leave its first turn with one conclusion:
 
 After publication, this zero-context handoff should be discoverable through the immutable tag:
 
-`cortex-zero-context-handoff-v0.6.0`
+`cortex-zero-context-handoff-v0.7.0`
 
 A fresh chat should still revalidate the branch HEAD because later scientific work may legitimately
 advance beyond this tag.
@@ -2177,7 +2183,7 @@ estruturado contendo:
 - plano proposto para o próximo checkpoint com testes, evidências e critérios de aceite.
 
 Estado esperado do handoff publicado: F0 PASS, F1 PASS, F2 COMPLETE, F2-G4B e F2-G5 concluídas,
-F3 COMPLETE em F3-C, F4 ACTIVE em F4-A / SHADOW, evolution inactive+disabled, confirmatory seeds intactas e
+F3 COMPLETE em F3-C, F4 ACTIVE em F4-B / SHADOW, evolution inactive+disabled, confirmatory seeds intactas e
 resume.do_not_start_another_seed=true. Exatamente um live Option EXECUTE pós-G4A ocorreu em G4B e
 não deve ser repetido. Se o estado vivo divergir, audite commits/artifacts e siga o estado persistente
 mais recente.
