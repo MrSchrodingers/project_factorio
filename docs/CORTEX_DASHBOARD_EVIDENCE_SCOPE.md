@@ -216,7 +216,7 @@ At F4-B it shows:
 
 - current phase = F4-B SHADOW;
 - next checkpoint = F4-C;
-- current work = causal memory ablation / held-out transfer protocol;
+- current work = frozen F4-C causal protocol / paired evaluation harness validation;
 - evolution OFF;
 - no active executor;
 - no automatic seed launch.

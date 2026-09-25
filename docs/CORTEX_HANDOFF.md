@@ -60,6 +60,8 @@ Esse bloco é histórico e NÃO representa os serviços atuais.
 - active curriculum/open-play/evolution/Cortex runner processes: nenhum;
 - phase-state: F4 / active / F4-B;
 - next checkpoint: F4-C;
+- F4-C preregistration: frozen/eligible; execution_ready=false;
+- blocker: causal_transfer_evaluation_harness_not_validated;
 - F4 Exit Gate: aberto;
 - confirmatory seeds 20261101–20261110: todas pending, zero running/completed;
 - WORLD live: RCON conectado e 0 player-force entities no estado observado;
@@ -100,20 +102,33 @@ F4-B está validada em SHADOW:
 
 F4-B proves retrieval/consolidation/decay mechanics, not memory benefit.
 
-F4-C must define the same held-out transfer tasks under two conditions:
+A preregistration F4-C está congelada sem outcomes observados:
 
-1. memory available;
-2. explicit memory ablation.
+- implementation: fa2dff30ec717b18dc7412c2b1246cbb95e0dce8;
+- manifest: configs/cortex_f4c_causal_ablation_v1.json;
+- raw manifest SHA-256:
+  82253e71dc94cd5ad803e1340523d4053dfc0a11299848709e6f7dc8414f7c41;
+- freeze audit SHA-256:
+  6b818ae63d57062fd4a4f70a0a411f49a1356b053418d6b40d2e90ae95b80c81;
+- 4 task families;
+- 8 non-confirmatory pilot pairs: 20261201–20261208;
+- 20 held-out evaluation pairs: 20261221–20261240;
+- MEMORY ON vs MEMORY ABLATED with matched non-memory capabilities;
+- arm order counterbalanced 10/10;
+- primary endpoint J and delta_J fixed before outcomes;
+- SESOI delta_J=0.05;
+- exact paired sign-flip inference and inverted 95% CI;
+- minimum analyzable set 16 pairs overall / 3 per family;
+- missing is never zero;
+- evaluation-derived memory writes quarantined.
 
-The split must prevent future-data leakage and must separate training/source runs from evaluation
-runs. F4 closes only if memory removal causes statistically detectable performance loss. A lookup
-benchmark alone is insufficient evidence of game-level benefit.
+Isso resolve o blocker de preregistration, mas NÃO o experimento. O blocker atual é
+causal_transfer_evaluation_harness_not_validated: ainda é necessário provar checkpoint restore,
+arm isolation, budget parity e outcome extraction antes de qualquer pilot seed.
 
-A auditoria preliminar de elegibilidade mostrou que os seeds exploratórios 20261001–20261005 ainda
-não formam um benchmark causal adequado: repairs repetem essencialmente dois symptom/action
-families, e cada seed contém somente uma spatial demo com o mesmo start/goal e route_cost=8.25.
-Os 85 counterexamples globais / 33 signatures podem informar o design, mas 85 runs não equivalem a
-85 independent seeds. Ver docs/CORTEX_PHASE4_CAUSAL_ABLATION_PROTOCOL.md.
+A auditoria que motivou esse desenho permanece válida: 20261001–20261005 eram homogêneos demais e
+85 counterexample runs não equivalem a 85 independent seeds. Ver
+docs/CORTEX_PHASE4_CAUSAL_ABLATION_PROTOCOL.md.
 
 Ainda não executar confirmatory seeds.
 Não habilitar evolution.
@@ -134,8 +149,8 @@ Não inferir continuidade pela tela. Executar na ordem:
 8. conferir artifacts/docs/checkpoints;
 9. obedecer resume.do_not_start_another_seed.
 
-Em F4-B/F4-C, do_not_start_another_seed=true significa NÃO lançar seed até o protocolo causal estar
-congelado e elegível.
+Em F4-C, do_not_start_another_seed=true agora significa NÃO lançar seed até o paired evaluation
+harness estar implementado, testado, versionado e com execution_ready=true.
 
 O runtime científico histórico da corrected baseline permanece pinado em
 95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac. Source/dashboard podem avançar separadamente.

@@ -1573,17 +1573,21 @@ Não há claim de melhoria de outcome nem de causalidade.
 paired evaluation e inferência estatística. O Exit Gate F4 permanece aberto.
 
 
-**F4-C protocol readiness audit (2026-09-25): BLOCKED.** Os corrected exploratory seeds
-20261001–20261005 são independentes em sandbox, mas não têm diversidade suficiente para um claim
-causal de memória. Repairs repetem quase somente fuel_starved -> resupply e
-producer_output_unprocessed -> placement; cada seed possui uma única spatial demo com mesmo
-start/goal e route_cost=8.25. O corpus global de 85 counterexamples / 33 signatures / 52
-recorrências posteriores pode orientar pilotos, mas runs não substituem independent evaluation
-seeds. Contrato completo: docs/CORTEX_PHASE4_CAUSAL_ABLATION_PROTOCOL.md.
+**F4-C preregistration (2026-09-25): FROZEN / CAUSALLY ELIGIBLE.** A auditoria inicial mostrou
+que 20261001–20261005 não eram diversos o suficiente; por isso esses seeds não foram promovidos a
+benchmark causal. O protocolo executável agora congela quatro task families, 8 pares de pilot
+(20261201–20261208), 20 pares held-out (20261221–20261240), MEMORY ON versus MEMORY ABLATED,
+counterbalancing 10/10, budgets iguais, source-memory snapshot imutável, endpoint J, SESOI
+delta_J=0.05, teste pareado exato, CI 95%, missingness e technical-invalidity rules. Manifest:
+configs/cortex_f4c_causal_ablation_v1.json; frozen implementation:
+fa2dff30ec717b18dc7412c2b1246cbb95e0dce8. Contrato completo:
+docs/CORTEX_PHASE4_CAUSAL_ABLATION_PROTOCOL.md.
 
-O machine state expõe phase4_next_checkpoint=F4-C,
-phase4_exit_gate.causal_memory_ablation_transfer=false e blocker
-causal_transfer_protocol_not_frozen. Confirmatory seeds permanecem fora de tuning/pilot.
+O machine state continua phase=F4 / phase4_checkpoint=F4-B / phase4_next_checkpoint=F4-C e mantém
+phase4_exit_gate.causal_memory_ablation_transfer=false. A preregistration é
+phase4_causal_protocol.validated=true / eligible=true / execution_ready=false. O blocker atual é
+causal_transfer_evaluation_harness_not_validated. Confirmatory seeds 20261101–20261110 permanecem
+intactas e fora de tuning/pilot. Nenhum outcome F4-C foi observado.
 
 **Dashboard epistemic hardening:** implementation
 0c94090f91ad43c1a3a47a6bec25f377f9e56e00; full gate 1521 core/FLE + 2 PyTorch PASS mais

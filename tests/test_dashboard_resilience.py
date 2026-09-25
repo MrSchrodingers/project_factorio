@@ -163,6 +163,8 @@ def test_dashboard_separates_live_cortex_from_frozen_baseline_evidence() -> None
     assert "CORTEX SHADOW · nenhum executor controla o mundo" in app
     assert "IDLE INTENCIONAL · HISTÓRICO PRESERVADO" in app
     assert "F4-C — causal memory ablation + held-out transfer" in app
+    assert "F4-C · protocol frozen · harness validation" in app
+    assert "paired evaluation harness before any pilot seed" in app
     assert "CORTEX SHADOW · IDLE INTENCIONAL" in app
     assert "FROZEN · EVOLUTION OFF" in app
     assert "Último curriculum baseline preservado" in app

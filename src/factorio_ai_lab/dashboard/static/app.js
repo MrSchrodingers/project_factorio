@@ -2643,7 +2643,7 @@ function renderResearchCockpit() {
 
   const healthDetail = historical
     ? "evidência histórica congelada · nenhum processo G" + String(generation || "?")
-      + " está ativo · current Cortex work = F4-C protocol design"
+      + " está ativo · current Cortex work = F4-C paired harness validation"
     : running
       ? (baselineSeed !== null && baselineSeed !== undefined
         ? "seed " + String(baselineSeed) + " is collecting isolated evidence · "
@@ -4043,11 +4043,11 @@ function updateMission() {
     setText("missionTitle", "F4-C — causal memory ablation + held-out transfer");
     setText(
       "missionDetail",
-      "F4-B está concluído em SHADOW. O corpus exploratório atual não deve ser tratado como prova causal; nenhum agente está executando no Factorio."
+      "Pré-registro causal F4-C congelado e elegível. Nenhum outcome F4-C foi observado; validar o paired evaluation harness antes de qualquer pilot seed."
     );
-    setText("stageName", "F4-C · protocol design");
+    setText("stageName", "F4-C · protocol frozen · harness validation");
     setText("nextAction", operational.cortexPhase.resume?.action
-      || "freeze a diverse non-confirmatory held-out transfer benchmark");
+      || "validate paired evaluation harness before any pilot seed");
     $("stageProgressBar").style.width = "0%";
     setText("stageProgressText", String(blocker.status || "blocked").toUpperCase());
     setClassText("researchBadge", "CORTEX SHADOW · IDLE INTENCIONAL", "badge warn");
@@ -4271,7 +4271,7 @@ function updateKpis() {
   setText(
     "researchLoopDetail",
     operational.historicalEvidenceMode
-      ? "no active agent process · evolution OFF · F4-C protocol design is the current research task"
+      ? "no active agent process · evolution OFF · F4-C paired harness validation is the current research task"
       : baselineCompleted
         ? "seed " + String(context.seed ?? "--")
         + " closed · " + String(research.status || context.status || "--")

@@ -81,7 +81,8 @@ ESTADO ESPERADO DO HANDOFF, QUE DEVE SER REVALIDADO:
 - F4-B hybrid retrieval + consolidation + non-destructive decay PASS;
 - F4 Exit Gate ainda NÃO satisfeito;
 - next checkpoint = F4-C;
-- F4-C bloqueado até congelar benchmark de transferência não-confirmatório, diverso e held-out;
+- F4-C preregistration FROZEN/ELIGIBLE, mas execution_ready=false;
+- blocker esperado: causal_transfer_evaluation_harness_not_validated;
 - continuous autonomous authority OFF;
 - factorio-ai-evolution inactive+disabled;
 - confirmatory seeds 20261101–20261110 intactas/pending;
@@ -118,20 +119,40 @@ Auditoria preliminar:
 - corpus global: 85 counterexamples / 33 signatures / 52 recorrências posteriores;
 - 85 runs não equivalem a 85 independent seeds.
 
+F4-C PREREGISTRATION ESPERADA:
+- frozen implementation: fa2dff30ec717b18dc7412c2b1246cbb95e0dce8;
+- manifest: configs/cortex_f4c_causal_ablation_v1.json;
+- raw manifest SHA-256:
+  82253e71dc94cd5ad803e1340523d4053dfc0a11299848709e6f7dc8414f7c41;
+- freeze audit SHA-256:
+  6b818ae63d57062fd4a4f70a0a411f49a1356b053418d6b40d2e90ae95b80c81;
+- 4 task families;
+- pilot seeds 20261201–20261208, 8 pairs;
+- held-out evaluation seeds 20261221–20261240, 20 pairs;
+- confirmatory 20261101–20261110 remain excluded;
+- MEMORY ON vs MEMORY ABLATED;
+- counterbalance 10/10;
+- primary J, delta_J, SESOI=0.05, exact paired test and 95% CI frozen;
+- minimum analyzable 16 pairs overall and 3/family;
+- missing != zero;
+- no F4-C outcomes observed.
+
 PRÓXIMO TRABALHO AUTORIZADO:
-F4-C protocol design / preregistration.
+F4-C paired evaluation harness.
 
 Você deve:
-1. auditar novamente a elegibilidade dos dados;
-2. definir source-memory vs held-out evaluation seeds/worlds;
-3. definir pares MEMORY ON vs MEMORY ABLATED no mesmo world/checkpoint;
-4. bloquear leakage temporal/cross-seed;
-5. manter tools/action surface/compute budgets equivalentes;
-6. congelar task families e critérios de inclusão/exclusão;
-7. definir primary endpoint J, effect size, CI e paired statistical test antes de avaliar;
-8. definir pilot não-confirmatório se necessário para variância/sample size;
-9. gerar protocol manifest imutável e testes;
-10. somente depois considerar novos non-confirmatory evaluation seeds.
+1. reconstruir task specs deterministicamente do manifest congelado;
+2. implementar snapshot/checkpoint digest e restore verification;
+3. provar equivalência de world state antes de cada arm;
+4. congelar e verificar o source-memory manifest em ambos os arms;
+5. implementar MEMORY ABLATED como retrieval-only ablation;
+6. provar tool/action surface e budgets equivalentes;
+7. quarentenar qualquer memory write derivado de pilot/evaluation;
+8. implementar outcome extraction idêntico e recomputável;
+9. implementar J, delta_J, exact paired test, CI e artifact schema sem alterar o preregistro;
+10. manter execution_ready=false até focused/full gates passarem;
+11. somente depois considerar os pilot seeds 20261201–20261208;
+12. não iniciar held-out evaluation antes de validar pilot instrumentation sem mudar o protocolo.
 
 NÃO:
 - habilite evolution;
@@ -146,8 +167,8 @@ NÃO:
 NO PRIMEIRO TURNO:
 entregue reconstrução curta porém rigorosa de Git/runtime/services/phase/artifacts/confirmatory/WORLD
 vs CURRENT vs HISTORICAL, divergências, riscos e plano F4-C. Se tudo estiver consistente, prossiga no
-mesmo trabalho para preparar o protocolo F4-C sem pedir confirmações desnecessárias. Pare antes de
-executar seeds caso o protocolo ainda não esteja formalmente congelado e elegível.
+mesmo trabalho para implementar/validar o paired harness sem pedir confirmações desnecessárias.
+Pare antes de executar seeds enquanto phase4_causal_protocol.execution_ready=false.
 
 Ao fechar checkpoint:
 focused tests -> full core/FLE -> PyTorch -> Ruff -> compileall -> JS -> TS/Vite -> whitespace ->

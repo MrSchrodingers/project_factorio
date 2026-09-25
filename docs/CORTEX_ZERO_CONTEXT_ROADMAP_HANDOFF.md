@@ -64,7 +64,10 @@ Expected scientific state:
 - phase4_exit_gate.hybrid_retrieval_consolidation_decay=true;
 - phase4_exit_gate.causal_memory_ablation_transfer=false;
 - phase4_exit_gate.validated=false;
-- phase4_blocker.code=causal_transfer_protocol_not_frozen;
+- phase4_causal_protocol.validated=true;
+- phase4_causal_protocol.eligible=true;
+- phase4_causal_protocol.execution_ready=false;
+- phase4_blocker.code=causal_transfer_evaluation_harness_not_validated;
 - resume.do_not_start_another_seed=true.
 
 Machine-readable state outranks remembered conversation state.
@@ -125,7 +128,7 @@ The UI is a projection; Git + persisted artifacts + phase-state are authority.
 Canonical ready-to-paste prompt:
 docs/CORTEX_NEXT_SESSION_PROMPT.md
 
-Only after reconstruction should work continue on F4-C protocol design. Do not launch a seed merely
+Only after reconstruction should work continue on the F4-C paired evaluation harness. Do not launch a seed merely
 because old research artifacts say learning/evaluating.
 
 ---
@@ -1355,7 +1358,7 @@ evidence mode and explicitly separates:
 3. HISTORICAL EVIDENCE.
 
 In this mode G97 is historical/frozen, curriculum/UCB/model/timeline cards are historical, evolution
-is OFF, the top mission comes from F4 phase-state and F4-C protocol design is current work.
+is OFF, the top mission comes from F4 phase-state and F4-C paired harness validation is current work.
 
 A connected zero-entity world is labelled WORLD LIVE empty. No complete physical entity snapshot
 exists for the corrected exploratory seeds, so the UI must not invent a historical factory scene
@@ -2043,7 +2046,9 @@ At this checkpoint:
 - F4-B hybrid retrieval/consolidation/non-destructive decay PASS;
 - F4 Exit Gate OPEN;
 - F4-C next checkpoint, currently BLOCKED/PRE-REGISTRATION;
-- blocker = causal_transfer_protocol_not_frozen;
+- F4-C preregistration = frozen/eligible;
+- execution_ready = false;
+- blocker = causal_transfer_evaluation_harness_not_validated;
 - continuous autonomous authority OFF;
 - evolution inactive+disabled;
 - confirmatory seeds 20261101–20261110 untouched/pending;
@@ -2103,3 +2108,67 @@ Use that document as the copy/paste prompt. Its required behavior is:
 - do not launch evaluation seeds until protocol is frozen and eligible;
 - do not use confirmatory seeds for tuning;
 - do not enable evolution or continuous authority.
+
+## 33. F4-C frozen preregistration update — 2026-09-25
+
+The F4-C protocol-design blocker has been resolved without running any F4-C outcome-producing seed.
+
+Frozen implementation:
+
+fa2dff30ec717b18dc7412c2b1246cbb95e0dce8
+
+Tracked manifest:
+
+configs/cortex_f4c_causal_ablation_v1.json
+
+Raw manifest SHA-256:
+
+82253e71dc94cd5ad803e1340523d4053dfc0a11299848709e6f7dc8414f7c41
+
+Canonical manifest SHA-256:
+
+e6633dccc851470a6943ae426b767cb1c039cedb1bede23dc9e6f1c27c94bdac
+
+Freeze audit SHA-256:
+
+6b818ae63d57062fd4a4f70a0a411f49a1356b053418d6b40d2e90ae95b80c81
+
+Frozen design:
+
+- 4 transfer families;
+- 8 non-confirmatory pilot pairs, seeds 20261201–20261208;
+- 20 held-out evaluation pairs, seeds 20261221–20261240;
+- confirmatory seeds 20261101–20261110 remain untouched and excluded;
+- MEMORY ON versus retrieval-only MEMORY ABLATED;
+- matched non-memory tools, feasibility, action surface and budgets;
+- explicit 10/10 arm-order counterbalancing;
+- source memory frozen at the F4-B 222-item / 759-occurrence snapshot;
+- evaluation-derived writes quarantined;
+- primary endpoint J frozen before outcomes;
+- primary contrast delta_J;
+- SESOI delta_J=0.05;
+- exact paired sign-flip inference and inverted two-sided 95% CI;
+- minimum analyzable set 16 pairs overall and 3/family;
+- technical invalidity and interruption rules predeclared;
+- missing is never zero.
+
+Machine state after freeze:
+
+- phase=F4;
+- phase4_checkpoint=F4-B;
+- phase4_next_checkpoint=F4-C;
+- phase4_causal_protocol.validated=true;
+- phase4_causal_protocol.eligible=true;
+- phase4_causal_protocol.execution_ready=false;
+- phase4_exit_gate.causal_memory_ablation_transfer=false;
+- phase4_exit_gate.validated=false;
+- blocker=causal_transfer_evaluation_harness_not_validated;
+- resume.do_not_start_another_seed=true.
+
+Therefore the next legitimate work is no longer protocol design. It is implementation and validation
+of the paired evaluation harness: checkpoint digest/restore, arm isolation, memory-manifest pinning,
+retrieval-only ablation, matched budgets, memory-write quarantine, identical outcome extraction and
+fully recomputable J/delta_J artifacts.
+
+No pilot seed is authorized until that harness is versioned, tested and machine-gated as
+execution_ready=true. F4 remains ACTIVE and no causal memory-benefit claim has been made.

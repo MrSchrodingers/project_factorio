@@ -82,9 +82,11 @@ memories repetidas, 432 supports semânticos duplicados e 10 counterexamples rep
 F4-B SHA-256: 5fc37b0cee5f121c5ff6b6054fc45f4b0a09bad851e34793958bdd3dc1c5a801.
 Implementation: a4ff558eccd9df0898fef4138a75fa1b55976a8d. Full gate: 1520 core/FLE + 2 PyTorch
 PASS. A ablação causal e transferência held-out continuam abertas; portanto o Exit Gate F4 ainda
-não está satisfeito. F4-C está em PRE-REGISTRATION/BLOCKED: os cinco seeds exploratórios corrigidos
-são demasiado homogêneos para sustentar um claim causal de memória, e as seeds confirmatórias
-20261101–20261110 permanecem congeladas. Continuous authority e evolution permanecem OFF.
+não está satisfeito. O protocolo F4-C agora está FROZEN/CAUSALLY ELIGIBLE em
+fa2dff30ec717b18dc7412c2b1246cbb95e0dce8: 4 task families, 8 pares de pilot e 20 pares held-out,
+com MEMORY ON versus MEMORY ABLATED, endpoint/inferência pré-registrados e confirmatory seeds
+20261101–20261110 ainda congeladas. A execução permanece bloqueada até validar o paired evaluation
+harness; nenhum outcome F4-C foi observado. Continuous authority e evolution permanecem OFF.
 
 O hardening de UI/status 0c94090f91ad43c1a3a47a6bec25f377f9e56e00 separa explicitamente
 WORLD LIVE, CORTEX CURRENT CONTROL PLANE e HISTORICAL EVIDENCE. Sem runner ativo, G97,
