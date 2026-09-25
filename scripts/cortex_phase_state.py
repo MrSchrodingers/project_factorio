@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -13,6 +14,14 @@ def _load(path: Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise TypeError(f"{path} must contain a JSON object")
     return value
+
+
+def _sha256(path: Path) -> str:
+    digest=hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda:handle.read(1024*1024),b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _seed_record(
@@ -271,6 +280,187 @@ def build_phase_state(
         and phase2_authority_dry_run_payload.get(
             "live_option_execute_authorized"
         ) is False
+    )
+
+    phase2_live_option_canary_path=(
+        state_root
+        / "runs"
+        / "audits"
+        / "cortex_f2g4b_option_live_canary.json"
+    )
+    phase2_live_option_canary=phase2_live_option_canary_path.exists()
+    phase2_live_option_canary_payload: dict[str, Any]={}
+    phase2_live_option_canary_error: str | None=None
+    if phase2_live_option_canary:
+        try:
+            phase2_live_option_canary_payload=_load(
+                phase2_live_option_canary_path
+            )
+        except (OSError,json.JSONDecodeError,TypeError) as exc:
+            phase2_live_option_canary_error=f"{type(exc).__name__}: {exc}"
+
+    phase2_live_option_doc_path=(
+        state_root
+        / "docs"
+        / "CORTEX_PHASE2_LIVE_OPTION_CANARY.md"
+    )
+    phase2_live_option_doc=phase2_live_option_doc_path.exists()
+
+    phase2_live_temporal_audit_path=(
+        state_root
+        / "runs"
+        / "audits"
+        / "cortex_f2g4b_temporal_audit.json"
+    )
+    phase2_live_temporal_audit=phase2_live_temporal_audit_path.exists()
+    phase2_live_temporal_audit_payload: dict[str, Any]={}
+    phase2_live_temporal_audit_error: str | None=None
+    if phase2_live_temporal_audit:
+        try:
+            phase2_live_temporal_audit_payload=_load(
+                phase2_live_temporal_audit_path
+            )
+        except (OSError,json.JSONDecodeError,TypeError) as exc:
+            phase2_live_temporal_audit_error=f"{type(exc).__name__}: {exc}"
+
+    live_result=phase2_live_option_canary_payload.get(
+        "option_execution_result"
+    )
+    if not isinstance(live_result,dict):
+        live_result={}
+    live_action=live_result.get("action_result")
+    if not isinstance(live_action,dict):
+        live_action={}
+    live_postconditions=live_action.get("postconditions")
+    if not isinstance(live_postconditions,list):
+        live_postconditions=[]
+    live_hard_postconditions_satisfied=bool(live_postconditions) and all(
+        isinstance(row,dict)
+        and (
+            row.get("hard") is not True
+            or row.get("state")=="satisfied"
+        )
+        for row in live_postconditions
+    )
+    live_grant=phase2_live_option_canary_payload.get("grant")
+    if not isinstance(live_grant,dict):
+        live_grant={}
+    live_scope=live_grant.get("scope")
+    if not isinstance(live_scope,dict):
+        live_scope={}
+    live_lease=phase2_live_option_canary_payload.get("world_lease")
+    if not isinstance(live_lease,dict):
+        live_lease={}
+    live_lease_before=phase2_live_option_canary_payload.get(
+        "world_lease_before_execute"
+    )
+    if not isinstance(live_lease_before,dict):
+        live_lease_before={}
+    live_ledger_before=phase2_live_option_canary_payload.get(
+        "ledger_entry_before"
+    )
+    if not isinstance(live_ledger_before,dict):
+        live_ledger_before={}
+    live_ledger_after=phase2_live_option_canary_payload.get(
+        "ledger_entry_after"
+    )
+    if not isinstance(live_ledger_after,dict):
+        live_ledger_after={}
+    live_final=phase2_live_option_canary_payload.get("measurement_final")
+    if not isinstance(live_final,dict):
+        live_final={}
+    live_evolution_after_lease=phase2_live_option_canary_payload.get(
+        "evolution_after_lease"
+    )
+    if not isinstance(live_evolution_after_lease,dict):
+        live_evolution_after_lease={}
+    live_evolution_before_execute=phase2_live_option_canary_payload.get(
+        "evolution_before_execute"
+    )
+    if not isinstance(live_evolution_before_execute,dict):
+        live_evolution_before_execute={}
+    live_artifact_sha256=(
+        _sha256(phase2_live_option_canary_path)
+        if phase2_live_option_canary
+        and phase2_live_option_canary_error is None
+        else None
+    )
+    temporal_claim=phase2_live_temporal_audit_payload.get("temporal_claim")
+    if not isinstance(temporal_claim,dict):
+        temporal_claim={}
+
+    live_scope_id=live_scope.get("world_lease_id")
+    live_lease_scope_id=live_lease.get("scope_id")
+    live_lease_before_scope_id=live_lease_before.get("scope_id")
+    live_grant_id=live_grant.get("grant_id")
+    live_ledger_after_grant_id=live_ledger_after.get("grant_id")
+    live_consumed_at=live_ledger_after.get("consumed_at")
+    live_processor_output=live_final.get("processor_output")
+    live_coverage=live_final.get("physical_processing_coverage")
+    live_producers=live_final.get("producers_reaching_processor")
+    live_seed=phase2_live_option_canary_payload.get("seed")
+
+    phase2_live_option_canary_valid=(
+        phase2_live_option_doc
+        and phase2_live_option_canary
+        and phase2_live_option_canary_error is None
+        and phase2_live_temporal_audit
+        and phase2_live_temporal_audit_error is None
+        and phase2_live_option_canary_payload.get("status")=="completed"
+        and phase2_live_option_canary_payload.get("confirmatory_seed") is False
+        and isinstance(live_seed,int)
+        and live_seed not in range(20261101,20261111)
+        and phase2_live_option_canary_payload.get("automatic_retry") is False
+        and phase2_live_option_canary_payload.get("option_execution_attempts")==1
+        and phase2_live_option_canary_payload.get("continuous_authority") is False
+        and phase2_live_option_canary_payload.get("failure") is None
+        and phase2_live_option_canary_payload.get("functional_accept") is True
+        and phase2_live_option_canary_payload.get("transaction_committed") is True
+        and live_result.get("status")=="accepted"
+        and live_result.get("changed_world") is True
+        and live_action.get("status")=="accepted"
+        and live_hard_postconditions_satisfied
+        and isinstance(live_processor_output,(int,float))
+        and not isinstance(live_processor_output,bool)
+        and float(live_processor_output)>0
+        and isinstance(live_coverage,(int,float))
+        and not isinstance(live_coverage,bool)
+        and float(live_coverage)>0
+        and isinstance(live_producers,(int,float))
+        and not isinstance(live_producers,bool)
+        and float(live_producers)>0
+        and live_scope.get("max_executions")==1
+        and isinstance(live_scope_id,str)
+        and bool(live_scope_id)
+        and live_scope_id==live_lease_scope_id
+        and live_scope_id==live_lease_before_scope_id
+        and isinstance(live_lease.get("lease_id"),str)
+        and bool(live_lease.get("lease_id"))
+        and live_lease.get("lease_id")==live_lease_before.get("lease_id")
+        and live_lease_before.get("status")=="active"
+        and live_ledger_before.get("consumed_at") is None
+        and live_ledger_before.get("consume_result") is None
+        and isinstance(live_consumed_at,str)
+        and bool(live_consumed_at)
+        and live_ledger_after.get("consume_result")
+        =="reserved_before_runtime_mutation"
+        and live_grant_id==live_ledger_after_grant_id
+        and live_result.get("grant_consumed_at")==live_consumed_at
+        and live_result.get("grant_consume_result")
+        =="reserved_before_runtime_mutation"
+        and live_result.get("plan_digest")==live_grant.get("plan_digest")
+        and live_evolution_after_lease
+        =={"active":"inactive","enabled":"disabled"}
+        and live_evolution_before_execute
+        =={"active":"inactive","enabled":"disabled"}
+        and phase2_live_temporal_audit_payload.get("live_artifact_sha256")
+        ==live_artifact_sha256
+        and phase2_live_temporal_audit_payload.get("live_run_id")
+        ==phase2_live_option_canary_payload.get("run_id")
+        and phase2_live_temporal_audit_payload.get("classification")
+        =="functional_accept_tick_epoch_reset_explained"
+        and temporal_claim.get("old_artifact_rewritten") is False
+        and temporal_claim.get("second_live_canary_executed") is False
     )
     phase2_delivery_actuator_canary_path=(
         state_root
@@ -534,6 +724,7 @@ def build_phase_state(
 
     phase2_checkpoint=None
     for checkpoint,enabled in (
+        ("F2-G4B",phase2_live_option_canary_valid),
         ("F2-G4A",phase2_persistent_authority_valid),
         ("F2-G3",phase2_option_execution),
         ("F2-G2",phase2_options),
@@ -657,6 +848,73 @@ def build_phase_state(
                 )
             ),
             "read_error":phase2_authority_dry_run_error,
+        },
+        "phase2_live_option_canary":{
+            "path":str(phase2_live_option_canary_path),
+            "exists":phase2_live_option_canary,
+            "document_path":str(phase2_live_option_doc_path),
+            "document_exists":phase2_live_option_doc,
+            "validated":phase2_live_option_canary_valid,
+            "status":phase2_live_option_canary_payload.get("status"),
+            "run_id":phase2_live_option_canary_payload.get("run_id"),
+            "seed":live_seed,
+            "confirmatory_seed":phase2_live_option_canary_payload.get(
+                "confirmatory_seed"
+            ),
+            "code_commit":(
+                phase2_live_option_canary_payload.get("code_revision") or {}
+            ).get("commit"),
+            "automatic_retry":phase2_live_option_canary_payload.get(
+                "automatic_retry"
+            ),
+            "option_execution_attempts":(
+                phase2_live_option_canary_payload.get(
+                    "option_execution_attempts"
+                )
+            ),
+            "continuous_authority":phase2_live_option_canary_payload.get(
+                "continuous_authority"
+            ),
+            "grant_id":live_grant_id,
+            "grant_scope":live_scope,
+            "world_lease":live_lease,
+            "world_lease_before_execute":live_lease_before,
+            "ledger_consumed_at":live_consumed_at,
+            "ledger_consume_result":live_ledger_after.get(
+                "consume_result"
+            ),
+            "transaction_committed":phase2_live_option_canary_payload.get(
+                "transaction_committed"
+            ),
+            "rollback_observed":phase2_live_option_canary_payload.get(
+                "rollback_observed"
+            ),
+            "action_status":live_result.get("status"),
+            "changed_world":live_result.get("changed_world"),
+            "functional_accept":phase2_live_option_canary_payload.get(
+                "functional_accept"
+            ),
+            "sustained_operation":phase2_live_option_canary_payload.get(
+                "sustained_operation"
+            ),
+            "sustainability_classification":(
+                phase2_live_option_canary_payload.get(
+                    "sustainability_classification"
+                )
+            ),
+            "tick_measurement_status":live_result.get(
+                "tick_measurement_status"
+            ),
+            "observed_ticks":live_result.get("observed_ticks"),
+            "candidate_after":live_final,
+            "temporal_audit_path":str(phase2_live_temporal_audit_path),
+            "temporal_audit_exists":phase2_live_temporal_audit,
+            "temporal_audit_classification":(
+                phase2_live_temporal_audit_payload.get("classification")
+            ),
+            "live_artifact_sha256":live_artifact_sha256,
+            "read_error":phase2_live_option_canary_error,
+            "temporal_audit_read_error":phase2_live_temporal_audit_error,
         },
         "phase2_delivery_actuator_canary":{
             "path":str(phase2_delivery_actuator_canary_path),

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -1046,3 +1047,117 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
     assert authority["world_mutation"] is False
     assert authority["continuous_authority"] is False
     assert authority["live_option_execute_authorized"] is False
+
+    (docs/"CORTEX_PHASE2_LIVE_OPTION_CANARY.md").write_text(
+        "# F2-G4B\n"
+    )
+    live_payload={
+        "status":"completed",
+        "run_id":"f2g4b-test",
+        "seed":424242,
+        "confirmatory_seed":False,
+        "code_revision":{"commit":"g4b-sha","dirty":False},
+        "automatic_retry":False,
+        "option_execution_attempts":1,
+        "continuous_authority":False,
+        "failure":None,
+        "functional_accept":True,
+        "transaction_committed":True,
+        "rollback_observed":False,
+        "sustained_operation":False,
+        "sustainability_classification":"functional_accept_terminal_no_fuel",
+        "grant":{
+            "grant_id":"grant-g4b",
+            "plan_digest":"digest-g4b",
+            "scope":{
+                "experiment_id":"f2g4b-test",
+                "world_lease_id":"arena:run:lease",
+                "option_kind":"establish_processing_chain",
+                "max_executions":1,
+            },
+        },
+        "world_lease":{
+            "status":"active",
+            "lease_id":"lease",
+            "scope_id":"arena:run:lease",
+        },
+        "world_lease_before_execute":{
+            "status":"active",
+            "lease_id":"lease",
+            "scope_id":"arena:run:lease",
+        },
+        "ledger_entry_before":{
+            "grant_id":"grant-g4b",
+            "consumed_at":None,
+            "consume_result":None,
+        },
+        "ledger_entry_after":{
+            "grant_id":"grant-g4b",
+            "consumed_at":"2026-09-25T01:00:00+00:00",
+            "consume_result":"reserved_before_runtime_mutation",
+        },
+        "evolution_after_lease":{
+            "active":"inactive",
+            "enabled":"disabled",
+        },
+        "evolution_before_execute":{
+            "active":"inactive",
+            "enabled":"disabled",
+        },
+        "measurement_final":{
+            "physical_processing_coverage":1.0,
+            "processor_exists":True,
+            "processor_output":13.0,
+            "processor_status":"no_fuel",
+            "producers_reaching_processor":1,
+        },
+        "option_execution_result":{
+            "status":"accepted",
+            "changed_world":True,
+            "plan_digest":"digest-g4b",
+            "grant_consumed_at":"2026-09-25T01:00:00+00:00",
+            "grant_consume_result":"reserved_before_runtime_mutation",
+            "tick_measurement_status":"invalid_rewound",
+            "observed_ticks":None,
+            "action_result":{
+                "status":"accepted",
+                "postconditions":[
+                    {"name":"reach","hard":True,"state":"satisfied"},
+                    {"name":"exists","hard":True,"state":"satisfied"},
+                    {"name":"output","hard":True,"state":"satisfied"},
+                ],
+            },
+        },
+    }
+    live_path=audits/"cortex_f2g4b_option_live_canary.json"
+    live_path.write_text(json.dumps(live_payload)+"\n")
+    live_sha=hashlib.sha256(live_path.read_bytes()).hexdigest()
+    (audits/"cortex_f2g4b_temporal_audit.json").write_text(
+        json.dumps({
+            "live_artifact_sha256":live_sha,
+            "live_run_id":"f2g4b-test",
+            "classification":"functional_accept_tick_epoch_reset_explained",
+            "temporal_claim":{
+                "old_artifact_rewritten":False,
+                "second_live_canary_executed":False,
+            },
+        })+"\n"
+    )
+
+    g4b=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert g4b["phase2_checkpoint"] == "F2-G4B"
+    live=g4b["phase2_live_option_canary"]
+    assert live["validated"] is True
+    assert live["functional_accept"] is True
+    assert live["transaction_committed"] is True
+    assert live["option_execution_attempts"] == 1
+    assert live["automatic_retry"] is False
+    assert live["continuous_authority"] is False
+    assert live["ledger_consumed_at"] is not None
+    assert live["temporal_audit_classification"] == (
+        "functional_accept_tick_epoch_reset_explained"
+    )
+    assert live["sustained_operation"] is False

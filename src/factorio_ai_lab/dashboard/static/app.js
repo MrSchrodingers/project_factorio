@@ -1754,17 +1754,20 @@ function renderExperimentContext() {
     const optionCompositionPhase = phase2Checkpoint === "F2-G2";
     const optionExecutionPhase = phase2Checkpoint === "F2-G3";
     const persistentAuthorityPhase = phase2Checkpoint === "F2-G4A";
+    const liveOptionCanaryPhase = phase2Checkpoint === "F2-G4B";
     const useDeliveryCanaryEvidence = deliveryActuatorCanary
       || runnerIndependencePhase
       || optionCompositionPhase
       || optionExecutionPhase
       || persistentAuthorityPhase;
     const useFunctionalCanaryEvidence = functionalCanary || deliveryActuatorPhase;
-    const canary = useDeliveryCanaryEvidence
+    const canary = liveOptionCanaryPhase
+      ? (cortexPhase.phase2_live_option_canary || {})
+      : (useDeliveryCanaryEvidence
       ? (cortexPhase.phase2_delivery_actuator_canary || {})
       : (useFunctionalCanaryEvidence
         ? (cortexPhase.phase2_functional_canary || {})
-        : (cortexPhase.phase2_canary || {}));
+        : (cortexPhase.phase2_canary || {})));
     const candidate = canary.candidate_after || {};
     const controlledExecution = phase2Checkpoint.startsWith("F2-E")
       || functionalCanary;
@@ -1786,6 +1789,9 @@ function renderExperimentContext() {
       phaseBadge = configured
         ? "F1-B · " + completed + "/" + configured
         : "F1-B · seed " + seed;
+    } else if (liveOptionCanaryPhase) {
+      phaseTitle = "F2-G4B · live Option functional accept · epoch auditado";
+      phaseBadge = "F2-G4B · one-shot live PASS · sustentabilidade aberta";
     } else if (persistentAuthorityPhase) {
       phaseTitle = "F2-G4A · persistent one-shot authority · DRY-RUN";
       phaseBadge = "F2-G4A · durable ledger · no live EXECUTE";
@@ -1836,11 +1842,13 @@ function renderExperimentContext() {
 
     setText(
       "cortexCanaryLabel",
-      useDeliveryCanaryEvidence
+      liveOptionCanaryPhase
+        ? "F2-G4B · CANÁRIO LIVE VIA OPTION"
+        : (useDeliveryCanaryEvidence
         ? "F2-F4C · ÚLTIMO CANÁRIO FUNCIONAL"
         : (useFunctionalCanaryEvidence
           ? "F2-F3 · ÚLTIMO CANÁRIO FUNCIONAL"
-          : "F2-E · TRANSAÇÃO CONTROLADA")
+          : "F2-E · TRANSAÇÃO CONTROLADA"))
     );
 
     if (canary.exists) {
@@ -1882,7 +1890,9 @@ function renderExperimentContext() {
       );
       setText(
         "cortexAuthorityDetail",
-        persistentAuthorityPhase
+        liveOptionCanaryPhase
+          ? "F2-G4B: uma única Option live aceita sob grant persistente + WorldLease atestado; temporal epoch auditado · continuous authority OFF."
+          : (persistentAuthorityPhase
           ? "F2-G4A: grant one-shot persistente/restart-safe validado em dry-run; live Option EXECUTE bloqueado · continuous authority OFF."
           : (optionExecutionPhase
             ? "F2-G3 validado apenas em fake/replay; live Option EXECUTE bloqueado · continuous authority OFF."
@@ -1893,7 +1903,7 @@ function renderExperimentContext() {
             : ("EXECUTE concedido somente ao canário registrado"
               + " · continuous authority "
               + (canary.continuous_authority ? "ON" : "OFF")
-              + " · baseline/holdout separados."))))
+              + " · baseline/holdout separados.")))))
       );
     } else {
       setText("cortexCanaryStatus", "canário não executado");
