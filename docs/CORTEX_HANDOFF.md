@@ -1,5 +1,10 @@
 # Cortex Research — Handoff Operacional
 
+> **Chat/modelo com zero contexto:** começar por
+> `docs/CORTEX_ZERO_CONTEXT_ROADMAP_HANDOFF.md`. Ele contém a fundamentação teórica, roadmap
+> F0–F12, fontes de verdade, estado operacional, interpretação do dashboard, protocolo
+> SentinelX/GitHub e o plano autorizado F2-G4A.
+
 **Documento de continuidade curta.** O contrato completo está em
 `docs/CORTEX_RESEARCH_PROGRAM.md`.
 

@@ -8,8 +8,9 @@ A pergunta científica é se um agente consegue **aprender a projetar, operar, r
 otimizar fábricas**, formar memória reutilizável, transferir estratégias entre mundos e melhorar
 com experiência sem receber do programador a sequência de ações que constitui a solução.
 
+> **START HERE — zero-context roadmap/handoff:** [docs/CORTEX_ZERO_CONTEXT_ROADMAP_HANDOFF.md](docs/CORTEX_ZERO_CONTEXT_ROADMAP_HANDOFF.md)
 > **Documento canônico:** [docs/CORTEX_RESEARCH_PROGRAM.md](docs/CORTEX_RESEARCH_PROGRAM.md)
-> **Handoff operacional:** [docs/CORTEX_HANDOFF.md](docs/CORTEX_HANDOFF.md)
+> **Handoff operacional curto:** [docs/CORTEX_HANDOFF.md](docs/CORTEX_HANDOFF.md)
 > **Diagnóstico da arquitetura anterior:** [docs/HANDOFF-CORTEX.md](docs/HANDOFF-CORTEX.md)
 > **F1 — integridade e isolamento:** [docs/CORTEX_PHASE1_INTEGRITY.md](docs/CORTEX_PHASE1_INTEGRITY.md)
 > **F1-B — protocolo da baseline:** [docs/CORTEX_PHASE1_BASELINE_PROTOCOL.md](docs/CORTEX_PHASE1_BASELINE_PROTOCOL.md)
@@ -157,7 +158,7 @@ trocado atomicamente; estado mutável permanece em /srv/factorio-ai-lab/runs.
 O dashboard possui runtime separado em /srv/factorio-ai-dashboard-runtime. Durante F1-B ele pode
 avançar sem alterar o runtime científico congelado da baseline. O evidence scope é declarado por
 FACTORIO_AI_DASHBOARD_SCOPE; mundo físico e evidência experimental são rotulados separadamente.
-Dashboard F1-B atualmente deployado em 8ce05ba3; a baseline científica permanece pinada em 95c34a53.
+Dashboard/source F2-G3 estava deployado em 5b3fb7db no checkpoint anterior; a baseline científica permanece pinada em 95c34a53. Sempre revalidar BUILD_INFO e /api/context antes de agir.
 
 ## Estrutura
 

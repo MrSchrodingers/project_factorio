@@ -7,12 +7,13 @@
 **Branch de transição:** `research/cortex-v1`
 **Baseline pré-Cortex:** `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 **Tag de baseline:** `cortex-pre-research-baseline-20260923`
-**Status:** Fase 0 concluída — próxima: Fase 1, Instrumentação, isolamento e baseline corrigida
+**Status:** F2-G3 concluída — F2-G4A autorizada; F2 ativa; F3 e continuous authority bloqueadas
 
 > Este arquivo é o contrato científico e operacional do Factorio AI Lab. Em caso de perda de
-> contexto de conversa, troca de operador, troca de modelo ou reinício do host, a continuidade
-> deve partir deste documento e de `docs/CORTEX_HANDOFF.md`. Checkboxes só podem ser marcados
-> quando houver evidência reproduzível, caminho de artefato e commit identificável.
+> contexto de conversa, troca de operador, troca de modelo ou reinício do host, um operador sem
+> contexto deve começar por `docs/CORTEX_ZERO_CONTEXT_ROADMAP_HANDOFF.md` e então validar este
+> programa + `docs/CORTEX_HANDOFF.md`. Checkboxes só podem ser marcados quando houver evidência
+> reproduzível, caminho de artefato e commit identificável.
 
 ---
 
