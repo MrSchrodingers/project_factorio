@@ -1941,6 +1941,81 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
         f4b["phase4_blocker"]["detail"] or ""
     )
 
+    configs=tmp_path/"configs"
+    configs.mkdir(exist_ok=True)
+    f4c_doc=docs/"CORTEX_PHASE4_CAUSAL_ABLATION_PROTOCOL.md"
+    f4c_doc.write_text("# F4-C protocol\n")
+    f4c_manifest_payload={
+        "schema_version":"cortex_f4c_causal_ablation_protocol_v1",
+        "protocol_id":"cortex-f4c-memory-ablation-transfer-v1",
+        "status":"frozen",
+        "authority":"shadow",
+        "continuous_authority":False,
+        "source_memory":{"manifest_sha256":"a"*64},
+        "seed_partitions":{
+            "confirmatory_reserved":list(range(20261101,20261111))
+        },
+    }
+    f4c_manifest=configs/"cortex_f4c_causal_ablation_v1.json"
+    f4c_manifest.write_text(json.dumps(f4c_manifest_payload,sort_keys=True)+"\n")
+    f4c_manifest_file_sha=module._sha256(f4c_manifest)
+    f4b_sha=module._sha256(f4b_audit)
+    f4c_audit_payload={
+        "schema_version":"cortex_f4c_protocol_freeze_v1",
+        "status":"pass",
+        "authority":"shadow",
+        "world_mutation":False,
+        "factorio_rcon_used":False,
+        "fle_environment_created":False,
+        "world_lease_acquired":False,
+        "execution_grant_created":False,
+        "continuous_authority":False,
+        "code_revision":{
+            "commit":"f4c-protocol-sha",
+            "branch":"research/cortex-v1",
+            "dirty":False,
+        },
+        "protocol":{
+            "protocol_id":"cortex-f4c-memory-ablation-transfer-v1",
+            "file_sha256":f4c_manifest_file_sha,
+            "manifest_sha256":"b"*64,
+            "evaluation_pair_count":20,
+            "pilot_pair_count":8,
+            "task_family_count":4,
+            "memory_on_first":10,
+            "memory_ablated_first":10,
+            "confirmatory_reserved":list(range(20261101,20261111)),
+        },
+        "source":{
+            "f4b_artifact_sha256":f4b_sha,
+            "memory_manifest_sha256":"a"*64,
+        },
+        "checks":{
+            "protocol_matches_frozen_v1_builder":True,
+            "seed_partitions_disjoint":True,
+            "counterbalancing_valid":True,
+            "missing_is_never_zero":True,
+        },
+    }
+    f4c_audit=audits/"cortex_f4c_protocol_freeze.json"
+    f4c_audit.write_text(json.dumps(f4c_audit_payload)+"\n")
+
+    f4c_ready=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert f4c_ready["phase4_checkpoint"]=="F4-B"
+    assert f4c_ready["phase4_next_checkpoint"]=="F4-C"
+    assert f4c_ready["phase4_causal_protocol"]["validated"] is True
+    assert f4c_ready["phase4_causal_protocol"]["eligible"] is True
+    assert f4c_ready["phase4_causal_protocol"]["execution_ready"] is False
+    assert (
+        f4c_ready["phase4_blocker"]["code"]
+        =="causal_transfer_evaluation_harness_not_validated"
+    )
+    assert f4c_ready["resume"]["do_not_start_another_seed"] is True
+    assert "paired evaluation harness" in f4c_ready["resume"]["action"]
+
     f4b_payload["source"]["f4a_artifact_sha256"]="wrong"
     f4b_audit.write_text(json.dumps(f4b_payload)+"\n")
     f4b_wrong_source=module.build_phase_state(

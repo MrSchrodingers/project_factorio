@@ -1,0 +1,1361 @@
+{
+  "authority": "shadow",
+  "budgets": {
+    "max_actions": 32,
+    "max_decisions": 12,
+    "max_game_ticks": 18000,
+    "max_llm_calls": 2,
+    "max_retrieval_queries": 4,
+    "max_wall_clock_seconds": 300
+  },
+  "claim_boundary": {
+    "does_not_claim": [
+      "continuous autonomous authority",
+      "optimal retrieval weights",
+      "general intelligence",
+      "confirmatory-seed performance",
+      "benefit from online learning during evaluation"
+    ],
+    "primary_claim": "memory access improves paired held-out task utility relative to retrieval ablation"
+  },
+  "continuous_authority": false,
+  "counterbalancing": {
+    "memory_ablated_first": 10,
+    "memory_on_first": 10,
+    "method": "explicit_balanced_schedule",
+    "schedule": [
+      {
+        "family": "structural_flow_repair",
+        "first_condition": "memory_on",
+        "second_condition": "memory_ablated",
+        "seed": 20261221,
+        "task_id": "evaluation:structural_flow_repair:20261221"
+      },
+      {
+        "family": "structural_flow_repair",
+        "first_condition": "memory_ablated",
+        "second_condition": "memory_on",
+        "seed": 20261222,
+        "task_id": "evaluation:structural_flow_repair:20261222"
+      },
+      {
+        "family": "structural_flow_repair",
+        "first_condition": "memory_on",
+        "second_condition": "memory_ablated",
+        "seed": 20261223,
+        "task_id": "evaluation:structural_flow_repair:20261223"
+      },
+      {
+        "family": "structural_flow_repair",
+        "first_condition": "memory_ablated",
+        "second_condition": "memory_on",
+        "seed": 20261224,
+        "task_id": "evaluation:structural_flow_repair:20261224"
+      },
+      {
+        "family": "structural_flow_repair",
+        "first_condition": "memory_on",
+        "second_condition": "memory_ablated",
+        "seed": 20261225,
+        "task_id": "evaluation:structural_flow_repair:20261225"
+      },
+      {
+        "family": "fuel_energy_recovery",
+        "first_condition": "memory_ablated",
+        "second_condition": "memory_on",
+        "seed": 20261226,
+        "task_id": "evaluation:fuel_energy_recovery:20261226"
+      },
+      {
+        "family": "fuel_energy_recovery",
+        "first_condition": "memory_on",
+        "second_condition": "memory_ablated",
+        "seed": 20261227,
+        "task_id": "evaluation:fuel_energy_recovery:20261227"
+      },
+      {
+        "family": "fuel_energy_recovery",
+        "first_condition": "memory_ablated",
+        "second_condition": "memory_on",
+        "seed": 20261228,
+        "task_id": "evaluation:fuel_energy_recovery:20261228"
+      },
+      {
+        "family": "fuel_energy_recovery",
+        "first_condition": "memory_on",
+        "second_condition": "memory_ablated",
+        "seed": 20261229,
+        "task_id": "evaluation:fuel_energy_recovery:20261229"
+      },
+      {
+        "family": "fuel_energy_recovery",
+        "first_condition": "memory_ablated",
+        "second_condition": "memory_on",
+        "seed": 20261230,
+        "task_id": "evaluation:fuel_energy_recovery:20261230"
+      },
+      {
+        "family": "spatial_logistics_routing",
+        "first_condition": "memory_on",
+        "second_condition": "memory_ablated",
+        "seed": 20261231,
+        "task_id": "evaluation:spatial_logistics_routing:20261231"
+      },
+      {
+        "family": "spatial_logistics_routing",
+        "first_condition": "memory_ablated",
+        "second_condition": "memory_on",
+        "seed": 20261232,
+        "task_id": "evaluation:spatial_logistics_routing:20261232"
+      },
+      {
+        "family": "spatial_logistics_routing",
+        "first_condition": "memory_on",
+        "second_condition": "memory_ablated",
+        "seed": 20261233,
+        "task_id": "evaluation:spatial_logistics_routing:20261233"
+      },
+      {
+        "family": "spatial_logistics_routing",
+        "first_condition": "memory_ablated",
+        "second_condition": "memory_on",
+        "seed": 20261234,
+        "task_id": "evaluation:spatial_logistics_routing:20261234"
+      },
+      {
+        "family": "spatial_logistics_routing",
+        "first_condition": "memory_on",
+        "second_condition": "memory_ablated",
+        "seed": 20261235,
+        "task_id": "evaluation:spatial_logistics_routing:20261235"
+      },
+      {
+        "family": "production_transition_planning",
+        "first_condition": "memory_ablated",
+        "second_condition": "memory_on",
+        "seed": 20261236,
+        "task_id": "evaluation:production_transition_planning:20261236"
+      },
+      {
+        "family": "production_transition_planning",
+        "first_condition": "memory_on",
+        "second_condition": "memory_ablated",
+        "seed": 20261237,
+        "task_id": "evaluation:production_transition_planning:20261237"
+      },
+      {
+        "family": "production_transition_planning",
+        "first_condition": "memory_ablated",
+        "second_condition": "memory_on",
+        "seed": 20261238,
+        "task_id": "evaluation:production_transition_planning:20261238"
+      },
+      {
+        "family": "production_transition_planning",
+        "first_condition": "memory_on",
+        "second_condition": "memory_ablated",
+        "seed": 20261239,
+        "task_id": "evaluation:production_transition_planning:20261239"
+      },
+      {
+        "family": "production_transition_planning",
+        "first_condition": "memory_ablated",
+        "second_condition": "memory_on",
+        "seed": 20261240,
+        "task_id": "evaluation:production_transition_planning:20261240"
+      }
+    ]
+  },
+  "execution_gate": {
+    "confirmatory_seeds_must_remain_pending": true,
+    "continuous_authority_must_be_false": true,
+    "evaluation_harness_must_pass_before_seed_launch": true,
+    "evolution_must_be_inactive": true,
+    "protocol_manifest_must_match_frozen_hash": true
+  },
+  "invalidity_and_missingness": {
+    "missing_is_never_zero": true,
+    "outcome_dependent_exclusion_forbidden": true,
+    "predeclared_technical_invalidity": [
+      "checkpoint_restore_mismatch",
+      "code_revision_mismatch_between_arms",
+      "source_memory_manifest_mismatch",
+      "cross_arm_world_state_leakage",
+      "evaluation_memory_contamination",
+      "outcome_extractor_failure"
+    ],
+    "task_timeout_with_valid_instrumentation": "observed_task_failure",
+    "transport_or_tool_timeout": "not_an_experimental_failure_until_process_lease_artifact_and_world_state_are_audited"
+  },
+  "pairing": {
+    "conditions": [
+      "memory_on",
+      "memory_ablated"
+    ],
+    "evaluation_memory_updates_before_completion": false,
+    "memory_ablated": {
+      "retrieval_mode": "empty_retrieval_result",
+      "unrelated_capabilities_removed": false,
+      "writes": "quarantined"
+    },
+    "memory_on": {
+      "retrieval_mode": "frozen_f4b_snapshot",
+      "writes": "quarantined"
+    },
+    "online_updates_between_arms": false,
+    "restore_checkpoint_between_arms": true,
+    "same_action_surface": true,
+    "same_candidate_generation": true,
+    "same_code_revision": true,
+    "same_deterministic_tools": true,
+    "same_feasibility_rules": true,
+    "same_outcome_extractor": true,
+    "same_runtime_budgets": true,
+    "same_world_checkpoint": true
+  },
+  "primary_endpoint": {
+    "direction": "higher_is_better",
+    "formula": "0.55*functional_success + 0.25*goal_progress + 0.10*(1-normalized_resource_cost) + 0.10*(1-invalid_action_rate)",
+    "functional_success": "1 iff every predeclared hard postcondition is satisfied; otherwise 0",
+    "goal_progress": "satisfied_hard_postconditions / total_hard_postconditions",
+    "invalid_action_rate": "invalid_or_refused_actions/proposed_actions; if proposed_actions=0 on an initially unsatisfied task, use 1",
+    "missing_policy": "missing_or_unmeasured_primary_component_invalidates_the_pair; missing_is_never_zero",
+    "name": "J",
+    "normalized_resource_cost": "0.5*min(1,action_count/max_actions) + 0.5*min(1,observed_game_ticks/max_game_ticks)",
+    "range": [
+      0.0,
+      1.0
+    ]
+  },
+  "protocol_id": "cortex-f4c-memory-ablation-transfer-v1",
+  "schema_version": "cortex_f4c_causal_ablation_protocol_v1",
+  "scientific_question": "Does access to the frozen Cortex cognitive-memory substrate improve performance on held-out transfer tasks under matched non-memory capabilities?",
+  "seed_partitions": {
+    "confirmatory_reserved": [
+      20261101,
+      20261102,
+      20261103,
+      20261104,
+      20261105,
+      20261106,
+      20261107,
+      20261108,
+      20261109,
+      20261110
+    ],
+    "disjoint_required": true,
+    "evaluation": [
+      20261221,
+      20261222,
+      20261223,
+      20261224,
+      20261225,
+      20261226,
+      20261227,
+      20261228,
+      20261229,
+      20261230,
+      20261231,
+      20261232,
+      20261233,
+      20261234,
+      20261235,
+      20261236,
+      20261237,
+      20261238,
+      20261239,
+      20261240
+    ],
+    "pilot": [
+      20261201,
+      20261202,
+      20261203,
+      20261204,
+      20261205,
+      20261206,
+      20261207,
+      20261208
+    ]
+  },
+  "source_memory": {
+    "evaluation_write_policy": "quarantine_until_all_evaluation_pairs_complete",
+    "f4a_artifact_sha256": "f45e31785c17cd6222a57937564036dbdd4976ee1d6376b61f340a9d70066228",
+    "f4b_artifact_sha256": "5fc37b0cee5f121c5ff6b6054fc45f4b0a09bad851e34793958bdd3dc1c5a801",
+    "freeze_scope": "entire_f4c_experiment",
+    "item_count": 222,
+    "manifest_sha256": "e6aa69816fe992f6b2a6afc8aff529fa5f1572106ca0939cee830af5a6cf3399",
+    "occurrence_count": 759,
+    "path": "runs/ledger/cortex_cognitive_memory.sqlite3",
+    "schema_version": "cortex_cognitive_memory_v1"
+  },
+  "statistics": {
+    "alpha": 0.05,
+    "alternative": "greater",
+    "analysis_unit": "paired_evaluation_task",
+    "confidence_interval": {
+      "level": 0.95,
+      "method": "invert_two_sided_exact_paired_sign_flip_randomization_test",
+      "parameter": "constant_additive_shift_tau"
+    },
+    "effect_sizes": [
+      "mean_delta_J",
+      "median_delta_J",
+      "paired_cohens_dz"
+    ],
+    "enumeration": "all_2^20_sign_assignments",
+    "evaluation_pairs": 20,
+    "family_stratification": "report_each_family_descriptively_and_with_effect_size",
+    "pilot_excluded_from_primary_inference": true,
+    "primary_contrast": "delta_J = J_memory_on - J_memory_ablated",
+    "primary_statistic": "mean_delta_J",
+    "secondary_endpoints": [
+      "functional_success",
+      "goal_progress",
+      "normalized_resource_cost",
+      "invalid_action_rate"
+    ],
+    "secondary_multiplicity": "holm_familywise_alpha_0.05_if_inferential_claimed",
+    "test": "exact_paired_sign_flip_randomization"
+  },
+  "status": "frozen",
+  "stopping_rule": {
+    "evaluation_pairs": 20,
+    "optional_sample_size_change_after_evaluation_begins": false,
+    "pilot_may_change_future_protocol_version_only": true,
+    "pilot_outcomes_reused_as_evaluation": false,
+    "pilot_pairs": 8
+  },
+  "task_design": {
+    "evaluation_tasks": [
+      {
+        "family": "structural_flow_repair",
+        "generator_version": "cortex_f4c_taskgen_v1",
+        "partition": "evaluation",
+        "seed": 20261221,
+        "spec": {
+          "blocked_links": 2,
+          "buffered_output_units": 21,
+          "candidate_classes": [
+            "placement_processing",
+            "reroute_logistics",
+            "rebuild_segment"
+          ],
+          "hard_postconditions": [
+            "processor_exists",
+            "producer_reaches_processor",
+            "processor_output_increases",
+            "no_new_dead_end"
+          ],
+          "inventory_pressure": "medium",
+          "producer_count": 3,
+          "sink_distance_tiles": 7,
+          "topology": "partial_bus"
+        },
+        "task_id": "evaluation:structural_flow_repair:20261221"
+      },
+      {
+        "family": "structural_flow_repair",
+        "generator_version": "cortex_f4c_taskgen_v1",
+        "partition": "evaluation",
+        "seed": 20261222,
+        "spec": {
+          "blocked_links": 1,
+          "buffered_output_units": 92,
+          "candidate_classes": [
+            "placement_processing",
+            "reroute_logistics",
+            "rebuild_segment"
+          ],
+          "hard_postconditions": [
+            "processor_exists",
+            "producer_reaches_processor",
+            "processor_output_increases",
+            "no_new_dead_end"
+          ],
+          "inventory_pressure": "low",
+          "producer_count": 4,
+          "sink_distance_tiles": 9,
+          "topology": "partial_bus"
+        },
+        "task_id": "evaluation:structural_flow_repair:20261222"
+      },
+      {
+        "family": "structural_flow_repair",
+        "generator_version": "cortex_f4c_taskgen_v1",
+        "partition": "evaluation",
+        "seed": 20261223,
+        "spec": {
+          "blocked_links": 2,
+          "buffered_output_units": 37,
+          "candidate_classes": [
+            "placement_processing",
+            "reroute_logistics",
+            "rebuild_segment"
+          ],
+          "hard_postconditions": [
+            "processor_exists",
+            "producer_reaches_processor",
+            "processor_output_increases",
+            "no_new_dead_end"
+          ],
+          "inventory_pressure": "medium",
+          "producer_count": 5,
+          "sink_distance_tiles": 14,
+          "topology": "partial_bus"
+        },
+        "task_id": "evaluation:structural_flow_repair:20261223"
+      },
+      {
+        "family": "structural_flow_repair",
+        "generator_version": "cortex_f4c_taskgen_v1",
+        "partition": "evaluation",
+        "seed": 20261224,
+        "spec": {
+          "blocked_links": 3,
+          "buffered_output_units": 13,
+          "candidate_classes": [
+            "placement_processing",
+            "reroute_logistics",
+            "rebuild_segment"
+          ],
+          "hard_postconditions": [
+            "processor_exists",
+            "producer_reaches_processor",
+            "processor_output_increases",
+            "no_new_dead_end"
+          ],
+          "inventory_pressure": "low",
+          "producer_count": 2,
+          "sink_distance_tiles": 11,
+          "topology": "convergent"
+        },
+        "task_id": "evaluation:structural_flow_repair:20261224"
+      },
+      {
+        "family": "structural_flow_repair",
+        "generator_version": "cortex_f4c_taskgen_v1",
+        "partition": "evaluation",
+        "seed": 20261225,
+        "spec": {
+          "blocked_links": 1,
+          "buffered_output_units": 83,
+          "candidate_classes": [
+            "placement_processing",
+            "reroute_logistics",
+            "rebuild_segment"
+          ],
+          "hard_postconditions": [
+            "processor_exists",
+            "producer_reaches_processor",
+            "processor_output_increases",
+            "no_new_dead_end"
+          ],
+          "inventory_pressure": "low",
+          "producer_count": 5,
+          "sink_distance_tiles": 10,
+          "topology": "convergent"
+        },
+        "task_id": "evaluation:structural_flow_repair:20261225"
+      },
+      {
+        "family": "fuel_energy_recovery",
+        "generator_version": "cortex_f4c_taskgen_v1",
+        "partition": "evaluation",
+        "seed": 20261226,
+        "spec": {
+          "bootstrap_inventory_pressure": "low",
+          "burner_entities": 4,
+          "candidate_classes": [
+            "local_refuel",
+            "route_endogenous_fuel",
+            "establish_power_generation"
+          ],
+          "coal_distance_tiles": 18,
+          "hard_postconditions": [
+            "energy_dependency_resolved",
+            "target_chain_resumes",
+            "bootstrap_dependency_not_increased",
+            "no_validated_capability_regresses"
+          ],
+          "local_fuel_units": 0,
+          "power_demand_kw": 733,
+          "terminal_condition": "mixed_energy_deficit"
+        },
+        "task_id": "evaluation:fuel_energy_recovery:20261226"
+      },
+      {
+        "family": "fuel_energy_recovery",
+        "generator_version": "cortex_f4c_taskgen_v1",
+        "partition": "evaluation",
+        "seed": 20261227,
+        "spec": {
+          "bootstrap_inventory_pressure": "constrained",
+          "burner_entities": 5,
+          "candidate_classes": [
+            "local_refuel",
+            "route_endogenous_fuel",
+            "establish_power_generation"
+          ],
+          "coal_distance_tiles": 14,
+          "hard_postconditions": [
+            "energy_dependency_resolved",
+            "target_chain_resumes",
+            "bootstrap_dependency_not_increased",
+            "no_validated_capability_regresses"
+          ],
+          "local_fuel_units": 3,
+          "power_demand_kw": 759,
+          "terminal_condition": "no_fuel"
+        },
+        "task_id": "evaluation:fuel_energy_recovery:20261227"
+      },
+      {
+        "family": "fuel_energy_recovery",
+        "generator_version": "cortex_f4c_taskgen_v1",
+        "partition": "evaluation",
+        "seed": 20261228,
+        "spec": {
+          "bootstrap_inventory_pressure": "low",
+          "burner_entities": 5,
+          "candidate_classes": [
+            "local_refuel",
+            "route_endogenous_fuel",
+            "establish_power_generation"
+          ],
+          "coal_distance_tiles": 12,
+          "hard_postconditions": [
+            "energy_dependency_resolved",
+            "target_chain_resumes",
+            "bootstrap_dependency_not_increased",
+            "no_validated_capability_regresses"
+          ],
+          "local_fuel_units": 2,
+          "power_demand_kw": 817,
+          "terminal_condition": "mixed_energy_deficit"
+        },
+        "task_id": "evaluation:fuel_energy_recovery:20261228"
+      },
+      {
+        "family": "fuel_energy_recovery",
+        "generator_version": "cortex_f4c_taskgen_v1",
+        "partition": "evaluation",
+        "seed": 20261229,
+        "spec": {
+          "bootstrap_inventory_pressure": "low",
+          "burner_entities": 2,
+          "candidate_classes": [
+            "local_refuel",
+            "route_endogenous_fuel",
+            "establish_power_generation"
+          ],
+          "coal_distance_tiles": 15,
+          "hard_postconditions": [
+            "energy_dependency_resolved",
+            "target_chain_resumes",
+            "bootstrap_dependency_not_increased",
+            "no_validated_capability_regresses"
+          ],
+          "local_fuel_units": 1,
+          "power_demand_kw": 329,
+          "terminal_condition": "no_fuel"
+        },
+        "task_id": "evaluation:fuel_energy_recovery:20261229"
+      },
+      {
+        "family": "fuel_energy_recovery",
+        "generator_version": "cortex_f4c_taskgen_v1",
+        "partition": "evaluation",
+        "seed": 20261230,
+        "spec": {
+          "bootstrap_inventory_pressure": "none",
+          "burner_entities": 4,
+          "candidate_classes": [
+            "local_refuel",
+            "route_endogenous_fuel",
+            "establish_power_generation"
+          ],
+          "coal_distance_tiles": 11,
+          "hard_postconditions": [
+            "energy_dependency_resolved",
+            "target_chain_resumes",
+            "bootstrap_dependency_not_increased",
+            "no_validated_capability_regresses"
+          ],
+          "local_fuel_units": 4,
+          "power_demand_kw": 871,
+          "terminal_condition": "no_fuel"
+        },
+        "task_id": "evaluation:fuel_energy_recovery:20261230"
+      },
+      {
+        "family": "spatial_logistics_routing",
+        "generator_version": "cortex_f4c_taskgen_v1",
+        "partition": "evaluation",
+        "seed": 20261231,
+        "spec": {
+          "candidate_classes": [
+            "weighted_astar",
+            "detour_with_underground",
+            "alternate_corridor"
+          ],
+          "goal": [
+            35,
+            26
+          ],
+          "grid": [
+            42,
+            29
+          ],
+          "hard_postconditions": [
+            "route_found",
+            "route_collision_free",
+            "endpoints_connected",
+            "route_within_resource_budget"
+          ],
+          "obstacle_rectangles": [
+            [
+              29,
+              19,
+              2,
+              3
+            ],
+            [
+              16,
+              6,
+              4,
+              3
+            ],
+            [
+              24,
+              7,
+              4,
+              3
+            ],
+            [
+              30,
+              17,
+              2,
+              3
+            ],
+            [
+              20,
+              7,
+              4,
+              5
+            ]
+          ],
+          "start": [
+            3,
+            2
+          ],
+          "turn_penalty": 1.178,
+          "underground_budget": 4
+        },
+        "task_id": "evaluation:spatial_logistics_routing:20261231"
+      },
+      {
+        "family": "spatial_logistics_routing",
+        "generator_version": "cortex_f4c_taskgen_v1",
+        "partition": "evaluation",
+        "seed": 20261232,
+        "spec": {
+          "candidate_classes": [
+            "weighted_astar",
+            "detour_with_underground",
+            "alternate_corridor"
+          ],
+          "goal": [
+            30,
+            28
+          ],
+          "grid": [
+            34,
+            32
+          ],
+          "hard_postconditions": [
+            "route_found",
+            "route_collision_free",
+            "endpoints_connected",
+            "route_within_resource_budget"
+          ],
+          "obstacle_rectangles": [
+            [
+              20,
+              18,
+              5,
+              4
+            ],
+            [
+              8,
+              12,
+              5,
+              2
+            ],
+            [
+              8,
+              21,
+              3,
+              5
+            ],
+            [
+              11,
+              17,
+              4,
+              2
+            ],
+            [
+              8,
+              8,
+              4,
+              4
+            ]
+          ],
+          "start": [
+            4,
+            4
+          ],
+          "turn_penalty": 0.857,
+          "underground_budget": 3
+        },
+        "task_id": "evaluation:spatial_logistics_routing:20261232"
+      },
+      {
+        "family": "spatial_logistics_routing",
+        "generator_version": "cortex_f4c_taskgen_v1",
+        "partition": "evaluation",
+        "seed": 20261233,
+        "spec": {
+          "candidate_classes": [
+            "weighted_astar",
+            "detour_with_underground",
+            "alternate_corridor"
+          ],
+          "goal": [
+            33,
+            34
+          ],
+          "grid": [
+            37,
+            38
+          ],
+          "hard_postconditions": [
+            "route_found",
+            "route_collision_free",
+            "endpoints_connected",
+            "route_within_resource_budget"
+          ],
+          "obstacle_rectangles": [
+            [
+              10,
+              21,
+              3,
+              3
+            ],
+            [
+              22,
+              18,
+              3,
+              5
+            ],
+            [
+              24,
+              14,
+              2,
+              5
+            ],
+            [
+              20,
+              27,
+              5,
+              3
+            ],
+            [
+              25,
+              25,
+              3,
+              5
+            ],
+            [
+              9,
+              11,
+              3,
+              2
+            ]
+          ],
+          "start": [
+            5,
+            6
+          ],
+          "turn_penalty": 0.655,
+          "underground_budget": 2
+        },
+        "task_id": "evaluation:spatial_logistics_routing:20261233"
+      },
+      {
+        "family": "spatial_logistics_routing",
+        "generator_version": "cortex_f4c_taskgen_v1",
+        "partition": "evaluation",
+        "seed": 20261234,
+        "spec": {
+          "candidate_classes": [
+            "weighted_astar",
+            "detour_with_underground",
+            "alternate_corridor"
+          ],
+          "goal": [
+            39,
+            31
+          ],
+          "grid": [
+            44,
+            36
+          ],
+          "hard_postconditions": [
+            "route_found",
+            "route_collision_free",
+            "endpoints_connected",
+            "route_within_resource_budget"
+          ],
+          "obstacle_rectangles": [
+            [
+              25,
+              12,
+              5,
+              4
+            ],
+            [
+              31,
+              12,
+              5,
+              5
+            ],
+            [
+              16,
+              10,
+              3,
+              3
+            ],
+            [
+              30,
+              6,
+              2,
+              5
+            ],
+            [
+              32,
+              9,
+              2,
+              2
+            ]
+          ],
+          "start": [
+            3,
+            2
+          ],
+          "turn_penalty": 0.655,
+          "underground_budget": 4
+        },
+        "task_id": "evaluation:spatial_logistics_routing:20261234"
+      },
+      {
+        "family": "spatial_logistics_routing",
+        "generator_version": "cortex_f4c_taskgen_v1",
+        "partition": "evaluation",
+        "seed": 20261235,
+        "spec": {
+          "candidate_classes": [
+            "weighted_astar",
+            "detour_with_underground",
+            "alternate_corridor"
+          ],
+          "goal": [
+            33,
+            34
+          ],
+          "grid": [
+            37,
+            40
+          ],
+          "hard_postconditions": [
+            "route_found",
+            "route_collision_free",
+            "endpoints_connected",
+            "route_within_resource_budget"
+          ],
+          "obstacle_rectangles": [
+            [
+              20,
+              27,
+              5,
+              4
+            ],
+            [
+              17,
+              24,
+              4,
+              4
+            ],
+            [
+              15,
+              22,
+              5,
+              3
+            ],
+            [
+              18,
+              27,
+              2,
+              3
+            ]
+          ],
+          "start": [
+            5,
+            3
+          ],
+          "turn_penalty": 0.319,
+          "underground_budget": 0
+        },
+        "task_id": "evaluation:spatial_logistics_routing:20261235"
+      },
+      {
+        "family": "production_transition_planning",
+        "generator_version": "cortex_f4c_taskgen_v1",
+        "partition": "evaluation",
+        "seed": 20261236,
+        "spec": {
+          "candidate_classes": [
+            "buffer_first",
+            "power_first",
+            "route_first",
+            "craft_chain_first"
+          ],
+          "coal_available": 44,
+          "copper_available": 104,
+          "hard_postconditions": [
+            "required_material_budget_satisfied",
+            "dependency_order_valid",
+            "target_stage_functional",
+            "no_validated_capability_regresses"
+          ],
+          "iron_available": 77,
+          "layout_pressure": "moderate",
+          "required_buffer_margin": 11,
+          "target_stage": "electric_mining",
+          "wood_available": 37
+        },
+        "task_id": "evaluation:production_transition_planning:20261236"
+      },
+      {
+        "family": "production_transition_planning",
+        "generator_version": "cortex_f4c_taskgen_v1",
+        "partition": "evaluation",
+        "seed": 20261237,
+        "spec": {
+          "candidate_classes": [
+            "buffer_first",
+            "power_first",
+            "route_first",
+            "craft_chain_first"
+          ],
+          "coal_available": 46,
+          "copper_available": 114,
+          "hard_postconditions": [
+            "required_material_budget_satisfied",
+            "dependency_order_valid",
+            "target_stage_functional",
+            "no_validated_capability_regresses"
+          ],
+          "iron_available": 69,
+          "layout_pressure": "compact",
+          "required_buffer_margin": 2,
+          "target_stage": "electric_mining",
+          "wood_available": 54
+        },
+        "task_id": "evaluation:production_transition_planning:20261237"
+      },
+      {
+        "family": "production_transition_planning",
+        "generator_version": "cortex_f4c_taskgen_v1",
+        "partition": "evaluation",
+        "seed": 20261238,
+        "spec": {
+          "candidate_classes": [
+            "buffer_first",
+            "power_first",
+            "route_first",
+            "craft_chain_first"
+          ],
+          "coal_available": 20,
+          "copper_available": 83,
+          "hard_postconditions": [
+            "required_material_budget_satisfied",
+            "dependency_order_valid",
+            "target_stage_functional",
+            "no_validated_capability_regresses"
+          ],
+          "iron_available": 68,
+          "layout_pressure": "compact",
+          "required_buffer_margin": 6,
+          "target_stage": "automation_science",
+          "wood_available": 21
+        },
+        "task_id": "evaluation:production_transition_planning:20261238"
+      },
+      {
+        "family": "production_transition_planning",
+        "generator_version": "cortex_f4c_taskgen_v1",
+        "partition": "evaluation",
+        "seed": 20261239,
+        "spec": {
+          "candidate_classes": [
+            "buffer_first",
+            "power_first",
+            "route_first",
+            "craft_chain_first"
+          ],
+          "coal_available": 70,
+          "copper_available": 63,
+          "hard_postconditions": [
+            "required_material_budget_satisfied",
+            "dependency_order_valid",
+            "target_stage_functional",
+            "no_validated_capability_regresses"
+          ],
+          "iron_available": 93,
+          "layout_pressure": "expanded",
+          "required_buffer_margin": 3,
+          "target_stage": "logistic_science",
+          "wood_available": 50
+        },
+        "task_id": "evaluation:production_transition_planning:20261239"
+      },
+      {
+        "family": "production_transition_planning",
+        "generator_version": "cortex_f4c_taskgen_v1",
+        "partition": "evaluation",
+        "seed": 20261240,
+        "spec": {
+          "candidate_classes": [
+            "buffer_first",
+            "power_first",
+            "route_first",
+            "craft_chain_first"
+          ],
+          "coal_available": 80,
+          "copper_available": 15,
+          "hard_postconditions": [
+            "required_material_budget_satisfied",
+            "dependency_order_valid",
+            "target_stage_functional",
+            "no_validated_capability_regresses"
+          ],
+          "iron_available": 70,
+          "layout_pressure": "expanded",
+          "required_buffer_margin": 11,
+          "target_stage": "electric_mining",
+          "wood_available": 63
+        },
+        "task_id": "evaluation:production_transition_planning:20261240"
+      }
+    ],
+    "generator_version": "cortex_f4c_taskgen_v1",
+    "minimum_evaluation_pairs_per_family": 5,
+    "minimum_task_families": 4,
+    "pilot_tasks": [
+      {
+        "family": "structural_flow_repair",
+        "generator_version": "cortex_f4c_taskgen_v1",
+        "partition": "pilot",
+        "seed": 20261201,
+        "spec": {
+          "blocked_links": 2,
+          "buffered_output_units": 72,
+          "candidate_classes": [
+            "placement_processing",
+            "reroute_logistics",
+            "rebuild_segment"
+          ],
+          "hard_postconditions": [
+            "processor_exists",
+            "producer_reaches_processor",
+            "processor_output_increases",
+            "no_new_dead_end"
+          ],
+          "inventory_pressure": "low",
+          "producer_count": 5,
+          "sink_distance_tiles": 10,
+          "topology": "partial_bus"
+        },
+        "task_id": "pilot:structural_flow_repair:20261201"
+      },
+      {
+        "family": "structural_flow_repair",
+        "generator_version": "cortex_f4c_taskgen_v1",
+        "partition": "pilot",
+        "seed": 20261202,
+        "spec": {
+          "blocked_links": 2,
+          "buffered_output_units": 89,
+          "candidate_classes": [
+            "placement_processing",
+            "reroute_logistics",
+            "rebuild_segment"
+          ],
+          "hard_postconditions": [
+            "processor_exists",
+            "producer_reaches_processor",
+            "processor_output_increases",
+            "no_new_dead_end"
+          ],
+          "inventory_pressure": "low",
+          "producer_count": 2,
+          "sink_distance_tiles": 18,
+          "topology": "offset_sink"
+        },
+        "task_id": "pilot:structural_flow_repair:20261202"
+      },
+      {
+        "family": "fuel_energy_recovery",
+        "generator_version": "cortex_f4c_taskgen_v1",
+        "partition": "pilot",
+        "seed": 20261203,
+        "spec": {
+          "bootstrap_inventory_pressure": "constrained",
+          "burner_entities": 2,
+          "candidate_classes": [
+            "local_refuel",
+            "route_endogenous_fuel",
+            "establish_power_generation"
+          ],
+          "coal_distance_tiles": 12,
+          "hard_postconditions": [
+            "energy_dependency_resolved",
+            "target_chain_resumes",
+            "bootstrap_dependency_not_increased",
+            "no_validated_capability_regresses"
+          ],
+          "local_fuel_units": 4,
+          "power_demand_kw": 863,
+          "terminal_condition": "mixed_energy_deficit"
+        },
+        "task_id": "pilot:fuel_energy_recovery:20261203"
+      },
+      {
+        "family": "fuel_energy_recovery",
+        "generator_version": "cortex_f4c_taskgen_v1",
+        "partition": "pilot",
+        "seed": 20261204,
+        "spec": {
+          "bootstrap_inventory_pressure": "low",
+          "burner_entities": 4,
+          "candidate_classes": [
+            "local_refuel",
+            "route_endogenous_fuel",
+            "establish_power_generation"
+          ],
+          "coal_distance_tiles": 14,
+          "hard_postconditions": [
+            "energy_dependency_resolved",
+            "target_chain_resumes",
+            "bootstrap_dependency_not_increased",
+            "no_validated_capability_regresses"
+          ],
+          "local_fuel_units": 1,
+          "power_demand_kw": 490,
+          "terminal_condition": "power_deficit"
+        },
+        "task_id": "pilot:fuel_energy_recovery:20261204"
+      },
+      {
+        "family": "spatial_logistics_routing",
+        "generator_version": "cortex_f4c_taskgen_v1",
+        "partition": "pilot",
+        "seed": 20261205,
+        "spec": {
+          "candidate_classes": [
+            "weighted_astar",
+            "detour_with_underground",
+            "alternate_corridor"
+          ],
+          "goal": [
+            34,
+            30
+          ],
+          "grid": [
+            37,
+            37
+          ],
+          "hard_postconditions": [
+            "route_found",
+            "route_collision_free",
+            "endpoints_connected",
+            "route_within_resource_budget"
+          ],
+          "obstacle_rectangles": [
+            [
+              17,
+              23,
+              3,
+              5
+            ],
+            [
+              17,
+              23,
+              3,
+              5
+            ],
+            [
+              25,
+              16,
+              4,
+              5
+            ],
+            [
+              21,
+              7,
+              3,
+              2
+            ],
+            [
+              19,
+              18,
+              4,
+              5
+            ],
+            [
+              13,
+              26,
+              5,
+              4
+            ]
+          ],
+          "start": [
+            4,
+            6
+          ],
+          "turn_penalty": 1.06,
+          "underground_budget": 2
+        },
+        "task_id": "pilot:spatial_logistics_routing:20261205"
+      },
+      {
+        "family": "spatial_logistics_routing",
+        "generator_version": "cortex_f4c_taskgen_v1",
+        "partition": "pilot",
+        "seed": 20261206,
+        "spec": {
+          "candidate_classes": [
+            "weighted_astar",
+            "detour_with_underground",
+            "alternate_corridor"
+          ],
+          "goal": [
+            36,
+            18
+          ],
+          "grid": [
+            41,
+            24
+          ],
+          "hard_postconditions": [
+            "route_found",
+            "route_collision_free",
+            "endpoints_connected",
+            "route_within_resource_budget"
+          ],
+          "obstacle_rectangles": [
+            [
+              17,
+              6,
+              5,
+              4
+            ],
+            [
+              20,
+              9,
+              2,
+              5
+            ],
+            [
+              18,
+              9,
+              3,
+              2
+            ],
+            [
+              23,
+              13,
+              5,
+              5
+            ]
+          ],
+          "start": [
+            3,
+            5
+          ],
+          "turn_penalty": 1.09,
+          "underground_budget": 2
+        },
+        "task_id": "pilot:spatial_logistics_routing:20261206"
+      },
+      {
+        "family": "production_transition_planning",
+        "generator_version": "cortex_f4c_taskgen_v1",
+        "partition": "pilot",
+        "seed": 20261207,
+        "spec": {
+          "candidate_classes": [
+            "buffer_first",
+            "power_first",
+            "route_first",
+            "craft_chain_first"
+          ],
+          "coal_available": 57,
+          "copper_available": 56,
+          "hard_postconditions": [
+            "required_material_budget_satisfied",
+            "dependency_order_valid",
+            "target_stage_functional",
+            "no_validated_capability_regresses"
+          ],
+          "iron_available": 179,
+          "layout_pressure": "compact",
+          "required_buffer_margin": 11,
+          "target_stage": "automation_science",
+          "wood_available": 14
+        },
+        "task_id": "pilot:production_transition_planning:20261207"
+      },
+      {
+        "family": "production_transition_planning",
+        "generator_version": "cortex_f4c_taskgen_v1",
+        "partition": "pilot",
+        "seed": 20261208,
+        "spec": {
+          "candidate_classes": [
+            "buffer_first",
+            "power_first",
+            "route_first",
+            "craft_chain_first"
+          ],
+          "coal_available": 42,
+          "copper_available": 17,
+          "hard_postconditions": [
+            "required_material_budget_satisfied",
+            "dependency_order_valid",
+            "target_stage_functional",
+            "no_validated_capability_regresses"
+          ],
+          "iron_available": 44,
+          "layout_pressure": "compact",
+          "required_buffer_margin": 6,
+          "target_stage": "electric_mining",
+          "wood_available": 24
+        },
+        "task_id": "pilot:production_transition_planning:20261208"
+      }
+    ],
+    "solution_labels_forbidden": true,
+    "task_generation_frozen_before_outcomes": true
+  }
+}

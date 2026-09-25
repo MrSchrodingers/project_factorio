@@ -1189,6 +1189,117 @@ def build_phase_state(
         and all(value is True for value in phase4_retrieval_checks.values())
     )
 
+    phase4_causal_doc_path=(
+        state_root / "docs" / "CORTEX_PHASE4_CAUSAL_ABLATION_PROTOCOL.md"
+    )
+    phase4_causal_doc=phase4_causal_doc_path.exists()
+    phase4_causal_manifest_path=(
+        state_root / "configs" / "cortex_f4c_causal_ablation_v1.json"
+    )
+    phase4_causal_manifest=phase4_causal_manifest_path.exists()
+    phase4_causal_manifest_payload: dict[str, Any]={}
+    phase4_causal_manifest_error: str | None=None
+    if phase4_causal_manifest:
+        try:
+            phase4_causal_manifest_payload=_load(phase4_causal_manifest_path)
+        except (OSError,json.JSONDecodeError,TypeError) as exc:
+            phase4_causal_manifest_error=f"{type(exc).__name__}: {exc}"
+
+    phase4_causal_audit_path=(
+        state_root / "runs" / "audits" / "cortex_f4c_protocol_freeze.json"
+    )
+    phase4_causal_audit=phase4_causal_audit_path.exists()
+    phase4_causal_payload: dict[str, Any]={}
+    phase4_causal_error: str | None=None
+    if phase4_causal_audit:
+        try:
+            phase4_causal_payload=_load(phase4_causal_audit_path)
+        except (OSError,json.JSONDecodeError,TypeError) as exc:
+            phase4_causal_error=f"{type(exc).__name__}: {exc}"
+
+    phase4_causal_revision=phase4_causal_payload.get("code_revision")
+    if not isinstance(phase4_causal_revision,dict):
+        phase4_causal_revision={}
+    phase4_causal_protocol=phase4_causal_payload.get("protocol")
+    if not isinstance(phase4_causal_protocol,dict):
+        phase4_causal_protocol={}
+    phase4_causal_source=phase4_causal_payload.get("source")
+    if not isinstance(phase4_causal_source,dict):
+        phase4_causal_source={}
+    phase4_causal_checks=phase4_causal_payload.get("checks")
+    if not isinstance(phase4_causal_checks,dict):
+        phase4_causal_checks={}
+
+    phase4_causal_manifest_sha=(
+        _sha256(phase4_causal_manifest_path)
+        if phase4_causal_manifest_path.exists()
+        else None
+    )
+    phase4_f4b_sha=(
+        _sha256(phase4_retrieval_audit_path)
+        if phase4_retrieval_audit_path.exists()
+        else None
+    )
+    phase4_expected_confirmatory=list(range(20261101,20261111))
+    phase4_manifest_partitions=phase4_causal_manifest_payload.get(
+        "seed_partitions"
+    )
+    if not isinstance(phase4_manifest_partitions,dict):
+        phase4_manifest_partitions={}
+    phase4_manifest_source=phase4_causal_manifest_payload.get("source_memory")
+    if not isinstance(phase4_manifest_source,dict):
+        phase4_manifest_source={}
+
+    phase4_causal_protocol_valid=(
+        phase4_retrieval_valid
+        and phase4_causal_doc
+        and phase4_causal_manifest
+        and phase4_causal_audit
+        and phase4_causal_manifest_error is None
+        and phase4_causal_error is None
+        and phase4_causal_manifest_payload.get("schema_version")
+        =="cortex_f4c_causal_ablation_protocol_v1"
+        and phase4_causal_manifest_payload.get("protocol_id")
+        =="cortex-f4c-memory-ablation-transfer-v1"
+        and phase4_causal_manifest_payload.get("status")=="frozen"
+        and phase4_causal_manifest_payload.get("authority")=="shadow"
+        and phase4_causal_manifest_payload.get("continuous_authority") is False
+        and phase4_manifest_partitions.get("confirmatory_reserved")
+        ==phase4_expected_confirmatory
+        and phase4_manifest_source.get("manifest_sha256")
+        ==phase4_retrieval_before.get("manifest_sha256")
+        and phase4_causal_payload.get("schema_version")
+        =="cortex_f4c_protocol_freeze_v1"
+        and phase4_causal_payload.get("status")=="pass"
+        and phase4_causal_payload.get("authority")=="shadow"
+        and phase4_causal_payload.get("world_mutation") is False
+        and phase4_causal_payload.get("factorio_rcon_used") is False
+        and phase4_causal_payload.get("fle_environment_created") is False
+        and phase4_causal_payload.get("world_lease_acquired") is False
+        and phase4_causal_payload.get("execution_grant_created") is False
+        and phase4_causal_payload.get("continuous_authority") is False
+        and phase4_causal_revision.get("dirty") is False
+        and isinstance(phase4_causal_revision.get("commit"),str)
+        and bool(phase4_causal_revision.get("commit"))
+        and phase4_causal_protocol.get("protocol_id")
+        =="cortex-f4c-memory-ablation-transfer-v1"
+        and phase4_causal_protocol.get("file_sha256")
+        ==phase4_causal_manifest_sha
+        and phase4_causal_protocol.get("evaluation_pair_count")==20
+        and phase4_causal_protocol.get("pilot_pair_count")==8
+        and phase4_causal_protocol.get("task_family_count")>=4
+        and phase4_causal_protocol.get("memory_on_first")==10
+        and phase4_causal_protocol.get("memory_ablated_first")==10
+        and phase4_causal_protocol.get("confirmatory_reserved")
+        ==phase4_expected_confirmatory
+        and phase4_causal_source.get("f4b_artifact_sha256")
+        ==phase4_f4b_sha
+        and phase4_causal_source.get("memory_manifest_sha256")
+        ==phase4_retrieval_before.get("manifest_sha256")
+        and bool(phase4_causal_checks)
+        and all(value is True for value in phase4_causal_checks.values())
+    )
+
     phase2_delivery_actuator_canary_path=(
         state_root
         / "runs"
@@ -1432,7 +1543,12 @@ def build_phase_state(
                 "functional_accept_sustainability_not_proven"
             )
 
-    if phase4_retrieval_valid:
+    if phase4_causal_protocol_valid:
+        action=(
+            "F4-C causal protocol frozen and eligible; implement and validate "
+            "the paired evaluation harness before launching any pilot seed"
+        )
+    elif phase4_retrieval_valid:
         action=(
             "F4-B complete in SHADOW; F4-C requires a frozen, diverse "
             "non-confirmatory held-out memory-ablation transfer protocol"
@@ -1552,6 +1668,42 @@ def build_phase_state(
         "phase4_next_checkpoint":(
             "F4-C" if phase4_retrieval_valid else ("F4-B" if phase4_memory_valid else "F4-A")
         ),
+        "phase4_causal_protocol":{
+            "document_path":str(phase4_causal_doc_path),
+            "document_exists":phase4_causal_doc,
+            "manifest_path":str(phase4_causal_manifest_path),
+            "manifest_exists":phase4_causal_manifest,
+            "manifest_file_sha256":phase4_causal_manifest_sha,
+            "audit_path":str(phase4_causal_audit_path),
+            "audit_exists":phase4_causal_audit,
+            "validated":phase4_causal_protocol_valid,
+            "eligible":phase4_causal_protocol_valid,
+            "execution_ready":False,
+            "status":phase4_causal_payload.get("status"),
+            "protocol_id":phase4_causal_protocol.get("protocol_id"),
+            "manifest_sha256":phase4_causal_protocol.get("manifest_sha256"),
+            "code_commit":phase4_causal_revision.get("commit"),
+            "evaluation_pair_count":phase4_causal_protocol.get(
+                "evaluation_pair_count"
+            ),
+            "pilot_pair_count":phase4_causal_protocol.get("pilot_pair_count"),
+            "task_family_count":phase4_causal_protocol.get("task_family_count"),
+            "counterbalancing":{
+                "memory_on_first":phase4_causal_protocol.get("memory_on_first"),
+                "memory_ablated_first":phase4_causal_protocol.get(
+                    "memory_ablated_first"
+                ),
+            },
+            "confirmatory_reserved":phase4_causal_protocol.get(
+                "confirmatory_reserved"
+            ),
+            "source_memory_manifest_sha256":phase4_causal_source.get(
+                "memory_manifest_sha256"
+            ),
+            "checks":phase4_causal_checks,
+            "manifest_read_error":phase4_causal_manifest_error,
+            "audit_read_error":phase4_causal_error,
+        },
         "phase4_exit_gate":{
             "memory_substrate":phase4_memory_valid,
             "hybrid_retrieval_consolidation_decay":phase4_retrieval_valid,
@@ -1559,15 +1711,32 @@ def build_phase_state(
             "validated":False,
         },
         "phase4_blocker":{
-            "code":"causal_transfer_protocol_not_frozen",
-            "status":"blocked" if phase4_retrieval_valid else "not_reached",
-            "detail":(
-                "F4-C needs source/evaluation separation, explicit memory ON versus "
-                "memory-ablated conditions, leakage control, paired metrics and "
-                "predeclared statistical inference on a sufficiently diverse "
-                "non-confirmatory held-out benchmark. Confirmatory seeds remain frozen."
+            "code":(
+                "causal_transfer_evaluation_harness_not_validated"
+                if phase4_causal_protocol_valid
+                else "causal_transfer_protocol_not_frozen"
+            ),
+            "status":(
+                "blocked"
                 if phase4_retrieval_valid
-                else None
+                else "not_reached"
+            ),
+            "detail":(
+                (
+                    "F4-C protocol is frozen and causally eligible, but no paired "
+                    "evaluation harness has yet demonstrated checkpoint restore, "
+                    "arm isolation, matched budgets, and outcome extraction. "
+                    "Do not launch pilot or evaluation seeds yet."
+                )
+                if phase4_causal_protocol_valid
+                else (
+                    "F4-C needs source/evaluation separation, explicit memory ON versus "
+                    "memory-ablated conditions, leakage control, paired metrics and "
+                    "predeclared statistical inference on a sufficiently diverse "
+                    "non-confirmatory held-out benchmark. Confirmatory seeds remain frozen."
+                    if phase4_retrieval_valid
+                    else None
+                )
             ),
         },
         "phase4_memory_retrieval":{
