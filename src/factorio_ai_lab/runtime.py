@@ -116,6 +116,7 @@ class FactorioWorldLease:
     path: Path = WORLD_LOCK
     state_path: Path = WORLD_LEASE_STATE
     _handle: TextIO | None = None
+    _lease_id: str | None = None
 
     def acquire(self) -> FactorioWorldLease:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -132,12 +133,14 @@ class FactorioWorldLease:
                 + holder[:1200]
             ) from exc
 
+        lease_id = uuid.uuid4().hex
         payload = {
             "status": "active",
             "pid": os.getpid(),
             "run_id": self.run_id,
             "arena": self.arena,
             "owner": self.owner,
+            "lease_id": lease_id,
             "acquired_at": utc_now(),
             "updated_at": utc_now(),
         }
@@ -148,7 +151,43 @@ class FactorioWorldLease:
         os.fsync(handle.fileno())
         _atomic_json(self.state_path, payload)
         self._handle = handle
+        self._lease_id = lease_id
         return self
+
+    def active_attestation(self) -> dict[str, Any]:
+        """Prove this process still owns the exact active world lease."""
+
+        handle = self._handle
+        lease_id = self._lease_id
+        if handle is None or handle.closed or lease_id is None:
+            raise WorldBusyError("Factorio world lease is not actively held")
+
+        payload = _read_json(self.state_path)
+        expected = {
+            "status": "active",
+            "pid": os.getpid(),
+            "run_id": self.run_id,
+            "arena": self.arena,
+            "owner": self.owner,
+            "lease_id": lease_id,
+        }
+        mismatches = {
+            key: {"expected": value, "observed": payload.get(key)}
+            for key, value in expected.items()
+            if payload.get(key) != value
+        }
+        if mismatches:
+            raise WorldBusyError(
+                "Factorio world lease attestation mismatch: "
+                + json.dumps(mismatches, sort_keys=True)
+            )
+
+        return {
+            **expected,
+            "scope_id": f"{self.arena}:{self.run_id}:{lease_id}",
+            "acquired_at": payload.get("acquired_at"),
+            "updated_at": payload.get("updated_at"),
+        }
 
     def release(self) -> None:
         handle = self._handle
@@ -166,6 +205,7 @@ class FactorioWorldLease:
         finally:
             handle.close()
             self._handle = None
+            self._lease_id = None
 
     def __enter__(self) -> Self:
         return self.acquire()

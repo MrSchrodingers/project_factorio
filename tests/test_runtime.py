@@ -46,6 +46,35 @@ def test_world_lease_rejects_concurrent_writer(tmp_path: Path) -> None:
     payload = json.loads(state.read_text())
     assert payload["status"] == "released"
     assert payload["run_id"] == "run-a"
+    assert isinstance(payload["lease_id"], str)
+    assert payload["lease_id"]
+
+
+def test_world_lease_attestation_binds_exact_active_acquisition(
+    tmp_path: Path,
+) -> None:
+    lock = tmp_path / "world.lock"
+    state = tmp_path / "lease.json"
+    lease = FactorioWorldLease(
+        run_id="run-attested",
+        arena="g4b",
+        owner="test",
+        path=lock,
+        state_path=state,
+    ).acquire()
+    try:
+        attestation = lease.active_attestation()
+        assert attestation["status"] == "active"
+        assert attestation["run_id"] == "run-attested"
+        assert attestation["arena"] == "g4b"
+        assert attestation["owner"] == "test"
+        assert attestation["lease_id"]
+        assert attestation["scope_id"].endswith(attestation["lease_id"])
+    finally:
+        lease.release()
+
+    with pytest.raises(WorldBusyError, match="not actively held"):
+        lease.active_attestation()
 
 
 def test_action_runtime_writes_causal_trace(tmp_path: Path) -> None:
