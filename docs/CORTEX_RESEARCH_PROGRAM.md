@@ -7,7 +7,7 @@
 **Branch de transição:** `research/cortex-v1`
 **Baseline pré-Cortex:** `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 **Tag de baseline:** `cortex-pre-research-baseline-20260923`
-**Status:** F2-G4A concluída — F2-G4B é o próximo checkpoint; F2 ativa; F3 e continuous authority bloqueadas
+**Status:** F2-G4B concluída — F2-G5 baseline-only enforcement é o próximo checkpoint; F2 ativa; F3 e continuous authority bloqueadas
 
 > Este arquivo é o contrato científico e operacional do Factorio AI Lab. Em caso de perda de
 > contexto de conversa, troca de operador, troca de modelo ou reinício do host, um operador sem
@@ -886,9 +886,9 @@ pareada nas seeds confirmatórias congeladas.
 - [x] contratos pré/pós-condição;
 - [x] provenance por ação;
 - [x] refusals nomeadas;
-- [ ] transactional execution universal;
+- [x] transactional execution universal;
 - [x] options iniciais;
-- [ ] teste que constrói cadeia funcional sem `curriculum_runner`;
+- [x] teste que constrói cadeia funcional sem curriculum_runner;
 - [ ] runner antigo executável apenas como baseline.
 
 **F2-A progress:** PASS parcial. Ontology tipada e UniversalExecutor em SHADOW foram
@@ -1324,9 +1324,58 @@ Ruff/compileall/JavaScript/TypeScript/Vite/whitespace PASS.
 reconstruction/concurrency em dry-run. Ainda não existe evidência de live Option-controlled
 functional chain; o runner legado também ainda não está formalmente baseline-only.
 
-**Next:** F2-G4B — um único canário live não-confirmatório através da Option API, com persistent
-one-shot grant, scope ligado ao WorldLease real, sem retry automático e sem continuous authority.
-F3 permanece bloqueada.
+**F2-G4B progress:** **PASS parcial de F2.** Um único canário live não-confirmatório atravessou
+ProcessingChainOptionPlan -> OptionExecutionBoundary -> persistent grant -> attested WorldLease ->
+StructuralTransactionalAdapter -> TransactionalFLEExecutor, sem curriculum_runner.
+
+**Implementation F2-G4B:** 794963b435bff616042ca0a6e6f278ead315e5e0 —
+feat: adiciona canário live de Option com lease atestado. O WorldLease passou a emitir lease_id
+única por aquisição e active_attestation(); o scope do grant foi ligado a
+arena:run_id:lease_id e revalidado imediatamente antes do consume.
+
+**Live evidence F2-G4B:** run cortex-f2g4b-20260925T014418Z, seed 424242,
+confirmatory_seed=false; artifact runs/audits/cortex_f2g4b_option_live_canary.json, SHA-256
+fb9b69b38a3446dd956ebf529f1888bebfb670cfe59fa8fd8b24b74030f0fc95. Houve exatamente uma
+tentativa, option_execution_attempts=1, automatic_retry=false e continuous_authority=false.
+
+**Authority F2-G4B:** grant 8a7c449946224b458a04820b3e4d8288, plan digest
+3319fdcae56a30a3785c6e64cf2976c442a6c7ed51d3d7f68e19686ef9db9fec. Antes da mutação,
+consumed_at=null; o ledger então persistiu consumed_at=2026-09-25T01:44:58.837313+00:00 e
+consume_result=reserved_before_runtime_mutation. O lease foi liberado ao final.
+
+**Functional evidence F2-G4B:** Option accepted, changed_world=true,
+transaction_committed=true, três hard postconditions satisfeitas. A transição medida foi coverage
+0.0 -> 1.0, processor inexistente -> existente, output 0 -> 13 iron plates e
+producers_reaching_processor 0 -> 1. O furnace terminou no_fuel; logo
+functional_accept=true e sustained_operation=false.
+
+**Temporal counterexample F2-G4B:** o artifact original registrou ticks_before=21840,
+ticks_after=7800, observed_ticks=null e tick_measurement_status=invalid_rewound. Auditoria do
+FLE 0.4.3 mostrou que Action com game_state restaura o checkpoint no início do step e o reset
+administrativo zera storage.elapsed_ticks; GameState não serializa esse contador. Portanto os
+dois valores pertencem a epochs distintos, e não provam rollback do mundo.
+
+**Temporal audit F2-G4B:** runs/audits/cortex_f2g4b_temporal_audit.json, SHA-256
+21cdcbe0e60751952600ae1edb26ab4d0d94e72c9fff5d18e3d83f1f023e52d1, classificação
+functional_accept_tick_epoch_reset_explained. O artifact live não foi reescrito e nenhum segundo
+canário foi executado.
+
+**Temporal fix:** commit aaf10beb5b5ec11b7b28e3619823b02b0a465b59 —
+fix: corrige epoch temporal em transações com checkpoint. Para accepted checkpoint actions, o
+boundary pode usar FLEStep.info.ticks como epoch local explícita quando o contador global
+rebobina; reject/rollback continua sem fabricar duração.
+
+**Verification F2-G4B:** implementation gate 1459 core/FLE + 2 PyTorch PASS; temporal-fix gate
+1460 core/FLE + 2 PyTorch PASS; control-plane gate 1460 core/FLE + 2 PyTorch PASS;
+Ruff/compileall/JavaScript/TypeScript/Vite/whitespace PASS. Live artifact e temporal audit
+permaneceram imutáveis.
+
+**Decision F2-G4B:** **PASS parcial de F2.** Os requisitos transactional execution universal e
+teste que constrói cadeia funcional sem curriculum_runner têm agora evidência live sob authority
+durável. Sustentabilidade autônoma continua não provada.
+
+**Next:** F2-G5 — tornar o runner legado formalmente baseline-only, com fail-closed no caminho
+Cortex e testes que impeçam dispatch stage-coded fora do modo baseline. F3 permanece bloqueada.
 **Exit Gate F2:** o agente pode montar uma cadeia funcional escolhendo primitivas/options por uma
 API genérica, sem caminho codificado por estágio.
 

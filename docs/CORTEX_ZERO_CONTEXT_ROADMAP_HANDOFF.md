@@ -5,7 +5,7 @@
 **Repository:** `MrSchrodingers/project_factorio`
 **Live checkout:** `/srv/factorio-ai-lab`
 **Transition branch:** `research/cortex-v1`
-**Current scientific phase:** **F2-G4A COMPLETE — F2-G4B NEXT**
+**Current scientific phase:** **F2-G4B COMPLETE — F2-G5 BASELINE-ONLY ENFORCEMENT NEXT**
 **F3:** BLOCKED
 **Continuous autonomous authority:** OFF
 **Confirmatory seeds:** untouched / frozen
@@ -63,8 +63,8 @@ Expected invariant after a published checkpoint:
 - working tree = clean;
 - resolve the published checkpoint SHA from Git/GitHub and the immutable tag.
 
-F2-G4A implementation evidence is anchored to f567bf453c9e3c0e8dfb319adfeef266b4926af8.
-The closure/deploy SHA must be resolved from the live repository and BUILD_INFO.
+F2-G4B live implementation evidence is anchored to 794963b435bff616042ca0a6e6f278ead315e5e0; the temporal fix is aaf10beb5b5ec11b7b28e3619823b02b0a465b59 and control-plane integration is 5cbf99dfc739f09c7d9851d27a89c205e97f300a.
+The published G4B closure/deploy SHA must be resolved from Git/tag plus BUILD_INFO.
 
 If these differ, STOP and audit recent commits before continuing.
 
@@ -88,7 +88,7 @@ Expected checkpoint at this handoff:
 
 `phase=F2`
 `phase_status=active`
-`phase2_checkpoint=F2-G4A`
+`phase2_checkpoint=F2-G4B`
 
 Machine-readable state outranks remembered conversation state.
 
@@ -108,7 +108,7 @@ Dashboard runtime:
 
 Expected dashboard/source rule:
 
-the deployed dashboard BUILD_INFO commit must equal the current published G4A closure commit.
+the deployed dashboard BUILD_INFO commit must equal the current published G4B closure commit.
 Resolve that SHA from Git/tag plus BUILD_INFO rather than from a hardcoded value in this document.
 
 This separation is intentional. The dashboard/source may advance while the frozen baseline runtime
@@ -922,7 +922,7 @@ Therefore:
 
 ### F2-G4A — persistent one-shot Option authority
 
-**CURRENT COMPLETED CHECKPOINT.**
+**COMPLETED PREDECESSOR CHECKPOINT.**
 
 Implementation commit:
 
@@ -970,14 +970,60 @@ Therefore:
 
 **F2-G4A DOES NOT CLAIM LIVE OPTION EXECUTION.**
 
-### F2-G4B — next checkpoint
+### F2-G4B — live one-shot Option canary
 
-One explicit non-confirmatory live Option canary may be considered only after the G4A tag, dashboard
-deploy, machine-readable checkpoint and evolution-off state are revalidated.
+**CURRENT COMPLETED CHECKPOINT.**
 
-G4B must bind the persistent grant to the actual experiment and FactorioWorldLease, keep the hard
-functional termination contract unchanged, forbid automatic retry and preserve
-continuous_authority=false.
+Implementation commit:
+
+794963b435bff616042ca0a6e6f278ead315e5e0
+
+Temporal instrumentation fix:
+
+aaf10beb5b5ec11b7b28e3619823b02b0a465b59
+
+Control-plane integration:
+
+5cbf99dfc739f09c7d9851d27a89c205e97f300a
+
+Canonical live artifact:
+
+runs/audits/cortex_f2g4b_option_live_canary.json
+
+SHA-256:
+
+fb9b69b38a3446dd956ebf529f1888bebfb670cfe59fa8fd8b24b74030f0fc95
+
+Canonical temporal audit:
+
+runs/audits/cortex_f2g4b_temporal_audit.json
+
+SHA-256:
+
+21cdcbe0e60751952600ae1edb26ab4d0d94e72c9fff5d18e3d83f1f023e52d1
+
+The run cortex-f2g4b-20260925T014418Z used seed 424242, outside the frozen confirmatory set.
+Exactly one Option execution was attempted, with automatic_retry=false and
+continuous_authority=false. The persistent grant was consumed durably before runtime mutation and
+was bound to the attested FactorioWorldLease. The Option was accepted, all hard postconditions
+passed, physical processing coverage rose 0 -> 1, one producer reached the processor, and 13 iron
+plates were produced.
+
+The furnace terminated no_fuel; therefore this is a functional accept, not evidence of sustained
+autonomous operation.
+
+The original artifact recorded a tick epoch reset (21840 -> 7800) caused by FLE checkpoint
+restoration. The original artifact was not rewritten and no second canary was run. The separate
+temporal audit classifies this as functional_accept_tick_epoch_reset_explained.
+
+**DO NOT rerun G4B.**
+
+### F2-G5 — next checkpoint
+
+Make the legacy curriculum_runner mechanically baseline-only. Cortex execution paths must fail
+closed rather than import or dispatch stage-coded authority. Legacy baseline experiments may
+continue only under an explicit baseline execution identity. F3 remains blocked until this final
+F2 checklist item is satisfied.
 
 ## F3 — Executive / Cognitive Loop
 
@@ -1379,9 +1425,9 @@ Before retrying any mutation, check:
 
 ---
 
-# 13. F2-G4A closure and F2-G4B next work
+# 13. F2-G4B closure and F2-G5 next work
 
-F2-G4A is complete as a partial F2 checkpoint.
+F2-G4B is complete as a partial F2 checkpoint. F2 remains active only because baseline-only enforcement of the legacy runner is still open.
 
 ## 13.1 G4A authority result
 
@@ -1965,19 +2011,20 @@ At this checkpoint:
 - F2 ACTIVE;
 - F2-G3 COMPLETE;
 - F2-G4A COMPLETE;
-- F2-G4B NEXT;
+- F2-G4B COMPLETE;
+- F2-G5 NEXT: baseline-only enforcement of the legacy runner;
 - F3 BLOCKED;
 - continuous authority OFF;
 - evolution service OFF;
 - confirmatory seeds untouched;
-- last live accepted Cortex canary = F2-F4C;
-- F2-F4C produced 13 iron plates but ended no_fuel;
+- last live accepted Cortex canary = F2-G4B;
+- F2-G4B produced 13 iron plates but ended no_fuel;
 - sustainable autonomy not proven;
 - first Option exists;
 - universal Option boundary exists;
-- persistent one-shot authority exists and is restart/concurrency validated in dry-run;
-- no post-G4A live Option EXECUTE has been performed; G4B requires explicit preflight and exact persistent scope;
-- G4A implementation commit = f567bf453c9e3c0e8dfb319adfeef266b4926af8;
+- persistent one-shot authority exists and is restart/concurrency validated;
+- exactly one post-G4A live Option EXECUTE occurred; it is already consumed/audited and MUST NOT be repeated;
+- G4B implementation commit = 794963b435bff616042ca0a6e6f278ead315e5e0;
 - G4A dry-run artifact SHA-256 = 94b60b7b8a298252edcb37b4435854c97f83e0f6832de9ec46aec05aff1e1ec6;
 - published closure/dashboard SHA must be revalidated from Git/tag/BUILD_INFO;
 - frozen baseline runtime = `95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac`;
