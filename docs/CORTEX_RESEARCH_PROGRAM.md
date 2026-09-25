@@ -7,7 +7,7 @@
 **Branch de transição:** `research/cortex-v1`
 **Baseline pré-Cortex:** `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 **Tag de baseline:** `cortex-pre-research-baseline-20260923`
-**Status:** F2-G4B concluída — F2-G5 baseline-only enforcement é o próximo checkpoint; F2 ativa; F3 e continuous authority bloqueadas
+**Status:** F2 COMPLETE em F2-G5 — F3 READY / NOT STARTED; continuous authority e evolution OFF
 
 > Este arquivo é o contrato científico e operacional do Factorio AI Lab. Em caso de perda de
 > contexto de conversa, troca de operador, troca de modelo ou reinício do host, um operador sem
