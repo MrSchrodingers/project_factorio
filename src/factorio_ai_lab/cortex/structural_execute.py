@@ -703,6 +703,19 @@ class StructuralTransactionalAdapter:
             purpose=compilation.compiled.purpose,
         )
 
+        step_info = getattr(step, "info", {})
+        raw_step_ticks = (
+            step_info.get("ticks")
+            if isinstance(step_info, dict)
+            else None
+        )
+        executor_step_ticks = (
+            int(raw_step_ticks)
+            if isinstance(raw_step_ticks, (int, float))
+            and not isinstance(raw_step_ticks, bool)
+            and raw_step_ticks >= 0
+            else None
+        )
         measurements: dict[str, Any] = {
             "before": before,
             "candidate_after": candidate_after,
@@ -710,6 +723,8 @@ class StructuralTransactionalAdapter:
             "contract_version": compilation.compiled.contract_version,
             "operation_names": list(compilation.compiled.operation_names),
             "settle_seconds": compilation.compiled.settle_seconds,
+            "checkpoint_used": bool(use_checkpoint_for_action),
+            "executor_step_ticks": executor_step_ticks,
         }
         if measurement_error is not None:
             measurements["measurement_error"] = measurement_error

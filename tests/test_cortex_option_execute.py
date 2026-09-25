@@ -264,11 +264,44 @@ class FakeTickingEnvironment:
             {
                 "output_game_state": deepcopy(self.state),
                 "error_occurred": False,
+                "ticks": self.ticks,
             },
         )
 
     def close(self) -> None:
         pass
+
+
+class FakeCheckpointResetEnvironment(FakeTickingEnvironment):
+    def __init__(self, *, promotes: bool) -> None:
+        super().__init__(promotes=promotes)
+        self.initial_ticks = 21_840
+        self.ticks = self.initial_ticks
+
+    def step(self, action: FakeAction):
+        self.step_calls += 1
+        self.last_action = action
+        if action.game_state is not None:
+            self.state = deepcopy(action.game_state)
+            self.ticks = 0
+        self.ticks += 7_800
+        if self.promotes:
+            self.state["producers_reaching_processor"] = 4
+            self.state["physical_processing_coverage"] = 2 / 3
+            self.state["processor_exists"] = True
+            self.state["processor_status"] = "no_fuel"
+            self.state["processor_output"] = 13.0
+        return (
+            {"raw_text": action.code},
+            1.0,
+            False,
+            False,
+            {
+                "output_game_state": deepcopy(self.state),
+                "error_occurred": False,
+                "ticks": self.ticks,
+            },
+        )
 
 
 def transactional_executor(
@@ -409,6 +442,42 @@ def test_fake_execute_commits_and_feeds_observed_ticks_back_to_budget(
     assert result.feedback_budget.sustainability_evaluable is True
     assert result.lineage["code_revision"] == "f2g3-sha"
     assert result.lineage["run_id"] == "f2g3-run"
+
+
+def test_checkpoint_reset_uses_transaction_epoch_ticks_for_accepted_action(
+    tmp_path: Path,
+) -> None:
+    plan = option_plan()
+    env = FakeCheckpointResetEnvironment(promotes=True)
+    tx = transactional_executor(env)
+    scope, execution_grant, ledger = persisted_grant(
+        plan,
+        tmp_path / "checkpoint-grants.sqlite3",
+    )
+
+    result = OptionExecutionBoundary(ledger=ledger).execute(
+        plan,
+        authority=ActionAuthority.EXECUTE,
+        grant=execution_grant,
+        scope=scope,
+        executor=tx,
+        measure=probe(env),
+        tick_source=env,
+        now=FIXED_NOW,
+    )
+
+    assert result.status is ActionStatus.ACCEPTED
+    assert result.ticks_before == 21_840
+    assert result.ticks_after == 7_800
+    assert result.observed_ticks == 7_800
+    assert result.tick_measurement_status == "observed_checkpoint_epoch"
+    assert result.feedback_budget is not None
+    assert result.feedback_budget.observed_ticks == 7_800
+    assert result.feedback_budget.observed_source is not None
+    assert "FLEStep.info.ticks" in result.feedback_budget.observed_source
+    assert result.action_result is not None
+    assert result.action_result.measurements["checkpoint_used"] is True
+    assert result.action_result.measurements["executor_step_ticks"] == 7_800
 
 
 def test_rejected_transaction_does_not_claim_zero_ticks_after_rollback(

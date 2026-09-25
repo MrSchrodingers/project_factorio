@@ -62,6 +62,7 @@ REFUSAL_OPTION_EXECUTION_SHADOW = "option_execution_shadow_only"
 REFUSAL_OPTION_EXECUTION_PROPOSAL = "option_execution_proposal_only"
 
 _TICK_SOURCE = "factorio_ai_lab.instrumentation.runtime.runtime_game_ticks"
+_CHECKPOINT_TICK_SOURCE = "factorio_ai_lab.integrations.fle.FLEStep.info.ticks"
 
 
 @dataclass(frozen=True)
@@ -276,13 +277,29 @@ def _tick_feedback(
     before: int | None,
     after: int | None,
     action_status: ActionStatus,
+    checkpoint_used: bool,
+    executor_step_ticks: int | None,
 ) -> tuple[int | None, str, OptionBudget | None]:
+    if action_status is not ActionStatus.ACCEPTED:
+        return None, "missing_after_rollback", None
     if before is None or after is None:
         return None, "missing", None
     if after < before:
+        if (
+            checkpoint_used
+            and executor_step_ticks is not None
+            and executor_step_ticks >= 0
+        ):
+            return (
+                executor_step_ticks,
+                "observed_checkpoint_epoch",
+                OptionBudget(
+                    requested_ticks=budget.requested_ticks,
+                    observed_ticks=executor_step_ticks,
+                    observed_source=_CHECKPOINT_TICK_SOURCE,
+                ),
+            )
         return None, "invalid_rewound", None
-    if action_status is not ActionStatus.ACCEPTED and after <= before:
-        return None, "missing_after_rollback", None
     elapsed = after - before
     return (
         elapsed,
@@ -655,11 +672,26 @@ class OptionExecutionBoundary:
         )
 
         ticks_after = runtime_game_ticks(tick_source)
+        checkpoint_used = bool(
+            action_result.measurements.get("checkpoint_used", False)
+        )
+        raw_executor_ticks = action_result.measurements.get(
+            "executor_step_ticks"
+        )
+        executor_step_ticks = (
+            int(raw_executor_ticks)
+            if isinstance(raw_executor_ticks, (int, float))
+            and not isinstance(raw_executor_ticks, bool)
+            and raw_executor_ticks >= 0
+            else None
+        )
         observed_ticks, tick_status, feedback = _tick_feedback(
             plan.request.budget,
             before=ticks_before,
             after=ticks_after,
             action_status=action_result.status,
+            checkpoint_used=checkpoint_used,
+            executor_step_ticks=executor_step_ticks,
         )
 
         return OptionExecutionResult(
