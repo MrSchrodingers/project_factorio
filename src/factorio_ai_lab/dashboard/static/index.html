@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Factorio AI Lab</title>
-  <link rel="stylesheet" href="/static/styles.css?v=6d8355e157e7">
+  <link rel="stylesheet" href="/static/styles.css?v=d8302a43f695">
   <link rel="stylesheet" href="/static/map/style.css?v=c71c7bfce507">
 </head>
 <body>
@@ -362,8 +362,8 @@
       <article class="card factory-card">
         <div class="card-head world-card-head">
           <div>
-            <span class="label">FÁBRICA AO VIVO</span>
-            <h2>Mapa da fábrica</h2>
+            <span id="factoryViewLabel" class="label">WORLD LIVE · FÁBRICA</span>
+            <h2 id="factoryViewTitle">Mapa da fábrica</h2>
           </div>
           <div class="world-head-actions">
             <div class="view-mode-toggle" role="group" aria-label="World view mode">
@@ -381,6 +381,14 @@
 
         <div class="world-stage" id="worldStage" data-factory-map></div>
         <div id="worldStateNotice" class="world-state-notice" hidden></div>
+        <div id="historicalReplayNotice" class="historical-replay-notice" hidden aria-live="polite">
+          <div>
+            <span id="historicalReplayLabel" class="label">REPLAY VISUAL · NÃO EXECUTA FACTORIO</span>
+            <strong id="historicalReplayEvent">carregando evidência histórica…</strong>
+            <small id="historicalReplayMeta">somente apresentação</small>
+          </div>
+          <span id="historicalReplayBadge" class="badge neutral">--</span>
+        </div>
 
         <div class="factory-footer">
           <div>
@@ -731,7 +739,7 @@
     </details>
   </main>
 
-  <script src="/static/app.js?v=59bda838941e"></script>
+  <script src="/static/app.js?v=a2a5369f6835"></script>
   <script src="/static/map/factory-map.js?v=3dc0844d0d2d"></script>
 </body>
 </html>

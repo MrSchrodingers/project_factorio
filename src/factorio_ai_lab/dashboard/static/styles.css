@@ -2745,3 +2745,36 @@ small { line-height: 1.35; }
   line-height: 1.45;
 }
 .world-state-notice[hidden] { display: none; }
+
+.historical-replay-notice {
+  margin: 8px 12px 0;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px dashed rgba(106, 181, 247, .28);
+  border-radius: 8px;
+  background: rgba(106, 181, 247, .045);
+}
+.historical-replay-notice[hidden] { display: none; }
+.historical-replay-notice > div { min-width: 0; }
+.historical-replay-notice strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.historical-replay-notice small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+@media (max-width: 780px) {
+  .historical-replay-notice {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

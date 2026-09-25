@@ -39,6 +39,7 @@ const state = {
   production: { precision: "1m", series: {} },
   productionPrecision: "1m",
   productionLoading: false,
+  historicalReplayCursor: 0,
 };
 
 function setText(id, value) {
@@ -135,13 +136,22 @@ function cortexOperationalView() {
   const phase4Checkpoint = String(cortexPhase.phase4_checkpoint || "");
   const globalCortex = context.kind === "global" && ["F3", "F4"].includes(phase);
   const liveAgent = !!runner.active;
+  const paused = globalCortex && !liveAgent;
+  const researchEvents = Array.isArray(state.research && state.research.events)
+    ? state.research.events
+    : [];
+  const runEvents = Array.isArray(state.run && state.run.events)
+    ? state.run.events
+    : [];
   return {
     context,
     cortexPhase,
     phase,
     phase4Checkpoint,
     liveAgent,
-    historicalEvidenceMode: globalCortex && !liveAgent,
+    paused,
+    historicalEvidenceMode: paused,
+    visualReplayAvailable: paused && (researchEvents.length > 0 || runEvents.length > 0),
   };
 }
 
@@ -1743,12 +1753,15 @@ function renderExperimentContext() {
   const failed = Array.isArray(summary.failed_stages) ? summary.failed_stages : [];
   const science = summary.logistic_science_output;
   const worldEntities = Number((state.world || {}).entity_count || 0);
+  const operational = cortexOperationalView();
 
   setText(
     "experimentContextTitle",
     baseline
       ? "Baseline isolada · seed " + seed + " · " + String(context.status || "--")
-      : String(context.label || "Global / Cortex")
+      : (operational.paused
+        ? "Cortex " + (operational.phase || "--") + " · PAUSADO / SHADOW"
+        : String(context.label || "Global / Cortex"))
   );
   setText(
     "experimentContextDetail",
@@ -1762,19 +1775,30 @@ function renderExperimentContext() {
         + (context.status === "completed"
           ? " · mundo continua tickando após o snapshot final"
           : "")
-      : "estado global do Cortex · baselines permanecem isoladas como evidência"
+      : (operational.paused
+        ? "estado global do Cortex · execução autônoma pausada · telemetria WORLD continua live · baselines permanecem isoladas como evidência"
+        : "estado global do Cortex · baselines permanecem isoladas como evidência")
   );
   setClassText(
     "evidenceTruthBadge",
     baseline ? "EVIDENCE · SEED " + seed : "EVIDENCE · GLOBAL",
     baseline ? "badge good" : "badge neutral"
   );
-  const operational = cortexOperationalView();
   const worldEmpty = Number((state.world || {}).entity_count || 0) === 0;
   setClassText(
     "worldTruthBadge",
     worldEmpty ? "WORLD · LIVE RCON · EMPTY" : "WORLD · LIVE RCON",
     worldEmpty ? "badge warn" : "badge live"
+  );
+  setText(
+    "factoryViewLabel",
+    operational.historicalEvidenceMode ? "WORLD LIVE · CORTEX PAUSADO" : "WORLD LIVE · FÁBRICA"
+  );
+  setText(
+    "factoryViewTitle",
+    operational.historicalEvidenceMode && worldEmpty
+      ? "Mapa live vazio · replay histórico separado"
+      : "Mapa da fábrica"
   );
 
   const modeNotice = $("operationalModeNotice");
@@ -1783,15 +1807,17 @@ function renderExperimentContext() {
     if (operational.historicalEvidenceMode) {
       setText(
         "operationalModeTitle",
-        "CORTEX SHADOW · nenhum executor controla o mundo"
+        "CORTEX PAUSADO · nenhum executor controla o mundo"
       );
       setText(
         "operationalModeDetail",
-        "F4-B está fechado. Gerações, curriculum, UCB, modelos e timelines abaixo são evidência histórica congelada; evolution está OFF. O próximo trabalho é F4-C protocolar/causal, não uma geração live."
+        "F4-B está fechado e o pré-registro F4-C está congelado. Evolution e runners permanecem OFF. A UI pode reproduzir visualmente eventos históricos reais, mas replay visual não executa Factorio, não cria outcome e não conta como evidência F4-C."
       );
       setClassText(
         "operationalModeBadge",
-        "IDLE INTENCIONAL · HISTÓRICO PRESERVADO",
+        operational.visualReplayAvailable
+          ? "PAUSADO · REPLAY VISUAL DISPONÍVEL"
+          : "PAUSADO · HISTÓRICO PRESERVADO",
         "badge warn"
       );
     }
@@ -1800,7 +1826,7 @@ function renderExperimentContext() {
   if (worldNotice) {
     worldNotice.hidden = !(operational.historicalEvidenceMode && worldEmpty);
     if (!worldNotice.hidden) {
-      worldNotice.textContent = "WORLD LIVE conectado, porém vazio: 0 entidades é o estado físico observado do player force. Não há runner/evolution ativo construindo neste momento; o mapa não está travado.";
+      worldNotice.textContent = "WORLD LIVE conectado, porém vazio: 0 entidades é o estado físico observado do player force. Cortex está PAUSADO e não há runner/evolution construindo. O replay visual abaixo usa somente eventos históricos persistidos e nunca substitui o estado físico live.";
     }
   }
 
@@ -3739,7 +3765,7 @@ function renderCurriculum() {
   const operational = cortexOperationalView();
   const historical = operational.historicalEvidenceMode;
   setText("curriculumLabel", historical ? "EVIDÊNCIA HISTÓRICA" : "EXECUÇÃO AUTÔNOMA");
-  setText("curriculumTitle", historical ? "Último curriculum baseline preservado" : "Curriculum");
+  setText("curriculumTitle", historical ? "Replay do último curriculum baseline" : "Curriculum");
   const curriculum = Array.isArray(state.research && state.research.curriculum)
     ? state.research.curriculum
     : [];
@@ -3755,7 +3781,11 @@ function renderCurriculum() {
       : !historical && (status === "running" || status === "learning" || status === "validating")
         ? "active"
         : "";
-    const displayStatus = historical ? "histórico · " + status : status;
+    const displayStatus = historical
+      ? (["running", "learning", "validating", "starting"].includes(status)
+        ? "congelado · " + status
+        : "histórico · " + status)
+      : status;
     const detail = stage.detail || stage.objective || "";
     return '<div class="stage-row ' + cls + '">'
       + '<span class="stage-index">' + (index + 1) + '</span>'
@@ -3770,11 +3800,70 @@ function eventTime(event) {
   return event.at || event.timestamp || event.time || "";
 }
 
+function historicalReplayEvents() {
+  const events = [];
+  const seen = new Set();
+  const appendUnique = (event, source) => {
+    if (!event || typeof event !== "object") return;
+    const when = String(eventTime(event));
+    const type = String(event.type || "event");
+    const message = String(event.message || event.observation || event.lesson || type);
+    const key = when + "|" + type + "|" + message;
+    if (seen.has(key)) return;
+    seen.add(key);
+    events.push(Object.assign({}, event, { source }));
+  };
+  for (const event of ((state.research && state.research.events) || [])) {
+    appendUnique(event, "research");
+  }
+  for (const event of ((state.run && state.run.events) || [])) {
+    appendUnique(event, "run");
+  }
+  events.sort((a, b) => String(eventTime(a)).localeCompare(String(eventTime(b))));
+  return events.slice(-40);
+}
+
+function renderHistoricalReplay(advance = false) {
+  const panel = $("historicalReplayNotice");
+  if (!panel) return;
+  const operational = cortexOperationalView();
+  panel.hidden = !operational.historicalEvidenceMode;
+  if (panel.hidden) return;
+
+  const events = historicalReplayEvents();
+  setText("historicalReplayLabel", "REPLAY VISUAL · NÃO EXECUTA FACTORIO");
+  if (!events.length) {
+    setText("historicalReplayEvent", "Nenhum evento persistido disponível para replay.");
+    setText("historicalReplayMeta", "Cortex permanece pausado · WORLD LIVE continua separado");
+    setClassText("historicalReplayBadge", "PAUSADO · SEM REPLAY", "badge neutral");
+    return;
+  }
+
+  if (advance) {
+    state.historicalReplayCursor = (state.historicalReplayCursor + 1) % events.length;
+  } else {
+    state.historicalReplayCursor %= events.length;
+  }
+  const index = state.historicalReplayCursor;
+  const event = events[index];
+  const type = String(event.type || "event");
+  const message = String(event.message || event.observation || event.lesson || type);
+  const when = String(eventTime(event) || "--");
+  setText("historicalReplayEvent", message);
+  setText(
+    "historicalReplayMeta",
+    "evento histórico " + (index + 1) + "/" + events.length
+      + " · " + type + " · " + when
+      + " · somente apresentação"
+  );
+  setClassText("historicalReplayBadge", "REPLAY " + (index + 1) + "/" + events.length, "badge neutral");
+}
+
 function renderTimeline() {
   const operational = cortexOperationalView();
   const historical = operational.historicalEvidenceMode;
   setText("timelineLabel", historical ? "EVIDÊNCIA HISTÓRICA" : "RASTRO DE DECISÕES");
-  setText("timelineTitle", historical ? "Última timeline persistida" : "Linha do tempo");
+  setText("timelineTitle", historical ? "Replay histórico · última timeline persistida" : "Linha do tempo");
   const events = [];
   const seen = new Set();
   const appendUnique = (event, source) => {
@@ -4050,7 +4139,7 @@ function updateMission() {
       || "validate paired evaluation harness before any pilot seed");
     $("stageProgressBar").style.width = "0%";
     setText("stageProgressText", String(blocker.status || "blocked").toUpperCase());
-    setClassText("researchBadge", "CORTEX SHADOW · IDLE INTENCIONAL", "badge warn");
+    setClassText("researchBadge", "CORTEX PAUSADO · HARNESS PENDENTE", "badge warn");
     return;
   }
 
@@ -4199,7 +4288,7 @@ function updateKpis() {
   const operational = cortexOperationalView();
   const arenaMode = String(arena.mode || "unknown");
   const arenaLabel = operational.historicalEvidenceMode
-    ? "CORTEX SHADOW · " + (operational.phase4Checkpoint || operational.phase || "--")
+    ? "CORTEX PAUSADO · " + (operational.phase4Checkpoint || operational.phase || "--")
     : baselineContext
       ? "BASELINE · seed " + String(context.seed ?? "--")
       : arenaMode === "open_play"
@@ -4243,7 +4332,7 @@ function updateKpis() {
     && !researchPromotion.promoted;
   const baselineCompleted = baselineContext && context.status === "completed";
   const loopLabel = operational.historicalEvidenceMode
-    ? "idle · by design"
+    ? "PAUSADO · por desenho"
     : baselineCompleted
       ? "baseline seed completed"
       : runnerStalled
@@ -4306,7 +4395,7 @@ function updateKpis() {
     setText("engineeringGoal", "F4-C · causal memory transfer benchmark");
     setText(
       "engineeringGoalDetail",
-      "protocol not frozen · memory ON vs explicit ablation · held-out non-confirmatory tasks · leakage control + paired inference"
+      "protocol frozen · harness ainda não validado · memory ON vs retrieval-only ablation · held-out non-confirmatory tasks · leakage control + paired inference"
     );
   } else if (nextGoal) {
     setText("engineeringGoal", nextGoal.label || nextGoal.goal_id || "next capability");
@@ -4346,8 +4435,8 @@ function updateKpis() {
     setText(
       "onlineLearner",
       onlineRows.length
-        ? "HISTÓRICO · " + String(online.algorithm || "online learner")
-        : "HISTÓRICO · sem learner ativo"
+        ? "PAUSADO · HISTÓRICO · " + String(online.algorithm || "online learner")
+        : "PAUSADO · sem learner ativo"
     );
     setText(
       "onlineLearnerDetail",
@@ -4385,13 +4474,15 @@ function updateKpis() {
   const actionStage = String(activeAction.stage || "");
   const factorioLabel = !factorio.connected
     ? "Factorio offline"
-    : execution.action_active
-      ? "Factorio · executando " + actionLabel(actionKind)
-      : execution.writer_active
-        ? "Factorio · entre ações"
-        : simulating
-          ? "Factorio · simulando"
-          : "Factorio · ocioso";
+    : operational.historicalEvidenceMode
+      ? "Factorio · telemetria live · Cortex pausado"
+      : execution.action_active
+        ? "Factorio · executando " + actionLabel(actionKind)
+        : execution.writer_active
+          ? "Factorio · entre ações"
+          : simulating
+            ? "Factorio · mundo tickando"
+            : "Factorio · ocioso";
   setClassText(
     "factorioStatus",
     factorioLabel,
@@ -4407,6 +4498,8 @@ function updateKpis() {
         ].filter(Boolean).join(" · ")
       : execution.writer_active
         ? "executor experimental possui o lease exclusivo do mundo"
+        : operational.historicalEvidenceMode
+        ? "telemetria RCON live; nenhum executor Cortex possui lease do mundo; replay visual é somente apresentação"
         : "nenhum executor experimental possui o lease do mundo";
   }
   setClassText("llmStatus", llm.connected ? "Qwen inference" : "offline", llm.connected ? "good" : "bad");
@@ -4430,7 +4523,7 @@ function updateKpis() {
 
   const runStatus = String((state.run && state.run.status) || "--");
   if (operational.historicalEvidenceMode) {
-    setClassText("runStatus", "FROZEN · " + statusLabel(runStatus), "badge neutral");
+    setClassText("runStatus", "PAUSADO · último " + statusLabel(runStatus), "badge neutral");
     setText(
       "runId",
       state.run && state.run.run_id
@@ -4487,6 +4580,7 @@ function applyPayload(payload) {
   renderResearchAnalytics();
   renderCurriculum();
   renderTimeline();
+  renderHistoricalReplay(false);
   renderKnowledge();
   renderTruthTable();
   drawOfflineLearning();
@@ -4577,13 +4671,26 @@ $("configForm").addEventListener("submit", async (event) => {
   if (response.ok) setTimeout(() => setText("configSaved", ""), 1600);
 });
 
+function updateSocketBadge(degraded = false) {
+  if (degraded) {
+    setClassText("socketBadge", "telemetria degradada", "badge dead");
+    return;
+  }
+  const operational = cortexOperationalView();
+  if (operational.historicalEvidenceMode) {
+    setClassText("socketBadge", "telemetria live · Cortex pausado", "badge neutral");
+  } else {
+    setClassText("socketBadge", "live", "badge live");
+  }
+}
+
 function connectSocket() {
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
   const socket = new WebSocket(protocol + "//" + location.host + "/ws/live");
   state.socket = socket;
 
   socket.addEventListener("open", () => {
-    setClassText("socketBadge", "live", "badge live");
+    updateSocketBadge(false);
   });
 
   socket.addEventListener("message", (event) => {
@@ -4591,11 +4698,12 @@ function connectSocket() {
       const payload = JSON.parse(event.data);
       if (payload.stream_error) {
         console.error("live sample degraded", payload.stream_error);
-        setClassText("socketBadge", "degraded · live", "badge dead");
+        updateSocketBadge(true);
       } else {
-        setClassText("socketBadge", "live", "badge live");
+        updateSocketBadge(false);
       }
       applyPayload(payload);
+      if (!payload.stream_error) updateSocketBadge(false);
     } catch (error) {
       console.error("live payload error", error);
     }
@@ -4632,6 +4740,9 @@ Promise.allSettled([loadConfig(), loadInitialState(), loadProduction()])
   .finally(connectSocket);
 
 setInterval(updateFrameAge, 1000);
+setInterval(() => {
+  if (document.visibilityState === "visible") renderHistoricalReplay(true);
+}, 4500);
 setInterval(() => {
   if (document.visibilityState === "visible") refreshWorldFrame(false);
 }, 3000);

@@ -160,14 +160,19 @@ def test_dashboard_separates_live_cortex_from_frozen_baseline_evidence() -> None
 
     assert "function cortexOperationalView()" in app
     assert "historicalEvidenceMode" in app
-    assert "CORTEX SHADOW · nenhum executor controla o mundo" in app
-    assert "IDLE INTENCIONAL · HISTÓRICO PRESERVADO" in app
+    assert "CORTEX PAUSADO · nenhum executor controla o mundo" in app
+    assert "PAUSADO · REPLAY VISUAL DISPONÍVEL" in app
     assert "F4-C — causal memory ablation + held-out transfer" in app
     assert "F4-C · protocol frozen · harness validation" in app
+    assert "CORTEX PAUSADO · nenhum executor controla o mundo" in app
+    assert "REPLAY VISUAL · NÃO EXECUTA FACTORIO" in app
+    assert "protocol frozen · harness ainda não validado" in app
+    assert "Factorio · telemetria live · Cortex pausado" in app
+    assert "historicalReplayNotice" in index
     assert "paired evaluation harness before any pilot seed" in app
-    assert "CORTEX SHADOW · IDLE INTENCIONAL" in app
+    assert "CORTEX PAUSADO · HARNESS PENDENTE" in app
     assert "FROZEN · EVOLUTION OFF" in app
-    assert "Último curriculum baseline preservado" in app
+    assert "Replay do último curriculum baseline" in app
     assert "WORLD LIVE conectado, porém vazio" in app
     assert 'id="operationalModeNotice"' in index
     assert 'id="worldStateNotice"' in index
