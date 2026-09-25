@@ -1749,9 +1749,13 @@ function renderExperimentContext() {
     const phase3Checkpoint = String(cortexPhase.phase3_checkpoint || "");
     const executiveShadowPhase = phase3Checkpoint === "F3-A";
     const verificationCreditPhase = phase3Checkpoint === "F3-B";
-    const phase3ShadowActive = executiveShadowPhase || verificationCreditPhase;
+    const pairedShadowPhase = phase3Checkpoint === "F3-C";
+    const phase3ShadowActive = executiveShadowPhase
+      || verificationCreditPhase
+      || pairedShadowPhase;
     const executiveShadow = cortexPhase.phase3_executive_shadow_kernel || {};
     const verificationCredit = cortexPhase.phase3_verification_credit_ledger || {};
+    const pairedShadow = cortexPhase.phase3_paired_shadow_comparison || {};
     const functionalCanary = phase2Checkpoint === "F2-F3";
     const deliveryActuatorPhase = phase2Checkpoint.startsWith("F2-F4");
     const deliveryActuatorRunner = phase2Checkpoint === "F2-F4B";
@@ -1799,6 +1803,9 @@ function renderExperimentContext() {
       phaseBadge = configured
         ? "F1-B · " + completed + "/" + configured
         : "F1-B · seed " + seed;
+    } else if (pairedShadowPhase) {
+      phaseTitle = "F3 · COMPLETE · F3-C paired shadow comparison";
+      phaseBadge = "F3 COMPLETE · escolhas explícitas · no live authority";
     } else if (verificationCreditPhase) {
       phaseTitle = "F3-B · Verification + Credit Ledger · SHADOW";
       phaseBadge = "F3-B · outcomes verificados · ledger persistente";
@@ -1911,7 +1918,17 @@ function renderExperimentContext() {
       );
       setText(
         "cortexAuthorityDetail",
-        verificationCreditPhase
+        pairedShadowPhase
+          ? "F3-C SHADOW: comparação pareada de escolhas sobre os mesmos objetivos históricos. "
+            + "Artifact " + String(pairedShadow.status || "--").toUpperCase()
+            + " · pairs "
+            + String((pairedShadow.comparison || {}).paired_episode_count || "--")
+            + " · legacy agreement "
+            + String((pairedShadow.comparison || {}).legacy_policy_agreement || "--")
+            + " · policy divergence "
+            + String((pairedShadow.comparison || {}).policy_divergence_pairs || "--")
+            + " · F3 Exit Gate completo sem claim de superiority · G4B segue última evidência live."
+          : (verificationCreditPhase
           ? "F3-B SHADOW: verification-after-action + credit fail-closed + ledger persistente. "
             + "Artifact " + String(verificationCredit.status || "--").toUpperCase()
             + " · episodes "
@@ -1940,7 +1957,7 @@ function renderExperimentContext() {
             : ("EXECUTE concedido somente ao canário registrado"
               + " · continuous authority "
               + (canary.continuous_authority ? "ON" : "OFF")
-              + " · baseline/holdout separados."))))))))
+              + " · baseline/holdout separados.")))))))))
       );
     } else {
       setText("cortexCanaryStatus", "canário não executado");

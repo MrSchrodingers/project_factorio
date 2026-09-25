@@ -101,3 +101,16 @@ def test_dashboard_renders_f3b_credit_ledger_as_shadow() -> None:
     assert "F3-B · outcomes verificados · ledger persistente" in app
     assert "verification-after-action + credit fail-closed" in app
     assert "G4B permanece a última evidência live" in app
+
+
+def test_dashboard_renders_f3c_as_complete_without_superiority_claim() -> None:
+    app=(
+        Path(__file__).parents[1]
+        / "src/factorio_ai_lab/dashboard/static/app.js"
+    ).read_text()
+
+    assert 'phase3Checkpoint === "F3-C"' in app
+    assert "F3 · COMPLETE · F3-C paired shadow comparison" in app
+    assert "F3 COMPLETE · escolhas explícitas · no live authority" in app
+    assert "F3 Exit Gate completo sem claim de superiority" in app
+    assert "G4B segue última evidência live" in app

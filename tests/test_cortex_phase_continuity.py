@@ -1455,6 +1455,178 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
         "against the legacy runner"
     )
 
+    assert f3b["phase3_exit_gate"]["validated"] is False
+
+    paired_rows=[
+        {
+            "run_id":"paired-r1",
+            "generation":97,
+            "stage":"Logistic science",
+            "symptom":(
+                "producer_output_unprocessed:"
+                "output_buffered_not_processed"
+            ),
+            "action_key":"placement:place_processing_for_buffered_output",
+            "choice_basis":"fixed_rule_no_history",
+            "executed":False,
+            "targets":["p1","p2"],
+            "outcome":{
+                "before":None,
+                "after":None,
+                "prediction":{
+                    "metric":"producers_reaching_processor",
+                    "direction":"increase"
+                },
+                "reward":None,
+                "verdict":"unmeasured"
+            }
+        },
+        {
+            "run_id":"paired-r2",
+            "generation":98,
+            "stage":"Logistic science",
+            "symptom":(
+                "producer_chain_reaches_no_sink:"
+                "chain_reaches_no_sink"
+            ),
+            "action_key":"rebuild:reroute_producer_logistics",
+            "choice_basis":"fixed_rule_no_history",
+            "executed":False,
+            "targets":["p3"],
+            "outcome":{
+                "before":None,
+                "after":None,
+                "prediction":{
+                    "metric":"producers_reaching_processor",
+                    "direction":"increase"
+                },
+                "reward":None,
+                "verdict":"unmeasured"
+            }
+        },
+    ]
+    with repairs.open("a",encoding="utf-8") as handle:
+        for row in paired_rows:
+            handle.write(json.dumps(row)+"\n")
+    f3c_pairs=[]
+    for row_index,row in zip((2,3),paired_rows,strict=True):
+        f3c_pairs.append({
+            "pair_id":f"pair-{row_index}",
+            "observed":{
+                "row_index":row_index,
+                "run_id":row["run_id"],
+                "generation":row["generation"],
+                "stage":row["stage"],
+                "symptom":row["symptom"],
+                "action_key":row["action_key"],
+                "choice_basis":row["choice_basis"],
+                "executed":row["executed"],
+                "targets":row["targets"],
+                "outcome":row["outcome"],
+                "identity_sha256":"fixture"
+            },
+            "candidate_action_keys":["a","b"],
+            "candidate_count":2,
+            "same_candidate_set_between_policies":True,
+            "legacy_action_in_candidate_set":True,
+            "legacy_policy_choice":row["action_key"],
+            "rebuild_policy_choice":(
+                "rebuild:reroute_producer_logistics"
+            ),
+            "legacy_policy_agrees_with_runner":True,
+            "rebuild_policy_agrees_with_runner":row_index==3,
+            "policies_diverge":row_index==2,
+            "world_mutation":False,
+            "execute_authorized":False
+        })
+    f3c_payload={
+        "schema_version":"cortex_f3c_paired_shadow_comparison_v1",
+        "status":"pass",
+        "run_id":"f3c-shadow",
+        "code_revision":{
+            "commit":"f3c-sha",
+            "branch":"research/cortex-v1",
+            "dirty":False
+        },
+        "authority":"shadow",
+        "world_mutation":False,
+        "factorio_rcon_used":False,
+        "fle_environment_created":False,
+        "world_lease_acquired":False,
+        "execution_grant_created":False,
+        "continuous_authority":False,
+        "comparison":{
+            "paired_episode_count":2,
+            "fixed_rule_basis_count":2,
+            "canonical_fixed_rule_agreement":2,
+            "canonical_fixed_rule_agreement_rate":1.0,
+            "multiple_candidate_pairs":2,
+            "candidate_set_policy_invariant_pairs":2,
+            "legacy_action_coverage":2,
+            "legacy_policy_agreement":2,
+            "legacy_policy_agreement_rate":1.0,
+            "rebuild_policy_agreement":1,
+            "rebuild_policy_agreement_rate":0.5,
+            "policy_divergence_pairs":1,
+            "policy_divergence_rate":0.5,
+            "observed_unexecuted_pairs":2,
+            "observed_reward_count":0
+        },
+        "pairs":f3c_pairs,
+        "checks":{
+            "paired_episode_count_positive":True,
+            "all_pairs_fixed_rule_no_history":True,
+            "canonical_fixed_rule_matches_every_runner_choice":True,
+            "all_pairs_have_multiple_candidates":True,
+            "candidate_sets_policy_invariant":True,
+            "legacy_action_covered_in_every_pair":True,
+            "fixed_legacy_policy_matches_every_runner_choice":True,
+            "alternative_policy_diverges_on_at_least_one_pair":True,
+            "all_observed_structural_actions_unexecuted":True,
+            "no_observed_reward_used_for_structural_comparison":True,
+            "shadow_only":True,
+            "world_mutation_false":True,
+            "execute_authorized_false":True
+        }
+    }
+    f3c_audit=audits/"cortex_f3c_paired_shadow_comparison.json"
+    f3c_audit.write_text(json.dumps(f3c_payload)+"\n")
+
+    f3c_artifact_only=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert f3c_artifact_only["phase"] == "F3"
+    assert f3c_artifact_only["phase_status"] == "active"
+    assert f3c_artifact_only["phase3_checkpoint"] == "F3-B"
+    assert (
+        f3c_artifact_only["phase3_paired_shadow_comparison"]["validated"]
+        is False
+    )
+    assert f3c_artifact_only["phase3_exit_gate"]["validated"] is False
+
+    f3c_doc=docs/"CORTEX_PHASE3_PAIRED_SHADOW_COMPARISON.md"
+    f3c_doc.write_text("# F3-C\n")
+    f3c=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert f3c["phase"] == "F3"
+    assert f3c["phase_status"] == "complete"
+    assert f3c["phase3_checkpoint"] == "F3-C"
+    assert f3c["phase3_exit_gate"]["validated"] is True
+    assert f3c["phase3_paired_shadow_comparison"]["validated"] is True
+    assert (
+        f3c["phase3_paired_shadow_comparison"][
+            "pairs_still_match_observed_rows"
+        ]
+        is True
+    )
+    assert f3c["resume"]["do_not_start_another_seed"] is True
+    assert f3c["resume"]["action"] == (
+        "F3 complete; F4 ready but not started"
+    )
+
     connection=sqlite3.connect(ledger_path)
     connection.execute(
         "UPDATE executive_episodes SET payload_sha256=? WHERE episode_id=?",

@@ -106,6 +106,30 @@ def _observed_repair_row_matches(
     return all(row.get(key)==observed.get(key) for key in keys)
 
 
+def _paired_repair_row_matches(
+    path: Path,
+    observed: dict[str, Any],
+) -> bool:
+    row_index=observed.get("row_index")
+    if not isinstance(row_index,int) or isinstance(row_index,bool):
+        return False
+    row=_jsonl_row(path,row_index)
+    if row is None:
+        return False
+    keys=(
+        "run_id",
+        "generation",
+        "stage",
+        "symptom",
+        "action_key",
+        "choice_basis",
+        "executed",
+        "targets",
+        "outcome",
+    )
+    return all(row.get(key)==observed.get(key) for key in keys)
+
+
 def _seed_record(
     *,
     state_root: Path,
@@ -785,6 +809,99 @@ def build_phase_state(
         and all(value is True for value in phase3_credit_checks.values())
     )
 
+    phase3_comparison_doc_path=(
+        state_root
+        / "docs"
+        / "CORTEX_PHASE3_PAIRED_SHADOW_COMPARISON.md"
+    )
+    phase3_comparison_doc=phase3_comparison_doc_path.exists()
+    phase3_comparison_audit_path=(
+        state_root
+        / "runs"
+        / "audits"
+        / "cortex_f3c_paired_shadow_comparison.json"
+    )
+    phase3_comparison_audit=phase3_comparison_audit_path.exists()
+    phase3_comparison_payload: dict[str, Any]={}
+    phase3_comparison_error: str | None=None
+    if phase3_comparison_audit:
+        try:
+            phase3_comparison_payload=_load(phase3_comparison_audit_path)
+        except (OSError,json.JSONDecodeError,TypeError) as exc:
+            phase3_comparison_error=f"{type(exc).__name__}: {exc}"
+
+    phase3_comparison_revision=phase3_comparison_payload.get("code_revision")
+    if not isinstance(phase3_comparison_revision,dict):
+        phase3_comparison_revision={}
+    phase3_comparison=phase3_comparison_payload.get("comparison")
+    if not isinstance(phase3_comparison,dict):
+        phase3_comparison={}
+    phase3_comparison_pairs=phase3_comparison_payload.get("pairs")
+    if not isinstance(phase3_comparison_pairs,list):
+        phase3_comparison_pairs=[]
+    phase3_comparison_checks=phase3_comparison_payload.get("checks")
+    if not isinstance(phase3_comparison_checks,dict):
+        phase3_comparison_checks={}
+    phase3_pair_rows_match=bool(phase3_comparison_pairs) and all(
+        isinstance(pair,dict)
+        and isinstance(pair.get("observed"),dict)
+        and _paired_repair_row_matches(
+            phase3_repairs_path,
+            pair["observed"],
+        )
+        for pair in phase3_comparison_pairs
+    )
+    phase3_paired_count=phase3_comparison.get("paired_episode_count")
+    phase3_policy_divergence=phase3_comparison.get(
+        "policy_divergence_pairs"
+    )
+    phase3_comparison_valid=(
+        phase3_credit_valid
+        and phase3_comparison_doc
+        and phase3_comparison_audit
+        and phase3_comparison_error is None
+        and phase3_comparison_payload.get("schema_version")
+        =="cortex_f3c_paired_shadow_comparison_v1"
+        and phase3_comparison_payload.get("status")=="pass"
+        and phase3_comparison_revision.get("dirty") is False
+        and isinstance(phase3_comparison_revision.get("commit"),str)
+        and bool(phase3_comparison_revision.get("commit"))
+        and phase3_comparison_payload.get("authority")=="shadow"
+        and phase3_comparison_payload.get("world_mutation") is False
+        and phase3_comparison_payload.get("factorio_rcon_used") is False
+        and phase3_comparison_payload.get("fle_environment_created") is False
+        and phase3_comparison_payload.get("world_lease_acquired") is False
+        and phase3_comparison_payload.get("execution_grant_created") is False
+        and phase3_comparison_payload.get("continuous_authority") is False
+        and isinstance(phase3_paired_count,int)
+        and not isinstance(phase3_paired_count,bool)
+        and phase3_paired_count>=2
+        and len(phase3_comparison_pairs)==phase3_paired_count
+        and phase3_pair_rows_match
+        and phase3_comparison.get("fixed_rule_basis_count")
+        ==phase3_paired_count
+        and phase3_comparison.get("canonical_fixed_rule_agreement")
+        ==phase3_paired_count
+        and phase3_comparison.get("multiple_candidate_pairs")
+        ==phase3_paired_count
+        and phase3_comparison.get(
+            "candidate_set_policy_invariant_pairs"
+        )==phase3_paired_count
+        and phase3_comparison.get("legacy_action_coverage")
+        ==phase3_paired_count
+        and phase3_comparison.get("legacy_policy_agreement")
+        ==phase3_paired_count
+        and isinstance(phase3_policy_divergence,int)
+        and not isinstance(phase3_policy_divergence,bool)
+        and phase3_policy_divergence>0
+        and phase3_comparison.get("observed_unexecuted_pairs")
+        ==phase3_paired_count
+        and phase3_comparison.get("observed_reward_count")==0
+        and bool(phase3_comparison_checks)
+        and all(value is True for value in phase3_comparison_checks.values())
+    )
+    phase3_exit_gate_valid=phase3_comparison_valid
+
     phase2_delivery_actuator_canary_path=(
         state_root
         / "runs"
@@ -1028,7 +1145,9 @@ def build_phase_state(
                 "functional_accept_sustainability_not_proven"
             )
 
-    if phase3_credit_valid:
+    if phase3_comparison_valid:
+        action="F3 complete; F4 ready but not started"
+    elif phase3_credit_valid:
         action=(
             "F3-B active in SHADOW; implement paired shadow comparison "
             "against the legacy runner"
@@ -1091,7 +1210,11 @@ def build_phase_state(
         "generated_at":datetime.now(UTC).isoformat(),
         "phase":(
             "F3"
-            if phase3_credit_valid or phase3_executive_valid
+            if (
+                phase3_comparison_valid
+                or phase3_credit_valid
+                or phase3_executive_valid
+            )
             else (
                 "F2"
                 if exploratory_complete
@@ -1105,9 +1228,12 @@ def build_phase_state(
             )
         ),
         "phase_status":(
-            "active"
-            if phase3_credit_valid or phase3_executive_valid
+            "complete"
+            if phase3_comparison_valid
             else (
+                "active"
+                if phase3_credit_valid or phase3_executive_valid
+                else (
                 "complete"
                 if phase2_exit_gate_valid
                 else (
@@ -1124,6 +1250,7 @@ def build_phase_state(
                     )
                 )
             )
+        )
         ),
         "protocol":protocol_id,
         "scientific_release_commit":protocol_commit,
@@ -1144,10 +1271,52 @@ def build_phase_state(
         },
         "phase2_checkpoint":phase2_checkpoint,
         "phase3_checkpoint":(
-            "F3-B"
-            if phase3_credit_valid
-            else ("F3-A" if phase3_executive_valid else None)
+            "F3-C"
+            if phase3_comparison_valid
+            else (
+                "F3-B"
+                if phase3_credit_valid
+                else ("F3-A" if phase3_executive_valid else None)
+            )
         ),
+        "phase3_exit_gate":{
+            "executive_shadow_kernel":phase3_executive_valid,
+            "verification_credit_ledger":phase3_credit_valid,
+            "paired_shadow_comparison":phase3_comparison_valid,
+            "same_goal_multiple_choices_observable":phase3_comparison_valid,
+            "validated":phase3_exit_gate_valid,
+        },
+        "phase3_paired_shadow_comparison":{
+            "document_path":str(phase3_comparison_doc_path),
+            "document_exists":phase3_comparison_doc,
+            "audit_path":str(phase3_comparison_audit_path),
+            "audit_exists":phase3_comparison_audit,
+            "validated":phase3_comparison_valid,
+            "status":phase3_comparison_payload.get("status"),
+            "run_id":phase3_comparison_payload.get("run_id"),
+            "code_commit":phase3_comparison_revision.get("commit"),
+            "authority":phase3_comparison_payload.get("authority"),
+            "world_mutation":phase3_comparison_payload.get("world_mutation"),
+            "factorio_rcon_used":phase3_comparison_payload.get(
+                "factorio_rcon_used"
+            ),
+            "fle_environment_created":phase3_comparison_payload.get(
+                "fle_environment_created"
+            ),
+            "world_lease_acquired":phase3_comparison_payload.get(
+                "world_lease_acquired"
+            ),
+            "execution_grant_created":phase3_comparison_payload.get(
+                "execution_grant_created"
+            ),
+            "continuous_authority":phase3_comparison_payload.get(
+                "continuous_authority"
+            ),
+            "comparison":phase3_comparison,
+            "pairs_still_match_observed_rows":phase3_pair_rows_match,
+            "checks":phase3_comparison_checks,
+            "read_error":phase3_comparison_error,
+        },
         "phase3_verification_credit_ledger":{
             "document_path":str(phase3_credit_doc_path),
             "document_exists":phase3_credit_doc,
