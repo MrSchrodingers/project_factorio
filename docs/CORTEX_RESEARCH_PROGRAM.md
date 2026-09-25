@@ -7,7 +7,7 @@
 **Branch de transição:** `research/cortex-v1`
 **Baseline pré-Cortex:** `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 **Tag de baseline:** `cortex-pre-research-baseline-20260923`
-**Status:** F4 ACTIVE em F4-B / SHADOW — F3 COMPLETE; continuous authority e evolution OFF
+**Status:** F4 ACTIVE em F4-B / SHADOW — F4-C PRE-REGISTRATION BLOCKED; F3 COMPLETE; continuous authority e evolution OFF
 
 > Este arquivo é o contrato científico e operacional do Factorio AI Lab. Em caso de perda de
 > contexto de conversa, troca de operador, troca de modelo ou reinício do host, um operador sem
@@ -1571,6 +1571,26 @@ Não há claim de melhoria de outcome nem de causalidade.
 
 **Next F4-C:** ablação causal de memória em tarefas de transferência held-out, com leakage control,
 paired evaluation e inferência estatística. O Exit Gate F4 permanece aberto.
+
+
+**F4-C protocol readiness audit (2026-09-25): BLOCKED.** Os corrected exploratory seeds
+20261001–20261005 são independentes em sandbox, mas não têm diversidade suficiente para um claim
+causal de memória. Repairs repetem quase somente fuel_starved -> resupply e
+producer_output_unprocessed -> placement; cada seed possui uma única spatial demo com mesmo
+start/goal e route_cost=8.25. O corpus global de 85 counterexamples / 33 signatures / 52
+recorrências posteriores pode orientar pilotos, mas runs não substituem independent evaluation
+seeds. Contrato completo: docs/CORTEX_PHASE4_CAUSAL_ABLATION_PROTOCOL.md.
+
+O machine state expõe phase4_next_checkpoint=F4-C,
+phase4_exit_gate.causal_memory_ablation_transfer=false e blocker
+causal_transfer_protocol_not_frozen. Confirmatory seeds permanecem fora de tuning/pilot.
+
+**Dashboard epistemic hardening:** implementation
+0c94090f91ad43c1a3a47a6bec25f377f9e56e00; full gate 1521 core/FLE + 2 PyTorch PASS mais
+Ruff/compileall/JavaScript/TypeScript/Vite/whitespace PASS. Quando nenhum runner está ativo, a UI
+mostra G97/evolution/curriculum/UCB/model/timeline como HISTORICAL/FROZEN e mantém WORLD LIVE como
+superfície separada. Mundo live conectado com 0 entities é explicitamente mundo vazio, não
+atividade em curso nem falha de renderer.
 
 ---
 

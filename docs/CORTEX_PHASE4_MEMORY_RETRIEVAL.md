@@ -248,3 +248,16 @@ F4-C must use a held-out transfer protocol with leakage control and compare the 
 surface with memory available versus memory ablated. F4 closes only if memory removal causes a
 statistically detectable performance loss. Confirmatory seeds remain frozen until that protocol is
 defined and frozen.
+
+
+## Post-closure F4-C readiness result
+
+A subsequent eligibility audit did not promote F4-C. The existing corrected exploratory corpus is
+too homogeneous for a defensible causal transfer claim.
+
+Canonical protocol/readiness document:
+
+docs/CORTEX_PHASE4_CAUSAL_ABLATION_PROTOCOL.md
+
+Machine state must therefore remain F4 ACTIVE / F4-B, with F4-C as the next checkpoint and the F4
+Exit Gate open. Confirmatory seeds remain frozen.

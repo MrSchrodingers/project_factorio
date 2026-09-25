@@ -42,6 +42,8 @@ com experiência sem receber do programador a sequência de ações que constitu
 > **F3-C — Paired shadow comparison / F3 closure:** [docs/CORTEX_PHASE3_PAIRED_SHADOW_COMPARISON.md](docs/CORTEX_PHASE3_PAIRED_SHADOW_COMPARISON.md)
 > **F4-A — Typed cognitive memory substrate:** [docs/CORTEX_PHASE4_MEMORY_SUBSTRATE.md](docs/CORTEX_PHASE4_MEMORY_SUBSTRATE.md)
 > **F4-B — Hybrid retrieval, consolidation and decay:** [docs/CORTEX_PHASE4_MEMORY_RETRIEVAL.md](docs/CORTEX_PHASE4_MEMORY_RETRIEVAL.md)
+> **F4-C — Causal memory ablation / transfer protocol:** [docs/CORTEX_PHASE4_CAUSAL_ABLATION_PROTOCOL.md](docs/CORTEX_PHASE4_CAUSAL_ABLATION_PROTOCOL.md)
+> **Next-session zero-context prompt:** [docs/CORTEX_NEXT_SESSION_PROMPT.md](docs/CORTEX_NEXT_SESSION_PROMPT.md)
 > **F1-B — storage hardening:** [docs/CORTEX_F1_STORAGE_HARDENING.md](docs/CORTEX_F1_STORAGE_HARDENING.md)
 > **Dashboard / evidence scope:** [docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md](docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md)
 > **Dashboard / tmp hardening:** [docs/CORTEX_DASHBOARD_TMP_HARDENING.md](docs/CORTEX_DASHBOARD_TMP_HARDENING.md)
@@ -80,7 +82,14 @@ memories repetidas, 432 supports semânticos duplicados e 10 counterexamples rep
 F4-B SHA-256: 5fc37b0cee5f121c5ff6b6054fc45f4b0a09bad851e34793958bdd3dc1c5a801.
 Implementation: a4ff558eccd9df0898fef4138a75fa1b55976a8d. Full gate: 1520 core/FLE + 2 PyTorch
 PASS. A ablação causal e transferência held-out continuam abertas; portanto o Exit Gate F4 ainda
-não está satisfeito. Continuous authority e evolution permanecem OFF.
+não está satisfeito. F4-C está em PRE-REGISTRATION/BLOCKED: os cinco seeds exploratórios corrigidos
+são demasiado homogêneos para sustentar um claim causal de memória, e as seeds confirmatórias
+20261101–20261110 permanecem congeladas. Continuous authority e evolution permanecem OFF.
+
+O hardening de UI/status 0c94090f91ad43c1a3a47a6bec25f377f9e56e00 separa explicitamente
+WORLD LIVE, CORTEX CURRENT CONTROL PLANE e HISTORICAL EVIDENCE. Sem runner ativo, G97,
+curriculum/UCB/model metrics são mostrados como FROZEN/HISTÓRICO; um mundo RCON conectado com 0
+entidades é mostrado como mundo live vazio, não como geração executando nem renderer travado.
 As seeds confirmatórias 20261101–20261110 permanecem congeladas e não executadas; serão usadas
 posteriormente para avaliação pareada do Cortex, sem tuning nelas.
 

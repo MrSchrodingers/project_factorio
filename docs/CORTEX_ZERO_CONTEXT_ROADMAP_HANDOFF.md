@@ -21,149 +21,112 @@
 
 # 0. First-turn protocol for a zero-context chat
 
-A fresh chat MUST NOT start by changing code, launching experiments, restarting evolution, or
-trusting the dashboard. Its first turn should reconstruct state from primary sources.
+A fresh chat MUST reconstruct the live state before changing code or launching any experiment.
+Conversation memory and dashboard presentation are lower-authority sources.
 
 ## 0.1 SentinelX entry point
 
-Use SentinelX host label:
+Host:
+- label: kali
+- known host id: host_a07c932d2d737c26
+- checkout: /srv/factorio-ai-lab
+- continuity context: sxc_4557STHZ
 
-`kali`
+First action: resume the latest SentinelX context revision with detail=full. A resumed context restores
+knowledge, not authorization; revalidate volatile facts before mutation.
 
-Resume continuity context:
+## 0.2 Revalidate Git and concurrency
 
-`sxc_4557STHZ`
+Inspect branch, local HEAD, origin/research/cortex-v1, dirty/untracked state, recent commits/tags and
+active pytest/ruff/Cortex/evolution/curriculum/open-play processes.
 
-Recommended first call:
+Expected published lineage at this handoff:
 
-- `sentinel_context(operation="resume", context_id="sxc_4557STHZ", options={"detail":"full"})`
+- F4-B implementation: a4ff558eccd9df0898fef4138a75fa1b55976a8d;
+- F4-B closure: 9a23b661c86ebd2eddb37eec2e1f3d8198c8b9c3;
+- UI/status epistemic hardening: 0c94090f91ad43c1a3a47a6bec25f377f9e56e00.
 
-Important: SentinelX context restores **knowledge**, not authorization. Every volatile fact must be
-revalidated live before mutation.
-
-Then inspect host:
-
-- `sentinel_state(host_id="kali")`
-
-## 0.2 Revalidate Git before reading the UI
-
-On the host:
-
-```bash
-cd /srv/factorio-ai-lab
-git -c safe.directory=/srv/factorio-ai-lab status --short --branch
-git -c safe.directory=/srv/factorio-ai-lab rev-parse HEAD
-git -c safe.directory=/srv/factorio-ai-lab rev-parse origin/research/cortex-v1
-git -c safe.directory=/srv/factorio-ai-lab log -10 --pretty=format:'%H %cI %s'
-```
-
-Expected invariant after a published checkpoint:
-
-- branch = research/cortex-v1;
-- local HEAD = origin/research/cortex-v1;
-- working tree = clean;
-- resolve the published checkpoint SHA from Git/GitHub and the immutable tag.
-
-F2-G4B live implementation evidence is anchored to 794963b435bff616042ca0a6e6f278ead315e5e0; the temporal fix is aaf10beb5b5ec11b7b28e3619823b02b0a465b59 and control-plane integration is 5cbf99dfc739f09c7d9851d27a89c205e97f300a.
-The published G4B closure/deploy SHA must be resolved from Git/tag plus BUILD_INFO.
-
-If these differ, STOP and audit recent commits before continuing.
-
-Git mutations should run as user `ti`:
-
-```bash
-sudo -u ti git -c safe.directory=/srv/factorio-ai-lab ...
-```
-
-Do not silently discard or overwrite pre-existing work.
+Do not overwrite pre-existing concurrent work. If local HEAD/origin/working tree diverge, audit first.
 
 ## 0.3 Rebuild the machine-readable phase state
 
-```bash
-cd /srv/factorio-ai-lab
-sudo -u ti env PYTHONPATH=src .venv-fle/bin/python   scripts/cortex_phase_state.py --write
-cat runs/cortex_phase_state.json
-```
+Regenerate runs/cortex_phase_state.json from scripts/cortex_phase_state.py.
 
-Expected checkpoint at this handoff:
+Expected scientific state:
 
-`phase=F2`
-`phase_status=complete`
-`phase2_checkpoint=F2-G5`
+- phase=F4;
+- phase_status=active;
+- phase2_checkpoint=F2-G5;
+- phase3_checkpoint=F3-C;
+- phase4_checkpoint=F4-B;
+- phase4_next_checkpoint=F4-C;
+- phase4_exit_gate.memory_substrate=true;
+- phase4_exit_gate.hybrid_retrieval_consolidation_decay=true;
+- phase4_exit_gate.causal_memory_ablation_transfer=false;
+- phase4_exit_gate.validated=false;
+- phase4_blocker.code=causal_transfer_protocol_not_frozen;
+- resume.do_not_start_another_seed=true.
 
 Machine-readable state outranks remembered conversation state.
 
 ## 0.4 Validate runtime separation
 
 Scientific baseline runtime:
-
-`/srv/factorio-ai-runtime/current/BUILD_INFO.json`
-
-Expected frozen scientific baseline commit:
-
-`95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac`
+- /srv/factorio-ai-runtime/current/BUILD_INFO.json
+- expected frozen commit: 95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac.
 
 Dashboard runtime:
+- /srv/factorio-ai-dashboard-runtime/current/BUILD_INFO.json.
 
-`/srv/factorio-ai-dashboard-runtime/current/BUILD_INFO.json`
+Dashboard/source may advance independently. Dashboard BUILD_INFO should match the latest published
+dashboard/status closure, not an old F2 hardcoded SHA.
 
-Expected dashboard/source rule:
+## 0.5 Validate services and writers
 
-the deployed dashboard BUILD_INFO commit must equal the current published F2/G5 closure commit.
-Resolve that SHA from Git/tag plus BUILD_INFO rather than from a hardcoded value in this document.
+Check dashboard, LLM, evolution active/enabled and active writer/runner processes.
 
-This separation is intentional. The dashboard/source may advance while the frozen baseline runtime
-remains unchanged.
+Expected:
+- dashboard active;
+- evolution inactive+disabled;
+- no curriculum_runner/open_play_runner/evolution_loop/Cortex execution process controlling Factorio.
 
-## 0.5 Validate services
+Do not restart evolution automatically.
 
-Check, do not assume:
+## 0.6 Validate the three truth surfaces
 
-```bash
-systemctl is-active factorio-ai-dashboard
-systemctl is-active factorio-ai-llm
-systemctl is-active factorio-ai-evolution || true
-systemctl is-enabled factorio-ai-evolution || true
-```
+Query /api/context, /api/world, /api/factory-graph, /api/evolution, /api/research and /ws/live.
 
-Expected at this checkpoint:
+Interpretation:
+1. WORLD LIVE = current RCON world.
+2. CORTEX CURRENT CONTROL PLANE = machine-readable research phase/authority.
+3. HISTORICAL EVIDENCE = persisted baseline/evolution/learning artifacts.
 
-- dashboard: active
-- local LLM: active
-- evolution: inactive
-- evolution enabled state: disabled
+The world may be connected with 0 player-force entities. That is a valid observed empty world.
+If no research runner is active, G97, curriculum, UCB, models and timelines are historical/frozen.
 
-A fresh chat MUST NOT restart evolution automatically.
+External dashboard:
+http://midasnet.tail106aa2.ts.net:8765/
 
-## 0.6 Validate dashboard projection, but never use it as the execution authority
-
-```bash
-curl -fsS http://127.0.0.1:8765/api/context
-curl -fsS http://127.0.0.1:8765/api/world
-curl -fsS http://127.0.0.1:8765/api/factory-graph
-curl -fsS http://127.0.0.1:8765/api/evolution
-curl -fsS http://127.0.0.1:8765/api/research
-```
-
-The external Tailscale dashboard currently exposed to the user is:
-
-`http://midasnet.tail106aa2.ts.net:8765/`
-
-The UI is a projection. Persistent artifacts + Git + machine-readable state are the authority.
+The UI is a projection; Git + persisted artifacts + phase-state are authority.
 
 ## 0.7 Read these documents in this order
 
-1. `docs/CORTEX_ZERO_CONTEXT_ROADMAP_HANDOFF.md` — this document.
-2. `docs/CORTEX_RESEARCH_PROGRAM.md` — canonical scientific constitution and full roadmap.
-3. `docs/CORTEX_HANDOFF.md` — short operational checkpoint.
-4. `docs/CORTEX_PHASE2_OPTION_EXECUTION_BOUNDARY.md` — current F2-G3 evidence.
-5. `docs/CORTEX_PHASE2_OPTIONS.md` — F2-G2 Option semantics.
-6. `docs/CORTEX_PHASE2_RUNNER_INDEPENDENCE.md` — F2-G1 runner decoupling.
-7. `docs/CORTEX_PHASE2_DELIVERY_ACTUATOR_CANARY.md` — last accepted live Factorio canary.
-8. `docs/CORTEX_CONTINUITY_PROTOCOL.md` — interruption/restart rules.
-9. `docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md` — world vs evidence semantics.
+1. docs/CORTEX_ZERO_CONTEXT_ROADMAP_HANDOFF.md
+2. docs/CORTEX_RESEARCH_PROGRAM.md
+3. docs/CORTEX_HANDOFF.md
+4. docs/CORTEX_PHASE4_MEMORY_SUBSTRATE.md
+5. docs/CORTEX_PHASE4_MEMORY_RETRIEVAL.md
+6. docs/CORTEX_PHASE4_CAUSAL_ABLATION_PROTOCOL.md
+7. docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md
+8. docs/CORTEX_CONTINUITY_PROTOCOL.md
+9. F3 phase docs if executive-loop lineage must be reconstructed.
+10. F2 authority docs only before any future live-execution discussion.
 
-Only then plan F2-G4B; do not execute a live canary before revalidating the published G4A checkpoint.
+Canonical ready-to-paste prompt:
+docs/CORTEX_NEXT_SESSION_PROMPT.md
+
+Only after reconstruction should work continue on F4-C protocol design. Do not launch a seed merely
+because old research artifacts say learning/evaluating.
 
 ---
 
@@ -1379,31 +1342,30 @@ The last live Cortex mutation evidence remains F2-G4B. F3/F4-A/F4-B use no live 
 
 Next checkpoint: F4-C causal memory ablation + transfer benchmark.
 
-## 10.4 Important UI ambiguity
+## 10.4 F4 dashboard hardening — completed
 
-Several lower dashboard cards still display historical baseline learning/evolution metrics:
+The ambiguity previously documented here was hardened in implementation
+0c94090f91ad43c1a3a47a6bec25f377f9e56e00.
 
-- UCB placement learner;
-- baseline challenger;
-- baseline generation;
-- world-model/spatial-policy statuses;
-- production/research frontier from seed 20261005.
+When the Cortex context is global F3/F4 and no research runner is active, the UI enters historical
+evidence mode and explicitly separates:
 
-These do NOT mean that Cortex evolution is currently running.
-
-At this checkpoint:
-
-- evolution service is OFF;
-- no champion is currently active for the Cortex program;
-- no continuous Cortex learning loop is controlling Factorio.
-
-A future UI hardening should separate:
-
-1. LIVE WORLD;
+1. WORLD LIVE;
 2. CORTEX CURRENT CONTROL PLANE;
-3. HISTORICAL EXPERIMENTAL EVIDENCE.
+3. HISTORICAL EVIDENCE.
 
-Historical cards should be visibly marked FROZEN/BASELINE/NOT CONTROLLING.
+In this mode G97 is historical/frozen, curriculum/UCB/model/timeline cards are historical, evolution
+is OFF, the top mission comes from F4 phase-state and F4-C protocol design is current work.
+
+A connected zero-entity world is labelled WORLD LIVE empty. No complete physical entity snapshot
+exists for the corrected exploratory seeds, so the UI must not invent a historical factory scene
+and label it live.
+
+Full hardening gate:
+
+- 1521 core/FLE PASS;
+- 2 PyTorch PASS;
+- Ruff/compileall/JavaScript/TypeScript/Vite/whitespace PASS.
 
 ---
 
@@ -1775,46 +1737,32 @@ Do not store secrets.
 
 # 20. Current live UI interpretation
 
-Published post-F2 observability hotfix:
+The dashboard is an observability surface, not authority.
 
-95254cc1b81cc75a90debf6ab93a01ddd0099485
+Expected current projection after the F4 status hardening:
 
-The dashboard main scope is global, not the historical exploratory baseline. A fresh operator
-should expect the Cortex control plane to show:
+- CORTEX SHADOW / F4-B;
+- F4-C shown as the next causal-memory checkpoint;
+- no active Cortex executor;
+- evolution OFF;
+- G97/evolution/curriculum/UCB/model/timeline artifacts labelled HISTÓRICO/FROZEN;
+- F2-G4B retained as the last live Cortex mutation evidence;
+- WORLD LIVE independently reports current RCON state.
 
-- F4 ACTIVE / F4-B hybrid memory retrieval;
-- F3 COMPLETE / F3-C paired shadow comparison;
-- F3 Exit Gate validated;
-- F2 COMPLETE / G5 remains the execution substrate;
-- F2 Exit Gate validated;
-- continuous authority OFF;
-- last live Cortex evidence = F2-G4B;
-- F2-G4B output = 13 iron plates, final processor no_fuel;
-- sustainability still unproven.
+If WORLD LIVE has 0 entities:
 
-Live WORLD state after the post-F2 dashboard hotfix:
+- this is a measured empty player-force world;
+- the map must say Factorio live / empty world;
+- this does not imply the dashboard is stuck;
+- this also does not imply the Cortex is autonomously running.
 
-- /api/world: HTTP 200;
-- connected=true;
-- observer_origin=world_fallback;
-- entity_count=0;
-- the player-force factory graph currently has zero nodes/edges;
-- /api/resource-overview remains connected and observed 38 resource cells / 2562 resource points.
+The system is intentionally SHADOW/idle while F4-C is preregistered. Starting a runner just to make
+the UI look active would violate the research protocol.
 
-The zero factory count is therefore an observed physical state of the current player force, not the
-old UI failure. The observer no longer equates a missing storage.agent_characters[1] with a
-disconnected Factorio world.
+Operational verification still checks dashboard BUILD_INFO, service/restart state, /api/context,
+/api/world, /ws/live, evolution active/enabled and active writer processes.
 
-Operational UI validation at closure:
-
-- all 17 initial bootstrap endpoints returned HTTP 200;
-- /ws/live delivered a payload with no stream_error and world.connected=true;
-- http://midasnet.tail106aa2.ts.net:8765/ returned HTTP 200;
-- the same Tailscale host returned HTTP 200 for /api/context and /api/world;
-- dashboard service was active with NRestarts=0.
-
-The baseline evidence side remains historical evidence only. Do not infer active evolution,
-learning, or a live factory from old baseline cards.
+Historical cards remain useful evidence, but never prove current control.
 
 ---
 
@@ -1959,7 +1907,7 @@ G4B must remain on the generic Cortex Option boundary.
 
 ---
 
-# 25. Suggested F2-G4B validation sequence
+# 25. Historical F2-G4B validation sequence — reference only
 
 1. Revalidate Git, tag, phase-state, dashboard BUILD_INFO and services.
 2. Verify G4A artifact/hash and persistent ledger schema.
@@ -1983,7 +1931,7 @@ G4B must remain on the generic Cortex Option boundary.
 
 ---
 
-# 26. Prohibited shortcuts in F2-G4B
+# 26. Historical F2-G4B prohibited shortcuts — still-valid authority constraints
 
 Do NOT:
 
@@ -2088,113 +2036,70 @@ At this checkpoint:
 
 - F0 PASS;
 - F1 PASS;
-- F2 COMPLETE;
-- F2-G3 COMPLETE;
-- F2-G4A COMPLETE;
-- F2-G4B COMPLETE;
-- F2-G5 COMPLETE: legacy runner baseline-only enforcement;
-- G5 implementation = 4fc7217d3e5e0fecb076bfd63305e5498eb52f4e; control-plane freeze = 581ed8c38de0a9ffdc908c250063ee9c9a0e8158;
-- F3 ACTIVE / F3-A SHADOW;
-- continuous authority OFF;
-- evolution service OFF;
-- confirmatory seeds untouched;
-- last live accepted Cortex canary = F2-G4B;
-- F2-G4B produced 13 iron plates but ended no_fuel;
-- sustainable autonomy not proven;
-- first Option exists;
-- universal Option boundary exists;
-- persistent one-shot authority exists and is restart/concurrency validated;
-- exactly one post-G4A live Option EXECUTE occurred; it is already consumed/audited and MUST NOT be repeated;
-- G4B implementation commit = 794963b435bff616042ca0a6e6f278ead315e5e0;
-- G4A dry-run artifact SHA-256 = 94b60b7b8a298252edcb37b4435854c97f83e0f6832de9ec46aec05aff1e1ec6;
-- dashboard world-without-avatar hotfix = 95254cc1b81cc75a90debf6ab93a01ddd0099485;
-- live UI validation: 17/17 bootstrap endpoints 200, WebSocket healthy, Tailscale root/context/world 200;
-- current WORLD: connected=true via world_fallback, 0 player-force factory entities, resources still observable;
-- published closure/dashboard SHA must be revalidated from Git/tag/BUILD_INFO;
-- frozen baseline runtime = `95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac`;
-- SentinelX context = sxc_4557STHZ; resume latest revision.
+- F2 COMPLETE / F2-G5;
+- F3 COMPLETE / F3-C;
+- F4 ACTIVE / F4-B SHADOW;
+- F4-A typed cognitive-memory substrate PASS;
+- F4-B hybrid retrieval/consolidation/non-destructive decay PASS;
+- F4 Exit Gate OPEN;
+- F4-C next checkpoint, currently BLOCKED/PRE-REGISTRATION;
+- blocker = causal_transfer_protocol_not_frozen;
+- continuous autonomous authority OFF;
+- evolution inactive+disabled;
+- confirmatory seeds 20261101–20261110 untouched/pending;
+- resume.do_not_start_another_seed=true;
+- last live Cortex mutation evidence = F2-G4B; do not repeat it;
+- frozen baseline runtime = 95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac;
+- F4-B artifact SHA-256 =
+  5fc37b0cee5f121c5ff6b6054fc45f4b0a09bad851e34793958bdd3dc1c5a801;
+- F4-B DB = 222 durable items / 759 occurrences / quick_check=ok;
+- UI/status hardening implementation =
+  0c94090f91ad43c1a3a47a6bec25f377f9e56e00;
+- hardening gate = 1521 core/FLE + 2 PyTorch PASS plus static/build gates;
+- current WORLD may legitimately be connected with 0 entities;
+- stale G97/curriculum/UCB/model metrics are historical when no runner is active.
+
+F4-C readiness audit:
+
+- five corrected exploratory seeds exist but are too homogeneous for the causal Exit Gate;
+- repairs are dominated by two fixed symptom/action families;
+- each seed has one same-geometry weighted-A* demonstration at route_cost=8.25;
+- global 85 counterexample runs / 33 signatures are useful for pilot design but are not 85
+  independent evaluation seeds.
 
 A fresh operator should leave its first turn with one conclusion:
 
-> **F2 is complete. G4B is the immutable bounded live Option evidence; G5 closes authority
-> separation by making the legacy runner baseline-only. The next scientific phase is F3, beginning
-> in SHADOW. Continuous authority, evolution and confirmatory-seed tuning remain OFF.**
+> F4-B is closed and reproducible. F4 is intentionally still active because causal memory benefit
+> has not been established. The next legitimate work is to freeze a diverse non-confirmatory F4-C
+> MEMORY ON versus MEMORY ABLATED held-out protocol. No evolution, confirmatory tuning or live
+> activity should be started merely to make the dashboard move.
 
 ---
 
 # 31. Immutable handoff anchor
 
-After publication, this zero-context handoff should be discoverable through the immutable tag:
+The F4-B closure is discoverable through:
 
-`cortex-zero-context-handoff-v0.7.0`
+- cortex-phase4b-complete-v0.1.0
+- cortex-zero-context-handoff-v0.7.0
 
-A fresh chat should still revalidate the branch HEAD because later scientific work may legitimately
-advance beyond this tag.
+This update should be published as cortex-zero-context-handoff-v0.8.0 if that tag is still absent.
+A fresh chat must still resolve the latest branch HEAD, tags and dashboard BUILD_INFO.
 
 ---
 
 # 32. Ready-to-paste bootstrap prompt for a brand-new chat
 
-Use the following message when starting a new chat with no prior context:
+The canonical prompt is maintained separately:
 
-```text
-Estamos continuando o projeto Factorio AI Lab / Cortex Research no repositório
-https://github.com/MrSchrodingers/project_factorio, host SentinelX `kali`, checkout
-`/srv/factorio-ai-lab`.
+docs/CORTEX_NEXT_SESSION_PROMPT.md
 
-Você está começando com ZERO contexto e não deve assumir nada desta mensagem como estado vivo sem
-revalidar.
+Use that document as the copy/paste prompt. Its required behavior is:
 
-Primeiro, use SentinelX para:
-1. retomar `sxc_4557STHZ` em detalhe full;
-2. consultar o estado do host `kali`;
-3. verificar Git branch/HEAD/origin/working tree;
-4. regenerar `runs/cortex_phase_state.json` com `scripts/cortex_phase_state.py --write`;
-5. ler BUILD_INFO do runtime científico e do dashboard;
-6. verificar serviços dashboard/LLM/evolution;
-7. consultar `/api/context`, `/api/world`, `/api/factory-graph`, `/api/evolution`;
-8. ler nesta ordem:
-   - docs/CORTEX_ZERO_CONTEXT_ROADMAP_HANDOFF.md
-   - docs/CORTEX_RESEARCH_PROGRAM.md
-   - docs/CORTEX_HANDOFF.md
-   - docs/CORTEX_PHASE2_OPTION_EXECUTION_BOUNDARY.md
-   - docs/CORTEX_PHASE2_PERSISTENT_OPTION_AUTHORITY.md
-   - docs/CORTEX_PHASE2_LIVE_OPTION_CANARY.md
-   - docs/CORTEX_PHASE2_BASELINE_ONLY_ENFORCEMENT.md
-   - docs/CORTEX_PHASE2_OPTIONS.md
-   - docs/CORTEX_CONTINUITY_PROTOCOL.md.
-
-Use GitHub para confirmar que o estado publicado corresponde ao repositório/branch e aos commits
-que você encontrou no host.
-
-Não altere código nem execute experimentos antes de me entregar, no primeiro turno, um diagnóstico
-estruturado contendo:
-- missão científica e hipótese central;
-- arquitetura herdada vs Cortex;
-- fundamentação teórica relevante;
-- roadmap F0–F12;
-- fases concluídas, fase ativa e Exit Gate atual;
-- o que está comprovado e o que ainda NÃO está comprovado;
-- estado de Git/runtime/serviços/dashboard;
-- interpretação WORLD live vs EVIDENCE histórica vs CORTEX control plane;
-- riscos metodológicos/operacionais;
-- próximo checkpoint autorizado;
-- arquivos que precisam ser lidos antes de editar;
-- plano proposto para o próximo checkpoint com testes, evidências e critérios de aceite.
-
-Estado esperado do handoff publicado: F0 PASS, F1 PASS, F2 COMPLETE, F2-G4B e F2-G5 concluídas,
-F3 COMPLETE em F3-C, F4 ACTIVE em F4-B / SHADOW, evolution inactive+disabled, confirmatory seeds intactas e
-resume.do_not_start_another_seed=true. Exatamente um live Option EXECUTE pós-G4A ocorreu em G4B e
-não deve ser repetido. Se o estado vivo divergir, audite commits/artifacts e siga o estado persistente
-mais recente.
-
-Não habilite evolution, não use seeds confirmatórias, não conceda continuous authority e não
-repita uma execução após timeout sem checar processo/lease/artifact/manifest/result.
-```
-
-Expected behavior of the new chat:
-
-- first turn = reconstruction and diagnosis;
-- second phase = preparar abertura explícita de F3 em SHADOW;
-- nenhuma nova authority live até critérios/evidence de F3 serem definidos e aprovados.
-
+- reconstruct live state from SentinelX/Git/artifacts first;
+- distinguish WORLD LIVE, CORTEX CURRENT and HISTORICAL EVIDENCE;
+- verify F4-B evidence and F4-C blocker;
+- prepare/preregister F4-C if state is consistent;
+- do not launch evaluation seeds until protocol is frozen and eligible;
+- do not use confirmatory seeds for tuning;
+- do not enable evolution or continuous authority.

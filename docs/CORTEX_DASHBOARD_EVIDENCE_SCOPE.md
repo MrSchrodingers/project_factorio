@@ -167,3 +167,90 @@ Validação viva após restart:
 - bundle servido substitui a frase herdada de incumbent por semântica cold-start.
 
 O runtime científico não foi movido durante nenhuma dessas operações.
+
+
+---
+
+## 14. F4 global Cortex hardening — LIVE vs CURRENT vs HISTORICAL
+
+A second evidence-scope failure became visible after F4-B.
+
+The global dashboard correctly projected phase=F4 / phase4_checkpoint=F4-B, but lower cards read
+legacy global research_state.json, active_run.json and evolution artifacts. Their persisted fields
+still contained G97, learning, curriculum stage 2/16 and UCB trials. Because no runner was actually
+active and evolution was inactive+disabled, rendering those fields as live created a false
+operational story.
+
+### 14.1 Authority rule
+
+The dashboard now derives an operational presentation mode from:
+
+- experiment context is global;
+- Cortex phase is F3/F4;
+- status.research_runner.active == false.
+
+Under that condition the UI enters **historical evidence mode**.
+
+### 14.2 Historical evidence mode
+
+The following remain visible but are explicitly marked FROZEN/HISTÓRICO:
+
+- G97 / generation arena;
+- champion/challenger state;
+- curriculum;
+- online UCB placement trials;
+- generation history;
+- decision timeline;
+- recurrent/spatial model evidence;
+- learning datasets and robustness state;
+- baseline knowledge stream.
+
+None of these labels may imply that a process is currently evaluating, learning, promoting or
+controlling Factorio.
+
+### 14.3 Current Cortex state
+
+The top mission is projected from machine-readable Cortex phase state, not stale curriculum state.
+
+At F4-B it shows:
+
+- current phase = F4-B SHADOW;
+- next checkpoint = F4-C;
+- current work = causal memory ablation / held-out transfer protocol;
+- evolution OFF;
+- no active executor;
+- no automatic seed launch.
+
+### 14.4 Empty live world
+
+A live RCON world with entity_count=0 is valid evidence.
+
+The map now says:
+
+- Factorio ao vivo · mundo vazio;
+- 0 entities is observed physical state;
+- no Cortex runner is building right now.
+
+The UI must not synthesize a historical factory and call it live. The corrected exploratory seed
+artifacts do not contain a complete persisted physical entity snapshot suitable for a faithful
+historical scene reconstruction.
+
+### 14.5 Implementation and gate
+
+Implementation:
+
+0c94090f91ad43c1a3a47a6bec25f377f9e56e00
+
+Validation:
+
+- 32 focused phase/dashboard tests PASS;
+- full core/FLE: 1521 PASS;
+- PyTorch: 2 PASS;
+- Ruff PASS;
+- compileall PASS;
+- JavaScript syntax PASS;
+- TypeScript/Vite build PASS;
+- whitespace PASS.
+
+This hardening changes presentation/phase-state semantics only. It does not grant authority and does
+not start evolution or a runner.

@@ -3,7 +3,7 @@
 > **Chat/modelo com zero contexto:** começar por
 > `docs/CORTEX_ZERO_CONTEXT_ROADMAP_HANDOFF.md`. Ele contém a fundamentação teórica, roadmap
 > F0–F12, fontes de verdade, estado operacional, interpretação do dashboard, protocolo
-> SentinelX/GitHub, o fechamento F2-G5 e a próxima fase F3.
+> SentinelX/GitHub, F2/F3 fechadas e o checkpoint ativo F4-B -> F4-C.
 
 **Documento de continuidade curta.** O contrato completo está em
 `docs/CORTEX_RESEARCH_PROGRAM.md`.
@@ -16,7 +16,7 @@
 - Baseline imutável de origem: `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 - Tag baseline publicada: `cortex-pre-research-baseline-20260923`
 - Handoff histórico: `docs/HANDOFF-CORTEX.md`
-- Runtime: F2-E possui EXECUTE apenas por chamada explícita no adapter; não há scheduler/grant contínuo. Evolution está disabled após reboot.
+- Runtime: a última mutação live Cortex permanece F2-G4B. F3/F4 são SHADOW/offline; não há scheduler/grant contínuo. Evolution está inactive+disabled.
 
 ## Regra de retomada
 
@@ -41,13 +41,30 @@ Antes da transição havia mudanças não commitadas pré-existentes em:
 Essas mudanças pertencem à evolução logística anterior e **não devem ser absorvidas
 silenciosamente pelo commit da F0**.
 
-## Estado operacional observado em 2026-09-23 23:59 -03
+## Snapshot operacional histórico pré-transição — 2026-09-23 23:59 -03
 
 - `factorio-ai-evolution.service`: active/running
 - `factorio-ai-dashboard.service`: active/running
 - `factorio-ai-llm.service`: active/running
 - LLM local: Qwen3-4B via llama.cpp :18081
 - RSS reportado do serviço LLM: ~8 GB — risco de memória a tratar na F1.
+
+Esse bloco é histórico e NÃO representa os serviços atuais.
+
+## Estado operacional atual revalidado em 2026-09-25
+
+- branch: research/cortex-v1;
+- F4-B closure publicada: 9a23b661c86ebd2eddb37eec2e1f3d8198c8b9c3;
+- UI/status hardening implementation: 0c94090f91ad43c1a3a47a6bec25f377f9e56e00;
+- evolution: inactive+disabled;
+- active curriculum/open-play/evolution/Cortex runner processes: nenhum;
+- phase-state: F4 / active / F4-B;
+- next checkpoint: F4-C;
+- F4 Exit Gate: aberto;
+- confirmatory seeds 20261101–20261110: todas pending, zero running/completed;
+- WORLD live: RCON conectado e 0 player-force entities no estado observado;
+- 0 entities é estado físico observado. Não inferir renderer travado;
+- G97/curriculum/UCB/model metrics são histórico congelado quando research_runner.active=false.
 
 ## Próxima ação
 
@@ -92,6 +109,12 @@ The split must prevent future-data leakage and must separate training/source run
 runs. F4 closes only if memory removal causes statistically detectable performance loss. A lookup
 benchmark alone is insufficient evidence of game-level benefit.
 
+A auditoria preliminar de elegibilidade mostrou que os seeds exploratórios 20261001–20261005 ainda
+não formam um benchmark causal adequado: repairs repetem essencialmente dois symptom/action
+families, e cada seed contém somente uma spatial demo com o mesmo start/goal e route_cost=8.25.
+Os 85 counterexamples globais / 33 signatures podem informar o design, mas 85 runs não equivalem a
+85 independent seeds. Ver docs/CORTEX_PHASE4_CAUSAL_ABLATION_PROTOCOL.md.
+
 Ainda não executar confirmatory seeds.
 Não habilitar evolution.
 Não conceder continuous autonomous authority.
@@ -101,23 +124,28 @@ Não usar as seeds 20261101–20261110 para tuning do protocolo.
 
 Não inferir continuidade pela tela. Executar na ordem:
 
-1. git status em /srv/factorio-ai-lab;
+1. git status/HEAD/origin em /srv/factorio-ai-lab;
 2. ler BUILD_INFO do runtime científico;
 3. ler BUILD_INFO do runtime do dashboard;
-4. confirmar factorio-ai-evolution inativo durante baseline;
-5. consultar /api/context;
-6. conferir manifest/result da última seed;
-7. conferir checkboxes deste handoff e do programa;
-8. executar somente a próxima seed ainda não marcada.
+4. confirmar factorio-ai-evolution inactive+disabled;
+5. verificar processos de runner/evolution/Cortex;
+6. regenerar runs/cortex_phase_state.json;
+7. consultar /api/context, /api/world e WebSocket;
+8. conferir artifacts/docs/checkpoints;
+9. obedecer resume.do_not_start_another_seed.
 
-Durante a série exploratória o runtime científico deve permanecer em
-95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac mesmo que source e dashboard avancem.
+Em F4-B/F4-C, do_not_start_another_seed=true significa NÃO lançar seed até o protocolo causal estar
+congelado e elegível.
 
-Checkpoint mecânico: executar `scripts/cortex_phase_state.py --write` e obedecer `resume.action`.
-Novas seeds devem ser iniciadas por `scripts/launch_corrected_baseline_seed.py`, que desacopla a
-execução da sessão SentinelX, valida SHA + release-root contra o protocolo, recusa seed duplicada
-ou evolution concorrente e grava automaticamente o snapshot global de isolamento pré-run.
-Detalhes: docs/CORTEX_CONTINUITY_PROTOCOL.md.
+O runtime científico histórico da corrected baseline permanece pinado em
+95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac. Source/dashboard podem avançar separadamente.
+
+scripts/launch_corrected_baseline_seed.py pertence ao protocolo de baseline. Não deve ser usado
+automaticamente durante F4-C. Qualquer novo non-confirmatory seed de F4-C deve nascer de
+protocolo/manifest próprio, congelado e testado.
+
+Prompt canônico para a próxima sessão: docs/CORTEX_NEXT_SESSION_PROMPT.md.
+Detalhes de continuidade: docs/CORTEX_CONTINUITY_PROTOCOL.md.
 
 ## Evidência de fechamento da F0
 
