@@ -36,6 +36,7 @@ com experiência sem receber do programador a sequência de ações que constitu
 > **F2-G3 — Universal Option execution boundary:** [docs/CORTEX_PHASE2_OPTION_EXECUTION_BOUNDARY.md](docs/CORTEX_PHASE2_OPTION_EXECUTION_BOUNDARY.md)
 > **F2-G4A — Persistent one-shot Option authority:** [docs/CORTEX_PHASE2_PERSISTENT_OPTION_AUTHORITY.md](docs/CORTEX_PHASE2_PERSISTENT_OPTION_AUTHORITY.md)
 > **F2-G4B — Live one-shot Option canary:** [docs/CORTEX_PHASE2_LIVE_OPTION_CANARY.md](docs/CORTEX_PHASE2_LIVE_OPTION_CANARY.md)
+> **F2-G5 — Baseline-only enforcement / F2 closure:** [docs/CORTEX_PHASE2_BASELINE_ONLY_ENFORCEMENT.md](docs/CORTEX_PHASE2_BASELINE_ONLY_ENFORCEMENT.md)
 > **F1-B — storage hardening:** [docs/CORTEX_F1_STORAGE_HARDENING.md](docs/CORTEX_F1_STORAGE_HARDENING.md)
 > **Dashboard / evidence scope:** [docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md](docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md)
 > **Dashboard / tmp hardening:** [docs/CORTEX_DASHBOARD_TMP_HARDENING.md](docs/CORTEX_DASHBOARD_TMP_HARDENING.md)
@@ -43,22 +44,19 @@ com experiência sem receber do programador a sequência de ações que constitu
 
 ## Estado do programa
 
-**Cortex Research Architecture v0.1 — F2-G4B valida a primeira execução live da Option
-establish_processing_chain pelo boundary genérico do Cortex sob grant SQLite one-shot e
-FactorioWorldLease atestado. Houve exatamente uma tentativa, sem retry/scheduler/continuous
-authority, usando seed não-confirmatória 424242. A transação foi aceita, os três hard functional
-gates passaram e a cadeia produziu 13 iron plates. O furnace terminou no_fuel, portanto
-functional_accept=true e sustained_operation=false.**
+**Cortex Research Architecture v0.1 — F2 COMPLETE. F2-G4B provou uma cadeia funcional live via
+Option/API genérica sob grant persistente one-shot e WorldLease atestado; F2-G5 tornou o
+curriculum_runner mecanicamente baseline-only e fail-closed antes da criação do ambiente.**
 
-G4B implementation: 794963b435bff616042ca0a6e6f278ead315e5e0. Live artifact SHA-256:
-fb9b69b38a3446dd956ebf529f1888bebfb670cfe59fa8fd8b24b74030f0fc95. O counterexample
-temporal do FLE foi preservado no artifact original e auditado sem rerun; a correção futura de
-instrumentação está em aaf10beb5b5ec11b7b28e3619823b02b0a465b59, e o temporal audit tem
-SHA-256 21cdcbe0e60751952600ae1edb26ab4d0d94e72c9fff5d18e3d83f1f023e52d1.
+G4B continua sendo a última evidência live: exatamente uma tentativa não-confirmatória, 13 iron
+plates, functional_accept=true e sustained_operation=false porque o furnace terminou no_fuel. O
+artifact live permanece imutável e seu counterexample temporal foi explicado por auditoria
+separada, sem rerun.
 
-O full gate final do control plane G4B ficou em 1460 core/FLE + 2 PyTorch PASS. F2 continua ativa
-porque o enforcement formal do runner legado como baseline-only ainda está aberto; F3 e
-continuous authority permanecem bloqueadas.
+G5 implementation: 4fc7217d3e5e0fecb076bfd63305e5498eb52f4e. Audit SHA-256:
+f7d796d1c406a7425fd3b14a783227364bb62ab42cef477a59960c41f4d721ae. O gate final ficou em
+1467 core/FLE + 2 PyTorch PASS, com Ruff/compileall/JavaScript/TypeScript/Vite/whitespace PASS.
+F3 está READY / NOT STARTED; continuous authority e evolution permanecem OFF.
 As seeds confirmatórias 20261101–20261110 permanecem congeladas e não executadas; serão usadas
 posteriormente para avaliação pareada do Cortex, sem tuning nelas.
 

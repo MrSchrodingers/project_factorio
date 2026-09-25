@@ -889,7 +889,7 @@ pareada nas seeds confirmatórias congeladas.
 - [x] transactional execution universal;
 - [x] options iniciais;
 - [x] teste que constrói cadeia funcional sem curriculum_runner;
-- [ ] runner antigo executável apenas como baseline.
+- [x] runner antigo executável apenas como baseline.
 
 **F2-A progress:** PASS parcial. Ontology tipada e UniversalExecutor em SHADOW foram
 implementados sem alterar o runtime científico F1. Evidence: docs/CORTEX_PHASE2_ACTION_ONTOLOGY.md,
@@ -1374,14 +1374,40 @@ permaneceram imutáveis.
 teste que constrói cadeia funcional sem curriculum_runner têm agora evidência live sob authority
 durável. Sustentabilidade autônoma continua não provada.
 
-**Next:** F2-G5 — tornar o runner legado formalmente baseline-only, com fail-closed no caminho
-Cortex e testes que impeçam dispatch stage-coded fora do modo baseline. F3 permanece bloqueada.
-**Exit Gate F2:** o agente pode montar uma cadeia funcional escolhendo primitivas/options por uma
-API genérica, sem caminho codificado por estágio.
+**F2-G5 progress:** **PASS e fechamento de F2.** O runner legado exige execution_role=baseline e
+recusa qualquer outro papel antes de criar ambiente FLE ou adquirir authority. Launchers legados
+permitidos rotulam explicitamente baseline; auditoria AST confirma que o pacote Cortex não importa
+curriculum_runner.
+
+**Evidence F2-G5:** docs/CORTEX_PHASE2_BASELINE_ONLY_ENFORCEMENT.md;
+runs/audits/cortex_f2g5_baseline_only_enforcement.json, SHA-256
+f7d796d1c406a7425fd3b14a783227364bb62ab42cef477a59960c41f4d721ae. O artifact foi produzido
+em árvore limpa no commit 4fc7217d3e5e0fecb076bfd63305e5498eb52f4e, com world_mutation=false
+e factorio_rcon_used=false.
+
+**Full gate F2-G5:** 1467 core/FLE PASS + 2 PyTorch PASS;
+Ruff/compileall/JavaScript/TypeScript/Vite/whitespace PASS.
+
+**Control-plane freeze F2-G5:** commit 581ed8c38de0a9ffdc908c250063ee9c9a0e8158 mantém
+confirmatory seeds congeladas após o fechamento: phase_status=complete, phase2_checkpoint=F2-G5 e
+resume.do_not_start_another_seed=true. Gate direcionado: 21 phase-continuity PASS + Ruff PASS.
+
+**Decision F2-G5:** **PASS. F2 COMPLETE.** O último requisito aberto, baseline-only enforcement,
+está mecanicamente atendido. O Exit Gate F2 está completo sem expandir continuous authority e sem
+nova mutação Factorio.
+
+**Exit Gate F2:** **PASS.** O agente montou uma cadeia funcional escolhendo primitivas/options por
+uma API genérica, sem caminho codificado por estágio, e o runner stage-coded remanescente está
+restrito a baseline.
+
+**Next:** F3 — Executive / Cognitive Loop. F3 está READY / NOT STARTED. A abertura deve começar em
+SHADOW e não herda autoridade contínua de F2.
 
 ---
 
 ## Fase 3 — Executive / Cognitive Loop
+
+**Status F3:** READY / NOT STARTED. F2 Exit Gate concluído; nenhuma authority F3 foi concedida.
 
 **Objetivo:** generalizar repair loop para decisão dirigida por objetivos.
 

@@ -3,7 +3,7 @@
 > **Chat/modelo com zero contexto:** começar por
 > `docs/CORTEX_ZERO_CONTEXT_ROADMAP_HANDOFF.md`. Ele contém a fundamentação teórica, roadmap
 > F0–F12, fontes de verdade, estado operacional, interpretação do dashboard, protocolo
-> SentinelX/GitHub e o estado G4B e próximo checkpoint F2-G5.
+> SentinelX/GitHub, o fechamento F2-G5 e a próxima fase F3.
 
 **Documento de continuidade curta.** O contrato completo está em
 `docs/CORTEX_RESEARCH_PROGRAM.md`.
@@ -11,7 +11,7 @@
 ## Estado atual
 
 - Programa: Cortex Research Architecture v0.1
-- Fase: **F2-G4B concluída — F2-G5 baseline-only enforcement é o próximo checkpoint; F2 ativa; F3 bloqueada**
+- Fase: **F2 COMPLETE em F2-G5 — F3 READY / NOT STARTED; continuous authority OFF**
 - Branch: `research/cortex-v1`
 - Baseline imutável de origem: `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 - Tag baseline publicada: `cortex-pre-research-baseline-20260923`
@@ -51,67 +51,40 @@ silenciosamente pelo commit da F0**.
 
 ## Próxima ação
 
-**F2-G5 — formalizar o runner legado como baseline-only.**
+**F3 — Executive / Cognitive Loop: preparar abertura explícita em SHADOW antes de qualquer nova
+authority live.**
 
-F2-G4B executou exatamente uma Option live não-confirmatória pelo caminho genérico do Cortex:
+F2-G5 fechou o último item do Exit Gate F2:
 
-- implementation commit: 794963b435bff616042ca0a6e6f278ead315e5e0;
-- temporal fix: aaf10beb5b5ec11b7b28e3619823b02b0a465b59;
-- live run: cortex-f2g4b-20260925T014418Z;
-- seed 424242, não-confirmatória;
-- live artifact SHA-256: fb9b69b38a3446dd956ebf529f1888bebfb670cfe59fa8fd8b24b74030f0fc95;
-- temporal audit SHA-256: 21cdcbe0e60751952600ae1edb26ab4d0d94e72c9fff5d18e3d83f1f023e52d1;
-- exatamente 1 execution attempt;
-- automatic_retry=false;
-- continuous_authority=false;
-- grant persistente one-shot;
-- scope ligado ao lease_id real e re-atestado imediatamente antes do consume;
-- grant consumido duravelmente antes da mutação;
-- lease liberado ao final;
-- Option accepted, changed_world=true, transaction_committed=true;
-- todos os hard postconditions satisfeitos;
-- coverage 0 -> 1;
-- processor output 0 -> 13 iron plates;
-- producers reaching processor 0 -> 1;
-- furnace final no_fuel;
-- functional_accept=true;
-- sustained_operation=false.
+- implementation commit: 4fc7217d3e5e0fecb076bfd63305e5498eb52f4e;
+- canonical audit: runs/audits/cortex_f2g5_baseline_only_enforcement.json;
+- audit SHA-256: f7d796d1c406a7425fd3b14a783227364bb62ab42cef477a59960c41f4d721ae;
+- run_curriculum exige execution_role=baseline;
+- role incorreta recusa antes de gym/FLE/environment/WorldLease;
+- launchers legados autorizados se identificam como baseline;
+- AST audit confirma zero import de curriculum_runner em src/factorio_ai_lab/cortex;
+- world_mutation=false e factorio_rcon_used=false no audit;
+- full gate: 1467 core/FLE + 2 PyTorch PASS;
+- control-plane freeze commit: 581ed8c38de0a9ffdc908c250063ee9c9a0e8158;
+- G4B preflight test isolation: 4ef61eea2d1d6890cba257c5df1a5deaae2c31a0;
+- final closure gate após follow-ups: 1467 core/FLE + 2 PyTorch PASS; static/build gates PASS;
+- F2 complete mantém resume.do_not_start_another_seed=true;
+- Ruff/compileall/JavaScript/TypeScript/Vite/whitespace PASS.
 
-Counterexample temporal preservado:
+O Exit Gate F2 está mecanicamente validado: API genérica de Options, boundary transacional
+universal, cadeia funcional live sem curriculum_runner e runner legado baseline-only.
 
-- artifact original: ticks_before=21840, ticks_after=7800, tick_measurement_status=invalid_rewound;
-- causa auditada: FLE 0.4.3 restaura game_state antes da Action e o reset zera storage.elapsed_ticks;
-- nenhum rerun foi feito;
-- o artifact live não foi reescrito;
-- o fix futuro usa FLEStep.info.ticks como epoch local em accepted checkpoint actions.
+A última evidência live continua sendo F2-G4B, run cortex-f2g4b-20260925T014418Z, com 13 iron
+plates e final no_fuel. Não repetir esse canário. Sustentabilidade autônoma continua não provada.
 
-Gates:
-
-- G4B implementation: 1459 core/FLE + 2 PyTorch PASS;
-- temporal fix: 1460 core/FLE + 2 PyTorch PASS;
-- G4B control plane: 1460 core/FLE + 2 PyTorch PASS;
-- Ruff/compileall/JS/TS/Vite/whitespace: PASS.
-
-Documento canônico:
-
-docs/CORTEX_PHASE2_LIVE_OPTION_CANARY.md
-
-Checklist F2 após G4B:
-
-- transactional execution universal: atendido;
-- initial Option: atendido;
-- functional chain live por Option/API sem curriculum_runner: atendido;
-- runner legado executável apenas como baseline: ainda aberto.
-
-F2-G5 deve impedir que caminhos Cortex importem/despachem curriculum_runner ou stage handlers
-legados como authority. O runner legado deve continuar disponível para experimentos rotulados
-explicitamente como baseline.
+O mesmo commit endureceu o dashboard contra stale RCON e falha parcial de endpoints. Após deploy,
+validar BUILD_INFO, /api/context, /api/world e /ws/live antes de confiar na tela.
 
 Não executar confirmatory seeds.
 Não habilitar evolution.
 Não conceder continuous autonomous authority.
-Não repetir o canário G4B.
-F3 permanece bloqueada.
+F3 está liberada pelo Exit Gate de F2, mas ainda não foi iniciada.
+
 ## Protocolo de retomada após interrupção
 
 Não inferir continuidade pela tela. Executar na ordem:

@@ -5,8 +5,8 @@
 **Repository:** `MrSchrodingers/project_factorio`
 **Live checkout:** `/srv/factorio-ai-lab`
 **Transition branch:** `research/cortex-v1`
-**Current scientific phase:** **F2-G4B COMPLETE — F2-G5 BASELINE-ONLY ENFORCEMENT NEXT**
-**F3:** BLOCKED
+**Current scientific phase:** **F2 COMPLETE — F2-G5 COMPLETE — F3 READY / NOT STARTED**
+**F3:** READY / NOT STARTED
 **Continuous autonomous authority:** OFF
 **Confirmatory seeds:** untouched / frozen
 **SentinelX context:** sxc_4557STHZ — always resume latest revision
@@ -87,8 +87,8 @@ cat runs/cortex_phase_state.json
 Expected checkpoint at this handoff:
 
 `phase=F2`
-`phase_status=active`
-`phase2_checkpoint=F2-G4B`
+`phase_status=complete`
+`phase2_checkpoint=F2-G5`
 
 Machine-readable state outranks remembered conversation state.
 
@@ -108,7 +108,7 @@ Dashboard runtime:
 
 Expected dashboard/source rule:
 
-the deployed dashboard BUILD_INFO commit must equal the current published G4B closure commit.
+the deployed dashboard BUILD_INFO commit must equal the current published F2/G5 closure commit.
 Resolve that SHA from Git/tag plus BUILD_INFO rather than from a hardcoded value in this document.
 
 This separation is intentional. The dashboard/source may advance while the frozen baseline runtime
@@ -1018,12 +1018,33 @@ temporal audit classifies this as functional_accept_tick_epoch_reset_explained.
 
 **DO NOT rerun G4B.**
 
-### F2-G5 — next checkpoint
+### F2-G5 — baseline-only enforcement
 
-Make the legacy curriculum_runner mechanically baseline-only. Cortex execution paths must fail
-closed rather than import or dispatch stage-coded authority. Legacy baseline experiments may
-continue only under an explicit baseline execution identity. F3 remains blocked until this final
-F2 checklist item is satisfied.
+**CURRENT COMPLETED CHECKPOINT AND F2 CLOSURE.**
+
+Implementation commit:
+
+4fc7217d3e5e0fecb076bfd63305e5498eb52f4e
+
+Canonical audit:
+
+runs/audits/cortex_f2g5_baseline_only_enforcement.json
+
+SHA-256:
+
+f7d796d1c406a7425fd3b14a783227364bb62ab42cef477a59960c41f4d721ae
+
+The legacy curriculum_runner now requires the exact execution role baseline and fails closed before
+environment creation for any other role. Baseline launchers label the role explicitly. Static AST
+audit finds no curriculum_runner import in the Cortex package. The audit used no RCON and caused no
+world mutation.
+
+Full gate: 1467 core/FLE + 2 PyTorch PASS, plus Ruff, compileall, JavaScript, TypeScript/Vite and
+whitespace PASS.
+
+**F2 Exit Gate: PASS. F2 COMPLETE.**
+
+F3 is READY / NOT STARTED. Do not infer continuous authority from this transition.
 
 ## F3 — Executive / Cognitive Loop
 
@@ -1425,9 +1446,9 @@ Before retrying any mutation, check:
 
 ---
 
-# 13. F2-G4B closure and F2-G5 next work
+# 13. F2 closure — G4B live evidence + G5 baseline-only enforcement
 
-F2-G4B is complete as a partial F2 checkpoint. F2 remains active only because baseline-only enforcement of the legacy runner is still open.
+F2-G4B provides the bounded live Option evidence; F2-G5 completes the remaining authority-separation requirement. F2 is complete.
 
 ## 13.1 G4A authority result
 
@@ -2008,12 +2029,13 @@ At this checkpoint:
 
 - F0 PASS;
 - F1 PASS;
-- F2 ACTIVE;
+- F2 COMPLETE;
 - F2-G3 COMPLETE;
 - F2-G4A COMPLETE;
 - F2-G4B COMPLETE;
-- F2-G5 NEXT: baseline-only enforcement of the legacy runner;
-- F3 BLOCKED;
+- F2-G5 COMPLETE: legacy runner baseline-only enforcement;
+- G5 implementation = 4fc7217d3e5e0fecb076bfd63305e5498eb52f4e; control-plane freeze = 581ed8c38de0a9ffdc908c250063ee9c9a0e8158;
+- F3 READY / NOT STARTED;
 - continuous authority OFF;
 - evolution service OFF;
 - confirmatory seeds untouched;
@@ -2032,9 +2054,9 @@ At this checkpoint:
 
 A fresh operator should leave its first turn with one conclusion:
 
-> **G4A removed process-local authority as the blocker. The next scientific task is one controlled
-> G4B live Option canary under an exact persistent grant and actual WorldLease, with no automatic
-> retry or continuous authority. That canary is evidence for F2, not permission to skip its Exit Gate.**
+> **F2 is complete. G4B is the immutable bounded live Option evidence; G5 closes authority
+> separation by making the legacy runner baseline-only. The next scientific phase is F3, beginning
+> in SHADOW. Continuous authority, evolution and confirmatory-seed tuning remain OFF.**
 
 ---
 
@@ -2042,7 +2064,7 @@ A fresh operator should leave its first turn with one conclusion:
 
 After publication, this zero-context handoff should be discoverable through the immutable tag:
 
-`cortex-zero-context-handoff-v0.1.0`
+`cortex-zero-context-handoff-v0.2.0`
 
 A fresh chat should still revalidate the branch HEAD because later scientific work may legitimately
 advance beyond this tag.
@@ -2075,6 +2097,8 @@ Primeiro, use SentinelX para:
    - docs/CORTEX_HANDOFF.md
    - docs/CORTEX_PHASE2_OPTION_EXECUTION_BOUNDARY.md
    - docs/CORTEX_PHASE2_PERSISTENT_OPTION_AUTHORITY.md
+   - docs/CORTEX_PHASE2_LIVE_OPTION_CANARY.md
+   - docs/CORTEX_PHASE2_BASELINE_ONLY_ENFORCEMENT.md
    - docs/CORTEX_PHASE2_OPTIONS.md
    - docs/CORTEX_CONTINUITY_PROTOCOL.md.
 
@@ -2096,10 +2120,11 @@ estruturado contendo:
 - arquivos que precisam ser lidos antes de editar;
 - plano proposto para o próximo checkpoint com testes, evidências e critérios de aceite.
 
-Estado esperado do handoff publicado: F0 PASS, F1 PASS, F2 ACTIVE, F2-G4A concluída, F2-G4B próxima,
-F3 bloqueada, evolution inactive+disabled, confirmatory seeds intactas e nenhum live Option EXECUTE
-pós-G4A executado ainda. Isso é apenas expectativa histórica: se o estado vivo divergir, audite os commits
-e siga o estado persistente mais recente.
+Estado esperado do handoff publicado: F0 PASS, F1 PASS, F2 COMPLETE, F2-G4B e F2-G5 concluídas,
+F3 READY / NOT STARTED, evolution inactive+disabled, confirmatory seeds intactas e
+resume.do_not_start_another_seed=true. Exatamente um live Option EXECUTE pós-G4A ocorreu em G4B e
+não deve ser repetido. Se o estado vivo divergir, audite commits/artifacts e siga o estado persistente
+mais recente.
 
 Não habilite evolution, não use seeds confirmatórias, não conceda continuous authority e não
 repita uma execução após timeout sem checar processo/lease/artifact/manifest/result.
@@ -2108,6 +2133,6 @@ repita uma execução após timeout sem checar processo/lease/artifact/manifest/
 Expected behavior of the new chat:
 
 - first turn = reconstruction and diagnosis;
-- second phase = F2-G4B preflight and scope/lease/grant reconciliation;
-- mutation only after the live state and scope are reconciled.
+- second phase = preparar abertura explícita de F3 em SHADOW;
+- nenhuma nova authority live até critérios/evidence de F3 serem definidos e aprovados.
 
