@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import sqlite3
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -1249,10 +1250,18 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
         "observed_evidence":{
             "source":"runs/repairs.jsonl",
             "source_sha256":repairs_sha,
+            "row_index":0,
+            "run_id":"legacy-observed",
+            "generation":96,
+            "stage":"Logistic science",
             "symptom":(
                 "producer_output_unprocessed:"
                 "output_buffered_not_processed"
-            )
+            ),
+            "action_key":"placement:place_processing_for_buffered_output",
+            "executed":False,
+            "targets":["u1","u2"],
+            "outcome":None
         },
         "counterfactual_expansion":{
             "observed_in_world":False,
@@ -1308,4 +1317,157 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
     assert f3["resume"]["action"] == (
         "F3-A active in SHADOW; implement verification, credit assignment, "
         "and experiment ledger"
+    )
+    assert (
+        f3["phase3_executive_shadow_kernel"]["observed_row_still_matches"]
+        is True
+    )
+
+    with repairs.open("a",encoding="utf-8") as handle:
+        handle.write(json.dumps({"append_only":True})+"\n")
+    f3_after_append=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert f3_after_append["phase"] == "F3"
+    assert f3_after_append["phase3_checkpoint"] == "F3-A"
+    assert (
+        f3_after_append["phase3_executive_shadow_kernel"]["validated"]
+        is True
+    )
+    assert (
+        f3_after_append["phase3_executive_shadow_kernel"][
+            "observed_row_still_matches"
+        ]
+        is True
+    )
+    assert (
+        f3_after_append["phase3_executive_shadow_kernel"][
+            "current_source_sha256"
+        ]
+        != f3_payload["observed_evidence"]["source_sha256"]
+    )
+
+
+    ledger_dir=tmp_path/"runs"/"ledger"
+    ledger_dir.mkdir(parents=True,exist_ok=True)
+    ledger_path=ledger_dir/"cortex_executive_episodes.sqlite3"
+    connection=sqlite3.connect(ledger_path)
+    connection.execute(
+        """
+        CREATE TABLE executive_episodes (
+            episode_id TEXT PRIMARY KEY,
+            payload_sha256 TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        "INSERT INTO executive_episodes(episode_id,payload_sha256) VALUES(?,?)",
+        ("episode-test","digest-test"),
+    )
+    connection.commit()
+    connection.close()
+
+    f3b_payload={
+        "schema_version":"cortex_f3b_verification_credit_replay_v1",
+        "status":"pass",
+        "run_id":"f3b-shadow",
+        "code_revision":{
+            "commit":"f3b-sha",
+            "branch":"research/cortex-v1",
+            "dirty":False
+        },
+        "authority":"shadow",
+        "world_mutation":False,
+        "factorio_rcon_used":False,
+        "fle_environment_created":False,
+        "world_lease_acquired":False,
+        "execution_grant_created":False,
+        "continuous_authority":False,
+        "verification":{
+            "selected_episode_count":1,
+            "matches_recorded":1,
+            "held":1,
+            "missed":0,
+            "unmeasured":0
+        },
+        "credit":{
+            "eligible":1,
+            "ineligible":0,
+            "reward_sum":1.0,
+            "mean_reward":1.0
+        },
+        "ledger":{
+            "path":"runs/ledger/cortex_executive_episodes.sqlite3",
+            "quick_check":"ok",
+            "count_before":0,
+            "count_after":1,
+            "inserted":1,
+            "already_present":0,
+            "episode_count":1,
+            "episode_digests":{"episode-test":"digest-test"},
+            "batch_digest":"batch"
+        },
+        "checks":{
+            "selected_episode_count_positive":True,
+            "all_selected_executed":True,
+            "all_verifications_match_recorded":True,
+            "all_selected_credit_eligible":True,
+            "no_unmeasured_selected":True,
+            "ledger_quick_check_ok":True,
+            "ledger_roundtrip_matches":True,
+            "episode_ids_unique":True,
+            "ledger_count_monotonic":True,
+            "all_selected_persisted":True
+        }
+    }
+    f3b_audit=audits/"cortex_f3b_verification_credit_replay.json"
+    f3b_audit.write_text(json.dumps(f3b_payload)+"\n")
+
+    f3b_artifact_only=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert f3b_artifact_only["phase"] == "F3"
+    assert f3b_artifact_only["phase3_checkpoint"] == "F3-A"
+    assert (
+        f3b_artifact_only["phase3_verification_credit_ledger"]["validated"]
+        is False
+    )
+
+    f3b_doc=docs/"CORTEX_PHASE3_VERIFICATION_CREDIT_LEDGER.md"
+    f3b_doc.write_text("# F3-B\n")
+    f3b=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert f3b["phase"] == "F3"
+    assert f3b["phase_status"] == "active"
+    assert f3b["phase3_checkpoint"] == "F3-B"
+    credit=f3b["phase3_verification_credit_ledger"]
+    assert credit["validated"] is True
+    assert credit["ledger_persisted_digests_match"] is True
+    assert credit["ledger_live_quick_check"] == "ok"
+    assert credit["ledger_live_count"] == 1
+    assert f3b["resume"]["do_not_start_another_seed"] is True
+    assert f3b["resume"]["action"] == (
+        "F3-B active in SHADOW; implement paired shadow comparison "
+        "against the legacy runner"
+    )
+
+    connection=sqlite3.connect(ledger_path)
+    connection.execute(
+        "UPDATE executive_episodes SET payload_sha256=? WHERE episode_id=?",
+        ("tampered","episode-test"),
+    )
+    connection.commit()
+    connection.close()
+    f3b_tampered=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert f3b_tampered["phase3_checkpoint"] == "F3-A"
+    assert (
+        f3b_tampered["phase3_verification_credit_ledger"]["validated"]
+        is False
     )

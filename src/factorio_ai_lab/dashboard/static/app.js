@@ -1748,7 +1748,10 @@ function renderExperimentContext() {
     const phase2Checkpoint = String(cortexPhase.phase2_checkpoint || "F2");
     const phase3Checkpoint = String(cortexPhase.phase3_checkpoint || "");
     const executiveShadowPhase = phase3Checkpoint === "F3-A";
+    const verificationCreditPhase = phase3Checkpoint === "F3-B";
+    const phase3ShadowActive = executiveShadowPhase || verificationCreditPhase;
     const executiveShadow = cortexPhase.phase3_executive_shadow_kernel || {};
+    const verificationCredit = cortexPhase.phase3_verification_credit_ledger || {};
     const functionalCanary = phase2Checkpoint === "F2-F3";
     const deliveryActuatorPhase = phase2Checkpoint.startsWith("F2-F4");
     const deliveryActuatorRunner = phase2Checkpoint === "F2-F4B";
@@ -1759,7 +1762,7 @@ function renderExperimentContext() {
     const persistentAuthorityPhase = phase2Checkpoint === "F2-G4A";
     const liveOptionCanaryPhase = phase2Checkpoint === "F2-G4B";
     const baselineOnlyPhase = phase2Checkpoint === "F2-G5";
-    const useLiveOptionEvidence = executiveShadowPhase
+    const useLiveOptionEvidence = phase3ShadowActive
       || liveOptionCanaryPhase
       || baselineOnlyPhase;
     const useDeliveryCanaryEvidence = deliveryActuatorCanary
@@ -1796,6 +1799,9 @@ function renderExperimentContext() {
       phaseBadge = configured
         ? "F1-B · " + completed + "/" + configured
         : "F1-B · seed " + seed;
+    } else if (verificationCreditPhase) {
+      phaseTitle = "F3-B · Verification + Credit Ledger · SHADOW";
+      phaseBadge = "F3-B · outcomes verificados · ledger persistente";
     } else if (executiveShadowPhase) {
       phaseTitle = "F3-A · Executive Shadow Kernel · SHADOW";
       phaseBadge = "F3-A · alternativas explícitas · no live authority";
@@ -1855,7 +1861,7 @@ function renderExperimentContext() {
 
     setText(
       "cortexCanaryLabel",
-      executiveShadowPhase || baselineOnlyPhase
+      phase3ShadowActive || baselineOnlyPhase
         ? "F2-G4B · ÚLTIMA EVIDÊNCIA LIVE VIA OPTION"
         : (liveOptionCanaryPhase
           ? "F2-G4B · CANÁRIO LIVE VIA OPTION"
@@ -1905,7 +1911,15 @@ function renderExperimentContext() {
       );
       setText(
         "cortexAuthorityDetail",
-        executiveShadowPhase
+        verificationCreditPhase
+          ? "F3-B SHADOW: verification-after-action + credit fail-closed + ledger persistente. "
+            + "Artifact " + String(verificationCredit.status || "--").toUpperCase()
+            + " · episodes "
+            + String((verificationCredit.verification || {}).selected_episode_count || "--")
+            + " · ledger "
+            + String(verificationCredit.ledger_live_quick_check || "--")
+            + " · G4B permanece a última evidência live · continuous authority OFF."
+          : (executiveShadowPhase
           ? "F3-A SHADOW: BeliefState/GoalStack + múltiplas alternativas + hard feasibility + policy/prediction-before-action. "
             + "Artifact " + String(executiveShadow.status || "--").toUpperCase()
             + " · candidates "
@@ -1926,7 +1940,7 @@ function renderExperimentContext() {
             : ("EXECUTE concedido somente ao canário registrado"
               + " · continuous authority "
               + (canary.continuous_authority ? "ON" : "OFF")
-              + " · baseline/holdout separados.")))))))
+              + " · baseline/holdout separados."))))))))
       );
     } else {
       setText("cortexCanaryStatus", "canário não executado");

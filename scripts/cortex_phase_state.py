@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,87 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda:handle.read(1024*1024),b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _jsonl_row(path: Path,index: int) -> dict[str, Any] | None:
+    if index < 0 or not path.exists():
+        return None
+    try:
+        for current,line in enumerate(path.read_text(encoding="utf-8").splitlines()):
+            if current != index:
+                continue
+            value=json.loads(line)
+            return value if isinstance(value,dict) else None
+    except (OSError,json.JSONDecodeError,TypeError):
+        return None
+    return None
+
+
+def _ledger_digests_match(
+    path: Path,
+    expected: dict[str, Any],
+) -> tuple[bool,str | None,int | None]:
+    if not path.exists() or not expected:
+        return False,None,None
+    connection: sqlite3.Connection | None=None
+    try:
+        connection=sqlite3.connect(
+            f"file:{path}?mode=ro",
+            uri=True,
+            timeout=10.0,
+        )
+        quick_check=str(connection.execute("PRAGMA quick_check").fetchone()[0])
+        if quick_check!="ok":
+            return False,quick_check,None
+        count=int(
+            connection.execute(
+                "SELECT COUNT(*) FROM executive_episodes"
+            ).fetchone()[0]
+        )
+        for episode_id,digest in expected.items():
+            if not isinstance(episode_id,str) or not episode_id:
+                return False,quick_check,count
+            if not isinstance(digest,str) or not digest:
+                return False,quick_check,count
+            row=connection.execute(
+                """
+                SELECT payload_sha256
+                FROM executive_episodes
+                WHERE episode_id=?
+                """,
+                (episode_id,),
+            ).fetchone()
+            if row is None or row[0]!=digest:
+                return False,quick_check,count
+        return True,quick_check,count
+    except (sqlite3.Error,OSError,TypeError,ValueError):
+        return False,None,None
+    finally:
+        if connection is not None:
+            connection.close()
+
+
+def _observed_repair_row_matches(
+    path: Path,
+    observed: dict[str, Any],
+) -> bool:
+    row_index=observed.get("row_index")
+    if not isinstance(row_index,int) or isinstance(row_index,bool):
+        return False
+    row=_jsonl_row(path,row_index)
+    if row is None:
+        return False
+    keys=(
+        "run_id",
+        "generation",
+        "stage",
+        "symptom",
+        "action_key",
+        "executed",
+        "targets",
+        "outcome",
+    )
+    return all(row.get(key)==observed.get(key) for key in keys)
 
 
 def _seed_record(
@@ -562,6 +644,10 @@ def build_phase_state(
         if phase3_repairs_path.exists()
         else None
     )
+    phase3_observed_row_match=_observed_repair_row_matches(
+        phase3_repairs_path,
+        phase3_observed,
+    )
     phase3_candidate_count=phase3_counterfactual.get("candidate_count")
     phase3_executive_valid=(
         phase2_exit_gate_valid
@@ -583,7 +669,9 @@ def build_phase_state(
         and phase3_executive_payload.get("continuous_authority") is False
         and phase3_observed.get("source")=="runs/repairs.jsonl"
         and phase3_repairs_sha is not None
-        and phase3_observed.get("source_sha256")==phase3_repairs_sha
+        and isinstance(phase3_observed.get("source_sha256"),str)
+        and bool(phase3_observed.get("source_sha256"))
+        and phase3_observed_row_match
         and phase3_observed.get("symptom")
         =="producer_output_unprocessed:output_buffered_not_processed"
         and phase3_counterfactual.get("observed_in_world") is False
@@ -594,6 +682,107 @@ def build_phase_state(
         =={"prefer_build","prefer_reroute"}
         and bool(phase3_checks)
         and all(value is True for value in phase3_checks.values())
+    )
+
+    phase3_credit_doc_path=(
+        state_root
+        / "docs"
+        / "CORTEX_PHASE3_VERIFICATION_CREDIT_LEDGER.md"
+    )
+    phase3_credit_doc=phase3_credit_doc_path.exists()
+    phase3_credit_audit_path=(
+        state_root
+        / "runs"
+        / "audits"
+        / "cortex_f3b_verification_credit_replay.json"
+    )
+    phase3_credit_audit=phase3_credit_audit_path.exists()
+    phase3_credit_payload: dict[str, Any]={}
+    phase3_credit_error: str | None=None
+    if phase3_credit_audit:
+        try:
+            phase3_credit_payload=_load(phase3_credit_audit_path)
+        except (OSError,json.JSONDecodeError,TypeError) as exc:
+            phase3_credit_error=f"{type(exc).__name__}: {exc}"
+
+    phase3_credit_revision=phase3_credit_payload.get("code_revision")
+    if not isinstance(phase3_credit_revision,dict):
+        phase3_credit_revision={}
+    phase3_credit_verification=phase3_credit_payload.get("verification")
+    if not isinstance(phase3_credit_verification,dict):
+        phase3_credit_verification={}
+    phase3_credit_assignment=phase3_credit_payload.get("credit")
+    if not isinstance(phase3_credit_assignment,dict):
+        phase3_credit_assignment={}
+    phase3_credit_ledger=phase3_credit_payload.get("ledger")
+    if not isinstance(phase3_credit_ledger,dict):
+        phase3_credit_ledger={}
+    phase3_credit_checks=phase3_credit_payload.get("checks")
+    if not isinstance(phase3_credit_checks,dict):
+        phase3_credit_checks={}
+    phase3_credit_episode_digests=phase3_credit_ledger.get(
+        "episode_digests"
+    )
+    if not isinstance(phase3_credit_episode_digests,dict):
+        phase3_credit_episode_digests={}
+    phase3_credit_ledger_relative=phase3_credit_ledger.get("path")
+    phase3_credit_ledger_path=(
+        state_root / phase3_credit_ledger_relative
+        if isinstance(phase3_credit_ledger_relative,str)
+        and phase3_credit_ledger_relative
+        else state_root
+        / "runs"
+        / "ledger"
+        / "cortex_executive_episodes.sqlite3"
+    )
+    (
+        phase3_credit_ledger_matches,
+        phase3_credit_ledger_quick_check,
+        phase3_credit_ledger_count,
+    )=_ledger_digests_match(
+        phase3_credit_ledger_path,
+        phase3_credit_episode_digests,
+    )
+    phase3_selected_count=phase3_credit_verification.get(
+        "selected_episode_count"
+    )
+    phase3_credit_valid=(
+        phase3_executive_valid
+        and phase3_credit_doc
+        and phase3_credit_audit
+        and phase3_credit_error is None
+        and phase3_credit_payload.get("schema_version")
+        =="cortex_f3b_verification_credit_replay_v1"
+        and phase3_credit_payload.get("status")=="pass"
+        and phase3_credit_revision.get("dirty") is False
+        and isinstance(phase3_credit_revision.get("commit"),str)
+        and bool(phase3_credit_revision.get("commit"))
+        and phase3_credit_payload.get("authority")=="shadow"
+        and phase3_credit_payload.get("world_mutation") is False
+        and phase3_credit_payload.get("factorio_rcon_used") is False
+        and phase3_credit_payload.get("fle_environment_created") is False
+        and phase3_credit_payload.get("world_lease_acquired") is False
+        and phase3_credit_payload.get("execution_grant_created") is False
+        and phase3_credit_payload.get("continuous_authority") is False
+        and isinstance(phase3_selected_count,int)
+        and not isinstance(phase3_selected_count,bool)
+        and phase3_selected_count>0
+        and phase3_credit_verification.get("matches_recorded")
+        ==phase3_selected_count
+        and phase3_credit_verification.get("unmeasured")==0
+        and phase3_credit_assignment.get("eligible")
+        ==phase3_selected_count
+        and phase3_credit_assignment.get("ineligible")==0
+        and phase3_credit_ledger.get("quick_check")=="ok"
+        and phase3_credit_ledger.get("episode_count")
+        ==phase3_selected_count
+        and len(phase3_credit_episode_digests)==phase3_selected_count
+        and phase3_credit_ledger_matches
+        and phase3_credit_ledger_quick_check=="ok"
+        and isinstance(phase3_credit_ledger_count,int)
+        and phase3_credit_ledger_count>=phase3_selected_count
+        and bool(phase3_credit_checks)
+        and all(value is True for value in phase3_credit_checks.values())
     )
 
     phase2_delivery_actuator_canary_path=(
@@ -839,7 +1028,12 @@ def build_phase_state(
                 "functional_accept_sustainability_not_proven"
             )
 
-    if phase3_executive_valid:
+    if phase3_credit_valid:
+        action=(
+            "F3-B active in SHADOW; implement paired shadow comparison "
+            "against the legacy runner"
+        )
+    elif phase3_executive_valid:
         action=(
             "F3-A active in SHADOW; implement verification, credit assignment, "
             "and experiment ledger"
@@ -897,7 +1091,7 @@ def build_phase_state(
         "generated_at":datetime.now(UTC).isoformat(),
         "phase":(
             "F3"
-            if phase3_executive_valid
+            if phase3_credit_valid or phase3_executive_valid
             else (
                 "F2"
                 if exploratory_complete
@@ -912,7 +1106,7 @@ def build_phase_state(
         ),
         "phase_status":(
             "active"
-            if phase3_executive_valid
+            if phase3_credit_valid or phase3_executive_valid
             else (
                 "complete"
                 if phase2_exit_gate_valid
@@ -950,8 +1144,46 @@ def build_phase_state(
         },
         "phase2_checkpoint":phase2_checkpoint,
         "phase3_checkpoint":(
-            "F3-A" if phase3_executive_valid else None
+            "F3-B"
+            if phase3_credit_valid
+            else ("F3-A" if phase3_executive_valid else None)
         ),
+        "phase3_verification_credit_ledger":{
+            "document_path":str(phase3_credit_doc_path),
+            "document_exists":phase3_credit_doc,
+            "audit_path":str(phase3_credit_audit_path),
+            "audit_exists":phase3_credit_audit,
+            "validated":phase3_credit_valid,
+            "status":phase3_credit_payload.get("status"),
+            "run_id":phase3_credit_payload.get("run_id"),
+            "code_commit":phase3_credit_revision.get("commit"),
+            "authority":phase3_credit_payload.get("authority"),
+            "world_mutation":phase3_credit_payload.get("world_mutation"),
+            "factorio_rcon_used":phase3_credit_payload.get(
+                "factorio_rcon_used"
+            ),
+            "fle_environment_created":phase3_credit_payload.get(
+                "fle_environment_created"
+            ),
+            "world_lease_acquired":phase3_credit_payload.get(
+                "world_lease_acquired"
+            ),
+            "execution_grant_created":phase3_credit_payload.get(
+                "execution_grant_created"
+            ),
+            "continuous_authority":phase3_credit_payload.get(
+                "continuous_authority"
+            ),
+            "verification":phase3_credit_verification,
+            "credit":phase3_credit_assignment,
+            "ledger":phase3_credit_ledger,
+            "ledger_path":str(phase3_credit_ledger_path),
+            "ledger_persisted_digests_match":phase3_credit_ledger_matches,
+            "ledger_live_quick_check":phase3_credit_ledger_quick_check,
+            "ledger_live_count":phase3_credit_ledger_count,
+            "checks":phase3_credit_checks,
+            "read_error":phase3_credit_error,
+        },
         "phase3_executive_shadow_kernel":{
             "document_path":str(phase3_executive_doc_path),
             "document_exists":phase3_executive_doc,
@@ -979,6 +1211,8 @@ def build_phase_state(
                 "continuous_authority"
             ),
             "observed_evidence":phase3_observed,
+            "observed_row_still_matches":phase3_observed_row_match,
+            "current_source_sha256":phase3_repairs_sha,
             "counterfactual_expansion":phase3_counterfactual,
             "checks":phase3_checks,
             "read_error":phase3_executive_error,

@@ -88,3 +88,16 @@ def test_dashboard_renders_f3a_as_shadow_and_keeps_g4b_as_live_evidence() -> Non
     assert "F3-A · alternativas explícitas · no live authority" in app
     assert "F2-G4B · ÚLTIMA EVIDÊNCIA LIVE VIA OPTION" in app
     assert "G4B permanece a última evidência live" in app
+
+
+def test_dashboard_renders_f3b_credit_ledger_as_shadow() -> None:
+    app=(
+        Path(__file__).parents[1]
+        / "src/factorio_ai_lab/dashboard/static/app.js"
+    ).read_text()
+
+    assert 'phase3Checkpoint === "F3-B"' in app
+    assert "F3-B · Verification + Credit Ledger · SHADOW" in app
+    assert "F3-B · outcomes verificados · ledger persistente" in app
+    assert "verification-after-action + credit fail-closed" in app
+    assert "G4B permanece a última evidência live" in app
