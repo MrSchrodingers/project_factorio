@@ -337,7 +337,29 @@ def build_protocol_manifest() -> dict[str, Any]:
             "test": "exact_paired_sign_flip_randomization",
             "alternative": "greater",
             "alpha": 0.05,
-            "enumeration": "all_2^20_sign_assignments",
+            "test_assumption": (
+                "under the sharp no-memory-effect null, paired condition labels are "
+                "exchangeable; no asymptotic normal approximation is used"
+            ),
+            "enumeration": "all_2^m_sign_assignments_for_m_valid_pairs",
+            "minimum_practically_relevant_effect_delta_J": 0.05,
+            "decision_rule": (
+                "support_F4_causal_memory_benefit_only_if one_sided_exact_p<=0.05 "
+                "and two_sided_95pct_CI_lower_bound>0 and mean_delta_J>=0.05"
+            ),
+            "sample_size_rationale": (
+                "fixed_n_20_before_outcomes: five independent held-out pairs per "
+                "each of four task families. No trustworthy prior transfer-effect "
+                "distribution exists, so no model-based power claim is made. "
+                "The design prioritizes exact finite-sample inference, family "
+                "coverage, and an immutable stopping rule; any larger design "
+                "requires a new protocol version before evaluation begins"
+            ),
+            "minimum_analyzable_pairs": 16,
+            "minimum_analyzable_pairs_per_family": 3,
+            "insufficient_valid_pairs_result": (
+                "inconclusive_protocol_execution_not_negative_memory_effect"
+            ),
             "effect_sizes": [
                 "mean_delta_J",
                 "median_delta_J",
@@ -373,6 +395,15 @@ def build_protocol_manifest() -> dict[str, Any]:
                 "evaluation_memory_contamination",
                 "outcome_extractor_failure",
             ],
+            "technical_invalidity_rule": (
+                "exclude_the_entire_pair_from_primary_inference; do_not_replace "
+                "with_a_new_seed_after_outcomes_are_visible"
+            ),
+            "interrupted_arm_recovery_rule": (
+                "audit_process_lease_grant_artifact_and_world_state_first; resume "
+                "the_same_arm_only_when_state_equivalence_is_proven, otherwise "
+                "mark_the_pair_technically_invalid"
+            ),
             "outcome_dependent_exclusion_forbidden": True,
             "missing_is_never_zero": True,
         },

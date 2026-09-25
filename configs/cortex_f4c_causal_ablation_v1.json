@@ -174,6 +174,7 @@
     "protocol_manifest_must_match_frozen_hash": true
   },
   "invalidity_and_missingness": {
+    "interrupted_arm_recovery_rule": "audit_process_lease_grant_artifact_and_world_state_first; resume the_same_arm_only_when_state_equivalence_is_proven, otherwise mark_the_pair_technically_invalid",
     "missing_is_never_zero": true,
     "outcome_dependent_exclusion_forbidden": true,
     "predeclared_technical_invalidity": [
@@ -185,6 +186,7 @@
       "outcome_extractor_failure"
     ],
     "task_timeout_with_valid_instrumentation": "observed_task_failure",
+    "technical_invalidity_rule": "exclude_the_entire_pair_from_primary_inference; do_not_replace with_a_new_seed_after_outcomes_are_visible",
     "transport_or_tool_timeout": "not_an_experimental_failure_until_process_lease_artifact_and_world_state_are_audited"
   },
   "pairing": {
@@ -297,17 +299,23 @@
       "method": "invert_two_sided_exact_paired_sign_flip_randomization_test",
       "parameter": "constant_additive_shift_tau"
     },
+    "decision_rule": "support_F4_causal_memory_benefit_only_if one_sided_exact_p<=0.05 and two_sided_95pct_CI_lower_bound>0 and mean_delta_J>=0.05",
     "effect_sizes": [
       "mean_delta_J",
       "median_delta_J",
       "paired_cohens_dz"
     ],
-    "enumeration": "all_2^20_sign_assignments",
+    "enumeration": "all_2^m_sign_assignments_for_m_valid_pairs",
     "evaluation_pairs": 20,
     "family_stratification": "report_each_family_descriptively_and_with_effect_size",
+    "insufficient_valid_pairs_result": "inconclusive_protocol_execution_not_negative_memory_effect",
+    "minimum_analyzable_pairs": 16,
+    "minimum_analyzable_pairs_per_family": 3,
+    "minimum_practically_relevant_effect_delta_J": 0.05,
     "pilot_excluded_from_primary_inference": true,
     "primary_contrast": "delta_J = J_memory_on - J_memory_ablated",
     "primary_statistic": "mean_delta_J",
+    "sample_size_rationale": "fixed_n_20_before_outcomes: five independent held-out pairs per each of four task families. No trustworthy prior transfer-effect distribution exists, so no model-based power claim is made. The design prioritizes exact finite-sample inference, family coverage, and an immutable stopping rule; any larger design requires a new protocol version before evaluation begins",
     "secondary_endpoints": [
       "functional_success",
       "goal_progress",
@@ -315,7 +323,8 @@
       "invalid_action_rate"
     ],
     "secondary_multiplicity": "holm_familywise_alpha_0.05_if_inferential_claimed",
-    "test": "exact_paired_sign_flip_randomization"
+    "test": "exact_paired_sign_flip_randomization",
+    "test_assumption": "under the sharp no-memory-effect null, paired condition labels are exchangeable; no asymptotic normal approximation is used"
   },
   "status": "frozen",
   "stopping_rule": {

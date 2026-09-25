@@ -77,9 +77,19 @@ def test_f4c_counterbalancing_statistics_and_missingness_are_frozen() -> None:
     assert sum(row["first_condition"] == MEMORY_ON for row in schedule) == 10
     assert sum(row["first_condition"] == MEMORY_ABLATED for row in schedule) == 10
     assert manifest["statistics"]["test"] == "exact_paired_sign_flip_randomization"
-    assert manifest["statistics"]["enumeration"] == "all_2^20_sign_assignments"
+    assert (
+        manifest["statistics"]["enumeration"]
+        == "all_2^m_sign_assignments_for_m_valid_pairs"
+    )
+    assert manifest["statistics"]["minimum_practically_relevant_effect_delta_J"] == 0.05
+    assert manifest["statistics"]["minimum_analyzable_pairs"] == 16
+    assert manifest["statistics"]["minimum_analyzable_pairs_per_family"] == 3
+    assert "one_sided_exact_p<=0.05" in manifest["statistics"]["decision_rule"]
     assert manifest["statistics"]["pilot_excluded_from_primary_inference"] is True
     assert manifest["invalidity_and_missingness"]["missing_is_never_zero"] is True
+    assert "exclude_the_entire_pair" in (
+        manifest["invalidity_and_missingness"]["technical_invalidity_rule"]
+    )
     assert "missing_is_never_zero" in manifest["primary_endpoint"]["missing_policy"]
 
 
