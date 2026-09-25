@@ -83,6 +83,70 @@ def _ledger_digests_match(
             connection.close()
 
 
+def _memory_batch_manifest(
+    path: Path,
+    batch_id: str,
+) -> tuple[str | None,str | None,int | None,str | None]:
+    if not path.exists() or not batch_id:
+        return None,None,None,None
+    connection: sqlite3.Connection | None=None
+    try:
+        connection=sqlite3.connect(
+            f"file:{path}?mode=ro",
+            uri=True,
+            timeout=10.0,
+        )
+        quick_check=str(connection.execute("PRAGMA quick_check").fetchone()[0])
+        schema_row=connection.execute(
+            "SELECT value FROM memory_meta WHERE key=?",
+            ("schema_version",),
+        ).fetchone()
+        schema=None if schema_row is None else str(schema_row[0])
+        rows=connection.execute(
+            """
+            SELECT
+                o.occurrence_id,
+                o.memory_id,
+                i.item_digest,
+                o.payload_sha256,
+                o.qualified,
+                o.contradiction,
+                o.reward
+            FROM memory_occurrences o
+            JOIN memory_items i ON i.memory_id=o.memory_id
+            WHERE o.batch_id=?
+            ORDER BY o.occurrence_id
+            """,
+            (batch_id,),
+        ).fetchall()
+        manifest=[
+            {
+                "occurrence_id":str(row[0]),
+                "memory_id":str(row[1]),
+                "item_digest":str(row[2]),
+                "payload_sha256":str(row[3]),
+                "qualified":bool(row[4]),
+                "contradiction":bool(row[5]),
+                "reward":None if row[6] is None else float(row[6]),
+            }
+            for row in rows
+        ]
+        digest=hashlib.sha256(
+            json.dumps(
+                manifest,
+                sort_keys=True,
+                separators=(",",":"),
+                ensure_ascii=False,
+            ).encode("utf-8")
+        ).hexdigest()
+        return quick_check,schema,len(manifest),digest
+    except (sqlite3.Error,OSError,TypeError,ValueError):
+        return None,None,None,None
+    finally:
+        if connection is not None:
+            connection.close()
+
+
 def _observed_repair_row_matches(
     path: Path,
     observed: dict[str, Any],
@@ -902,6 +966,126 @@ def build_phase_state(
     )
     phase3_exit_gate_valid=phase3_comparison_valid
 
+    phase4_memory_doc_path=(
+        state_root / "docs" / "CORTEX_PHASE4_MEMORY_SUBSTRATE.md"
+    )
+    phase4_memory_doc=phase4_memory_doc_path.exists()
+    phase4_memory_audit_path=(
+        state_root
+        / "runs"
+        / "audits"
+        / "cortex_f4a_memory_substrate_migration.json"
+    )
+    phase4_memory_audit=phase4_memory_audit_path.exists()
+    phase4_memory_payload: dict[str, Any]={}
+    phase4_memory_error: str | None=None
+    if phase4_memory_audit:
+        try:
+            phase4_memory_payload=_load(phase4_memory_audit_path)
+        except (OSError,json.JSONDecodeError,TypeError) as exc:
+            phase4_memory_error=f"{type(exc).__name__}: {exc}"
+
+    phase4_memory_revision=phase4_memory_payload.get("code_revision")
+    if not isinstance(phase4_memory_revision,dict):
+        phase4_memory_revision={}
+    phase4_memory_store=phase4_memory_payload.get("store")
+    if not isinstance(phase4_memory_store,dict):
+        phase4_memory_store={}
+    phase4_memory_snapshot=phase4_memory_store.get("snapshot")
+    if not isinstance(phase4_memory_snapshot,dict):
+        phase4_memory_snapshot={}
+    phase4_memory_batch=phase4_memory_store.get("batch_manifest")
+    if not isinstance(phase4_memory_batch,dict):
+        phase4_memory_batch={}
+    phase4_memory_working=phase4_memory_payload.get("working_memory")
+    if not isinstance(phase4_memory_working,dict):
+        phase4_memory_working={}
+    phase4_memory_checks=phase4_memory_payload.get("checks")
+    if not isinstance(phase4_memory_checks,dict):
+        phase4_memory_checks={}
+    phase4_memory_relative=phase4_memory_store.get("path")
+    phase4_memory_path=(
+        state_root / phase4_memory_relative
+        if isinstance(phase4_memory_relative,str) and phase4_memory_relative
+        else state_root / "runs" / "ledger" / "cortex_cognitive_memory.sqlite3"
+    )
+    phase4_batch_id=phase4_memory_payload.get("run_id")
+    if not isinstance(phase4_batch_id,str):
+        phase4_batch_id=""
+    (
+        phase4_live_quick_check,
+        phase4_live_schema,
+        phase4_live_batch_count,
+        phase4_live_manifest_sha,
+    )=_memory_batch_manifest(
+        phase4_memory_path,
+        phase4_batch_id,
+    )
+
+    def _memory_kind_positive(kind: str) -> bool:
+        row=phase4_memory_snapshot.get(kind)
+        return (
+            isinstance(row,dict)
+            and isinstance(row.get("items"),int)
+            and not isinstance(row.get("items"),bool)
+            and row["items"]>0
+            and isinstance(row.get("occurrences"),int)
+            and not isinstance(row.get("occurrences"),bool)
+            and row["occurrences"]>0
+        )
+
+    phase4_memory_valid=(
+        phase3_exit_gate_valid
+        and phase4_memory_doc
+        and phase4_memory_audit
+        and phase4_memory_error is None
+        and phase4_memory_payload.get("schema_version")
+        =="cortex_f4a_memory_substrate_migration_v1"
+        and phase4_memory_payload.get("status")=="pass"
+        and phase4_memory_revision.get("dirty") is False
+        and isinstance(phase4_memory_revision.get("commit"),str)
+        and bool(phase4_memory_revision.get("commit"))
+        and phase4_memory_payload.get("authority")=="shadow"
+        and phase4_memory_payload.get("world_mutation") is False
+        and phase4_memory_payload.get("factorio_rcon_used") is False
+        and phase4_memory_payload.get("fle_environment_created") is False
+        and phase4_memory_payload.get("world_lease_acquired") is False
+        and phase4_memory_payload.get("execution_grant_created") is False
+        and phase4_memory_payload.get("continuous_authority") is False
+        and phase4_memory_working.get("persistent") is False
+        and phase4_memory_working.get("evicted_oldest") is True
+        and isinstance(phase4_memory_working.get("capacity"),int)
+        and phase4_memory_working.get("size")
+        ==phase4_memory_working.get("capacity")
+        and all(
+            _memory_kind_positive(kind)
+            for kind in (
+                "episodic",
+                "semantic",
+                "procedural",
+                "counterexample",
+            )
+        )
+        and phase4_memory_store.get("quick_check")=="ok"
+        and phase4_memory_batch.get("batch_id")==phase4_batch_id
+        and isinstance(phase4_memory_batch.get("occurrence_count"),int)
+        and not isinstance(
+            phase4_memory_batch.get("occurrence_count"),
+            bool,
+        )
+        and phase4_memory_batch.get("occurrence_count")>0
+        and isinstance(phase4_memory_batch.get("manifest_sha256"),str)
+        and len(phase4_memory_batch.get("manifest_sha256"))==64
+        and phase4_live_quick_check=="ok"
+        and phase4_live_schema=="cortex_cognitive_memory_v1"
+        and phase4_live_batch_count
+        ==phase4_memory_batch.get("occurrence_count")
+        and phase4_live_manifest_sha
+        ==phase4_memory_batch.get("manifest_sha256")
+        and bool(phase4_memory_checks)
+        and all(value is True for value in phase4_memory_checks.values())
+    )
+
     phase2_delivery_actuator_canary_path=(
         state_root
         / "runs"
@@ -1145,7 +1329,12 @@ def build_phase_state(
                 "functional_accept_sustainability_not_proven"
             )
 
-    if phase3_comparison_valid:
+    if phase4_memory_valid:
+        action=(
+            "F4-A active in SHADOW; implement hybrid retrieval, "
+            "consolidation, and decay"
+        )
+    elif phase3_comparison_valid:
         action="F3 complete; F4 ready but not started"
     elif phase3_credit_valid:
         action=(
@@ -1205,53 +1394,30 @@ def build_phase_state(
             phase2_checkpoint=checkpoint
             break
 
+    if phase4_memory_valid:
+        phase_name="F4"
+        phase_status="active"
+    elif phase3_comparison_valid:
+        phase_name="F3"
+        phase_status="complete"
+    elif phase3_credit_valid or phase3_executive_valid:
+        phase_name="F3"
+        phase_status="active"
+    elif exploratory_complete and statistical_report_exists and phase2_started:
+        phase_name="F2"
+        phase_status="complete" if phase2_exit_gate_valid else "active"
+    elif exploratory_complete and statistical_report_exists:
+        phase_name="F1"
+        phase_status="complete"
+    else:
+        phase_name="F1-B"
+        phase_status="active"
+
     return {
         "schema_version":"cortex_phase_state_v1",
         "generated_at":datetime.now(UTC).isoformat(),
-        "phase":(
-            "F3"
-            if (
-                phase3_comparison_valid
-                or phase3_credit_valid
-                or phase3_executive_valid
-            )
-            else (
-                "F2"
-                if exploratory_complete
-                and statistical_report_exists
-                and phase2_started
-                else (
-                    "F1"
-                    if exploratory_complete and statistical_report_exists
-                    else "F1-B"
-                )
-            )
-        ),
-        "phase_status":(
-            "complete"
-            if phase3_comparison_valid
-            else (
-                "active"
-                if phase3_credit_valid or phase3_executive_valid
-                else (
-                "complete"
-                if phase2_exit_gate_valid
-                else (
-                    "active"
-                    if (
-                        phase2_started
-                        and exploratory_complete
-                        and statistical_report_exists
-                    )
-                    else (
-                        "complete"
-                        if exploratory_complete and statistical_report_exists
-                        else "active"
-                    )
-                )
-            )
-        )
-        ),
+        "phase":phase_name,
+        "phase_status":phase_status,
         "protocol":protocol_id,
         "scientific_release_commit":protocol_commit,
         "baseline_release_commits":sorted(release_commits),
@@ -1270,6 +1436,51 @@ def build_phase_state(
             "exists":phase2_started,
         },
         "phase2_checkpoint":phase2_checkpoint,
+        "phase4_checkpoint":(
+            "F4-A" if phase4_memory_valid else None
+        ),
+        "phase4_memory_substrate":{
+            "document_path":str(phase4_memory_doc_path),
+            "document_exists":phase4_memory_doc,
+            "audit_path":str(phase4_memory_audit_path),
+            "audit_exists":phase4_memory_audit,
+            "validated":phase4_memory_valid,
+            "status":phase4_memory_payload.get("status"),
+            "run_id":phase4_memory_payload.get("run_id"),
+            "code_commit":phase4_memory_revision.get("commit"),
+            "authority":phase4_memory_payload.get("authority"),
+            "world_mutation":phase4_memory_payload.get("world_mutation"),
+            "factorio_rcon_used":phase4_memory_payload.get(
+                "factorio_rcon_used"
+            ),
+            "fle_environment_created":phase4_memory_payload.get(
+                "fle_environment_created"
+            ),
+            "world_lease_acquired":phase4_memory_payload.get(
+                "world_lease_acquired"
+            ),
+            "execution_grant_created":phase4_memory_payload.get(
+                "execution_grant_created"
+            ),
+            "continuous_authority":phase4_memory_payload.get(
+                "continuous_authority"
+            ),
+            "working_memory":phase4_memory_working,
+            "store":phase4_memory_store,
+            "memory_path":str(phase4_memory_path),
+            "live_quick_check":phase4_live_quick_check,
+            "live_schema":phase4_live_schema,
+            "live_batch_occurrence_count":phase4_live_batch_count,
+            "live_batch_manifest_sha256":phase4_live_manifest_sha,
+            "batch_manifest_matches":(
+                phase4_live_batch_count
+                ==phase4_memory_batch.get("occurrence_count")
+                and phase4_live_manifest_sha
+                ==phase4_memory_batch.get("manifest_sha256")
+            ),
+            "checks":phase4_memory_checks,
+            "read_error":phase4_memory_error,
+        },
         "phase3_checkpoint":(
             "F3-C"
             if phase3_comparison_valid

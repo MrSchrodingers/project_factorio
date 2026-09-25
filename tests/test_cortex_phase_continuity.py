@@ -1627,6 +1627,215 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
         "F3 complete; F4 ready but not started"
     )
 
+    assert f3c["phase4_checkpoint"] is None
+    assert f3c["phase4_memory_substrate"]["validated"] is False
+
+    memory_path=ledger_dir/"cortex_cognitive_memory.sqlite3"
+    connection=sqlite3.connect(memory_path)
+    connection.execute(
+        """
+        CREATE TABLE memory_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        "INSERT INTO memory_meta(key,value) VALUES(?,?)",
+        ("schema_version","cortex_cognitive_memory_v1"),
+    )
+    connection.execute(
+        """
+        CREATE TABLE memory_items (
+            memory_id TEXT PRIMARY KEY,
+            item_digest TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE memory_occurrences (
+            occurrence_id TEXT PRIMARY KEY,
+            memory_id TEXT NOT NULL,
+            payload_sha256 TEXT NOT NULL,
+            qualified INTEGER NOT NULL,
+            contradiction INTEGER NOT NULL,
+            reward REAL,
+            batch_id TEXT NOT NULL
+        )
+        """
+    )
+    batch_id="cortex-f4a-fixture"
+    for index,kind in enumerate(
+        ("episodic","semantic","procedural","counterexample"),
+        start=1,
+    ):
+        memory_id=f"memory-{kind}"
+        connection.execute(
+            "INSERT INTO memory_items(memory_id,item_digest) VALUES(?,?)",
+            (memory_id,f"digest-{kind}"),
+        )
+        connection.execute(
+            """
+            INSERT INTO memory_occurrences(
+                occurrence_id,
+                memory_id,
+                payload_sha256,
+                qualified,
+                contradiction,
+                reward,
+                batch_id
+            ) VALUES(?,?,?,?,?,?,?)
+            """,
+            (
+                f"occurrence-{index}",
+                memory_id,
+                f"payload-{kind}",
+                1,
+                0,
+                1.0 if kind=="procedural" else None,
+                batch_id,
+            ),
+        )
+    connection.commit()
+    connection.close()
+    (
+        memory_quick,
+        memory_schema,
+        memory_batch_count,
+        memory_manifest_sha,
+    )=module._memory_batch_manifest(memory_path,batch_id)
+    assert memory_quick=="ok"
+    assert memory_schema=="cortex_cognitive_memory_v1"
+    assert memory_batch_count==4
+    assert isinstance(memory_manifest_sha,str)
+
+    f4a_payload={
+        "schema_version":"cortex_f4a_memory_substrate_migration_v1",
+        "status":"pass",
+        "run_id":batch_id,
+        "code_revision":{
+            "commit":"f4a-sha",
+            "branch":"research/cortex-v1",
+            "dirty":False
+        },
+        "authority":"shadow",
+        "world_mutation":False,
+        "factorio_rcon_used":False,
+        "fle_environment_created":False,
+        "world_lease_acquired":False,
+        "execution_grant_created":False,
+        "continuous_authority":False,
+        "working_memory":{
+            "capacity":3,
+            "size":3,
+            "keys":["belief","candidate","prediction"],
+            "evicted_oldest":True,
+            "persistent":False
+        },
+        "store":{
+            "path":"runs/ledger/cortex_cognitive_memory.sqlite3",
+            "quick_check":"ok",
+            "snapshot":{
+                "episodic":{
+                    "items":1,
+                    "occurrences":1,
+                    "qualified_occurrences":1
+                },
+                "semantic":{
+                    "items":1,
+                    "occurrences":1,
+                    "qualified_occurrences":1
+                },
+                "procedural":{
+                    "items":1,
+                    "occurrences":1,
+                    "qualified_occurrences":1
+                },
+                "counterexample":{
+                    "items":1,
+                    "occurrences":1,
+                    "qualified_occurrences":1
+                }
+            },
+            "batch_manifest":{
+                "batch_id":batch_id,
+                "occurrence_count":4,
+                "manifest_sha256":memory_manifest_sha
+            }
+        },
+        "checks":{
+            "executive_ledger_quick_check_ok":True,
+            "memory_quick_check_ok":True,
+            "working_memory_bounded":True,
+            "episodic_occurrences_cover_executive_episodes":True,
+            "semantic_verified_rows_imported":True,
+            "semantic_qualified_support_preserved":True,
+            "semantic_deduplicated":True,
+            "procedural_credit_only":True,
+            "procedural_confidence_empirical":True,
+            "counterexamples_first_class":True,
+            "batch_manifest_complete":True,
+            "no_live_authority":True
+        }
+    }
+    f4a_audit=audits/"cortex_f4a_memory_substrate_migration.json"
+    f4a_audit.write_text(json.dumps(f4a_payload)+"\n")
+
+    f4a_artifact_only=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert f4a_artifact_only["phase"]=="F3"
+    assert f4a_artifact_only["phase_status"]=="complete"
+    assert f4a_artifact_only["phase4_checkpoint"] is None
+    assert (
+        f4a_artifact_only["phase4_memory_substrate"]["validated"]
+        is False
+    )
+
+    f4a_doc=docs/"CORTEX_PHASE4_MEMORY_SUBSTRATE.md"
+    f4a_doc.write_text("# F4-A\n")
+    f4a=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert f4a["phase"]=="F4"
+    assert f4a["phase_status"]=="active"
+    assert f4a["phase3_checkpoint"]=="F3-C"
+    assert f4a["phase3_exit_gate"]["validated"] is True
+    assert f4a["phase4_checkpoint"]=="F4-A"
+    memory=f4a["phase4_memory_substrate"]
+    assert memory["validated"] is True
+    assert memory["live_quick_check"]=="ok"
+    assert memory["live_schema"]=="cortex_cognitive_memory_v1"
+    assert memory["batch_manifest_matches"] is True
+    assert memory["live_batch_occurrence_count"]==4
+    assert f4a["resume"]["do_not_start_another_seed"] is True
+    assert f4a["resume"]["action"] == (
+        "F4-A active in SHADOW; implement hybrid retrieval, "
+        "consolidation, and decay"
+    )
+
+    connection=sqlite3.connect(memory_path)
+    connection.execute(
+        "UPDATE memory_items SET item_digest=? WHERE memory_id=?",
+        ("tampered","memory-semantic"),
+    )
+    connection.commit()
+    connection.close()
+    f4a_tampered=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert f4a_tampered["phase"]=="F3"
+    assert f4a_tampered["phase_status"]=="complete"
+    assert f4a_tampered["phase4_checkpoint"] is None
+    assert (
+        f4a_tampered["phase4_memory_substrate"]["validated"]
+        is False
+    )
+
     connection=sqlite3.connect(ledger_path)
     connection.execute(
         "UPDATE executive_episodes SET payload_sha256=? WHERE episode_id=?",

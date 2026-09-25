@@ -1747,15 +1747,19 @@ function renderExperimentContext() {
       : true;
     const phase2Checkpoint = String(cortexPhase.phase2_checkpoint || "F2");
     const phase3Checkpoint = String(cortexPhase.phase3_checkpoint || "");
+    const phase4Checkpoint = String(cortexPhase.phase4_checkpoint || "");
     const executiveShadowPhase = phase3Checkpoint === "F3-A";
     const verificationCreditPhase = phase3Checkpoint === "F3-B";
     const pairedShadowPhase = phase3Checkpoint === "F3-C";
+    const memorySubstratePhase = phase4Checkpoint === "F4-A";
     const phase3ShadowActive = executiveShadowPhase
       || verificationCreditPhase
       || pairedShadowPhase;
+    const cortexShadowState = phase3ShadowActive || memorySubstratePhase;
     const executiveShadow = cortexPhase.phase3_executive_shadow_kernel || {};
     const verificationCredit = cortexPhase.phase3_verification_credit_ledger || {};
     const pairedShadow = cortexPhase.phase3_paired_shadow_comparison || {};
+    const memorySubstrate = cortexPhase.phase4_memory_substrate || {};
     const functionalCanary = phase2Checkpoint === "F2-F3";
     const deliveryActuatorPhase = phase2Checkpoint.startsWith("F2-F4");
     const deliveryActuatorRunner = phase2Checkpoint === "F2-F4B";
@@ -1766,7 +1770,7 @@ function renderExperimentContext() {
     const persistentAuthorityPhase = phase2Checkpoint === "F2-G4A";
     const liveOptionCanaryPhase = phase2Checkpoint === "F2-G4B";
     const baselineOnlyPhase = phase2Checkpoint === "F2-G5";
-    const useLiveOptionEvidence = phase3ShadowActive
+    const useLiveOptionEvidence = cortexShadowState
       || liveOptionCanaryPhase
       || baselineOnlyPhase;
     const useDeliveryCanaryEvidence = deliveryActuatorCanary
@@ -1803,6 +1807,9 @@ function renderExperimentContext() {
       phaseBadge = configured
         ? "F1-B · " + completed + "/" + configured
         : "F1-B · seed " + seed;
+    } else if (memorySubstratePhase) {
+      phaseTitle = "F4-A · Typed Memory Substrate · SHADOW";
+      phaseBadge = "F4-A · memória tipada · retrieval/ablation ainda abertos";
     } else if (pairedShadowPhase) {
       phaseTitle = "F3 · COMPLETE · F3-C paired shadow comparison";
       phaseBadge = "F3 COMPLETE · escolhas explícitas · no live authority";
@@ -1868,7 +1875,7 @@ function renderExperimentContext() {
 
     setText(
       "cortexCanaryLabel",
-      phase3ShadowActive || baselineOnlyPhase
+      cortexShadowState || baselineOnlyPhase
         ? "F2-G4B · ÚLTIMA EVIDÊNCIA LIVE VIA OPTION"
         : (liveOptionCanaryPhase
           ? "F2-G4B · CANÁRIO LIVE VIA OPTION"
@@ -1916,49 +1923,60 @@ function renderExperimentContext() {
           + " · run "
           + String(canary.run_id || "--")
       );
-      setText(
-        "cortexAuthorityDetail",
-        pairedShadowPhase
-          ? "F3-C SHADOW: comparação pareada de escolhas sobre os mesmos objetivos históricos. "
-            + "Artifact " + String(pairedShadow.status || "--").toUpperCase()
-            + " · pairs "
-            + String((pairedShadow.comparison || {}).paired_episode_count || "--")
-            + " · legacy agreement "
-            + String((pairedShadow.comparison || {}).legacy_policy_agreement || "--")
-            + " · policy divergence "
-            + String((pairedShadow.comparison || {}).policy_divergence_pairs || "--")
-            + " · F3 Exit Gate completo sem claim de superiority · G4B segue última evidência live."
-          : (verificationCreditPhase
-          ? "F3-B SHADOW: verification-after-action + credit fail-closed + ledger persistente. "
-            + "Artifact " + String(verificationCredit.status || "--").toUpperCase()
-            + " · episodes "
-            + String((verificationCredit.verification || {}).selected_episode_count || "--")
-            + " · ledger "
-            + String(verificationCredit.ledger_live_quick_check || "--")
-            + " · G4B permanece a última evidência live · continuous authority OFF."
-          : (executiveShadowPhase
-          ? "F3-A SHADOW: BeliefState/GoalStack + múltiplas alternativas + hard feasibility + policy/prediction-before-action. "
-            + "Artifact " + String(executiveShadow.status || "--").toUpperCase()
-            + " · candidates "
-            + String((executiveShadow.counterfactual_expansion || {}).candidate_count || "--")
-            + " · G4B permanece a última evidência live · continuous authority OFF."
-          : (baselineOnlyPhase
-          ? "F2-G5: runner legado fail-closed fora de baseline; F2 Exit Gate completo. G4B permanece a última evidência live · continuous authority OFF."
-          : (liveOptionCanaryPhase
-            ? "F2-G4B: uma única Option live aceita sob grant persistente + WorldLease atestado; temporal epoch auditado · continuous authority OFF."
-            : (persistentAuthorityPhase
-          ? "F2-G4A: grant one-shot persistente/restart-safe validado em dry-run; live Option EXECUTE bloqueado · continuous authority OFF."
-          : (optionExecutionPhase
-            ? "F2-G3 validado apenas em fake/replay; live Option EXECUTE bloqueado · continuous authority OFF."
-          : (optionCompositionPhase
-            ? "F2-G2 permanece em SHADOW/replay; último EXECUTE pertence ao canário F2-F4C · continuous authority OFF."
-            : (runnerIndependencePhase
-            ? "F2-G1 permanece em SHADOW; último EXECUTE pertence ao canário F2-F4C · continuous authority OFF."
-            : ("EXECUTE concedido somente ao canário registrado"
-              + " · continuous authority "
-              + (canary.continuous_authority ? "ON" : "OFF")
-              + " · baseline/holdout separados.")))))))))
-      );
+      let authorityDetail;
+      if (memorySubstratePhase) {
+        const memorySnapshot = memorySubstrate.store?.snapshot || {};
+        authorityDetail = "F4-A SHADOW: working + episodic + semantic + procedural + counterexample memory. "
+          + "Artifact " + String(memorySubstrate.status || "--").toUpperCase()
+          + " · episodic " + String(memorySnapshot.episodic?.items || "--")
+          + " · semantic " + String(memorySnapshot.semantic?.items || "--")
+          + " · procedural " + String(memorySnapshot.procedural?.items || "--")
+          + " · counterexamples " + String(memorySnapshot.counterexample?.items || "--")
+          + " · DB " + String(memorySubstrate.live_quick_check || "--")
+          + " · retrieval/ablation ainda não provados · continuous authority OFF.";
+      } else if (pairedShadowPhase) {
+        authorityDetail = "F3-C SHADOW: comparação pareada de escolhas sobre os mesmos objetivos históricos. "
+          + "Artifact " + String(pairedShadow.status || "--").toUpperCase()
+          + " · pairs "
+          + String((pairedShadow.comparison || {}).paired_episode_count || "--")
+          + " · legacy agreement "
+          + String((pairedShadow.comparison || {}).legacy_policy_agreement || "--")
+          + " · policy divergence "
+          + String((pairedShadow.comparison || {}).policy_divergence_pairs || "--")
+          + " · F3 Exit Gate completo sem claim de superiority · G4B segue última evidência live.";
+      } else if (verificationCreditPhase) {
+        authorityDetail = "F3-B SHADOW: verification-after-action + credit fail-closed + ledger persistente. "
+          + "Artifact " + String(verificationCredit.status || "--").toUpperCase()
+          + " · episodes "
+          + String((verificationCredit.verification || {}).selected_episode_count || "--")
+          + " · ledger "
+          + String(verificationCredit.ledger_live_quick_check || "--")
+          + " · G4B permanece a última evidência live · continuous authority OFF.";
+      } else if (executiveShadowPhase) {
+        authorityDetail = "F3-A SHADOW: BeliefState/GoalStack + múltiplas alternativas + hard feasibility + policy/prediction-before-action. "
+          + "Artifact " + String(executiveShadow.status || "--").toUpperCase()
+          + " · candidates "
+          + String((executiveShadow.counterfactual_expansion || {}).candidate_count || "--")
+          + " · G4B permanece a última evidência live · continuous authority OFF.";
+      } else if (baselineOnlyPhase) {
+        authorityDetail = "F2-G5: runner legado fail-closed fora de baseline; F2 Exit Gate completo. G4B permanece a última evidência live · continuous authority OFF.";
+      } else if (liveOptionCanaryPhase) {
+        authorityDetail = "F2-G4B: uma única Option live aceita sob grant persistente + WorldLease atestado; temporal epoch auditado · continuous authority OFF.";
+      } else if (persistentAuthorityPhase) {
+        authorityDetail = "F2-G4A: grant one-shot persistente/restart-safe validado em dry-run; live Option EXECUTE bloqueado · continuous authority OFF.";
+      } else if (optionExecutionPhase) {
+        authorityDetail = "F2-G3 validado apenas em fake/replay; live Option EXECUTE bloqueado · continuous authority OFF.";
+      } else if (optionCompositionPhase) {
+        authorityDetail = "F2-G2 permanece em SHADOW/replay; último EXECUTE pertence ao canário F2-F4C · continuous authority OFF.";
+      } else if (runnerIndependencePhase) {
+        authorityDetail = "F2-G1 permanece em SHADOW; último EXECUTE pertence ao canário F2-F4C · continuous authority OFF.";
+      } else {
+        authorityDetail = "EXECUTE concedido somente ao canário registrado"
+          + " · continuous authority "
+          + (canary.continuous_authority ? "ON" : "OFF")
+          + " · baseline/holdout separados.";
+      }
+      setText("cortexAuthorityDetail", authorityDetail);
     } else {
       setText("cortexCanaryStatus", "canário não executado");
       setText(

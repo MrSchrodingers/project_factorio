@@ -114,3 +114,17 @@ def test_dashboard_renders_f3c_as_complete_without_superiority_claim() -> None:
     assert "F3 COMPLETE · escolhas explícitas · no live authority" in app
     assert "F3 Exit Gate completo sem claim de superiority" in app
     assert "G4B segue última evidência live" in app
+
+
+def test_dashboard_renders_f4a_memory_substrate_without_memory_claim_inflation() -> None:
+    app=(
+        Path(__file__).parents[1]
+        / "src/factorio_ai_lab/dashboard/static/app.js"
+    ).read_text()
+
+    assert 'phase4Checkpoint === "F4-A"' in app
+    assert "F4-A · Typed Memory Substrate · SHADOW" in app
+    assert "retrieval/ablation ainda abertos" in app
+    assert "retrieval/ablation ainda não provados" in app
+    assert "continuous authority OFF" in app
+    assert "F2-G4B · ÚLTIMA EVIDÊNCIA LIVE VIA OPTION" in app
