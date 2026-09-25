@@ -1,18 +1,14 @@
 """Universal execution boundary for temporally extended Cortex Options.
 
-F2-G3 promotes a frozen SHADOW/PROPOSAL option plan only through an explicit
-one-shot grant bound to the exact plan digest.  World mutation still happens
-exclusively through StructuralTransactionalAdapter -> TransactionalFLEExecutor.
-
-This module has no scheduler, no live Factorio bootstrap and no persistent
-authority.
+F2-G4A preserves the F2-G3 typed boundary while replacing process-local grant
+memory with a durable one-shot authority ledger. World mutation remains
+exclusive to StructuralTransactionalAdapter -> TransactionalFLEExecutor.
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from factorio_ai_lab.cortex.actions import (
@@ -21,6 +17,16 @@ from factorio_ai_lab.cortex.actions import (
     ActionResult,
     ActionStatus,
     Refusal,
+)
+from factorio_ai_lab.cortex.grant_ledger import (
+    LEDGER_ALREADY_CONSUMED,
+    LEDGER_EXPIRED,
+    LEDGER_MISMATCH,
+    LEDGER_NOT_FOUND,
+    OptionExecutionGrant,
+    OptionExecutionScope,
+    PersistentOptionGrantLedger,
+    option_plan_digest,
 )
 from factorio_ai_lab.cortex.options import (
     OptionBudget,
@@ -38,6 +44,16 @@ REFUSAL_OPTION_EXECUTION_LINEAGE = "option_execution_lineage_invalid"
 REFUSAL_OPTION_EXECUTION_TERMINATION = "option_execution_termination_invalid"
 REFUSAL_OPTION_EXECUTION_GRANT_REQUIRED = "option_execution_grant_required"
 REFUSAL_OPTION_EXECUTION_GRANT_MISMATCH = "option_execution_grant_mismatch"
+REFUSAL_OPTION_EXECUTION_LEDGER_REQUIRED = (
+    "option_execution_persistent_ledger_required"
+)
+REFUSAL_OPTION_EXECUTION_GRANT_NOT_PERSISTED = (
+    "option_execution_grant_not_persisted"
+)
+REFUSAL_OPTION_EXECUTION_LEDGER_MISMATCH = (
+    "option_execution_ledger_mismatch"
+)
+REFUSAL_OPTION_EXECUTION_GRANT_EXPIRED = "option_execution_grant_expired"
 REFUSAL_OPTION_EXECUTION_RUNTIME_REQUIRED = "option_execution_runtime_required"
 REFUSAL_OPTION_EXECUTION_TICK_SOURCE = "option_execution_tick_source_unavailable"
 REFUSAL_OPTION_EXECUTION_GRANT_REUSED = "option_execution_grant_already_consumed"
@@ -48,70 +64,29 @@ REFUSAL_OPTION_EXECUTION_PROPOSAL = "option_execution_proposal_only"
 _TICK_SOURCE = "factorio_ai_lab.instrumentation.runtime.runtime_game_ticks"
 
 
-def option_plan_digest(plan: ProcessingChainOptionPlan) -> str:
-    """Stable SHA-256 over the exact frozen option plan."""
-
-    payload = json.dumps(
-        plan.to_dict(),
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
-
-
 @dataclass(frozen=True)
-class OptionExecutionGrant:
-    """One-shot promotion grant bound to one exact Option plan."""
+class OptionExecutionValidation:
+    """Non-mutating validation result used by the G4A dry-run boundary."""
 
     option_id: str
-    prepared_action_id: str
+    valid: bool
     plan_digest: str
-    code_revision: str
-    run_id: str | None
-    issued_by: str
-    reason: str
-
-    def __post_init__(self) -> None:
-        for label, value in (
-            ("option_id", self.option_id),
-            ("prepared_action_id", self.prepared_action_id),
-            ("plan_digest", self.plan_digest),
-            ("code_revision", self.code_revision),
-            ("issued_by", self.issued_by),
-            ("reason", self.reason),
-        ):
-            if not value.strip():
-                raise ValueError(f"{label} must be non-empty")
-
-    @classmethod
-    def for_plan(
-        cls,
-        plan: ProcessingChainOptionPlan,
-        *,
-        issued_by: str,
-        reason: str,
-    ) -> OptionExecutionGrant:
-        provenance = plan.request.provenance
-        return cls(
-            option_id=plan.request.option_id,
-            prepared_action_id=plan.prepared.action_id,
-            plan_digest=option_plan_digest(plan),
-            code_revision=provenance.code_revision,
-            run_id=provenance.run_id,
-            issued_by=issued_by,
-            reason=reason,
-        )
+    grant: OptionExecutionGrant | None
+    refusal: Refusal | None
+    ledger_status: str | None
+    lineage: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "option_id": self.option_id,
-            "prepared_action_id": self.prepared_action_id,
+            "valid": self.valid,
             "plan_digest": self.plan_digest,
-            "code_revision": self.code_revision,
-            "run_id": self.run_id,
-            "issued_by": self.issued_by,
-            "reason": self.reason,
+            "grant": None if self.grant is None else self.grant.to_dict(),
+            "refusal": None if self.refusal is None else self.refusal.to_dict(),
+            "ledger_status": self.ledger_status,
+            "lineage": dict(self.lineage),
+            "world_mutation": False,
+            "continuous_authority": False,
         }
 
 
@@ -133,6 +108,8 @@ class OptionExecutionResult:
     tick_measurement_status: str = "not_requested"
     feedback_budget: OptionBudget | None = None
     lineage: dict[str, Any] = field(default_factory=dict)
+    grant_consumed_at: str | None = None
+    grant_consume_result: str | None = None
 
     def __post_init__(self) -> None:
         if not self.option_id.strip():
@@ -144,7 +121,9 @@ class OptionExecutionResult:
             if self.authority is not ActionAuthority.EXECUTE:
                 raise ValueError("accepted option execution requires EXECUTE")
             if not self.changed_world:
-                raise ValueError("accepted option execution must report world mutation")
+                raise ValueError(
+                    "accepted option execution must report world mutation"
+                )
         elif self.changed_world:
             raise ValueError(
                 f"{self.status.value} option execution cannot claim world mutation"
@@ -170,6 +149,8 @@ class OptionExecutionResult:
                 None if self.feedback_budget is None else self.feedback_budget.to_dict()
             ),
             "lineage": dict(self.lineage),
+            "grant_consumed_at": self.grant_consumed_at,
+            "grant_consume_result": self.grant_consume_result,
             "continuous_authority": False,
         }
 
@@ -198,9 +179,13 @@ def _lineage_errors(plan: ProcessingChainOptionPlan) -> tuple[str, ...]:
     if action.parent_action_id != plan.request.option_id:
         errors.append("ActionRequest parent_action_id does not reference Option")
     if branch.parent_action_id != plan.action_request.action_id:
-        errors.append("ProcessingBranch parent_action_id does not reference ActionRequest")
+        errors.append(
+            "ProcessingBranch parent_action_id does not reference ActionRequest"
+        )
     if plan.prepared.action_id != plan.branch.request.action_id:
-        errors.append("PreparedStructuralAction action_id does not match branch request")
+        errors.append(
+            "PreparedStructuralAction action_id does not match branch request"
+        )
 
     revisions = {
         option.code_revision,
@@ -208,7 +193,9 @@ def _lineage_errors(plan: ProcessingChainOptionPlan) -> tuple[str, ...]:
         branch.code_revision,
     }
     if len(revisions) != 1:
-        errors.append("code_revision lineage differs across Option/Action/Branch")
+        errors.append(
+            "code_revision lineage differs across Option/Action/Branch"
+        )
 
     run_ids = {
         value
@@ -232,8 +219,7 @@ def _termination_errors(plan: ProcessingChainOptionPlan) -> tuple[str, ...]:
         for condition in plan.termination_conditions
     )
     expected_signature = tuple(
-        _condition_signature(condition)
-        for condition in expected
+        _condition_signature(condition) for condition in expected
     )
     if actual_signature != expected_signature:
         return (
@@ -263,6 +249,7 @@ def _grant_errors(
     grant: OptionExecutionGrant,
     *,
     digest: str,
+    scope: OptionExecutionScope,
 ) -> tuple[str, ...]:
     provenance = plan.request.provenance
     errors: list[str] = []
@@ -276,6 +263,10 @@ def _grant_errors(
         errors.append("grant code_revision mismatch")
     if grant.run_id != provenance.run_id:
         errors.append("grant run_id mismatch")
+    if grant.scope != scope:
+        errors.append("grant execution scope mismatch")
+    if grant.scope.option_kind != plan.request.kind.value:
+        errors.append("grant option kind mismatch")
     return tuple(errors)
 
 
@@ -331,16 +322,160 @@ def _refused(
     )
 
 
+def _ledger_refusal(status: str) -> tuple[str, str]:
+    if status == LEDGER_ALREADY_CONSUMED:
+        return (
+            REFUSAL_OPTION_EXECUTION_GRANT_REUSED,
+            "persistent ledger reports the one-shot grant already consumed",
+        )
+    if status == LEDGER_EXPIRED:
+        return (
+            REFUSAL_OPTION_EXECUTION_GRANT_EXPIRED,
+            "persistent ledger reports the grant expired",
+        )
+    if status == LEDGER_NOT_FOUND:
+        return (
+            REFUSAL_OPTION_EXECUTION_GRANT_NOT_PERSISTED,
+            "grant is not present in the persistent authority ledger",
+        )
+    if status == LEDGER_MISMATCH:
+        return (
+            REFUSAL_OPTION_EXECUTION_LEDGER_MISMATCH,
+            "persisted grant differs from the supplied exact grant",
+        )
+    return (
+        REFUSAL_OPTION_EXECUTION_LEDGER_MISMATCH,
+        f"persistent ledger refused grant with status {status}",
+    )
+
+
 class OptionExecutionBoundary:
-    """Single typed promotion/execution boundary for composed Cortex Options.
+    """Typed Option boundary backed by durable one-shot authority."""
 
-    Grant consumption is process-local in F2-G3.  That is sufficient for
-    SHADOW/fake transactional validation, but not a persistent live authority
-    ledger; live Option execution therefore remains blocked after this phase.
-    """
+    def __init__(
+        self,
+        *,
+        ledger: PersistentOptionGrantLedger | None = None,
+    ) -> None:
+        self.ledger = ledger
 
-    def __init__(self) -> None:
-        self._consumed_plan_digests: set[str] = set()
+    def validate(
+        self,
+        plan: ProcessingChainOptionPlan,
+        *,
+        grant: OptionExecutionGrant | None,
+        scope: OptionExecutionScope | None,
+        now: datetime | None = None,
+    ) -> OptionExecutionValidation:
+        """Validate exact lineage/grant/ledger state without consuming or mutating."""
+
+        digest = option_plan_digest(plan)
+        lineage = _lineage_payload(plan)
+
+        lineage_errors = _lineage_errors(plan)
+        if lineage_errors:
+            return OptionExecutionValidation(
+                option_id=plan.request.option_id,
+                valid=False,
+                plan_digest=digest,
+                grant=grant,
+                refusal=Refusal(
+                    code=REFUSAL_OPTION_EXECUTION_LINEAGE,
+                    detail="; ".join(lineage_errors),
+                    evidence=plan.request.evidence,
+                ),
+                ledger_status=None,
+                lineage=lineage,
+            )
+
+        termination_errors = _termination_errors(plan)
+        if termination_errors:
+            return OptionExecutionValidation(
+                option_id=plan.request.option_id,
+                valid=False,
+                plan_digest=digest,
+                grant=grant,
+                refusal=Refusal(
+                    code=REFUSAL_OPTION_EXECUTION_TERMINATION,
+                    detail="; ".join(termination_errors),
+                    evidence=plan.request.evidence,
+                ),
+                ledger_status=None,
+                lineage=lineage,
+            )
+
+        if grant is None or scope is None:
+            return OptionExecutionValidation(
+                option_id=plan.request.option_id,
+                valid=False,
+                plan_digest=digest,
+                grant=grant,
+                refusal=Refusal(
+                    code=REFUSAL_OPTION_EXECUTION_GRANT_REQUIRED,
+                    detail="dry-run validation requires exact grant and scope",
+                    evidence=plan.request.evidence,
+                ),
+                ledger_status=None,
+                lineage=lineage,
+            )
+
+        errors = _grant_errors(plan, grant, digest=digest, scope=scope)
+        if errors:
+            return OptionExecutionValidation(
+                option_id=plan.request.option_id,
+                valid=False,
+                plan_digest=digest,
+                grant=grant,
+                refusal=Refusal(
+                    code=REFUSAL_OPTION_EXECUTION_GRANT_MISMATCH,
+                    detail="; ".join(errors),
+                    evidence=plan.request.evidence,
+                ),
+                ledger_status=None,
+                lineage=lineage,
+            )
+
+        if self.ledger is None:
+            return OptionExecutionValidation(
+                option_id=plan.request.option_id,
+                valid=False,
+                plan_digest=digest,
+                grant=grant,
+                refusal=Refusal(
+                    code=REFUSAL_OPTION_EXECUTION_LEDGER_REQUIRED,
+                    detail="persistent grant ledger is required for authority validation",
+                    evidence=plan.request.evidence,
+                ),
+                ledger_status=None,
+                lineage=lineage,
+            )
+
+        decision = self.ledger.check(grant, now=now)
+        if not decision.allowed:
+            code, detail = _ledger_refusal(decision.status)
+            return OptionExecutionValidation(
+                option_id=plan.request.option_id,
+                valid=False,
+                plan_digest=digest,
+                grant=grant,
+                refusal=Refusal(
+                    code=code,
+                    detail=detail,
+                    evidence=plan.request.evidence,
+                ),
+                ledger_status=decision.status,
+                lineage=lineage,
+            )
+
+        return OptionExecutionValidation(
+            option_id=plan.request.option_id,
+            valid=True,
+            plan_digest=digest,
+            grant=grant,
+            refusal=None,
+            ledger_status=decision.status,
+            lineage=lineage,
+        )
 
     def execute(
         self,
@@ -348,10 +483,12 @@ class OptionExecutionBoundary:
         *,
         authority: ActionAuthority,
         grant: OptionExecutionGrant | None = None,
+        scope: OptionExecutionScope | None = None,
         executor: Any | None = None,
         measure: Any | None = None,
         tick_source: Any | None = None,
         use_checkpoint_for_action: bool = True,
+        now: datetime | None = None,
     ) -> OptionExecutionResult:
         digest = option_plan_digest(plan)
 
@@ -384,7 +521,9 @@ class OptionExecutionBoundary:
                 changed_world=False,
                 refusal=Refusal(
                     code=REFUSAL_OPTION_EXECUTION_SHADOW,
-                    detail="SHADOW validates the frozen Option and forbids execution",
+                    detail=(
+                        "SHADOW validates the frozen Option and forbids execution"
+                    ),
                 ),
                 lineage=_lineage_payload(plan),
             )
@@ -398,21 +537,29 @@ class OptionExecutionBoundary:
                 changed_world=False,
                 refusal=Refusal(
                     code=REFUSAL_OPTION_EXECUTION_PROPOSAL,
-                    detail="PROPOSAL may promote the frozen Option but cannot execute it",
+                    detail=(
+                        "PROPOSAL may promote the frozen Option but cannot execute it"
+                    ),
                 ),
                 lineage=_lineage_payload(plan),
             )
 
-        if grant is None:
+        if grant is None or scope is None:
             return _refused(
                 plan,
                 authority=authority,
                 digest=digest,
                 code=REFUSAL_OPTION_EXECUTION_GRANT_REQUIRED,
-                detail="EXECUTE requires a one-shot OptionExecutionGrant",
+                detail="EXECUTE requires exact one-shot grant and scope",
+                grant=grant,
             )
 
-        grant_errors = _grant_errors(plan, grant, digest=digest)
+        grant_errors = _grant_errors(
+            plan,
+            grant,
+            digest=digest,
+            scope=scope,
+        )
         if grant_errors:
             return _refused(
                 plan,
@@ -423,23 +570,26 @@ class OptionExecutionBoundary:
                 grant=grant,
             )
 
+        if self.ledger is None:
+            return _refused(
+                plan,
+                authority=authority,
+                digest=digest,
+                code=REFUSAL_OPTION_EXECUTION_LEDGER_REQUIRED,
+                detail="EXECUTE requires a persistent one-shot authority ledger",
+                grant=grant,
+            )
+
         if executor is None or measure is None:
             return _refused(
                 plan,
                 authority=authority,
                 digest=digest,
                 code=REFUSAL_OPTION_EXECUTION_RUNTIME_REQUIRED,
-                detail="EXECUTE requires explicit transactional executor and measurement probe",
-                grant=grant,
-            )
-
-        if digest in self._consumed_plan_digests:
-            return _refused(
-                plan,
-                authority=authority,
-                digest=digest,
-                code=REFUSAL_OPTION_EXECUTION_GRANT_REUSED,
-                detail="this boundary already consumed the frozen Option plan grant",
+                detail=(
+                    "EXECUTE requires explicit transactional executor "
+                    "and measurement probe"
+                ),
                 grant=grant,
             )
 
@@ -474,14 +624,26 @@ class OptionExecutionBoundary:
                 digest=digest,
                 code=REFUSAL_OPTION_EXECUTION_TICK_BUDGET,
                 detail=(
-                    "current FLE compiler requires an integer-second settle budget; "
-                    f"got {requested_ticks} ticks"
+                    "current FLE compiler requires an integer-second settle "
+                    f"budget; got {requested_ticks} ticks"
                 ),
                 grant=grant,
             )
         settle_seconds = requested_ticks // ticks_per_second
 
-        self._consumed_plan_digests.add(digest)
+        consume = self.ledger.consume(grant, now=now)
+        if not consume.allowed:
+            code, detail = _ledger_refusal(consume.status)
+            return _refused(
+                plan,
+                authority=authority,
+                digest=digest,
+                code=code,
+                detail=detail,
+                grant=grant,
+            )
+        if consume.entry is None or consume.entry.consumed_at is None:
+            raise RuntimeError("ledger allowed execution without durable consumption")
 
         action_result = StructuralTransactionalAdapter().execute(
             plan.prepared,
@@ -515,4 +677,6 @@ class OptionExecutionBoundary:
             tick_measurement_status=tick_status,
             feedback_budget=feedback,
             lineage=_lineage_payload(plan),
+            grant_consumed_at=consume.entry.consumed_at,
+            grant_consume_result=consume.entry.consume_result,
         )

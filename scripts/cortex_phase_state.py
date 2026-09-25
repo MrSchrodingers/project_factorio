@@ -235,6 +235,43 @@ def build_phase_state(
         state_root / "docs" / "CORTEX_PHASE2_OPTION_EXECUTION_BOUNDARY.md"
     )
     phase2_option_execution=phase2_option_execution_path.exists()
+    phase2_persistent_authority_path=(
+        state_root
+        / "docs"
+        / "CORTEX_PHASE2_PERSISTENT_OPTION_AUTHORITY.md"
+    )
+    phase2_persistent_authority=phase2_persistent_authority_path.exists()
+    phase2_authority_dry_run_path=(
+        state_root
+        / "runs"
+        / "audits"
+        / "cortex_f2g4a_option_authority_dry_run.json"
+    )
+    phase2_authority_dry_run=phase2_authority_dry_run_path.exists()
+    phase2_authority_dry_run_payload: dict[str, Any]={}
+    phase2_authority_dry_run_error: str | None=None
+    if phase2_authority_dry_run:
+        try:
+            phase2_authority_dry_run_payload=_load(
+                phase2_authority_dry_run_path
+            )
+        except (OSError,json.JSONDecodeError,TypeError) as exc:
+            phase2_authority_dry_run_error=f"{type(exc).__name__}: {exc}"
+    phase2_persistent_authority_valid=(
+        phase2_persistent_authority
+        and phase2_authority_dry_run
+        and phase2_authority_dry_run_error is None
+        and phase2_authority_dry_run_payload.get("status")=="pass"
+        and phase2_authority_dry_run_payload.get(
+            "factorio_world_mutation"
+        ) is False
+        and phase2_authority_dry_run_payload.get(
+            "continuous_authority"
+        ) is False
+        and phase2_authority_dry_run_payload.get(
+            "live_option_execute_authorized"
+        ) is False
+    )
     phase2_delivery_actuator_canary_path=(
         state_root
         / "runs"
@@ -497,6 +534,7 @@ def build_phase_state(
 
     phase2_checkpoint=None
     for checkpoint,enabled in (
+        ("F2-G4A",phase2_persistent_authority_valid),
         ("F2-G3",phase2_option_execution),
         ("F2-G2",phase2_options),
         ("F2-G1",phase2_runner_independence),
@@ -595,6 +633,30 @@ def build_phase_state(
         "phase2_option_execution_boundary":{
             "path":str(phase2_option_execution_path),
             "exists":phase2_option_execution,
+        },
+        "phase2_persistent_option_authority":{
+            "path":str(phase2_persistent_authority_path),
+            "exists":phase2_persistent_authority,
+            "validated":phase2_persistent_authority_valid,
+            "dry_run_path":str(phase2_authority_dry_run_path),
+            "dry_run_exists":phase2_authority_dry_run,
+            "dry_run_status":phase2_authority_dry_run_payload.get("status"),
+            "dry_run_run_id":phase2_authority_dry_run_payload.get("run_id"),
+            "dry_run_code_commit":(
+                phase2_authority_dry_run_payload.get("code_revision") or {}
+            ).get("commit"),
+            "world_mutation":phase2_authority_dry_run_payload.get(
+                "factorio_world_mutation"
+            ),
+            "continuous_authority":phase2_authority_dry_run_payload.get(
+                "continuous_authority"
+            ),
+            "live_option_execute_authorized":(
+                phase2_authority_dry_run_payload.get(
+                    "live_option_execute_authorized"
+                )
+            ),
+            "read_error":phase2_authority_dry_run_error,
         },
         "phase2_delivery_actuator_canary":{
             "path":str(phase2_delivery_actuator_canary_path),

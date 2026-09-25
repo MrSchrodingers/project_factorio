@@ -1753,10 +1753,12 @@ function renderExperimentContext() {
     const runnerIndependencePhase = phase2Checkpoint === "F2-G1";
     const optionCompositionPhase = phase2Checkpoint === "F2-G2";
     const optionExecutionPhase = phase2Checkpoint === "F2-G3";
+    const persistentAuthorityPhase = phase2Checkpoint === "F2-G4A";
     const useDeliveryCanaryEvidence = deliveryActuatorCanary
       || runnerIndependencePhase
       || optionCompositionPhase
-      || optionExecutionPhase;
+      || optionExecutionPhase
+      || persistentAuthorityPhase;
     const useFunctionalCanaryEvidence = functionalCanary || deliveryActuatorPhase;
     const canary = useDeliveryCanaryEvidence
       ? (cortexPhase.phase2_delivery_actuator_canary || {})
@@ -1784,6 +1786,9 @@ function renderExperimentContext() {
       phaseBadge = configured
         ? "F1-B · " + completed + "/" + configured
         : "F1-B · seed " + seed;
+    } else if (persistentAuthorityPhase) {
+      phaseTitle = "F2-G4A · persistent one-shot authority · DRY-RUN";
+      phaseBadge = "F2-G4A · durable ledger · no live EXECUTE";
     } else if (optionExecutionPhase) {
       phaseTitle = "F2-G3 · Option execution boundary · FAKE/REPLAY";
       phaseBadge = "F2-G3 · boundary universal · no live EXECUTE";
@@ -1877,8 +1882,10 @@ function renderExperimentContext() {
       );
       setText(
         "cortexAuthorityDetail",
-        optionExecutionPhase
-          ? "F2-G3 validado apenas em fake/replay; live Option EXECUTE bloqueado · continuous authority OFF."
+        persistentAuthorityPhase
+          ? "F2-G4A: grant one-shot persistente/restart-safe validado em dry-run; live Option EXECUTE bloqueado · continuous authority OFF."
+          : (optionExecutionPhase
+            ? "F2-G3 validado apenas em fake/replay; live Option EXECUTE bloqueado · continuous authority OFF."
           : (optionCompositionPhase
             ? "F2-G2 permanece em SHADOW/replay; último EXECUTE pertence ao canário F2-F4C · continuous authority OFF."
             : (runnerIndependencePhase
@@ -1886,7 +1893,7 @@ function renderExperimentContext() {
             : ("EXECUTE concedido somente ao canário registrado"
               + " · continuous authority "
               + (canary.continuous_authority ? "ON" : "OFF")
-              + " · baseline/holdout separados.")))
+              + " · baseline/holdout separados."))))
       );
     } else {
       setText("cortexCanaryStatus", "canário não executado");

@@ -1007,3 +1007,42 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
         g3["phase2_delivery_actuator_canary"]["classification"]
         == "functional_accept"
     )
+
+    (docs/"CORTEX_PHASE2_PERSISTENT_OPTION_AUTHORITY.md").write_text(
+        "# F2-G4A\n"
+    )
+    g4a_doc_only=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert g4a_doc_only["phase2_checkpoint"] == "F2-G3"
+    assert (
+        g4a_doc_only["phase2_persistent_option_authority"]["validated"]
+        is False
+    )
+
+    audits=tmp_path/"runs"/"audits"
+    audits.mkdir(parents=True,exist_ok=True)
+    (audits/"cortex_f2g4a_option_authority_dry_run.json").write_text(
+        json.dumps({
+            "status":"pass",
+            "run_id":"f2g4a-test",
+            "factorio_world_mutation":False,
+            "continuous_authority":False,
+            "live_option_execute_authorized":False,
+            "code_revision":{"commit":"g4a-sha"},
+        })+"\n"
+    )
+    g4a=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert g4a["phase2_checkpoint"] == "F2-G4A"
+    authority=g4a["phase2_persistent_option_authority"]
+    assert authority["exists"] is True
+    assert authority["validated"] is True
+    assert authority["dry_run_exists"] is True
+    assert authority["dry_run_status"] == "pass"
+    assert authority["world_mutation"] is False
+    assert authority["continuous_authority"] is False
+    assert authority["live_option_execute_authorized"] is False

@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 from copy import deepcopy
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,10 @@ from factorio_ai_lab.cortex.actions import (
     ActionStatus,
 )
 from factorio_ai_lab.cortex.executor import request_from_repair_action
+from factorio_ai_lab.cortex.grant_ledger import (
+    OptionExecutionScope,
+    PersistentOptionGrantLedger,
+)
 from factorio_ai_lab.cortex.option_execute import (
     REFUSAL_OPTION_EXECUTION_GRANT_REUSED,
     REFUSAL_OPTION_EXECUTION_LINEAGE,
@@ -284,12 +289,26 @@ def probe(env: FakeTickingEnvironment):
     return measure
 
 
-def grant(plan):
-    return OptionExecutionGrant.for_plan(
+FIXED_NOW = datetime(2026, 9, 24, 12, 0, tzinfo=UTC)
+
+
+def persisted_grant(plan, path: Path):
+    scope = OptionExecutionScope.for_plan(
         plan,
-        issued_by="f2-g3-test",
-        reason="transactional fake validation",
+        experiment_id="f2-g4a-test",
+        world_lease_id="deterministic-fake-world",
     )
+    ledger = PersistentOptionGrantLedger(path)
+    execution_grant = OptionExecutionGrant.for_plan(
+        plan,
+        scope=scope,
+        issued_by="f2-g4a-test",
+        reason="persistent transactional fake validation",
+        ttl_seconds=600,
+        now=FIXED_NOW,
+    )
+    ledger.issue(execution_grant)
+    return scope, execution_grant, ledger
 
 
 def test_shadow_validates_plan_without_runtime_or_mutation() -> None:
@@ -311,17 +330,23 @@ def test_shadow_validates_plan_without_runtime_or_mutation() -> None:
     assert result.to_dict()["continuous_authority"] is False
 
 
-def test_execute_requires_observable_tick_source_before_mutation() -> None:
+def test_execute_requires_observable_tick_source_before_mutation(
+    tmp_path: Path,
+) -> None:
     plan = option_plan()
     env = FakeTickingEnvironment(promotes=True)
     tx = transactional_executor(env)
-    boundary = OptionExecutionBoundary()
-    execution_grant = grant(plan)
+    scope, execution_grant, ledger = persisted_grant(
+        plan,
+        tmp_path / "grants.sqlite3",
+    )
+    boundary = OptionExecutionBoundary(ledger=ledger)
 
     refused = boundary.execute(
         plan,
         authority=ActionAuthority.EXECUTE,
         grant=execution_grant,
+        scope=scope,
         executor=tx,
         measure=probe(env),
         tick_source=None,
@@ -337,27 +362,37 @@ def test_execute_requires_observable_tick_source_before_mutation() -> None:
         plan,
         authority=ActionAuthority.EXECUTE,
         grant=execution_grant,
+        scope=scope,
         executor=tx,
         measure=probe(env),
         tick_source=env,
+        now=FIXED_NOW,
     )
     assert accepted.status is ActionStatus.ACCEPTED
     assert env.step_calls == 1
 
 
-def test_fake_execute_commits_and_feeds_observed_ticks_back_to_budget() -> None:
+def test_fake_execute_commits_and_feeds_observed_ticks_back_to_budget(
+    tmp_path: Path,
+) -> None:
     plan = option_plan()
     env = FakeTickingEnvironment(promotes=True)
     tx = transactional_executor(env)
-    boundary = OptionExecutionBoundary()
+    scope, execution_grant, ledger = persisted_grant(
+        plan,
+        tmp_path / "grants.sqlite3",
+    )
+    boundary = OptionExecutionBoundary(ledger=ledger)
 
     result = boundary.execute(
         plan,
         authority=ActionAuthority.EXECUTE,
-        grant=grant(plan),
+        grant=execution_grant,
+        scope=scope,
         executor=tx,
         measure=probe(env),
         tick_source=env,
+        now=FIXED_NOW,
     )
 
     assert result.status is ActionStatus.ACCEPTED
@@ -376,18 +411,26 @@ def test_fake_execute_commits_and_feeds_observed_ticks_back_to_budget() -> None:
     assert result.lineage["run_id"] == "f2g3-run"
 
 
-def test_rejected_transaction_does_not_claim_zero_ticks_after_rollback() -> None:
+def test_rejected_transaction_does_not_claim_zero_ticks_after_rollback(
+    tmp_path: Path,
+) -> None:
     plan = option_plan()
     env = FakeTickingEnvironment(promotes=False)
     tx = transactional_executor(env)
+    scope, execution_grant, ledger = persisted_grant(
+        plan,
+        tmp_path / "grants.sqlite3",
+    )
 
-    result = OptionExecutionBoundary().execute(
+    result = OptionExecutionBoundary(ledger=ledger).execute(
         plan,
         authority=ActionAuthority.EXECUTE,
-        grant=grant(plan),
+        grant=execution_grant,
+        scope=scope,
         executor=tx,
         measure=probe(env),
         tick_source=env,
+        now=FIXED_NOW,
     )
 
     assert result.status is ActionStatus.REJECTED
@@ -401,31 +444,46 @@ def test_rejected_transaction_does_not_claim_zero_ticks_after_rollback() -> None
     assert tx.game_state == env.initial
 
 
-def test_one_boundary_consumes_frozen_plan_grant_once() -> None:
+def test_persistent_ledger_consumes_grant_once_across_boundary_restart(
+    tmp_path: Path,
+) -> None:
     plan = option_plan()
     env = FakeTickingEnvironment(promotes=True)
     tx = transactional_executor(env)
-    boundary = OptionExecutionBoundary()
-    execution_grant = grant(plan)
+    scope, execution_grant, ledger = persisted_grant(
+        plan,
+        tmp_path / "grants.sqlite3",
+    )
+    first_boundary = OptionExecutionBoundary(ledger=ledger)
 
-    first = boundary.execute(
+    first = first_boundary.execute(
         plan,
         authority=ActionAuthority.EXECUTE,
         grant=execution_grant,
+        scope=scope,
         executor=tx,
         measure=probe(env),
         tick_source=env,
+        now=FIXED_NOW,
     )
     assert first.status is ActionStatus.ACCEPTED
+    assert first.grant_consumed_at is not None
+    assert first.grant_consume_result == "reserved_before_runtime_mutation"
     assert env.step_calls == 1
 
-    second = boundary.execute(
+    reconstructed_ledger = PersistentOptionGrantLedger(
+        tmp_path / "grants.sqlite3"
+    )
+    second_boundary = OptionExecutionBoundary(ledger=reconstructed_ledger)
+    second = second_boundary.execute(
         plan,
         authority=ActionAuthority.EXECUTE,
         grant=execution_grant,
+        scope=scope,
         executor=tx,
         measure=probe(env),
         tick_source=env,
+        now=FIXED_NOW,
     )
     assert second.status is ActionStatus.REFUSED
     assert second.refusal is not None
@@ -475,7 +533,9 @@ def test_option_execution_modules_do_not_import_curriculum_runner() -> None:
     root = Path(__file__).resolve().parents[1]
     paths = [
         root / "src/factorio_ai_lab/cortex/options.py",
+        root / "src/factorio_ai_lab/cortex/grant_ledger.py",
         root / "src/factorio_ai_lab/cortex/option_execute.py",
+        root / "scripts/run_cortex_option_authority_dry_run.py",
     ]
     imported: set[str] = set()
     for path in paths:
