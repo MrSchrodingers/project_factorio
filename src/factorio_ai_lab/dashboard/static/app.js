@@ -154,6 +154,7 @@ function cortexOperationalView() {
     paused,
     historicalEvidenceMode: paused,
     visualReplayAvailable: paused && (researchEvents.length > 0 || runEvents.length > 0),
+    labSimulationActive: paused && !!phase4Harness.preflight_validated,
   };
 }
 
@@ -1762,7 +1763,9 @@ function renderExperimentContext() {
     baseline
       ? "Baseline isolada · seed " + seed + " · " + String(context.status || "--")
       : (operational.paused
-        ? "Cortex " + (operational.phase || "--") + " · PAUSADO / SHADOW"
+        ? (operational.labSimulationActive
+          ? "Cortex " + (operational.phase || "--") + " · LAB ATIVO / SIMULAÇÃO"
+          : "Cortex " + (operational.phase || "--") + " · PAUSADO / SHADOW")
         : String(context.label || "Global / Cortex"))
   );
   setText(
@@ -1778,7 +1781,9 @@ function renderExperimentContext() {
           ? " · mundo continua tickando após o snapshot final"
           : "")
       : (operational.paused
-        ? "estado global do Cortex · execução autônoma pausada · telemetria WORLD continua live · baselines permanecem isoladas como evidência"
+        ? (operational.labSimulationActive
+          ? "laboratório ativo em simulação/replay · executor Cortex e evolution OFF · telemetria WORLD continua live · nenhuma autoridade contínua"
+          : "estado global do Cortex · execução autônoma pausada · telemetria WORLD continua live · baselines permanecem isoladas como evidência")
         : "estado global do Cortex · baselines permanecem isoladas como evidência")
   );
   setClassText(
@@ -1794,7 +1799,9 @@ function renderExperimentContext() {
   );
   setText(
     "factoryViewLabel",
-    operational.historicalEvidenceMode ? "WORLD LIVE · CORTEX PAUSADO" : "WORLD LIVE · FÁBRICA"
+    operational.labSimulationActive
+      ? "WORLD LIVE · LAB SIMULAÇÃO"
+      : (operational.historicalEvidenceMode ? "WORLD LIVE · CORTEX PAUSADO" : "WORLD LIVE · FÁBRICA")
   );
   setText(
     "factoryViewTitle",
@@ -1809,19 +1816,23 @@ function renderExperimentContext() {
     if (operational.historicalEvidenceMode) {
       setText(
         "operationalModeTitle",
-        "CORTEX PAUSADO · nenhum executor controla o mundo"
+        operational.labSimulationActive
+          ? "LAB ATIVO · simulação/replay F4-C"
+          : "CORTEX PAUSADO · nenhum executor controla o mundo"
       );
       setText(
         "operationalModeDetail",
         operational.phase4Harness.preflight_validated
-          ? "F4-B e o pré-registro F4-C estão fechados; o harness pareado passou apenas o preflight sintético. Evolution e runners permanecem OFF. Replay visual e simulação de harness não executam Factorio, não criam outcome experimental e não contam como evidência F4-C."
+          ? "F4-B e o pré-registro F4-C estão fechados; o harness pareado passou o preflight sintético. A interface permanece ativa em replay/simulação, enquanto executor Cortex, evolution e runners ficam OFF. Esta atividade visual não executa Factorio, não cria outcome experimental e não conta como evidência F4-C."
           : "F4-B está fechado e o pré-registro F4-C está congelado. Evolution e runners permanecem OFF. A UI pode reproduzir visualmente eventos históricos reais, mas replay visual não executa Factorio, não cria outcome e não conta como evidência F4-C."
       );
       setClassText(
         "operationalModeBadge",
-        operational.visualReplayAvailable
-          ? "PAUSADO · REPLAY VISUAL DISPONÍVEL"
-          : "PAUSADO · HISTÓRICO PRESERVADO",
+        operational.labSimulationActive
+          ? "SIMULAÇÃO ATIVA · SEM AUTORIDADE"
+          : (operational.visualReplayAvailable
+            ? "PAUSADO · REPLAY VISUAL DISPONÍVEL"
+            : "PAUSADO · HISTÓRICO PRESERVADO"),
         "badge warn"
       );
     }
@@ -1830,7 +1841,9 @@ function renderExperimentContext() {
   if (worldNotice) {
     worldNotice.hidden = !(operational.historicalEvidenceMode && worldEmpty);
     if (!worldNotice.hidden) {
-      worldNotice.textContent = "WORLD LIVE conectado, porém vazio: 0 entidades é o estado físico observado do player force. Cortex está PAUSADO e não há runner/evolution construindo. O replay visual abaixo usa somente eventos históricos persistidos e nunca substitui o estado físico live.";
+      worldNotice.textContent = operational.labSimulationActive
+        ? "WORLD LIVE conectado, porém vazio: 0 entidades é o estado físico observado do player force. A UI está ATIVA em simulação/replay, mas executor Cortex/evolution permanecem OFF e nada está construindo no mundo. O replay nunca substitui o estado físico live."
+        : "WORLD LIVE conectado, porém vazio: 0 entidades é o estado físico observado do player force. Cortex está PAUSADO e não há runner/evolution construindo. O replay visual abaixo usa somente eventos históricos persistidos e nunca substitui o estado físico live.";
     }
   }
 
@@ -4159,7 +4172,7 @@ function updateMission() {
     setClassText(
       "researchBadge",
       harnessPreflight
-        ? "CORTEX PAUSADO · PREFLIGHT SINTÉTICO PASS"
+        ? "LAB ATIVO · PREFLIGHT SINTÉTICO PASS"
         : "CORTEX PAUSADO · HARNESS PENDENTE",
       "badge warn"
     );
@@ -4311,7 +4324,9 @@ function updateKpis() {
   const operational = cortexOperationalView();
   const arenaMode = String(arena.mode || "unknown");
   const arenaLabel = operational.historicalEvidenceMode
-    ? "CORTEX PAUSADO · " + (operational.phase4Checkpoint || operational.phase || "--")
+    ? (operational.labSimulationActive
+      ? "LAB ATIVO · F4-C PREFLIGHT"
+      : "CORTEX PAUSADO · " + (operational.phase4Checkpoint || operational.phase || "--"))
     : baselineContext
       ? "BASELINE · seed " + String(context.seed ?? "--")
       : arenaMode === "open_play"
@@ -4355,7 +4370,7 @@ function updateKpis() {
     && !researchPromotion.promoted;
   const baselineCompleted = baselineContext && context.status === "completed";
   const loopLabel = operational.historicalEvidenceMode
-    ? "PAUSADO · por desenho"
+    ? (operational.labSimulationActive ? "LAB ATIVO · simulação/preflight" : "PAUSADO · por desenho")
     : baselineCompleted
       ? "baseline seed completed"
       : runnerStalled
@@ -4383,7 +4398,9 @@ function updateKpis() {
   setText(
     "researchLoopDetail",
     operational.historicalEvidenceMode
-      ? "no active agent process · evolution OFF · F4-C paired harness validation is the current research task"
+      ? (operational.labSimulationActive
+        ? "UI/replay ativo · harness sintético PASS · executor/evolution OFF · adapters reais são a fronteira atual"
+        : "no active agent process · evolution OFF · F4-C paired harness validation is the current research task")
       : baselineCompleted
         ? "seed " + String(context.seed ?? "--")
         + " closed · " + String(research.status || context.status || "--")
@@ -4418,7 +4435,9 @@ function updateKpis() {
     setText("engineeringGoal", "F4-C · causal memory transfer benchmark");
     setText(
       "engineeringGoalDetail",
-      "protocol frozen · harness ainda não validado · memory ON vs retrieval-only ablation · held-out non-confirmatory tasks · leakage control + paired inference"
+      operational.phase4Harness.preflight_validated
+        ? "harness sintético PASS · adapters reais pendentes · memory ON vs retrieval-only ablation · held-out non-confirmatory tasks · leakage control + paired inference"
+        : "protocol frozen · harness ainda não validado · memory ON vs retrieval-only ablation · held-out non-confirmatory tasks · leakage control + paired inference"
     );
   } else if (nextGoal) {
     setText("engineeringGoal", nextGoal.label || nextGoal.goal_id || "next capability");
@@ -4498,7 +4517,7 @@ function updateKpis() {
   const factorioLabel = !factorio.connected
     ? "Factorio offline"
     : operational.historicalEvidenceMode
-      ? "Factorio · telemetria live · Cortex pausado"
+      ? "Factorio · telemetria live · executor Cortex OFF"
       : execution.action_active
         ? "Factorio · executando " + actionLabel(actionKind)
         : execution.writer_active
@@ -4522,7 +4541,7 @@ function updateKpis() {
       : execution.writer_active
         ? "executor experimental possui o lease exclusivo do mundo"
         : operational.historicalEvidenceMode
-        ? "telemetria RCON live; nenhum executor Cortex possui lease do mundo; replay visual é somente apresentação"
+        ? "telemetria RCON live; nenhum executor Cortex possui lease do mundo; UI/replay pode estar ativo sem autoridade experimental"
         : "nenhum executor experimental possui o lease do mundo";
   }
   setClassText("llmStatus", llm.connected ? "Qwen inference" : "offline", llm.connected ? "good" : "bad");
@@ -4701,7 +4720,13 @@ function updateSocketBadge(degraded = false) {
   }
   const operational = cortexOperationalView();
   if (operational.historicalEvidenceMode) {
-    setClassText("socketBadge", "telemetria live · Cortex pausado", "badge neutral");
+    setClassText(
+      "socketBadge",
+      operational.labSimulationActive
+        ? "UI ativa · telemetria live · executor OFF"
+        : "telemetria live · Cortex pausado",
+      "badge neutral"
+    );
   } else {
     setClassText("socketBadge", "live", "badge live");
   }
