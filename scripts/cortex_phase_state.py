@@ -1531,8 +1531,188 @@ def build_phase_state(
         and bool(phase4_real_adapter_checks)
         and all(value is True for value in phase4_real_adapter_checks.values())
     )
+    phase4_treatment_doc_path=(
+        state_root / "docs" / "CORTEX_PHASE4_TREATMENT_AND_RUNNER_GATE.md"
+    )
+    phase4_treatment_module_path=(
+        state_root
+        / "src"
+        / "factorio_ai_lab"
+        / "cortex"
+        / "causal_treatment.py"
+    )
+    phase4_treatment_validator_path=(
+        state_root / "scripts" / "validate_cortex_f4c_treatment.py"
+    )
+    phase4_treatment_tests_path=(
+        state_root / "tests" / "test_cortex_f4c_treatment.py"
+    )
+    phase4_treatment_audit_path=(
+        state_root / "runs" / "audits" / "cortex_f4c_treatment_validation.json"
+    )
+    phase4_treatment_audit=phase4_treatment_audit_path.exists()
+    phase4_treatment_payload: dict[str,Any]={}
+    phase4_treatment_error: str | None=None
+    if phase4_treatment_audit:
+        try:
+            phase4_treatment_payload=_load(phase4_treatment_audit_path)
+        except (OSError,json.JSONDecodeError,TypeError) as exc:
+            phase4_treatment_error=f"{type(exc).__name__}: {exc}"
+    phase4_treatment_revision=phase4_treatment_payload.get("code_revision")
+    if not isinstance(phase4_treatment_revision,dict):
+        phase4_treatment_revision={}
+    phase4_treatment_protocol=phase4_treatment_payload.get("protocol")
+    if not isinstance(phase4_treatment_protocol,dict):
+        phase4_treatment_protocol={}
+    phase4_treatment_source=phase4_treatment_payload.get("source")
+    if not isinstance(phase4_treatment_source,dict):
+        phase4_treatment_source={}
+    phase4_treatment_before=phase4_treatment_source.get("database_before")
+    if not isinstance(phase4_treatment_before,dict):
+        phase4_treatment_before={}
+    phase4_treatment_after=phase4_treatment_source.get("database_after")
+    if not isinstance(phase4_treatment_after,dict):
+        phase4_treatment_after={}
+    phase4_treatment_checks=phase4_treatment_payload.get("checks")
+    if not isinstance(phase4_treatment_checks,dict):
+        phase4_treatment_checks={}
+    phase4_treatment_expected_hashes={
+        "treatment_module_sha256":(
+            _sha256(phase4_treatment_module_path)
+            if phase4_treatment_module_path.exists() else None
+        ),
+        "validator_sha256":(
+            _sha256(phase4_treatment_validator_path)
+            if phase4_treatment_validator_path.exists() else None
+        ),
+        "tests_sha256":(
+            _sha256(phase4_treatment_tests_path)
+            if phase4_treatment_tests_path.exists() else None
+        ),
+    }
+    phase4_treatment_valid=(
+        phase4_real_task_adapters_valid
+        and phase4_treatment_doc_path.exists()
+        and phase4_treatment_module_path.exists()
+        and phase4_treatment_validator_path.exists()
+        and phase4_treatment_tests_path.exists()
+        and phase4_treatment_audit
+        and phase4_treatment_error is None
+        and phase4_treatment_payload.get("schema_version")
+        =="cortex_f4c_treatment_validation_v1"
+        and phase4_treatment_payload.get("status")=="pass"
+        and phase4_treatment_payload.get("mode")
+        =="treatment_semantics_preflight"
+        and phase4_treatment_revision.get("dirty") is False
+        and phase4_treatment_protocol.get("protocol_id")
+        =="cortex-f4c-memory-ablation-transfer-v1"
+        and phase4_treatment_protocol.get("manifest_file_sha256")
+        ==phase4_causal_manifest_sha
+        and phase4_treatment_protocol.get("manifest_sha256")
+        ==phase4_causal_protocol.get("manifest_sha256")
+        and phase4_treatment_before==phase4_treatment_after
+        and phase4_treatment_before.get("manifest_sha256")
+        ==phase4_retrieval_before.get("manifest_sha256")
+        and all(
+            phase4_treatment_source.get(key)==value
+            for key,value in phase4_treatment_expected_hashes.items()
+        )
+        and bool(phase4_treatment_checks)
+        and all(value is True for value in phase4_treatment_checks.values())
+        and (phase4_treatment_payload.get("authority") or {}).get(
+            "world_mutation"
+        ) is False
+        and (phase4_treatment_payload.get("authority") or {}).get(
+            "protocol_seed_executed"
+        ) is False
+    )
+
+    phase4_pilot_runner_script_path=(
+        state_root / "scripts" / "run_cortex_f4c_pilot.py"
+    )
+    phase4_pilot_runner_tests_path=(
+        state_root / "tests" / "test_cortex_f4c_pilot_runner.py"
+    )
+    phase4_pilot_runner_validator_path=(
+        state_root / "scripts" / "validate_cortex_f4c_pilot_runner.py"
+    )
+    phase4_pilot_runner_audit_path=(
+        state_root / "runs" / "audits" / "cortex_f4c_pilot_runner_validation.json"
+    )
+    phase4_pilot_runner_audit=phase4_pilot_runner_audit_path.exists()
+    phase4_pilot_runner_payload: dict[str,Any]={}
+    phase4_pilot_runner_error: str | None=None
+    if phase4_pilot_runner_audit:
+        try:
+            phase4_pilot_runner_payload=_load(phase4_pilot_runner_audit_path)
+        except (OSError,json.JSONDecodeError,TypeError) as exc:
+            phase4_pilot_runner_error=f"{type(exc).__name__}: {exc}"
+    phase4_pilot_runner_revision=phase4_pilot_runner_payload.get("code_revision")
+    if not isinstance(phase4_pilot_runner_revision,dict):
+        phase4_pilot_runner_revision={}
+    phase4_pilot_runner_protocol=phase4_pilot_runner_payload.get("protocol")
+    if not isinstance(phase4_pilot_runner_protocol,dict):
+        phase4_pilot_runner_protocol={}
+    phase4_pilot_runner_source=phase4_pilot_runner_payload.get("source")
+    if not isinstance(phase4_pilot_runner_source,dict):
+        phase4_pilot_runner_source={}
+    phase4_pilot_runner_checks=phase4_pilot_runner_payload.get("checks")
+    if not isinstance(phase4_pilot_runner_checks,dict):
+        phase4_pilot_runner_checks={}
+    phase4_pilot_runner_expected_hashes={
+        "runner_sha256":(
+            _sha256(phase4_pilot_runner_script_path)
+            if phase4_pilot_runner_script_path.exists() else None
+        ),
+        "validator_sha256":(
+            _sha256(phase4_pilot_runner_validator_path)
+            if phase4_pilot_runner_validator_path.exists() else None
+        ),
+        "tests_sha256":(
+            _sha256(phase4_pilot_runner_tests_path)
+            if phase4_pilot_runner_tests_path.exists() else None
+        ),
+    }
+    phase4_pilot_runner_valid=(
+        phase4_treatment_valid
+        and phase4_pilot_runner_script_path.exists()
+        and phase4_pilot_runner_tests_path.exists()
+        and phase4_pilot_runner_validator_path.exists()
+        and phase4_pilot_runner_audit
+        and phase4_pilot_runner_error is None
+        and phase4_pilot_runner_payload.get("schema_version")
+        =="cortex_f4c_pilot_runner_validation_v1"
+        and phase4_pilot_runner_payload.get("status")=="pass"
+        and phase4_pilot_runner_payload.get("mode")=="pilot_runner_dry_run"
+        and phase4_pilot_runner_revision.get("dirty") is False
+        and phase4_pilot_runner_protocol.get("protocol_id")
+        =="cortex-f4c-memory-ablation-transfer-v1"
+        and phase4_pilot_runner_protocol.get("manifest_file_sha256")
+        ==phase4_causal_manifest_sha
+        and phase4_pilot_runner_protocol.get("manifest_sha256")
+        ==phase4_causal_protocol.get("manifest_sha256")
+        and all(
+            phase4_pilot_runner_source.get(key)==value
+            for key,value in phase4_pilot_runner_expected_hashes.items()
+        )
+        and bool(phase4_pilot_runner_checks)
+        and all(value is True for value in phase4_pilot_runner_checks.values())
+        and (phase4_pilot_runner_payload.get("authority") or {}).get(
+            "pilot_seed_executed"
+        ) is False
+        and (phase4_pilot_runner_payload.get("authority") or {}).get(
+            "evaluation_seed_executed"
+        ) is False
+        and (phase4_pilot_runner_payload.get("authority") or {}).get(
+            "confirmatory_seed_executed"
+        ) is False
+    )
+
     phase4_execution_ready=(
-        phase4_harness_preflight_valid and phase4_real_task_adapters_valid
+        phase4_harness_preflight_valid
+        and phase4_real_task_adapters_valid
+        and phase4_treatment_valid
+        and phase4_pilot_runner_valid
     )
 
     phase2_delivery_actuator_canary_path=(
@@ -1780,10 +1960,22 @@ def build_phase_state(
 
     if phase4_execution_ready:
         action=(
-            "F4-C execution preflight PASS: paired harness and all four real "
-            "family adapters validated in disposable NON-PROTOCOL fixtures; "
-            "next controlled action is the preregistered pilot stage, while "
-            "evaluation and confirmatory seeds remain frozen"
+            "F4-C execution preflight PASS across harness, real adapters, "
+            "active memory treatment and pilot runner; next controlled action "
+            "is one preregistered pilot pair, while evaluation and confirmatory "
+            "seeds remain frozen"
+        )
+    elif phase4_treatment_valid:
+        action=(
+            "F4-C treatment semantics PASS but pilot runner readiness is not "
+            "validated; implement and validate the protocol runner without "
+            "executing any pilot/evaluation/confirmatory seed"
+        )
+    elif phase4_real_task_adapters_valid:
+        action=(
+            "F4-C real adapters PASS but causal treatment semantics are not "
+            "validated; prove retrieval enters ranking/selection with the "
+            "identical frozen candidate surface before any pilot seed"
         )
     elif phase4_harness_preflight_valid:
         action=(
@@ -1990,6 +2182,24 @@ def build_phase_state(
             "checks":phase4_real_adapter_checks,
             "read_error":phase4_real_adapter_error,
         },
+        "phase4_treatment":{
+            "document_path":str(phase4_treatment_doc_path),
+            "audit_path":str(phase4_treatment_audit_path),
+            "audit_exists":phase4_treatment_audit,
+            "validated":phase4_treatment_valid,
+            "policy_version":phase4_treatment_payload.get("policy_version"),
+            "checks":phase4_treatment_checks,
+            "read_error":phase4_treatment_error,
+        },
+        "phase4_pilot_runner":{
+            "script_path":str(phase4_pilot_runner_script_path),
+            "validator_path":str(phase4_pilot_runner_validator_path),
+            "audit_path":str(phase4_pilot_runner_audit_path),
+            "audit_exists":phase4_pilot_runner_audit,
+            "validated":phase4_pilot_runner_valid,
+            "checks":phase4_pilot_runner_checks,
+            "read_error":phase4_pilot_runner_error,
+        },
         "phase4_exit_gate":{
             "memory_substrate":phase4_memory_valid,
             "hybrid_retrieval_consolidation_decay":phase4_retrieval_valid,
@@ -2001,12 +2211,20 @@ def build_phase_state(
                 "causal_transfer_pilot_not_executed"
                 if phase4_execution_ready
                 else (
-                    "causal_transfer_real_task_adapters_not_validated"
-                    if phase4_harness_preflight_valid
+                    "causal_transfer_pilot_runner_not_validated"
+                    if phase4_treatment_valid
                     else (
-                        "causal_transfer_evaluation_harness_not_validated"
-                        if phase4_causal_protocol_valid
-                        else "causal_transfer_protocol_not_frozen"
+                        "causal_transfer_treatment_not_validated"
+                        if phase4_real_task_adapters_valid
+                        else (
+                            "causal_transfer_real_task_adapters_not_validated"
+                            if phase4_harness_preflight_valid
+                            else (
+                                "causal_transfer_evaluation_harness_not_validated"
+                                if phase4_causal_protocol_valid
+                                else "causal_transfer_protocol_not_frozen"
+                            )
+                        )
                     )
                 )
             ),
@@ -2017,39 +2235,49 @@ def build_phase_state(
             ),
             "detail":(
                 (
-                    "F4-C paired harness and all four real family adapters passed "
-                    "NON-PROTOCOL preflight with exact restore, retrieval-only "
-                    "ablation, matched surfaces, quarantined writes, family-specific "
-                    "negative probes, and no live Factorio authority. Infrastructure "
-                    "is ready for the controlled preregistered pilot stage, but no "
-                    "pilot causal outcome exists yet; evaluation and confirmatory "
-                    "seeds remain frozen."
+                    "Harness, real adapters, treatment semantics and pilot runner "
+                    "all passed preflight. No pilot outcome exists yet; evaluation "
+                    "and confirmatory seeds remain frozen."
                 )
                 if phase4_execution_ready
                 else (
                     (
-                        "F4-C paired harness passed synthetic preflight for exact "
-                        "checkpoint restore, retrieval-only ablation, arm isolation, "
-                        "matched budgets, quarantined writes, and recomputable J. "
-                        "Real Factorio adapters for the four frozen task families "
-                        "remain unvalidated; do not launch pilot or evaluation seeds."
+                        "Memory treatment semantics passed: retrieval can affect "
+                        "ranking while candidate generation remains frozen. The "
+                        "protocol pilot runner is not yet validated; do not execute "
+                        "any pilot seed."
                     )
-                    if phase4_harness_preflight_valid
+                    if phase4_treatment_valid
                     else (
                         (
-                            "F4-C protocol is frozen and causally eligible, but no paired "
-                            "evaluation harness has yet demonstrated checkpoint restore, "
-                            "arm isolation, matched budgets, and outcome extraction. "
-                            "Do not launch pilot or evaluation seeds yet."
+                            "Real adapters passed component readiness, but the prior "
+                            "readiness claim was insufficient for causality because "
+                            "retrieval was logged without entering the decision path. "
+                            "Treatment semantics must pass before pilot execution."
                         )
-                        if phase4_causal_protocol_valid
+                        if phase4_real_task_adapters_valid
                         else (
-                            "F4-C needs source/evaluation separation, explicit memory ON versus "
-                            "memory-ablated conditions, leakage control, paired metrics and "
-                            "predeclared statistical inference on a sufficiently diverse "
-                            "non-confirmatory held-out benchmark. Confirmatory seeds remain frozen."
-                            if phase4_retrieval_valid
-                            else None
+                            (
+                                "F4-C paired harness passed synthetic preflight. "
+                                "Real task adapters remain unvalidated; do not launch "
+                                "pilot or evaluation seeds."
+                            )
+                            if phase4_harness_preflight_valid
+                            else (
+                                (
+                                    "F4-C protocol is frozen but the paired evaluation "
+                                    "harness is not validated. Do not launch seeds."
+                                )
+                                if phase4_causal_protocol_valid
+                                else (
+                                    (
+                                    "F4-C causal protocol is not frozen and eligible. "
+                                    "Confirmatory seeds remain frozen."
+                                )
+                                    if phase4_retrieval_valid
+                                    else None
+                                )
+                            )
                         )
                     )
                 )

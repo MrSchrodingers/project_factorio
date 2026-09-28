@@ -2173,21 +2173,137 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
     }
     real_adapter_audit=audits/"cortex_f4c_real_adapters_validation.json"
     real_adapter_audit.write_text(json.dumps(real_adapter_payload)+"\n")
-    f4c_execution_ready=module.build_phase_state(
+    f4c_adapters_ready=module.build_phase_state(
         state_root=tmp_path,
         protocol_path=protocol,
     )
     assert (
-        f4c_execution_ready["phase4_causal_protocol"][
+        f4c_adapters_ready["phase4_causal_protocol"][
             "real_task_adapters_validated"
         ]
         is True
     )
     assert (
+        f4c_adapters_ready["phase4_causal_protocol"]["execution_ready"]
+        is False
+    )
+    assert f4c_adapters_ready["phase4_real_adapters"]["validated"] is True
+    assert (
+        f4c_adapters_ready["phase4_blocker"]["code"]
+        =="causal_transfer_treatment_not_validated"
+    )
+
+    treatment_doc=docs/"CORTEX_PHASE4_TREATMENT_AND_RUNNER_GATE.md"
+    treatment_doc.write_text("# treatment gate\n")
+    treatment_module=(
+        tmp_path/"src"/"factorio_ai_lab"/"cortex"/"causal_treatment.py"
+    )
+    treatment_module.write_text("TREATMENT_POLICY_VERSION='fixture'\n")
+    treatment_validator=tmp_path/"scripts"/"validate_cortex_f4c_treatment.py"
+    treatment_validator.write_text("# treatment validator\n")
+    treatment_tests=tmp_path/"tests"/"test_cortex_f4c_treatment.py"
+    treatment_tests.write_text("# treatment tests\n")
+    treatment_payload={
+        "schema_version":"cortex_f4c_treatment_validation_v1",
+        "status":"pass",
+        "mode":"treatment_semantics_preflight",
+        "policy_version":"fixture",
+        "code_revision":{
+            "commit":"f4c-treatment-sha",
+            "branch":"research/cortex-v1",
+            "dirty":False,
+        },
+        "protocol":{
+            "protocol_id":"cortex-f4c-memory-ablation-transfer-v1",
+            "manifest_file_sha256":f4c_manifest_file_sha,
+            "manifest_sha256":"b"*64,
+        },
+        "source":{
+            "database_before":database_snapshot,
+            "database_after":database_snapshot,
+            "treatment_module_sha256":module._sha256(treatment_module),
+            "validator_sha256":module._sha256(treatment_validator),
+            "tests_sha256":module._sha256(treatment_tests),
+        },
+        "checks":{
+            "all_frozen_candidate_classes_registered":True,
+            "all_candidate_classes_planner_bound":True,
+            "candidate_surface_identical_on_vs_ablated":True,
+            "memory_enters_ranking_score_path":True,
+            "all_four_families_receive_nonzero_memory_signal":True,
+        },
+        "authority":{
+            "world_mutation":False,
+            "protocol_seed_executed":False,
+        },
+    }
+    treatment_audit=audits/"cortex_f4c_treatment_validation.json"
+    treatment_audit.write_text(json.dumps(treatment_payload)+"\n")
+    f4c_treatment_ready=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert f4c_treatment_ready["phase4_treatment"]["validated"] is True
+    assert (
+        f4c_treatment_ready["phase4_causal_protocol"]["execution_ready"]
+        is False
+    )
+    assert (
+        f4c_treatment_ready["phase4_blocker"]["code"]
+        =="causal_transfer_pilot_runner_not_validated"
+    )
+
+    pilot_runner=tmp_path/"scripts"/"run_cortex_f4c_pilot.py"
+    pilot_runner.write_text("# pilot runner fixture\n")
+    pilot_validator=(
+        tmp_path/"scripts"/"validate_cortex_f4c_pilot_runner.py"
+    )
+    pilot_validator.write_text("# pilot runner validator fixture\n")
+    pilot_tests=tmp_path/"tests"/"test_cortex_f4c_pilot_runner.py"
+    pilot_tests.write_text("# pilot runner tests fixture\n")
+    pilot_runner_payload={
+        "schema_version":"cortex_f4c_pilot_runner_validation_v1",
+        "status":"pass",
+        "mode":"pilot_runner_dry_run",
+        "code_revision":{
+            "commit":"f4c-pilot-runner-sha",
+            "branch":"research/cortex-v1",
+            "dirty":False,
+        },
+        "protocol":{
+            "protocol_id":"cortex-f4c-memory-ablation-transfer-v1",
+            "manifest_file_sha256":f4c_manifest_file_sha,
+            "manifest_sha256":"b"*64,
+        },
+        "source":{
+            "runner_sha256":module._sha256(pilot_runner),
+            "validator_sha256":module._sha256(pilot_validator),
+            "tests_sha256":module._sha256(pilot_tests),
+        },
+        "checks":{
+            "pilot_partition_only":True,
+            "evaluation_partition_rejected":True,
+            "confirmatory_partition_rejected":True,
+            "all_candidate_classes_protocol_executable":True,
+            "dry_run_does_not_execute_seed":True,
+        },
+        "authority":{
+            "pilot_seed_executed":False,
+            "evaluation_seed_executed":False,
+            "confirmatory_seed_executed":False,
+        },
+    }
+    pilot_runner_audit=audits/"cortex_f4c_pilot_runner_validation.json"
+    pilot_runner_audit.write_text(json.dumps(pilot_runner_payload)+"\n")
+    f4c_execution_ready=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert (
         f4c_execution_ready["phase4_causal_protocol"]["execution_ready"]
         is True
     )
-    assert f4c_execution_ready["phase4_real_adapters"]["validated"] is True
+    assert f4c_execution_ready["phase4_pilot_runner"]["validated"] is True
     assert (
         f4c_execution_ready["phase4_blocker"]["code"]
         =="causal_transfer_pilot_not_executed"
@@ -2198,9 +2314,7 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
     )
     assert f4c_execution_ready["phase4_exit_gate"]["validated"] is False
     assert f4c_execution_ready["resume"]["do_not_start_another_seed"] is True
-    assert "next controlled action is the preregistered pilot stage" in (
-        f4c_execution_ready["resume"]["action"]
-    )
+    assert "one preregistered pilot pair" in f4c_execution_ready["resume"]["action"]
 
     f4b_payload["source"]["f4a_artifact_sha256"]="wrong"
     f4b_audit.write_text(json.dumps(f4b_payload)+"\n")
