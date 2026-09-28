@@ -45,7 +45,7 @@ from factorio_ai_lab.cortex.memory_retrieval import (
     memory_database_snapshot,
 )
 
-SCHEMA_VERSION = "cortex_f4c_real_adapter_validation_v1"
+SCHEMA_VERSION = "cortex_f4c_real_adapters_validation_v1"
 DEFAULT_MANIFEST = Path("configs/cortex_f4c_causal_ablation_v1.json")
 DEFAULT_MEMORY = Path("runs/ledger/cortex_cognitive_memory.sqlite3")
 DEFAULT_OUTPUT = Path("runs/audits/cortex_f4c_real_adapters_validation.json")
