@@ -191,6 +191,15 @@ _BINDINGS = (
 CANDIDATE_BINDINGS = {row.candidate: row for row in _BINDINGS}
 
 
+def treatment_retrieval_limit(candidates: Sequence[str]) -> int:
+    """Allocate up to three frozen-memory results per candidate class."""
+
+    count = len(tuple(candidates))
+    if count <= 0:
+        raise ValueError("candidate surface must be non-empty")
+    return 3 * count
+
+
 def task_query_text(task: Mapping[str, Any]) -> str:
     """Build a treatment query from task context, excluding solution labels."""
 

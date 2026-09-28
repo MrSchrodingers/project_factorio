@@ -21,6 +21,7 @@ from factorio_ai_lab.cortex.causal_treatment import (
     binding_summary,
     rank_candidates,
     task_query_text,
+    treatment_retrieval_limit,
 )
 from factorio_ai_lab.cortex.memory import ValidityScope
 from factorio_ai_lab.cortex.memory_retrieval import (
@@ -89,7 +90,9 @@ def build_validation(
             query_id=f"treatment-preflight:{task['task_id']}",
             text=task_query_text(task),
             scope=ValidityScope(),
-            limit=5,
+            limit=treatment_retrieval_limit(
+                task["spec"]["candidate_classes"]
+            ),
         )
         retrieval = retrieve_memories(records, query)
         on_rows = retrieval.to_dict()["results"]

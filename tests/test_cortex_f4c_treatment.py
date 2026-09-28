@@ -1,6 +1,7 @@
 from factorio_ai_lab.cortex.causal_treatment import (
     CANDIDATE_BINDINGS,
     rank_candidates,
+    treatment_retrieval_limit,
 )
 
 
@@ -50,3 +51,8 @@ def test_all_frozen_candidate_bindings_are_unique_and_planner_bound():
     assert not all(
         row.protocol_executable for row in CANDIDATE_BINDINGS.values()
     )
+
+
+def test_treatment_retrieval_limit_scales_with_frozen_surface():
+    assert treatment_retrieval_limit(["a", "b", "c"]) == 9
+    assert treatment_retrieval_limit(["a", "b", "c", "d"]) == 12
