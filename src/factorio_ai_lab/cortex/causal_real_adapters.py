@@ -25,15 +25,28 @@ from factorio_ai_lab.cortex.causal_harness import (
 from factorio_ai_lab.cortex.memory import ValidityScope
 from factorio_ai_lab.cortex.memory_retrieval import MemoryQuery
 from factorio_ai_lab.domain.state import GridPoint
+from factorio_ai_lab.learning.repair_loop import (
+    DEFICIT_FUEL_STARVED,
+    INTENT_INSERT_FUEL,
+    TOOL_RESUPPLY,
+    RepairObservation,
+    plan_repairs,
+)
 from factorio_ai_lab.planning.astar import (
     RoutingWeights,
     blocked_from,
     rectangular_bounds,
     weighted_astar,
 )
+from factorio_ai_lab.planning.resupply import FuelSource, plan_supply
 
 SPATIAL_ADAPTER_VERSION = "cortex_f4c_spatial_real_adapter_v1"
 SPATIAL_TOOL_SURFACE = ("planning.astar.weighted_astar",)
+FUEL_ADAPTER_VERSION = "cortex_f4c_fuel_real_adapter_v1"
+FUEL_TOOL_SURFACE = (
+    "learning.repair_loop.plan_repairs",
+    "planning.resupply.plan_supply",
+)
 _ALLOWED_PREFLIGHT_PARTITIONS = frozenset({"adapter_preflight"})
 
 
@@ -330,3 +343,354 @@ class SpatialRoutingPairedAdapter:
             tool_surface=SPATIAL_TOOL_SURFACE,
             outcome_extractor_version=OUTCOME_EXTRACTOR_VERSION,
         )
+
+@dataclass(frozen=True)
+class FuelRecoveryFixture:
+    """Disposable non-protocol energy-recovery world for adapter preflight."""
+
+    energy_entity_id: str
+    target_entity_id: str
+    anchor: tuple[float, float]
+    fuel_needed: int
+    fuel_carried: int
+    fuel_sources: tuple[FuelSource, ...]
+    validated_capabilities: tuple[str, ...]
+
+    @classmethod
+    def from_task(cls, task: dict[str, Any]) -> FuelRecoveryFixture:
+        if task.get("family") != "fuel_energy_recovery":
+            raise HarnessValidationError("task family must be fuel_energy_recovery")
+        if task.get("partition") not in _ALLOWED_PREFLIGHT_PARTITIONS:
+            raise HarnessValidationError(
+                "fuel adapter preflight accepts NON-PROTOCOL adapter_preflight only"
+            )
+        if task.get("seed") is not None:
+            raise HarnessValidationError(
+                "fuel adapter preflight forbids protocol/experimental seeds"
+            )
+        spec = task.get("spec")
+        if not isinstance(spec, dict):
+            raise HarnessValidationError("fuel task spec missing")
+        required = {
+            "candidate_classes",
+            "hard_postconditions",
+            "energy_entity_id",
+            "target_entity_id",
+            "anchor",
+            "fuel_needed",
+            "fuel_carried",
+            "fuel_sources",
+            "validated_capabilities",
+        }
+        missing = sorted(required - set(spec))
+        if missing:
+            raise HarnessValidationError(
+                "fuel task spec missing fields: " + ", ".join(missing)
+            )
+        anchor_raw = spec["anchor"]
+        if (
+            not isinstance(anchor_raw, (list, tuple))
+            or len(anchor_raw) != 2
+            or any(
+                isinstance(value, bool) or not isinstance(value, (int, float))
+                for value in anchor_raw
+            )
+        ):
+            raise HarnessValidationError("anchor must be [number, number]")
+        fuel_needed = spec["fuel_needed"]
+        fuel_carried = spec["fuel_carried"]
+        for name, value in (
+            ("fuel_needed", fuel_needed),
+            ("fuel_carried", fuel_carried),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise HarnessValidationError(f"{name} must be a non-negative integer")
+        sources_raw = spec["fuel_sources"]
+        if not isinstance(sources_raw, list):
+            raise HarnessValidationError("fuel_sources must be a list")
+        sources: list[FuelSource] = []
+        for index, row in enumerate(sources_raw):
+            if not isinstance(row, dict):
+                raise HarnessValidationError(f"fuel_sources[{index}] must be a mapping")
+            position = row.get("position")
+            if (
+                not isinstance(position, (list, tuple))
+                or len(position) != 2
+                or any(
+                    isinstance(value, bool) or not isinstance(value, (int, float))
+                    for value in position
+                )
+            ):
+                raise HarnessValidationError(
+                    f"fuel_sources[{index}].position must be [number, number]"
+                )
+            available = row.get("available")
+            if (
+                isinstance(available, bool)
+                or not isinstance(available, int)
+                or available < 0
+            ):
+                raise HarnessValidationError(
+                    f"fuel_sources[{index}].available must be a non-negative integer"
+                )
+            supplies_chain = row.get("supplies_chain", False)
+            if not isinstance(supplies_chain, bool):
+                raise HarnessValidationError(
+                    f"fuel_sources[{index}].supplies_chain must be bool"
+                )
+            sources.append(
+                FuelSource(
+                    position=(float(position[0]), float(position[1])),
+                    available=int(available),
+                    supplies_chain=supplies_chain,
+                )
+            )
+        capabilities_raw = spec["validated_capabilities"]
+        if (
+            not isinstance(capabilities_raw, list)
+            or not capabilities_raw
+            or any(not isinstance(value, str) or not value for value in capabilities_raw)
+        ):
+            raise HarnessValidationError(
+                "validated_capabilities must be a non-empty string list"
+            )
+        energy_id = str(spec["energy_entity_id"])
+        target_id = str(spec["target_entity_id"])
+        if not energy_id or not target_id or energy_id == target_id:
+            raise HarnessValidationError(
+                "energy_entity_id and target_entity_id must be distinct"
+            )
+        return cls(
+            energy_entity_id=energy_id,
+            target_entity_id=target_id,
+            anchor=(float(anchor_raw[0]), float(anchor_raw[1])),
+            fuel_needed=int(fuel_needed),
+            fuel_carried=int(fuel_carried),
+            fuel_sources=tuple(sources),
+            validated_capabilities=tuple(capabilities_raw),
+        )
+
+    def graph(self) -> dict[str, Any]:
+        return {
+            "nodes": [
+                {
+                    "id": self.energy_entity_id,
+                    "name": "boiler",
+                    "category": "energy",
+                    "x": self.anchor[0],
+                    "y": self.anchor[1],
+                    "status": "no_fuel",
+                },
+                {
+                    "id": self.target_entity_id,
+                    "name": "assembling-machine-1",
+                    "category": "processing",
+                    "x": self.anchor[0] + 2.0,
+                    "y": self.anchor[1],
+                    "status": "no_power",
+                },
+            ],
+            "edges": [],
+            "metrics": {
+                "entity_status_observed": True,
+                "fuel_starved_entities": 1,
+                "power_starved_entities": 1,
+            },
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "energy_entity_id": self.energy_entity_id,
+            "target_entity_id": self.target_entity_id,
+            "anchor": list(self.anchor),
+            "fuel_needed": self.fuel_needed,
+            "fuel_carried": self.fuel_carried,
+            "fuel_sources": [
+                {
+                    "position": list(source.position),
+                    "available": source.available,
+                    "supplies_chain": source.supplies_chain,
+                }
+                for source in self.fuel_sources
+            ],
+            "validated_capabilities": list(self.validated_capabilities),
+        }
+
+
+class FuelRecoveryPairedAdapter:
+    """Paired harness binding over repair_loop + resupply."""
+
+    def __init__(self, fixture: FuelRecoveryFixture) -> None:
+        self.fixture = fixture
+        self.state: dict[str, Any] = {
+            "adapter_version": FUEL_ADAPTER_VERSION,
+            "fixture": fixture.to_dict(),
+            "entity_status": {
+                fixture.energy_entity_id: "no_fuel",
+                fixture.target_entity_id: "no_power",
+            },
+            "validated_capabilities": {
+                name: True for name in fixture.validated_capabilities
+            },
+            "arm_history": [],
+        }
+        self.arm_start_digests: list[str] = []
+
+    def capture_checkpoint(self) -> dict[str, Any]:
+        return deepcopy(self.state)
+
+    def restore_checkpoint(self, checkpoint: dict[str, Any]) -> None:
+        if not isinstance(checkpoint, dict):
+            raise HarnessValidationError("fuel checkpoint must be a mapping")
+        if checkpoint.get("fixture") != self.fixture.to_dict():
+            raise HarnessValidationError("fuel checkpoint fixture mismatch")
+        self.state = deepcopy(checkpoint)
+
+    def state_digest(self) -> str:
+        return checkpoint_digest(self.state)
+
+    def _validate_task(self, task: dict[str, Any]) -> dict[str, Any]:
+        expected = FuelRecoveryFixture.from_task(task)
+        if expected != self.fixture:
+            raise HarnessValidationError(
+                "task fuel fixture differs from disposable adapter fixture"
+            )
+        spec = task["spec"]
+        candidates = tuple(map(str, spec.get("candidate_classes") or ()))
+        if "repair_loop_resupply" not in candidates:
+            raise HarnessValidationError(
+                "candidate surface does not expose repair_loop_resupply"
+            )
+        expected_hard = {
+            "energy_dependency_resolved",
+            "target_chain_resumes",
+            "bootstrap_dependency_not_increased",
+            "no_validated_capability_regresses",
+        }
+        actual_hard = set(map(str, spec.get("hard_postconditions") or ()))
+        if actual_hard != expected_hard:
+            raise HarnessValidationError(
+                "fuel hard-postcondition contract mismatch"
+            )
+        return spec
+
+    def run_arm(
+        self,
+        task: dict[str, Any],
+        memory: MemoryAccess,
+        budget: HarnessBudget,
+    ) -> ArmObservation:
+        spec = self._validate_task(task)
+        start_digest = self.state_digest()
+        self.arm_start_digests.append(start_digest)
+
+        retrieval = memory.retrieve(
+            MemoryQuery(
+                query_id=f"real-adapter-preflight:{task.get('task_id', 'fuel')}",
+                text=(
+                    "fuel energy recovery boiler no fuel resupply "
+                    "restore power target chain"
+                ),
+                scope=ValidityScope(),
+                limit=5,
+            )
+        )
+
+        started = time.perf_counter()
+        repair_plan = plan_repairs(RepairObservation(graph=self.fixture.graph()))
+        fuel_steps = [
+            step
+            for step in repair_plan.steps
+            if step.deficit.kind == DEFICIT_FUEL_STARVED
+            and step.action.tool == TOOL_RESUPPLY
+            and step.action.intent == INTENT_INSERT_FUEL
+        ]
+        supply_plan = plan_supply(
+            anchor=self.fixture.anchor,
+            fuel_needed=self.fixture.fuel_needed,
+            fuel_carried=self.fixture.fuel_carried,
+            fuel_sources=self.fixture.fuel_sources,
+        )
+        elapsed = time.perf_counter() - started
+
+        fuel_action_available = len(fuel_steps) == 1
+        supplied = (
+            not supply_plan.refused
+            and self.fixture.fuel_carried + supply_plan.fuel_planned
+            >= self.fixture.fuel_needed
+        )
+        draws_from_active_chain = any(
+            draw.supplies_chain for draw in supply_plan.fuel_draws
+        )
+        energy_resolved = fuel_action_available and supplied
+        if energy_resolved:
+            self.state["entity_status"][self.fixture.energy_entity_id] = "working"
+            self.state["entity_status"][self.fixture.target_entity_id] = "working"
+
+        before_capabilities = {
+            name: True for name in self.fixture.validated_capabilities
+        }
+        after_capabilities = dict(self.state["validated_capabilities"])
+        no_regression = (
+            before_capabilities == after_capabilities
+            and not draws_from_active_chain
+        )
+        target_resumes = (
+            energy_resolved
+            and self.state["entity_status"][self.fixture.target_entity_id]
+            == "working"
+        )
+        bootstrap_not_increased = not draws_from_active_chain
+
+        hard = {
+            "energy_dependency_resolved": bool(energy_resolved),
+            "target_chain_resumes": bool(target_resumes),
+            "bootstrap_dependency_not_increased": bool(bootstrap_not_increased),
+            "no_validated_capability_regresses": bool(no_regression),
+        }
+
+        retrieved_ids = [
+            row["memory_id"]
+            for row in retrieval.to_dict().get("results", [])
+            if isinstance(row, dict) and row.get("memory_id")
+        ]
+        memory.quarantine_write(
+            {
+                "kind": "real_adapter_preflight_trace",
+                "adapter_version": FUEL_ADAPTER_VERSION,
+                "task_id": task.get("task_id"),
+                "condition": memory.condition,
+                "retrieved_memory_ids": retrieved_ids,
+                "repair_plan": repair_plan.to_dict(),
+                "supply_plan": supply_plan.to_dict(),
+                "hard_postconditions": hard,
+            }
+        )
+        self.state["arm_history"].append(
+            {
+                "condition": memory.condition,
+                "retrieved_count": len(retrieval.results),
+                "fuel_planned": supply_plan.fuel_planned,
+                "refusals": list(supply_plan.refusals),
+                "draws_from_active_chain": draws_from_active_chain,
+            }
+        )
+
+        invalid_or_refused = int(
+            not fuel_action_available or supply_plan.refused or not supplied
+        )
+        return ArmObservation(
+            hard_postconditions=hard,
+            action_count=1 if energy_resolved else 0,
+            observed_game_ticks=0,
+            invalid_or_refused_actions=invalid_or_refused,
+            proposed_actions=1,
+            initially_unsatisfied=True,
+            decisions=2,
+            wall_clock_seconds=elapsed,
+            llm_calls=0,
+            candidate_surface=tuple(map(str, spec["candidate_classes"])),
+            tool_surface=FUEL_TOOL_SURFACE,
+            outcome_extractor_version=OUTCOME_EXTRACTOR_VERSION,
+        )
+

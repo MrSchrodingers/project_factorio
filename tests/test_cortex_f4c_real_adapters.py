@@ -16,7 +16,10 @@ from factorio_ai_lab.cortex.causal_protocol import (
     build_protocol_manifest,
 )
 from factorio_ai_lab.cortex.causal_real_adapters import (
+    FUEL_TOOL_SURFACE,
     SPATIAL_TOOL_SURFACE,
+    FuelRecoveryFixture,
+    FuelRecoveryPairedAdapter,
     SpatialRoutingFixture,
     SpatialRoutingPairedAdapter,
 )
@@ -192,3 +195,135 @@ def test_spatial_resource_budget_is_measured_not_invented_as_success(tmp_path):
         assert score["valid"] is True
         assert score["functional_success"] == 0.0
         assert score["goal_progress"] == 0.75
+
+def _fuel_task(*, active_chain_source: bool = False) -> dict:
+    return {
+        "task_id": "adapter-preflight:fuel-recovery:test",
+        "partition": "adapter_preflight",
+        "family": "fuel_energy_recovery",
+        "seed": None,
+        "generator_version": "cortex_f4c_adapter_preflight_v1",
+        "spec": {
+            "candidate_classes": [
+                "repair_loop_resupply",
+                "idle_container_draw",
+                "active_chain_draw_last_resort",
+            ],
+            "hard_postconditions": [
+                "energy_dependency_resolved",
+                "target_chain_resumes",
+                "bootstrap_dependency_not_increased",
+                "no_validated_capability_regresses",
+            ],
+            "energy_entity_id": "boiler-1",
+            "target_entity_id": "assembler-1",
+            "anchor": [10.0, 10.0],
+            "fuel_needed": 12,
+            "fuel_carried": 0,
+            "fuel_sources": [
+                {
+                    "position": [8.0, 10.0],
+                    "available": 12,
+                    "supplies_chain": active_chain_source,
+                }
+            ],
+            "validated_capabilities": [
+                "iron_backbone",
+                "copper_chain",
+            ],
+        },
+    }
+
+
+def test_fuel_real_adapter_binds_repair_loop_and_resupply_in_pair(tmp_path):
+    memory_path = tmp_path / "memory.sqlite3"
+    _memory(memory_path)
+    task = _fuel_task()
+    fixture = FuelRecoveryFixture.from_task(task)
+    adapter = FuelRecoveryPairedAdapter(fixture)
+    checkpoint = adapter.state_digest()
+    pair = execute_pair(
+        task=task,
+        first_condition=MEMORY_ON,
+        second_condition=MEMORY_ABLATED,
+        adapter=adapter,
+        memory_records=load_memory_records(memory_path),
+        memory_snapshot=lambda: memory_database_snapshot(memory_path),
+        budget=HarnessBudget.from_manifest(build_protocol_manifest()),
+    )
+
+    assert pair["valid"] is True
+    assert pair["technical_invalidities"] == []
+    assert adapter.arm_start_digests == [checkpoint, checkpoint]
+    assert pair["source_memory_before"] == pair["source_memory_after"]
+    assert (
+        pair["arms"][MEMORY_ON]["observation"]["tool_surface"]
+        == list(FUEL_TOOL_SURFACE)
+    )
+    assert all(
+        pair["arms"][condition]["observation"]["hard_postconditions"][name]
+        for condition in (MEMORY_ON, MEMORY_ABLATED)
+        for name in task["spec"]["hard_postconditions"]
+    )
+    assert pair["arms"][MEMORY_ABLATED]["memory"]["retrievals"][0][
+        "result"
+    ]["results"] == []
+    assert pair["delta_J"] == 0.0
+
+
+def test_fuel_real_adapter_exposes_active_chain_regression_instead_of_hiding_it(
+    tmp_path,
+):
+    memory_path = tmp_path / "memory.sqlite3"
+    _memory(memory_path)
+    task = _fuel_task(active_chain_source=True)
+    fixture = FuelRecoveryFixture.from_task(task)
+    adapter = FuelRecoveryPairedAdapter(fixture)
+    pair = execute_pair(
+        task=task,
+        first_condition=MEMORY_ABLATED,
+        second_condition=MEMORY_ON,
+        adapter=adapter,
+        memory_records=load_memory_records(memory_path),
+        memory_snapshot=lambda: memory_database_snapshot(memory_path),
+        budget=HarnessBudget.from_manifest(build_protocol_manifest()),
+    )
+
+    assert pair["valid"] is True
+    for condition in (MEMORY_ON, MEMORY_ABLATED):
+        hard = pair["arms"][condition]["observation"]["hard_postconditions"]
+        assert hard["energy_dependency_resolved"] is True
+        assert hard["target_chain_resumes"] is True
+        assert hard["bootstrap_dependency_not_increased"] is False
+        assert hard["no_validated_capability_regresses"] is False
+        score = pair["arms"][condition]["score"]
+        assert score["valid"] is True
+        assert score["functional_success"] == 0.0
+        assert score["goal_progress"] == 0.5
+
+
+def test_fuel_real_adapter_refuses_protocol_partition(tmp_path):
+    memory_path = tmp_path / "memory.sqlite3"
+    _memory(memory_path)
+    task = _fuel_task()
+    fixture = FuelRecoveryFixture.from_task(task)
+    adapter = FuelRecoveryPairedAdapter(fixture)
+    protocol_task = deepcopy(task)
+    protocol_task["partition"] = "evaluation"
+    protocol_task["seed"] = 20261221
+    access = MemoryAccess(
+        MEMORY_ON,
+        load_memory_records(memory_path),
+        max_queries=4,
+    )
+
+    with pytest.raises(
+        HarnessValidationError,
+        match="accepts NON-PROTOCOL adapter_preflight only",
+    ):
+        adapter.run_arm(
+            protocol_task,
+            access,
+            HarnessBudget.from_manifest(build_protocol_manifest()),
+        )
+
