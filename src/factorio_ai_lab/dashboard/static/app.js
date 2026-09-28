@@ -135,6 +135,13 @@ function cortexOperationalView() {
   const phase = String(cortexPhase.phase || "");
   const phase4Checkpoint = String(cortexPhase.phase4_checkpoint || "");
   const phase4Harness = cortexPhase.phase4_causal_harness || {};
+  const phase4Protocol = cortexPhase.phase4_causal_protocol || {};
+  const phase4RealAdapters = cortexPhase.phase4_real_adapters || {};
+  const executionReady = (
+    !!phase4Protocol.execution_ready
+    && !!phase4Protocol.real_task_adapters_validated
+    && !!phase4RealAdapters.validated
+  );
   const globalCortex = context.kind === "global" && ["F3", "F4"].includes(phase);
   const liveAgent = !!runner.active;
   const paused = globalCortex && !liveAgent;
@@ -150,6 +157,9 @@ function cortexOperationalView() {
     phase,
     phase4Checkpoint,
     phase4Harness,
+    phase4Protocol,
+    phase4RealAdapters,
+    executionReady,
     liveAgent,
     paused,
     historicalEvidenceMode: paused,
@@ -1763,9 +1773,11 @@ function renderExperimentContext() {
     baseline
       ? "Baseline isolada · seed " + seed + " · " + String(context.status || "--")
       : (operational.paused
-        ? (operational.labSimulationActive
-          ? "Cortex " + (operational.phase || "--") + " · LAB ATIVO / SIMULAÇÃO"
-          : "Cortex " + (operational.phase || "--") + " · PAUSADO / SHADOW")
+        ? (operational.executionReady
+          ? "Cortex " + (operational.phase || "--") + " · LAB ATIVO / PILOT READY"
+          : (operational.labSimulationActive
+            ? "Cortex " + (operational.phase || "--") + " · LAB ATIVO / SIMULAÇÃO"
+            : "Cortex " + (operational.phase || "--") + " · PAUSADO / SHADOW"))
         : String(context.label || "Global / Cortex"))
   );
   setText(
@@ -1782,7 +1794,9 @@ function renderExperimentContext() {
           : "")
       : (operational.paused
         ? (operational.labSimulationActive
-          ? "laboratório ativo em simulação/replay · executor Cortex e evolution OFF · telemetria WORLD continua live · nenhuma autoridade contínua"
+          ? (operational.executionReady
+            ? "laboratório ativo · execution preflight PASS · harness + 4 adapters reais validados em NON-PROTOCOL · executor Cortex e evolution OFF · nenhuma seed executada"
+            : "laboratório ativo em simulação/replay · executor Cortex e evolution OFF · telemetria WORLD continua live · nenhuma autoridade contínua")
           : "estado global do Cortex · execução autônoma pausada · telemetria WORLD continua live · baselines permanecem isoladas como evidência")
         : "estado global do Cortex · baselines permanecem isoladas como evidência")
   );
@@ -1799,9 +1813,11 @@ function renderExperimentContext() {
   );
   setText(
     "factoryViewLabel",
-    operational.labSimulationActive
-      ? "WORLD LIVE · LAB SIMULAÇÃO"
-      : (operational.historicalEvidenceMode ? "WORLD LIVE · CORTEX PAUSADO" : "WORLD LIVE · FÁBRICA")
+    operational.executionReady
+      ? "WORLD LIVE · LAB PILOT READY"
+      : (operational.labSimulationActive
+        ? "WORLD LIVE · LAB SIMULAÇÃO"
+        : (operational.historicalEvidenceMode ? "WORLD LIVE · CORTEX PAUSADO" : "WORLD LIVE · FÁBRICA"))
   );
   setText(
     "factoryViewTitle",
@@ -1816,24 +1832,30 @@ function renderExperimentContext() {
     if (operational.historicalEvidenceMode) {
       setText(
         "operationalModeTitle",
-        operational.labSimulationActive
-          ? "LAB ATIVO · simulação/replay F4-C"
-          : "CORTEX PAUSADO · nenhum executor controla o mundo"
+        operational.executionReady
+          ? "LAB ATIVO · PILOT READY · NÃO EXECUTADO"
+          : (operational.labSimulationActive
+            ? "LAB ATIVO · simulação/replay F4-C"
+            : "CORTEX PAUSADO · nenhum executor controla o mundo")
       );
       setText(
         "operationalModeDetail",
-        operational.phase4Harness.preflight_validated
-          ? "F4-B e o pré-registro F4-C estão fechados; o harness pareado passou o preflight sintético. A interface permanece ativa em replay/simulação, enquanto executor Cortex, evolution e runners ficam OFF. Esta atividade visual não executa Factorio, não cria outcome experimental e não conta como evidência F4-C."
-          : "F4-B está fechado e o pré-registro F4-C está congelado. Evolution e runners permanecem OFF. A UI pode reproduzir visualmente eventos históricos reais, mas replay visual não executa Factorio, não cria outcome e não conta como evidência F4-C."
+        operational.executionReady
+          ? "F4-C execution preflight PASS: harness pareado e os quatro adapters reais passaram validação NON-PROTOCOL, incluindo restore, ablação retrieval-only e probes negativos fail-closed. Nenhum pilot/evaluation/confirmatory foi executado. Executor Cortex, evolution e runners permanecem OFF."
+          : (operational.phase4Harness.preflight_validated
+            ? "F4-B e o pré-registro F4-C estão fechados; o harness pareado passou o preflight sintético. A interface permanece ativa em replay/simulação, enquanto executor Cortex, evolution e runners ficam OFF. Esta atividade visual não executa Factorio, não cria outcome experimental e não conta como evidência F4-C."
+            : "F4-B está fechado e o pré-registro F4-C está congelado. Evolution e runners permanecem OFF. A UI pode reproduzir visualmente eventos históricos reais, mas replay visual não executa Factorio, não cria outcome e não conta como evidência F4-C.")
       );
       setClassText(
         "operationalModeBadge",
-        operational.labSimulationActive
-          ? "SIMULAÇÃO ATIVA · SEM AUTORIDADE"
-          : (operational.visualReplayAvailable
-            ? "PAUSADO · REPLAY VISUAL DISPONÍVEL"
-            : "PAUSADO · HISTÓRICO PRESERVADO"),
-        "badge warn"
+        operational.executionReady
+          ? "EXECUTION PREFLIGHT PASS · SEM AUTORIDADE"
+          : (operational.labSimulationActive
+            ? "SIMULAÇÃO ATIVA · SEM AUTORIDADE"
+            : (operational.visualReplayAvailable
+              ? "PAUSADO · REPLAY VISUAL DISPONÍVEL"
+              : "PAUSADO · HISTÓRICO PRESERVADO")),
+        operational.executionReady ? "badge good" : "badge warn"
       );
     }
   }
@@ -1841,9 +1863,11 @@ function renderExperimentContext() {
   if (worldNotice) {
     worldNotice.hidden = !(operational.historicalEvidenceMode && worldEmpty);
     if (!worldNotice.hidden) {
-      worldNotice.textContent = operational.labSimulationActive
-        ? "WORLD LIVE conectado, porém vazio: 0 entidades é o estado físico observado do player force. A UI está ATIVA em simulação/replay, mas executor Cortex/evolution permanecem OFF e nada está construindo no mundo. O replay nunca substitui o estado físico live."
-        : "WORLD LIVE conectado, porém vazio: 0 entidades é o estado físico observado do player force. Cortex está PAUSADO e não há runner/evolution construindo. O replay visual abaixo usa somente eventos históricos persistidos e nunca substitui o estado físico live.";
+      worldNotice.textContent = operational.executionReady
+        ? "WORLD LIVE conectado, porém vazio: 0 entidades é o estado físico observado do player force. O laboratório está PILOT READY, mas nenhum pilot foi executado; executor Cortex/evolution permanecem OFF e o replay não substitui o estado físico live."
+        : (operational.labSimulationActive
+          ? "WORLD LIVE conectado, porém vazio: 0 entidades é o estado físico observado do player force. A UI está ATIVA em simulação/replay, mas executor Cortex/evolution permanecem OFF e nada está construindo no mundo. O replay nunca substitui o estado físico live."
+          : "WORLD LIVE conectado, porém vazio: 0 entidades é o estado físico observado do player force. Cortex está PAUSADO e não há runner/evolution construindo. O replay visual abaixo usa somente eventos históricos persistidos e nunca substitui o estado físico live.");
     }
   }
 
@@ -4147,34 +4171,43 @@ function updateMission() {
   if (operational.historicalEvidenceMode && operational.phase4Checkpoint === "F4-B") {
     const blocker = operational.cortexPhase.phase4_blocker || {};
     const harnessPreflight = !!operational.phase4Harness.preflight_validated;
+    const executionReady = operational.executionReady;
     setText("missionTitle", "F4-C — causal memory ablation + held-out transfer");
     setText(
       "missionDetail",
-      harnessPreflight
-        ? "Harness pareado validado em simulação sintética: restore, isolamento, ablação retrieval-only, budgets, quarentena e J recomputável passaram. Nenhum outcome F4-C foi observado; adapters reais continuam bloqueados."
-        : "Pré-registro causal F4-C congelado e elegível. Nenhum outcome F4-C foi observado; validar o paired evaluation harness antes de qualquer pilot seed."
+      executionReady
+        ? "Execution preflight PASS: harness pareado + 4 adapters reais validados em fixtures NON-PROTOCOL, com probes negativos fail-closed. Nenhum pilot/evaluation/confirmatory foi executado; ainda não existe outcome causal F4-C."
+        : (harnessPreflight
+          ? "Harness pareado validado em simulação sintética: restore, isolamento, ablação retrieval-only, budgets, quarentena e J recomputável passaram. Nenhum outcome F4-C foi observado; adapters reais continuam bloqueados."
+          : "Pré-registro causal F4-C congelado e elegível. Nenhum outcome F4-C foi observado; validar o paired evaluation harness antes de qualquer pilot seed.")
     );
     setText(
       "stageName",
-      harnessPreflight
-        ? "F4-C · harness simulado PASS · adapters reais pendentes"
-        : "F4-C · protocol frozen · harness validation"
+      executionReady
+        ? "F4-C · execution preflight PASS · pilot pré-registrado pendente"
+        : (harnessPreflight
+          ? "F4-C · harness simulado PASS · adapters reais pendentes"
+          : "F4-C · protocol frozen · harness validation")
     );
     setText(
       "nextAction",
       operational.cortexPhase.resume?.action
-        || (harnessPreflight
-          ? "validate real task adapters in disposable non-protocol world"
-          : "validate paired evaluation harness before any pilot seed")
+        || (executionReady
+          ? "next controlled action: preregistered pilot stage; evaluation and confirmatory remain frozen"
+          : (harnessPreflight
+            ? "validate real task adapters in disposable non-protocol world"
+            : "validate paired evaluation harness before any pilot seed"))
     );
-    $("stageProgressBar").style.width = harnessPreflight ? "25%" : "0%";
+    $("stageProgressBar").style.width = executionReady ? "50%" : (harnessPreflight ? "25%" : "0%");
     setText("stageProgressText", String(blocker.status || "blocked").toUpperCase());
     setClassText(
       "researchBadge",
-      harnessPreflight
-        ? "LAB ATIVO · PREFLIGHT SINTÉTICO PASS"
-        : "CORTEX PAUSADO · HARNESS PENDENTE",
-      "badge warn"
+      executionReady
+        ? "LAB ATIVO · PILOT READY · NÃO EXECUTADO"
+        : (harnessPreflight
+          ? "LAB ATIVO · PREFLIGHT SINTÉTICO PASS"
+          : "CORTEX PAUSADO · HARNESS PENDENTE"),
+      executionReady ? "badge good" : "badge warn"
     );
     return;
   }
@@ -4324,9 +4357,11 @@ function updateKpis() {
   const operational = cortexOperationalView();
   const arenaMode = String(arena.mode || "unknown");
   const arenaLabel = operational.historicalEvidenceMode
-    ? (operational.labSimulationActive
-      ? "LAB ATIVO · F4-C PREFLIGHT"
-      : "CORTEX PAUSADO · " + (operational.phase4Checkpoint || operational.phase || "--"))
+    ? (operational.executionReady
+      ? "LAB ATIVO · F4-C READY FOR PILOT"
+      : (operational.labSimulationActive
+        ? "LAB ATIVO · F4-C PREFLIGHT"
+        : "CORTEX PAUSADO · " + (operational.phase4Checkpoint || operational.phase || "--")))
     : baselineContext
       ? "BASELINE · seed " + String(context.seed ?? "--")
       : arenaMode === "open_play"
@@ -4370,7 +4405,9 @@ function updateKpis() {
     && !researchPromotion.promoted;
   const baselineCompleted = baselineContext && context.status === "completed";
   const loopLabel = operational.historicalEvidenceMode
-    ? (operational.labSimulationActive ? "LAB ATIVO · simulação/preflight" : "PAUSADO · por desenho")
+    ? (operational.executionReady
+      ? "LAB ATIVO · pilot ready · não executado"
+      : (operational.labSimulationActive ? "LAB ATIVO · simulação/preflight" : "PAUSADO · por desenho"))
     : baselineCompleted
       ? "baseline seed completed"
       : runnerStalled
@@ -4398,9 +4435,11 @@ function updateKpis() {
   setText(
     "researchLoopDetail",
     operational.historicalEvidenceMode
-      ? (operational.labSimulationActive
-        ? "UI/replay ativo · harness sintético PASS · executor/evolution OFF · adapters reais são a fronteira atual"
-        : "no active agent process · evolution OFF · F4-C paired harness validation is the current research task")
+      ? (operational.executionReady
+        ? "UI/replay ativo · harness + 4 adapters reais PASS · executor/evolution OFF · pilot pré-registrado é a próxima fronteira controlada"
+        : (operational.labSimulationActive
+          ? "UI/replay ativo · harness sintético PASS · executor/evolution OFF · adapters reais são a fronteira atual"
+          : "no active agent process · evolution OFF · F4-C paired harness validation is the current research task"))
       : baselineCompleted
         ? "seed " + String(context.seed ?? "--")
         + " closed · " + String(research.status || context.status || "--")
@@ -4435,9 +4474,11 @@ function updateKpis() {
     setText("engineeringGoal", "F4-C · causal memory transfer benchmark");
     setText(
       "engineeringGoalDetail",
-      operational.phase4Harness.preflight_validated
-        ? "harness sintético PASS · adapters reais pendentes · memory ON vs retrieval-only ablation · held-out non-confirmatory tasks · leakage control + paired inference"
-        : "protocol frozen · harness ainda não validado · memory ON vs retrieval-only ablation · held-out non-confirmatory tasks · leakage control + paired inference"
+      operational.executionReady
+        ? "harness + adapters reais PASS · pilot ainda não executado · memory ON vs retrieval-only ablation · evaluation/confirmatory congeladas"
+        : (operational.phase4Harness.preflight_validated
+          ? "harness sintético PASS · adapters reais pendentes · memory ON vs retrieval-only ablation · held-out non-confirmatory tasks · leakage control + paired inference"
+          : "protocol frozen · harness ainda não validado · memory ON vs retrieval-only ablation · held-out non-confirmatory tasks · leakage control + paired inference")
     );
   } else if (nextGoal) {
     setText("engineeringGoal", nextGoal.label || nextGoal.goal_id || "next capability");
