@@ -180,6 +180,10 @@ def test_dashboard_separates_live_cortex_from_frozen_baseline_evidence() -> None
     assert "PILOT TASK-WORLD · SEM AUTORIDADE LIVE" in app
     assert "Pilot é instrumentation-only" in app
     assert "pilot 8/8 reviewed · evaluation runner pendente" in app
+    assert "EVAL TASK-WORLD · SEM AUTORIDADE LIVE" in app
+    assert "evaluation 20/20 · inference pending" in app
+    assert "technical_invalid sem replacement" in app
+    assert "held-out inference" in app
     assert "EXECUTION PREFLIGHT PASS · SEM AUTORIDADE" in app
     assert "F4-C · execution preflight PASS · pilot 0/8 ready" in app
     assert "harness + adapters + treatment + runner PASS · pilot 0/8 ready" in app

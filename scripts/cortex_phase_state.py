@@ -1933,6 +1933,541 @@ def build_phase_state(
     else:
         phase4_pilot_progress_status="ready"
 
+    phase4_evaluation_doc_path=(
+        state_root / "docs" / "CORTEX_PHASE4_EVALUATION_RUNNER.md"
+    )
+    phase4_evaluation_boundary_path=(
+        state_root
+        / "src"
+        / "factorio_ai_lab"
+        / "cortex"
+        / "causal_evaluation.py"
+    )
+    phase4_evaluation_inference_module_path=(
+        state_root
+        / "src"
+        / "factorio_ai_lab"
+        / "cortex"
+        / "causal_inference.py"
+    )
+    phase4_evaluation_runner_script_path=(
+        state_root / "scripts" / "run_cortex_f4c_evaluation.py"
+    )
+    phase4_evaluation_validator_path=(
+        state_root / "scripts" / "validate_cortex_f4c_evaluation_runner.py"
+    )
+    phase4_evaluation_pair_auditor_path=(
+        state_root / "scripts" / "audit_cortex_f4c_evaluation_pair.py"
+    )
+    phase4_evaluation_analyzer_path=(
+        state_root / "scripts" / "analyze_cortex_f4c_evaluation.py"
+    )
+    phase4_evaluation_tests_path=(
+        state_root / "tests" / "test_cortex_f4c_evaluation.py"
+    )
+    phase4_evaluation_runner_tests_path=(
+        state_root / "tests" / "test_cortex_f4c_evaluation_runner.py"
+    )
+    phase4_evaluation_runner_audit_path=(
+        state_root
+        / "runs"
+        / "audits"
+        / "cortex_f4c_evaluation_runner_validation.json"
+    )
+    phase4_evaluation_runner_audit=phase4_evaluation_runner_audit_path.exists()
+    phase4_evaluation_runner_payload: dict[str,Any]={}
+    phase4_evaluation_runner_error: str | None=None
+    if phase4_evaluation_runner_audit:
+        try:
+            phase4_evaluation_runner_payload=_load(
+                phase4_evaluation_runner_audit_path
+            )
+        except (OSError,json.JSONDecodeError,TypeError) as exc:
+            phase4_evaluation_runner_error=f"{type(exc).__name__}: {exc}"
+    phase4_evaluation_runner_revision=phase4_evaluation_runner_payload.get(
+        "code_revision"
+    )
+    if not isinstance(phase4_evaluation_runner_revision,dict):
+        phase4_evaluation_runner_revision={}
+    phase4_evaluation_runner_protocol=phase4_evaluation_runner_payload.get(
+        "protocol"
+    )
+    if not isinstance(phase4_evaluation_runner_protocol,dict):
+        phase4_evaluation_runner_protocol={}
+    phase4_evaluation_runner_source=phase4_evaluation_runner_payload.get(
+        "source"
+    )
+    if not isinstance(phase4_evaluation_runner_source,dict):
+        phase4_evaluation_runner_source={}
+    phase4_evaluation_runner_checks=phase4_evaluation_runner_payload.get(
+        "checks"
+    )
+    if not isinstance(phase4_evaluation_runner_checks,dict):
+        phase4_evaluation_runner_checks={}
+    phase4_evaluation_runner_claim=phase4_evaluation_runner_payload.get(
+        "claim_boundary"
+    )
+    if not isinstance(phase4_evaluation_runner_claim,dict):
+        phase4_evaluation_runner_claim={}
+    phase4_evaluation_expected_hashes={
+        "evaluation_boundary_sha256":(
+            _sha256(phase4_evaluation_boundary_path)
+            if phase4_evaluation_boundary_path.exists() else None
+        ),
+        "inference_module_sha256":(
+            _sha256(phase4_evaluation_inference_module_path)
+            if phase4_evaluation_inference_module_path.exists() else None
+        ),
+        "runner_sha256":(
+            _sha256(phase4_evaluation_runner_script_path)
+            if phase4_evaluation_runner_script_path.exists() else None
+        ),
+        "validator_sha256":(
+            _sha256(phase4_evaluation_validator_path)
+            if phase4_evaluation_validator_path.exists() else None
+        ),
+        "pair_auditor_sha256":(
+            _sha256(phase4_evaluation_pair_auditor_path)
+            if phase4_evaluation_pair_auditor_path.exists() else None
+        ),
+        "analyzer_sha256":(
+            _sha256(phase4_evaluation_analyzer_path)
+            if phase4_evaluation_analyzer_path.exists() else None
+        ),
+        "tests_sha256":(
+            _sha256(phase4_evaluation_tests_path)
+            if phase4_evaluation_tests_path.exists() else None
+        ),
+        "runner_tests_sha256":(
+            _sha256(phase4_evaluation_runner_tests_path)
+            if phase4_evaluation_runner_tests_path.exists() else None
+        ),
+        "doc_sha256":(
+            _sha256(phase4_evaluation_doc_path)
+            if phase4_evaluation_doc_path.exists() else None
+        ),
+        "treatment_module_sha256":(
+            _sha256(phase4_treatment_module_path)
+            if phase4_treatment_module_path.exists() else None
+        ),
+        "pilot_runtime_sha256":(
+            _sha256(phase4_pilot_runner_runtime_path)
+            if phase4_pilot_runner_runtime_path.exists() else None
+        ),
+        "treatment_audit_sha256":(
+            _sha256(phase4_treatment_audit_path)
+            if phase4_treatment_audit_path.exists() else None
+        ),
+        "pilot_runner_audit_sha256":(
+            _sha256(phase4_pilot_runner_audit_path)
+            if phase4_pilot_runner_audit_path.exists() else None
+        ),
+    }
+    phase4_evaluation_before=phase4_evaluation_runner_source.get(
+        "database_before"
+    )
+    if not isinstance(phase4_evaluation_before,dict):
+        phase4_evaluation_before={}
+    phase4_evaluation_after=phase4_evaluation_runner_source.get(
+        "database_after"
+    )
+    if not isinstance(phase4_evaluation_after,dict):
+        phase4_evaluation_after={}
+    phase4_evaluation_runner_valid=(
+        phase4_pilot_complete
+        and phase4_evaluation_doc_path.exists()
+        and phase4_evaluation_boundary_path.exists()
+        and phase4_evaluation_inference_module_path.exists()
+        and phase4_evaluation_runner_script_path.exists()
+        and phase4_evaluation_validator_path.exists()
+        and phase4_evaluation_pair_auditor_path.exists()
+        and phase4_evaluation_analyzer_path.exists()
+        and phase4_evaluation_tests_path.exists()
+        and phase4_evaluation_runner_tests_path.exists()
+        and phase4_evaluation_runner_audit
+        and phase4_evaluation_runner_error is None
+        and phase4_evaluation_runner_payload.get("schema_version")
+        =="cortex_f4c_evaluation_runner_validation_v1"
+        and phase4_evaluation_runner_payload.get("status")=="pass"
+        and phase4_evaluation_runner_payload.get("mode")
+        =="evaluation_runner_dry_run"
+        and phase4_evaluation_runner_revision.get("dirty") is False
+        and isinstance(
+            phase4_evaluation_runner_revision.get("commit"),str
+        )
+        and bool(phase4_evaluation_runner_revision.get("commit"))
+        and phase4_evaluation_runner_protocol.get("protocol_id")
+        =="cortex-f4c-memory-ablation-transfer-v1"
+        and phase4_evaluation_runner_protocol.get("manifest_file_sha256")
+        ==phase4_causal_manifest_sha
+        and phase4_evaluation_runner_protocol.get("manifest_sha256")
+        ==phase4_causal_protocol.get("manifest_sha256")
+        and phase4_evaluation_before==phase4_evaluation_after
+        and phase4_evaluation_before.get("manifest_sha256")
+        ==phase4_retrieval_before.get("manifest_sha256")
+        and phase4_evaluation_before.get("item_count")
+        ==phase4_retrieval_before.get("item_count")
+        and phase4_evaluation_before.get("occurrence_count")
+        ==phase4_retrieval_before.get("occurrence_count")
+        and all(
+            phase4_evaluation_runner_source.get(key)==value
+            for key,value in phase4_evaluation_expected_hashes.items()
+        )
+        and bool(phase4_evaluation_runner_checks)
+        and all(
+            value is True
+            for value in phase4_evaluation_runner_checks.values()
+        )
+        and (
+            phase4_evaluation_runner_payload.get("authority") or {}
+        ).get("world_mutation") is False
+        and (
+            phase4_evaluation_runner_payload.get("authority") or {}
+        ).get("factorio_rcon_used") is False
+        and (
+            phase4_evaluation_runner_payload.get("authority") or {}
+        ).get("fle_environment_created") is False
+        and (
+            phase4_evaluation_runner_payload.get("authority") or {}
+        ).get("world_lease_acquired") is False
+        and (
+            phase4_evaluation_runner_payload.get("authority") or {}
+        ).get("continuous_authority") is False
+        and (
+            phase4_evaluation_runner_payload.get("authority") or {}
+        ).get("evaluation_seed_executed") is False
+        and (
+            phase4_evaluation_runner_payload.get("authority") or {}
+        ).get("confirmatory_seed_executed") is False
+        and phase4_evaluation_runner_claim.get(
+            "heldout_specs_executed_in_validation"
+        ) is False
+        and phase4_evaluation_runner_claim.get(
+            "pilot_outcomes_used_for_adaptation"
+        ) is False
+        and phase4_evaluation_runner_claim.get(
+            "inference_code_frozen_before_outcomes"
+        ) is True
+    )
+
+    phase4_evaluation_raw_seeds=phase4_manifest_partitions.get("evaluation")
+    phase4_evaluation_seeds=(
+        tuple(int(value) for value in phase4_evaluation_raw_seeds)
+        if isinstance(phase4_evaluation_raw_seeds,list)
+        else ()
+    )
+    phase4_evaluation_rows: list[dict[str,Any]]=[]
+    phase4_evaluation_progress_errors: list[str]=[]
+    phase4_evaluation_hard_fail_seeds: list[int]=[]
+    for evaluation_index,evaluation_seed in enumerate(
+        phase4_evaluation_seeds,start=1
+    ):
+        evaluation_dir=(
+            state_root/"runs"/"f4c_evaluation"/str(evaluation_seed)
+        )
+        pair_path=evaluation_dir/"pair.json"
+        review_path=evaluation_dir/"review.json"
+        pair_exists=pair_path.exists()
+        review_exists=review_path.exists()
+        pair_payload: dict[str,Any]={}
+        review_payload: dict[str,Any]={}
+        pair_error: str | None=None
+        review_error: str | None=None
+        if pair_exists:
+            try:
+                pair_payload=_load(pair_path)
+            except (OSError,json.JSONDecodeError,TypeError) as exc:
+                pair_error=f"{type(exc).__name__}: {exc}"
+        if review_exists:
+            try:
+                review_payload=_load(review_path)
+            except (OSError,json.JSONDecodeError,TypeError) as exc:
+                review_error=f"{type(exc).__name__}: {exc}"
+        pair_sha=(
+            _sha256(pair_path)
+            if pair_exists and pair_error is None else None
+        )
+        pair_claim=pair_payload.get("claim_boundary")
+        if not isinstance(pair_claim,dict):
+            pair_claim={}
+        pair_revision=pair_payload.get("code_revision")
+        if not isinstance(pair_revision,dict):
+            pair_revision={}
+        pair_valid=(
+            pair_exists
+            and pair_error is None
+            and pair_payload.get("schema_version")
+            =="cortex_f4c_evaluation_pair_v1"
+            and pair_payload.get("status")=="completed"
+            and pair_payload.get("seed")==evaluation_seed
+            and isinstance(pair_payload.get("task_id"),str)
+            and pair_payload.get("live_factorio_world") is False
+            and pair_payload.get("factorio_rcon_used") is False
+            and pair_payload.get("fle_environment_created") is False
+            and pair_payload.get("world_lease_acquired") is False
+            and pair_payload.get("continuous_authority") is False
+            and pair_payload.get("automatic_retry") is False
+            and pair_revision.get("dirty") is False
+            and pair_revision.get("commit")
+            ==phase4_evaluation_runner_revision.get("commit")
+            and pair_claim.get("evaluation_only") is True
+            and pair_claim.get("primary_f4c_inference") is True
+            and pair_claim.get("pilot_evidence_reused") is False
+            and pair_claim.get("confirmatory_seed_executed") is False
+        )
+        review_claim=review_payload.get("claim_boundary")
+        if not isinstance(review_claim,dict):
+            review_claim={}
+        review_status=review_payload.get("status")
+        review_accepted=review_status in {"pass","technical_invalid"}
+        review_valid=(
+            pair_valid
+            and review_exists
+            and review_error is None
+            and review_payload.get("schema_version")
+            =="cortex_f4c_evaluation_pair_review_v1"
+            and review_accepted
+            and review_payload.get("seed")==evaluation_seed
+            and review_payload.get("pair_artifact_sha256")==pair_sha
+            and review_claim.get(
+                "outcome_dependent_exclusion_forbidden"
+            ) is True
+            and review_claim.get("replacement_seed_forbidden") is True
+            and review_claim.get("pilot_evidence_reused") is False
+            and review_claim.get(
+                "confirmatory_partition_untouched"
+            ) is True
+            and review_claim.get("primary_f4c_inference")
+            is (review_status=="pass")
+            and review_payload.get("valid_for_primary_inference")
+            is (review_status=="pass")
+        )
+        if pair_error is not None:
+            phase4_evaluation_progress_errors.append(
+                f"{evaluation_seed}:pair_read_error:{pair_error}"
+            )
+        if review_error is not None:
+            phase4_evaluation_progress_errors.append(
+                f"{evaluation_seed}:review_read_error:{review_error}"
+            )
+        if pair_exists and not pair_valid:
+            phase4_evaluation_progress_errors.append(
+                f"{evaluation_seed}:pair_invalid"
+            )
+        if review_exists and review_status=="fail":
+            phase4_evaluation_hard_fail_seeds.append(evaluation_seed)
+            phase4_evaluation_progress_errors.append(
+                f"{evaluation_seed}:review_fail"
+            )
+        elif review_exists and not review_valid:
+            phase4_evaluation_progress_errors.append(
+                f"{evaluation_seed}:review_invalid"
+            )
+        phase4_evaluation_rows.append({
+            "position":evaluation_index,
+            "seed":evaluation_seed,
+            "pair_path":str(pair_path),
+            "pair_exists":pair_exists,
+            "pair_valid":pair_valid,
+            "pair_sha256":pair_sha,
+            "pair_read_error":pair_error,
+            "review_path":str(review_path),
+            "review_exists":review_exists,
+            "review_status":review_status,
+            "review_valid":review_valid,
+            "valid_for_primary_inference":(
+                review_status=="pass" and review_valid
+            ),
+            "technical_invalid":(
+                review_status=="technical_invalid" and review_valid
+            ),
+            "delta_J":(
+                review_payload.get("delta_J")
+                if review_status=="pass" and review_valid
+                else None
+            ),
+            "family":review_payload.get("family"),
+            "review_read_error":review_error,
+        })
+
+    phase4_evaluation_pair_count=sum(
+        1 for row in phase4_evaluation_rows if row["pair_exists"]
+    )
+    phase4_evaluation_reviewed_count=sum(
+        1 for row in phase4_evaluation_rows if row["review_valid"]
+    )
+    phase4_evaluation_valid_primary_count=sum(
+        1
+        for row in phase4_evaluation_rows
+        if row["valid_for_primary_inference"]
+    )
+    phase4_evaluation_technical_invalid_count=sum(
+        1 for row in phase4_evaluation_rows if row["technical_invalid"]
+    )
+    phase4_evaluation_total=len(phase4_evaluation_rows)
+    phase4_evaluation_first_gap=None
+    for index,row in enumerate(phase4_evaluation_rows):
+        if not row["review_valid"]:
+            phase4_evaluation_first_gap=index
+            break
+    phase4_evaluation_out_of_order: list[int]=[]
+    if phase4_evaluation_first_gap is not None:
+        for row in phase4_evaluation_rows[phase4_evaluation_first_gap+1:]:
+            if row["pair_exists"] or row["review_exists"]:
+                phase4_evaluation_out_of_order.append(int(row["seed"]))
+    if phase4_evaluation_out_of_order:
+        phase4_evaluation_progress_errors.append(
+            "future_evaluation_evidence_out_of_order:"
+            +",".join(map(str,phase4_evaluation_out_of_order))
+        )
+
+    phase4_evaluation_awaiting_review_seed=None
+    phase4_evaluation_next_seed=None
+    if phase4_evaluation_first_gap is not None:
+        first_gap_row=phase4_evaluation_rows[phase4_evaluation_first_gap]
+        if first_gap_row["pair_exists"]:
+            phase4_evaluation_awaiting_review_seed=int(
+                first_gap_row["seed"]
+            )
+        else:
+            phase4_evaluation_next_seed=int(first_gap_row["seed"])
+    phase4_evaluation_complete=(
+        phase4_evaluation_total==20
+        and phase4_evaluation_reviewed_count==phase4_evaluation_total
+        and not phase4_evaluation_hard_fail_seeds
+    )
+    phase4_evaluation_progress_valid=(
+        phase4_evaluation_total==20
+        and not phase4_evaluation_progress_errors
+        and not phase4_evaluation_out_of_order
+        and not phase4_evaluation_hard_fail_seeds
+    )
+    phase4_evaluation_seed_launch_allowed=(
+        phase4_evaluation_runner_valid
+        and phase4_evaluation_progress_valid
+        and phase4_evaluation_awaiting_review_seed is None
+        and phase4_evaluation_next_seed is not None
+        and not phase4_evaluation_complete
+    )
+    if not phase4_evaluation_runner_valid:
+        phase4_evaluation_progress_status="not_ready"
+    elif not phase4_evaluation_progress_valid:
+        phase4_evaluation_progress_status="invalid"
+    elif phase4_evaluation_complete:
+        phase4_evaluation_progress_status="complete"
+    elif phase4_evaluation_awaiting_review_seed is not None:
+        phase4_evaluation_progress_status="awaiting_review"
+    elif phase4_evaluation_reviewed_count>0:
+        phase4_evaluation_progress_status="in_progress"
+    else:
+        phase4_evaluation_progress_status="ready"
+
+    phase4_inference_path=(
+        state_root
+        / "runs"
+        / "audits"
+        / "cortex_f4c_evaluation_inference.json"
+    )
+    phase4_inference_exists=phase4_inference_path.exists()
+    phase4_inference_payload: dict[str,Any]={}
+    phase4_inference_error: str | None=None
+    if phase4_inference_exists:
+        try:
+            phase4_inference_payload=_load(phase4_inference_path)
+        except (OSError,json.JSONDecodeError,TypeError) as exc:
+            phase4_inference_error=f"{type(exc).__name__}: {exc}"
+    phase4_inference_protocol=phase4_inference_payload.get("protocol")
+    if not isinstance(phase4_inference_protocol,dict):
+        phase4_inference_protocol={}
+    phase4_inference_lock=phase4_inference_payload.get("semantic_lock")
+    if not isinstance(phase4_inference_lock,dict):
+        phase4_inference_lock={}
+    phase4_inference_claim=phase4_inference_payload.get("claim_boundary")
+    if not isinstance(phase4_inference_claim,dict):
+        phase4_inference_claim={}
+    phase4_primary_inference=phase4_inference_payload.get("primary_inference")
+    if not isinstance(phase4_primary_inference,dict):
+        phase4_primary_inference={}
+    phase4_inference_provenance=phase4_inference_payload.get("provenance")
+    if not isinstance(phase4_inference_provenance,list):
+        phase4_inference_provenance=[]
+    phase4_inference_provenance_valid=(
+        len(phase4_inference_provenance)==phase4_evaluation_total==20
+        and all(
+            isinstance(prov,dict)
+            and prov.get("seed")==row["seed"]
+            and prov.get("pair_sha256")==row["pair_sha256"]
+            and (
+                (
+                    state_root
+                    / "runs"
+                    / "f4c_evaluation"
+                    / str(row["seed"])
+                    / "review.json"
+                ).exists()
+            )
+            and prov.get("review_sha256")
+            ==_sha256(
+                state_root
+                / "runs"
+                / "f4c_evaluation"
+                / str(row["seed"])
+                / "review.json"
+            )
+            and prov.get("review_status")==row["review_status"]
+            for prov,row in zip(
+                phase4_inference_provenance,
+                phase4_evaluation_rows,
+                strict=True,
+            )
+        )
+    )
+    phase4_inference_valid=(
+        phase4_evaluation_complete
+        and phase4_inference_exists
+        and phase4_inference_error is None
+        and phase4_inference_payload.get("schema_version")
+        =="cortex_f4c_evaluation_inference_v1"
+        and phase4_inference_payload.get("status")=="pass"
+        and phase4_inference_protocol.get("protocol_id")
+        =="cortex-f4c-memory-ablation-transfer-v1"
+        and phase4_inference_protocol.get("manifest_file_sha256")
+        ==phase4_causal_manifest_sha
+        and phase4_inference_protocol.get("manifest_sha256")
+        ==phase4_causal_protocol.get("manifest_sha256")
+        and phase4_inference_lock.get("treatment_module_sha256")
+        ==phase4_evaluation_expected_hashes["treatment_module_sha256"]
+        and phase4_inference_lock.get("pilot_runtime_sha256")
+        ==phase4_evaluation_expected_hashes["pilot_runtime_sha256"]
+        and phase4_inference_payload.get("evaluation_pair_count")==20
+        and phase4_inference_provenance_valid
+        and phase4_inference_claim.get("pilot_rows_included") is False
+        and phase4_inference_claim.get("confirmatory_rows_included") is False
+        and phase4_inference_claim.get("outcome_dependent_exclusion") is False
+        and phase4_inference_claim.get("replacement_seeds_used") is False
+        and phase4_inference_claim.get("fixed_sample_stopping_rule") is True
+        and phase4_primary_inference.get("valid_pair_count")
+        ==phase4_evaluation_valid_primary_count
+        and phase4_primary_inference.get("decision")
+        in {"positive","not_positive","inconclusive"}
+    )
+    phase4_causal_positive=(
+        phase4_inference_valid
+        and phase4_primary_inference.get(
+            "positive_causal_memory_result"
+        ) is True
+        and phase4_primary_inference.get("decision")=="positive"
+    )
+    phase4_exit_gate_valid=(
+        phase4_memory_valid
+        and phase4_retrieval_valid
+        and phase4_causal_positive
+    )
+    phase4_any_seed_launch_allowed=(
+        phase4_pilot_seed_launch_allowed
+        or phase4_evaluation_seed_launch_allowed
+    )
+
     phase2_delivery_actuator_canary_path=(
         state_root
         / "runs"
@@ -2189,13 +2724,7 @@ def build_phase_state(
                 f"{phase4_pilot_awaiting_review_seed} before any later pilot; "
                 "evaluation and confirmatory remain frozen"
             )
-        elif phase4_pilot_complete:
-            action=(
-                "F4-C pilot instrumentation complete 8/8 with PASS reviews; "
-                "freeze pilot outcomes against adaptation and implement/validate "
-                "the held-out evaluation runner before any evaluation seed"
-            )
-        elif phase4_pilot_next_seed is not None:
+        elif not phase4_pilot_complete and phase4_pilot_next_seed is not None:
             action=(
                 "F4-C pilot progress "
                 f"{phase4_pilot_reviewed_count}/{phase4_pilot_total} reviewed; "
@@ -2203,10 +2732,50 @@ def build_phase_state(
                 f"seed {phase4_pilot_next_seed}; evaluation and confirmatory "
                 "remain frozen"
             )
+        elif phase4_pilot_complete and not phase4_evaluation_runner_valid:
+            action=(
+                "F4-C pilot instrumentation complete 8/8 with PASS reviews; "
+                "freeze pilot outcomes against adaptation and implement/validate "
+                "the held-out evaluation runner before any evaluation seed"
+            )
+        elif not phase4_evaluation_progress_valid:
+            action=(
+                "halt F4-C held-out evaluation: canonical evaluation evidence "
+                "is invalid, failed integrity review, or is out of order"
+            )
+        elif phase4_evaluation_awaiting_review_seed is not None:
+            action=(
+                "audit held-out evaluation seed "
+                f"{phase4_evaluation_awaiting_review_seed} before any later "
+                "evaluation seed; no replacement seed is allowed"
+            )
+        elif (
+            not phase4_evaluation_complete
+            and phase4_evaluation_next_seed is not None
+        ):
+            action=(
+                "F4-C held-out evaluation progress "
+                f"{phase4_evaluation_reviewed_count}/"
+                f"{phase4_evaluation_total} reviewed; next controlled action "
+                "is exactly evaluation seed "
+                f"{phase4_evaluation_next_seed}; confirmatory remains frozen"
+            )
+        elif phase4_evaluation_complete and not phase4_inference_valid:
+            action=(
+                "F4-C held-out evaluation 20/20 reviewed; compute the single "
+                "preregistered exact primary inference artifact without "
+                "executing confirmatory seeds"
+            )
+        elif phase4_inference_valid:
+            action=(
+                "F4-C held-out inference complete with decision "
+                f"{phase4_primary_inference.get('decision')}; confirmatory seeds "
+                "remain frozen and no further experimental seed is authorized"
+            )
         else:
             action=(
-                "F4-C execution preflight PASS but no next pilot seed can be "
-                "resolved; halt before experimental execution"
+                "F4-C execution state has no authorized next action; halt "
+                "before experimental execution"
             )
     elif phase4_treatment_valid:
         action=(
@@ -2303,7 +2872,7 @@ def build_phase_state(
 
     if phase4_retrieval_valid or phase4_memory_valid:
         phase_name="F4"
-        phase_status="active"
+        phase_status="complete" if phase4_exit_gate_valid else "active"
     elif phase3_comparison_valid:
         phase_name="F3"
         phase_status="complete"
@@ -2344,12 +2913,22 @@ def build_phase_state(
         },
         "phase2_checkpoint":phase2_checkpoint,
         "phase4_checkpoint":(
-            "F4-B"
-            if phase4_retrieval_valid
-            else ("F4-A" if phase4_memory_valid else None)
+            "F4-C"
+            if phase4_exit_gate_valid
+            else (
+                "F4-B"
+                if phase4_retrieval_valid
+                else ("F4-A" if phase4_memory_valid else None)
+            )
         ),
         "phase4_next_checkpoint":(
-            "F4-C" if phase4_retrieval_valid else ("F4-B" if phase4_memory_valid else "F4-A")
+            None
+            if phase4_exit_gate_valid
+            else (
+                "F4-C"
+                if phase4_retrieval_valid
+                else ("F4-B" if phase4_memory_valid else "F4-A")
+            )
         ),
         "phase4_causal_protocol":{
             "document_path":str(phase4_causal_doc_path),
@@ -2467,133 +3046,236 @@ def build_phase_state(
                 "confirmatory_partition_frozen":True,
             },
         },
+        "phase4_evaluation_runner":{
+            "document_path":str(phase4_evaluation_doc_path),
+            "runner_path":str(phase4_evaluation_runner_script_path),
+            "validator_path":str(phase4_evaluation_validator_path),
+            "pair_auditor_path":str(phase4_evaluation_pair_auditor_path),
+            "analyzer_path":str(phase4_evaluation_analyzer_path),
+            "audit_path":str(phase4_evaluation_runner_audit_path),
+            "audit_exists":phase4_evaluation_runner_audit,
+            "validated":phase4_evaluation_runner_valid,
+            "code_commit":phase4_evaluation_runner_revision.get("commit"),
+            "checks":phase4_evaluation_runner_checks,
+            "read_error":phase4_evaluation_runner_error,
+        },
+        "phase4_evaluation_progress":{
+            "status":phase4_evaluation_progress_status,
+            "total":phase4_evaluation_total,
+            "pair_count":phase4_evaluation_pair_count,
+            "reviewed_count":phase4_evaluation_reviewed_count,
+            "valid_primary_count":phase4_evaluation_valid_primary_count,
+            "technical_invalid_count":phase4_evaluation_technical_invalid_count,
+            "complete":phase4_evaluation_complete,
+            "valid":phase4_evaluation_progress_valid,
+            "seed_launch_allowed":phase4_evaluation_seed_launch_allowed,
+            "next_seed":phase4_evaluation_next_seed,
+            "awaiting_review_seed":phase4_evaluation_awaiting_review_seed,
+            "hard_fail_seeds":phase4_evaluation_hard_fail_seeds,
+            "out_of_order_seeds":phase4_evaluation_out_of_order,
+            "errors":phase4_evaluation_progress_errors,
+            "rows":phase4_evaluation_rows,
+            "claim_boundary":{
+                "primary_f4c_inference":True,
+                "pilot_evidence_reused":False,
+                "replacement_seed_forbidden":True,
+                "confirmatory_partition_frozen":True,
+            },
+        },
+        "phase4_evaluation_inference":{
+            "path":str(phase4_inference_path),
+            "exists":phase4_inference_exists,
+            "validated":phase4_inference_valid,
+            "decision":phase4_primary_inference.get("decision"),
+            "sample_sufficient":phase4_primary_inference.get(
+                "sample_sufficient"
+            ),
+            "valid_pair_count":phase4_primary_inference.get(
+                "valid_pair_count"
+            ),
+            "family_valid_counts":phase4_primary_inference.get(
+                "family_valid_counts"
+            ),
+            "mean_delta_J":phase4_primary_inference.get("mean_delta_J"),
+            "median_delta_J":phase4_primary_inference.get("median_delta_J"),
+            "paired_cohens_dz":phase4_primary_inference.get(
+                "paired_cohens_dz"
+            ),
+            "one_sided_exact_p":phase4_primary_inference.get(
+                "one_sided_exact_p"
+            ),
+            "confidence_set_95pct":phase4_primary_inference.get(
+                "confidence_set_95pct"
+            ),
+            "sesoi_delta_J":phase4_primary_inference.get("sesoi_delta_J"),
+            "positive_causal_memory_result":phase4_primary_inference.get(
+                "positive_causal_memory_result"
+            ),
+            "read_error":phase4_inference_error,
+        },
         "phase4_exit_gate":{
             "memory_substrate":phase4_memory_valid,
             "hybrid_retrieval_consolidation_decay":phase4_retrieval_valid,
-            "causal_memory_ablation_transfer":False,
-            "validated":False,
+            "causal_memory_ablation_transfer":phase4_causal_positive,
+            "validated":phase4_exit_gate_valid,
         },
         "phase4_blocker":{
             "code":(
-                (
-                    "causal_transfer_pilot_progress_invalid"
-                    if not phase4_pilot_progress_valid
-                    else (
-                        "causal_transfer_pilot_review_pending"
-                        if phase4_pilot_awaiting_review_seed is not None
+                None
+                if phase4_exit_gate_valid
+                else (
+                    (
+                        "causal_transfer_pilot_progress_invalid"
+                        if not phase4_pilot_progress_valid
                         else (
-                            "causal_transfer_evaluation_runner_not_validated"
-                            if phase4_pilot_complete
+                            "causal_transfer_pilot_review_pending"
+                            if phase4_pilot_awaiting_review_seed is not None
                             else (
-                                "causal_transfer_pilot_in_progress"
-                                if phase4_pilot_reviewed_count>0
-                                else "causal_transfer_pilot_not_executed"
+                                (
+                                    "causal_transfer_pilot_in_progress"
+                                    if phase4_pilot_reviewed_count>0
+                                    else "causal_transfer_pilot_not_executed"
+                                )
+                                if not phase4_pilot_complete
+                                else (
+                                    "causal_transfer_evaluation_runner_not_validated"
+                                    if not phase4_evaluation_runner_valid
+                                    else (
+                                        "causal_transfer_evaluation_progress_invalid"
+                                        if not phase4_evaluation_progress_valid
+                                        else (
+                                            "causal_transfer_evaluation_review_pending"
+                                            if phase4_evaluation_awaiting_review_seed
+                                            is not None
+                                            else (
+                                                "causal_transfer_evaluation_in_progress"
+                                                if not phase4_evaluation_complete
+                                                and phase4_evaluation_reviewed_count>0
+                                                else (
+                                                    "causal_transfer_evaluation_not_executed"
+                                                    if not phase4_evaluation_complete
+                                                    else (
+                                                        "causal_transfer_inference_not_computed"
+                                                        if not phase4_inference_valid
+                                                        else (
+                                                            "causal_transfer_inconclusive"
+                                                            if phase4_primary_inference.get(
+                                                                "decision"
+                                                            )=="inconclusive"
+                                                            else "causal_transfer_effect_not_established"
+                                                        )
+                                                    )
+                                                )
+                                            )
+                                        )
+                                    )
+                                )
                             )
                         )
                     )
-                )
-                if phase4_execution_ready
-                else (
-                    "causal_transfer_pilot_runner_not_validated"
-                    if phase4_treatment_valid
+                    if phase4_execution_ready
                     else (
-                        "causal_transfer_treatment_not_validated"
-                        if phase4_real_task_adapters_valid
+                        "causal_transfer_pilot_runner_not_validated"
+                        if phase4_treatment_valid
                         else (
-                            "causal_transfer_real_task_adapters_not_validated"
-                            if phase4_harness_preflight_valid
+                            "causal_transfer_treatment_not_validated"
+                            if phase4_real_task_adapters_valid
                             else (
-                                "causal_transfer_evaluation_harness_not_validated"
-                                if phase4_causal_protocol_valid
-                                else "causal_transfer_protocol_not_frozen"
+                                "causal_transfer_real_task_adapters_not_validated"
+                                if phase4_harness_preflight_valid
+                                else (
+                                    "causal_transfer_evaluation_harness_not_validated"
+                                    if phase4_causal_protocol_valid
+                                    else "causal_transfer_protocol_not_frozen"
+                                )
                             )
                         )
                     )
                 )
             ),
             "status":(
-                "blocked"
-                if phase4_retrieval_valid
-                else "not_reached"
+                "clear"
+                if phase4_exit_gate_valid
+                else ("blocked" if phase4_retrieval_valid else "not_reached")
             ),
             "detail":(
-                (
-                    (
-                        "F4-C pilot evidence is invalid or out of order. No later "
-                        "pilot/evaluation/confirmatory seed is authorized."
-                    )
-                    if not phase4_pilot_progress_valid
-                    else (
-                        (
-                            "Pilot pair "
-                            f"{phase4_pilot_awaiting_review_seed} exists but has "
-                            "no canonical PASS review. Audit it before any later "
-                            "pilot; evaluation and confirmatory remain frozen."
-                        )
-                        if phase4_pilot_awaiting_review_seed is not None
-                        else (
-                            (
-                                "All 8 preregistered pilot pairs have canonical "
-                                "PASS reviews. Pilot evidence remains instrumentation-"
-                                "only and excluded from primary F4-C inference. "
-                                "Held-out evaluation runner is not yet validated."
-                            )
-                            if phase4_pilot_complete
-                            else (
-                                (
-                                    "F4-C pilot is in progress with "
-                                    f"{phase4_pilot_reviewed_count}/"
-                                    f"{phase4_pilot_total} pairs PASS-reviewed. "
-                                    f"Next eligible seed is {phase4_pilot_next_seed}; "
-                                    "evaluation and confirmatory remain frozen."
-                                )
-                                if phase4_pilot_reviewed_count>0
-                                else (
-                                    "Harness, real adapters, treatment semantics "
-                                    "and pilot runner passed preflight. Pilot is "
-                                    "0/8; evaluation and confirmatory remain frozen."
-                                )
-                            )
-                        )
-                    )
-                )
-                if phase4_execution_ready
+                "F4-C causal memory transfer PASS under the frozen held-out "
+                "primary inference; confirmatory seeds remain frozen."
+                if phase4_exit_gate_valid
                 else (
                     (
-                        "Memory treatment semantics passed: retrieval can affect "
-                        "ranking while candidate generation remains frozen. The "
-                        "protocol pilot runner is not yet validated; do not execute "
-                        "any pilot seed."
+                        "Pilot evidence ledger is invalid or out of order."
+                        if not phase4_pilot_progress_valid
+                        else (
+                            "Pilot pair review is pending before any later seed."
+                            if phase4_pilot_awaiting_review_seed is not None
+                            else (
+                                "F4-C pilot instrumentation is still in progress."
+                                if not phase4_pilot_complete
+                                else (
+                                    "Pilot 8/8 is frozen instrumentation-only; "
+                                    "held-out evaluation runner is not validated."
+                                    if not phase4_evaluation_runner_valid
+                                    else (
+                                        "Held-out evaluation evidence is invalid, "
+                                        "hard-failed, or out of fixed order."
+                                        if not phase4_evaluation_progress_valid
+                                        else (
+                                            "Held-out evaluation pair review is "
+                                            "pending before any later fixed seed."
+                                            if phase4_evaluation_awaiting_review_seed
+                                            is not None
+                                            else (
+                                                (
+                                                    "F4-C held-out evaluation is "
+                                                    f"{phase4_evaluation_reviewed_count}/"
+                                                    f"{phase4_evaluation_total} reviewed; "
+                                                    f"next fixed seed is "
+                                                    f"{phase4_evaluation_next_seed}."
+                                                )
+                                                if not phase4_evaluation_complete
+                                                else (
+                                                    "All 20 held-out pairs are "
+                                                    "reviewed; preregistered primary "
+                                                    "inference has not been computed."
+                                                    if not phase4_inference_valid
+                                                    else (
+                                                        "Held-out evaluation is "
+                                                        "inconclusive under the "
+                                                        "minimum valid-pair rule."
+                                                        if phase4_primary_inference.get(
+                                                            "decision"
+                                                        )=="inconclusive"
+                                                        else (
+                                                            "Held-out primary "
+                                                            "inference completed but "
+                                                            "the preregistered positive "
+                                                            "causal-memory rule was not "
+                                                            "satisfied."
+                                                        )
+                                                    )
+                                                )
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                        )
                     )
-                    if phase4_treatment_valid
+                    if phase4_execution_ready
                     else (
                         (
-                            "Real adapters passed component readiness, but treatment "
-                            "semantics must pass before pilot execution."
+                            "Memory treatment semantics passed but pilot runner "
+                            "readiness is not validated."
                         )
-                        if phase4_real_task_adapters_valid
+                        if phase4_treatment_valid
                         else (
                             (
-                                "F4-C paired harness passed synthetic preflight. "
-                                "Real task adapters remain unvalidated; do not launch "
-                                "pilot or evaluation seeds."
-                            )
-                            if phase4_harness_preflight_valid
-                            else (
-                                (
-                                    "F4-C protocol is frozen but the paired evaluation "
-                                    "harness is not validated. Do not launch seeds."
-                                )
-                                if phase4_causal_protocol_valid
-                                else (
-                                    (
-                                        "F4-C causal protocol is not frozen and eligible. "
-                                        "Confirmatory seeds remain frozen."
-                                    )
-                                    if phase4_retrieval_valid
-                                    else None
-                                )
-                            )
+                            "F4-C pre-experimental causal gates remain incomplete. "
+                            "Confirmatory seeds remain frozen."
+                        )
+                            if phase4_retrieval_valid
+                            else None
                         )
                     )
                 )
@@ -3120,7 +3802,7 @@ def build_phase_state(
                 or blocked_release
                 or (
                     phase2_exit_gate_valid
-                    and not phase4_pilot_seed_launch_allowed
+                    and not phase4_any_seed_launch_allowed
                 )
             ),
         },

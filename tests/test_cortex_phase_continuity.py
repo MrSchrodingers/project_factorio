@@ -2444,6 +2444,334 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
     (future_dir/"pair.json").unlink()
     future_dir.rmdir()
 
+    # Complete the remaining pilot instrumentation without changing semantics.
+    for seed in range(20261202,20261209):
+        pilot_dir=tmp_path/"runs"/"f4c_pilot"/str(seed)
+        pilot_dir.mkdir(parents=True,exist_ok=True)
+        pair_path=pilot_dir/"pair.json"
+        pair_path.write_text(json.dumps({
+            **first_pair_payload,
+            "seed":seed,
+            "task_id":f"pilot:fixture:{seed}",
+        })+"\n")
+        (pilot_dir/"review.json").write_text(json.dumps({
+            "schema_version":"cortex_f4c_pilot_pair_review_v1",
+            "status":"pass",
+            "seed":seed,
+            "pair_artifact_sha256":module._sha256(pair_path),
+            "claim_boundary":{
+                "instrumentation_only":True,
+                "variance_adaptation_forbidden":True,
+                "primary_f4c_inference":False,
+                "evaluation_partition_untouched":True,
+                "confirmatory_partition_untouched":True,
+            },
+        })+"\n")
+    pilot_complete=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert pilot_complete["phase4_pilot_progress"]["complete"] is True
+    assert pilot_complete["phase4_pilot_progress"]["reviewed_count"]==8
+    assert (
+        pilot_complete["phase4_blocker"]["code"]
+        =="causal_transfer_evaluation_runner_not_validated"
+    )
+
+    eval_doc=docs/"CORTEX_PHASE4_EVALUATION_RUNNER.md"
+    eval_doc.write_text("# evaluation runner fixture\n")
+    eval_boundary=(
+        tmp_path/"src"/"factorio_ai_lab"/"cortex"/"causal_evaluation.py"
+    )
+    eval_boundary.write_text("# evaluation boundary fixture\n")
+    eval_inference_module=(
+        tmp_path/"src"/"factorio_ai_lab"/"cortex"/"causal_inference.py"
+    )
+    eval_inference_module.write_text("# inference fixture\n")
+    eval_runner=tmp_path/"scripts"/"run_cortex_f4c_evaluation.py"
+    eval_runner.write_text("# runner fixture\n")
+    eval_validator=(
+        tmp_path/"scripts"/"validate_cortex_f4c_evaluation_runner.py"
+    )
+    eval_validator.write_text("# validator fixture\n")
+    eval_pair_auditor=(
+        tmp_path/"scripts"/"audit_cortex_f4c_evaluation_pair.py"
+    )
+    eval_pair_auditor.write_text("# pair auditor fixture\n")
+    eval_analyzer=tmp_path/"scripts"/"analyze_cortex_f4c_evaluation.py"
+    eval_analyzer.write_text("# analyzer fixture\n")
+    eval_tests=tmp_path/"tests"/"test_cortex_f4c_evaluation.py"
+    eval_tests.write_text("# evaluation tests fixture\n")
+    eval_runner_tests=(
+        tmp_path/"tests"/"test_cortex_f4c_evaluation_runner.py"
+    )
+    eval_runner_tests.write_text("# evaluation runner tests fixture\n")
+
+    eval_runner_payload={
+        "schema_version":"cortex_f4c_evaluation_runner_validation_v1",
+        "status":"pass",
+        "mode":"evaluation_runner_dry_run",
+        "code_revision":{
+            "commit":"f4c-eval-runner-sha",
+            "branch":"research/cortex-v1",
+            "dirty":False,
+        },
+        "protocol":{
+            "protocol_id":"cortex-f4c-memory-ablation-transfer-v1",
+            "manifest_file_sha256":f4c_manifest_file_sha,
+            "manifest_sha256":"b"*64,
+        },
+        "source":{
+            "evaluation_boundary_sha256":module._sha256(eval_boundary),
+            "inference_module_sha256":module._sha256(eval_inference_module),
+            "runner_sha256":module._sha256(eval_runner),
+            "validator_sha256":module._sha256(eval_validator),
+            "pair_auditor_sha256":module._sha256(eval_pair_auditor),
+            "analyzer_sha256":module._sha256(eval_analyzer),
+            "tests_sha256":module._sha256(eval_tests),
+            "runner_tests_sha256":module._sha256(eval_runner_tests),
+            "doc_sha256":module._sha256(eval_doc),
+            "treatment_module_sha256":module._sha256(treatment_module),
+            "pilot_runtime_sha256":module._sha256(pilot_runtime),
+            "treatment_audit_sha256":module._sha256(treatment_audit),
+            "pilot_runner_audit_sha256":module._sha256(pilot_runner_audit),
+            "database_before":database_snapshot,
+            "database_after":database_snapshot,
+        },
+        "checks":{
+            "pilot_instrumentation_complete_8_of_8":True,
+            "frozen_treatment_hash_unchanged":True,
+            "frozen_runtime_hash_unchanged":True,
+            "four_independent_preflight_pairs_valid":True,
+            "evaluation_seed_mapping_exact_20":True,
+            "evaluation_schedule_matches_frozen_counterbalance":True,
+            "no_evaluation_artifact_exists":True,
+            "exact_inference_frozen_before_outcomes":True,
+        },
+        "authority":{
+            "world_mutation":False,
+            "factorio_rcon_used":False,
+            "fle_environment_created":False,
+            "world_lease_acquired":False,
+            "continuous_authority":False,
+            "evaluation_seed_executed":False,
+            "confirmatory_seed_executed":False,
+        },
+        "claim_boundary":{
+            "heldout_specs_executed_in_validation":False,
+            "pilot_outcomes_used_for_adaptation":False,
+            "inference_code_frozen_before_outcomes":True,
+        },
+    }
+    eval_runner_audit=(
+        audits/"cortex_f4c_evaluation_runner_validation.json"
+    )
+    eval_runner_audit.write_text(json.dumps(eval_runner_payload)+"\n")
+    eval_ready=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert eval_ready["phase4_evaluation_runner"]["validated"] is True
+    eval_progress=eval_ready["phase4_evaluation_progress"]
+    assert eval_progress["status"]=="ready"
+    assert eval_progress["total"]==20
+    assert eval_progress["reviewed_count"]==0
+    assert eval_progress["next_seed"]==20261221
+    assert eval_progress["seed_launch_allowed"] is True
+    assert (
+        eval_ready["phase4_blocker"]["code"]
+        =="causal_transfer_evaluation_not_executed"
+    )
+    assert eval_ready["resume"]["do_not_start_another_seed"] is False
+
+    eval_pair_base={
+        "schema_version":"cortex_f4c_evaluation_pair_v1",
+        "status":"completed",
+        "live_factorio_world":False,
+        "factorio_rcon_used":False,
+        "fle_environment_created":False,
+        "world_lease_acquired":False,
+        "continuous_authority":False,
+        "automatic_retry":False,
+        "code_revision":{
+            "commit":"f4c-eval-runner-sha",
+            "dirty":False,
+        },
+        "claim_boundary":{
+            "evaluation_only":True,
+            "primary_f4c_inference":True,
+            "pilot_evidence_reused":False,
+            "confirmatory_seed_executed":False,
+        },
+    }
+
+    def write_eval(seed,status,family,delta):
+        eval_dir=tmp_path/"runs"/"f4c_evaluation"/str(seed)
+        eval_dir.mkdir(parents=True,exist_ok=True)
+        pair_path=eval_dir/"pair.json"
+        pair_path.write_text(json.dumps({
+            **eval_pair_base,
+            "seed":seed,
+            "task_id":f"evaluation:{family}:{seed}",
+            "family":family,
+        })+"\n")
+        valid_primary=status=="pass"
+        review_path=eval_dir/"review.json"
+        review_path.write_text(json.dumps({
+            "schema_version":"cortex_f4c_evaluation_pair_review_v1",
+            "status":status,
+            "seed":seed,
+            "family":family,
+            "pair_artifact_sha256":module._sha256(pair_path),
+            "valid_for_primary_inference":valid_primary,
+            "delta_J":delta if valid_primary else None,
+            "claim_boundary":{
+                "outcome_dependent_exclusion_forbidden":True,
+                "replacement_seed_forbidden":True,
+                "primary_f4c_inference":valid_primary,
+                "pilot_evidence_reused":False,
+                "confirmatory_partition_untouched":True,
+            },
+        })+"\n")
+        return pair_path,review_path
+
+    write_eval(20261221,"pass","structural_flow_repair",0.1)
+    eval_one=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    one=eval_one["phase4_evaluation_progress"]
+    assert one["status"]=="in_progress"
+    assert one["reviewed_count"]==1
+    assert one["valid_primary_count"]==1
+    assert one["technical_invalid_count"]==0
+    assert one["next_seed"]==20261222
+    assert one["seed_launch_allowed"] is True
+
+    write_eval(
+        20261222,
+        "technical_invalid",
+        "structural_flow_repair",
+        None,
+    )
+    eval_two=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    two=eval_two["phase4_evaluation_progress"]
+    assert two["reviewed_count"]==2
+    assert two["valid_primary_count"]==1
+    assert two["technical_invalid_count"]==1
+    assert two["next_seed"]==20261223
+    assert two["seed_launch_allowed"] is True
+
+    families={}
+    for seed in range(20261221,20261241):
+        if seed <= 20261225:
+            families[seed]="structural_flow_repair"
+        elif seed <= 20261230:
+            families[seed]="fuel_energy_recovery"
+        elif seed <= 20261235:
+            families[seed]="spatial_logistics_routing"
+        else:
+            families[seed]="production_transition_planning"
+    for seed in range(20261223,20261241):
+        write_eval(seed,"pass",families[seed],0.1)
+
+    eval_complete=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    complete=eval_complete["phase4_evaluation_progress"]
+    assert complete["status"]=="complete"
+    assert complete["reviewed_count"]==20
+    assert complete["valid_primary_count"]==19
+    assert complete["technical_invalid_count"]==1
+    assert complete["seed_launch_allowed"] is False
+    assert (
+        eval_complete["phase4_blocker"]["code"]
+        =="causal_transfer_inference_not_computed"
+    )
+
+    provenance=[]
+    for seed in range(20261221,20261241):
+        eval_dir=tmp_path/"runs"/"f4c_evaluation"/str(seed)
+        pair_path=eval_dir/"pair.json"
+        review_path=eval_dir/"review.json"
+        review=json.loads(review_path.read_text())
+        provenance.append({
+            "seed":seed,
+            "pair_sha256":module._sha256(pair_path),
+            "review_sha256":module._sha256(review_path),
+            "review_status":review["status"],
+        })
+    inference_path=audits/"cortex_f4c_evaluation_inference.json"
+    inference_path.write_text(json.dumps({
+        "schema_version":"cortex_f4c_evaluation_inference_v1",
+        "status":"pass",
+        "protocol":{
+            "protocol_id":"cortex-f4c-memory-ablation-transfer-v1",
+            "manifest_file_sha256":f4c_manifest_file_sha,
+            "manifest_sha256":"b"*64,
+        },
+        "semantic_lock":{
+            "treatment_module_sha256":module._sha256(treatment_module),
+            "pilot_runtime_sha256":module._sha256(pilot_runtime),
+        },
+        "evaluation_pair_count":20,
+        "provenance":provenance,
+        "primary_inference":{
+            "valid_pair_count":19,
+            "family_valid_counts":{
+                "structural_flow_repair":4,
+                "fuel_energy_recovery":5,
+                "spatial_logistics_routing":5,
+                "production_transition_planning":5,
+            },
+            "sample_sufficient":True,
+            "mean_delta_J":0.1,
+            "median_delta_J":0.1,
+            "paired_cohens_dz":2.0,
+            "one_sided_exact_p":0.001,
+            "confidence_set_95pct":{
+                "lower":0.07,
+                "upper":0.13,
+            },
+            "sesoi_delta_J":0.05,
+            "positive_causal_memory_result":True,
+            "decision":"positive",
+        },
+        "claim_boundary":{
+            "pilot_rows_included":False,
+            "confirmatory_rows_included":False,
+            "outcome_dependent_exclusion":False,
+            "replacement_seeds_used":False,
+            "fixed_sample_stopping_rule":True,
+        },
+    })+"\n")
+    eval_positive=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert (
+        eval_positive["phase4_evaluation_inference"]["validated"] is True
+    )
+    assert (
+        eval_positive["phase4_evaluation_inference"]["decision"]=="positive"
+    )
+    assert eval_positive["phase4_exit_gate"]["validated"] is True
+    assert (
+        eval_positive["phase4_exit_gate"]["causal_memory_ablation_transfer"]
+        is True
+    )
+    assert eval_positive["phase"]=="F4"
+    assert eval_positive["phase_status"]=="complete"
+    assert eval_positive["phase4_checkpoint"]=="F4-C"
+    assert eval_positive["phase4_next_checkpoint"] is None
+    assert eval_positive["phase4_blocker"]["code"] is None
+    assert eval_positive["phase4_blocker"]["status"]=="clear"
+    assert eval_positive["resume"]["do_not_start_another_seed"] is True
+
     f4b_payload["source"]["f4a_artifact_sha256"]="wrong"
     f4b_audit.write_text(json.dumps(f4b_payload)+"\n")
     f4b_wrong_source=module.build_phase_state(
