@@ -1628,3 +1628,137 @@ class ProductionTransitionPairedAdapter:
             outcome_extractor_version=OUTCOME_EXTRACTOR_VERSION,
         )
 
+
+
+def real_adapter_preflight_tasks() -> tuple[dict[str, Any], ...]:
+    """Canonical NON-PROTOCOL fixtures used only for adapter readiness."""
+
+    spatial = {
+        "task_id": "adapter-preflight:spatial-routing:readiness",
+        "partition": "adapter_preflight",
+        "family": "spatial_logistics_routing",
+        "seed": None,
+        "generator_version": "cortex_f4c_adapter_preflight_v1",
+        "spec": {
+            "candidate_classes": [
+                "weighted_astar",
+                "detour_with_underground",
+                "alternate_corridor",
+            ],
+            "hard_postconditions": [
+                "route_found",
+                "route_collision_free",
+                "endpoints_connected",
+                "route_within_resource_budget",
+            ],
+            "grid": [18, 18],
+            "start": [1, 1],
+            "goal": [16, 16],
+            "obstacle_rectangles": [
+                [7, 0, 2, 7],
+                [7, 10, 2, 8],
+                [12, 6, 2, 5],
+            ],
+            "turn_penalty": 0.2,
+            "underground_budget": 2,
+            "resource_budget_tiles": 48,
+        },
+    }
+    fuel = {
+        "task_id": "adapter-preflight:fuel-recovery:readiness",
+        "partition": "adapter_preflight",
+        "family": "fuel_energy_recovery",
+        "seed": None,
+        "generator_version": "cortex_f4c_adapter_preflight_v1",
+        "spec": {
+            "candidate_classes": [
+                "repair_loop_resupply",
+                "idle_container_draw",
+                "active_chain_draw_last_resort",
+            ],
+            "hard_postconditions": [
+                "energy_dependency_resolved",
+                "target_chain_resumes",
+                "bootstrap_dependency_not_increased",
+                "no_validated_capability_regresses",
+            ],
+            "energy_entity_id": "boiler-1",
+            "target_entity_id": "assembler-1",
+            "anchor": [10.0, 10.0],
+            "fuel_needed": 12,
+            "fuel_carried": 0,
+            "fuel_sources": [
+                {
+                    "position": [8.0, 10.0],
+                    "available": 12,
+                    "supplies_chain": False,
+                }
+            ],
+            "validated_capabilities": [
+                "iron_backbone",
+                "copper_chain",
+            ],
+        },
+    }
+    structural = {
+        "task_id": "adapter-preflight:structural-flow:readiness",
+        "partition": "adapter_preflight",
+        "family": "structural_flow_repair",
+        "seed": None,
+        "generator_version": "cortex_f4c_adapter_preflight_v1",
+        "spec": {
+            "candidate_classes": [
+                "structural_transactional_processing",
+                "reroute_existing_flow",
+            ],
+            "hard_postconditions": [
+                "processor_exists",
+                "producer_reaches_processor",
+                "processor_output_increases",
+                "no_new_dead_end",
+            ],
+            "initial_producers_reaching_processor": 3,
+            "initial_processor_output": 0.0,
+            "initial_dead_end_count": 0,
+            "processor_exists_after": True,
+            "dead_end_delta": 0,
+        },
+    }
+    production = {
+        "task_id": "adapter-preflight:production-transition:readiness",
+        "partition": "adapter_preflight",
+        "family": "production_transition_planning",
+        "seed": None,
+        "generator_version": "cortex_f4c_adapter_preflight_v1",
+        "spec": {
+            "candidate_classes": [
+                "production_dag_dependency_plan",
+                "defer_transition",
+            ],
+            "hard_postconditions": [
+                "required_material_budget_satisfied",
+                "dependency_order_valid",
+                "target_stage_functional",
+                "no_validated_capability_regresses",
+            ],
+            "target_item": "logistic-science-pack",
+            "target_count": 10,
+            "target_rate_per_s": 0.1,
+            "material_budget": {
+                "iron-ore": 55.0,
+                "copper-ore": 15.0,
+            },
+            "available": {
+                "assembling-machine-1": 10.0,
+                "stone-furnace": 4.0,
+            },
+            "raw_sources": ["iron-ore", "copper-ore"],
+            "validated_capabilities": [
+                "iron_backbone",
+                "copper_chain",
+                "steam_power",
+            ],
+            "catalog_profile": "minimal_logistic_science_v1",
+        },
+    }
+    return (spatial, fuel, structural, production)

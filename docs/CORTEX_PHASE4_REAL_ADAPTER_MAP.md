@@ -1,6 +1,6 @@
 # Cortex F4-C — mapa dos adapters reais
 
-Status: **implementation map frozen; real-world preflight pending**.
+Status: **four adapters implemented; disposable NON-PROTOCOL readiness audit pending**.
 
 Este documento liga as quatro famílias congeladas do protocolo F4-C aos
 componentes existentes do projeto. Ele não é evidência experimental e não
@@ -140,3 +140,29 @@ Mesmo após adapters reais passarem:
 - pilot `20261201–20261208` só pode começar quando o phase-state reportar
   `execution_ready=true`;
 - evaluation `20261221–20261240` permanece intocada durante tuning/preflight.
+
+
+## Implementação atual
+
+Os quatro bindings deste mapa agora existem em
+src/factorio_ai_lab/cortex/causal_real_adapters.py:
+
+- SpatialRoutingPairedAdapter usa weighted_astar;
+- FuelRecoveryPairedAdapter usa repair_loop.plan_repairs e
+  resupply.plan_supply;
+- StructuralFlowPairedAdapter usa o stack transacional existente
+  prepare_structural_branch -> compile_structural_action ->
+  StructuralTransactionalAdapter -> TransactionalFLEExecutor sobre um
+  ambiente descartável checkpointado;
+- ProductionTransitionPairedAdapter usa ProductionDagPlanner e
+  DependencyPlanner sobre um catálogo runtime determinístico descartável.
+
+A implementação isolada não habilita execution_ready. O gate é o artefato
+runs/audits/cortex_f4c_real_adapters_validation.json, gerado apenas por
+scripts/validate_cortex_f4c_real_adapters.py a partir de árvore Git limpa.
+Esse audit deve provar simultaneamente os quatro bindings, restore pareado,
+ablação retrieval-only, budgets/surfaces casados, escrita em quarentena,
+memória fonte imutável e firewall contra qualquer partition/seed protocolar.
+
+Mesmo com o audit PASS, o significado é somente pilot-ready. Nenhum resultado
+causal foi observado; o F4 Exit Gate continua aberto.
