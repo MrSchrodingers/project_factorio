@@ -2255,6 +2255,16 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
 
     pilot_runner=tmp_path/"scripts"/"run_cortex_f4c_pilot.py"
     pilot_runner.write_text("# pilot runner fixture\n")
+    pilot_runtime=(
+        tmp_path
+        /"src"
+        /"factorio_ai_lab"
+        /"cortex"
+        /"causal_pilot_runtime.py"
+    )
+    pilot_runtime.write_text("# pilot runtime fixture\n")
+    pilot_doc=docs/"CORTEX_PHASE4_PILOT_RUNNER.md"
+    pilot_doc.write_text("# pilot runner doc fixture\n")
     pilot_validator=(
         tmp_path/"scripts"/"validate_cortex_f4c_pilot_runner.py"
     )
@@ -2279,6 +2289,9 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
             "runner_sha256":module._sha256(pilot_runner),
             "validator_sha256":module._sha256(pilot_validator),
             "tests_sha256":module._sha256(pilot_tests),
+            "runtime_sha256":module._sha256(pilot_runtime),
+            "document_sha256":module._sha256(pilot_doc),
+            "treatment_audit_sha256":module._sha256(treatment_audit),
         },
         "checks":{
             "pilot_partition_only":True,
@@ -2288,6 +2301,11 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
             "dry_run_does_not_execute_seed":True,
         },
         "authority":{
+            "world_mutation":False,
+            "factorio_rcon_used":False,
+            "fle_environment_created":False,
+            "world_lease_acquired":False,
+            "continuous_authority":False,
             "pilot_seed_executed":False,
             "evaluation_seed_executed":False,
             "confirmatory_seed_executed":False,
@@ -2313,7 +2331,7 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
         is False
     )
     assert f4c_execution_ready["phase4_exit_gate"]["validated"] is False
-    assert f4c_execution_ready["resume"]["do_not_start_another_seed"] is True
+    assert f4c_execution_ready["resume"]["do_not_start_another_seed"] is False
     assert "one preregistered pilot pair" in f4c_execution_ready["resume"]["action"]
 
     f4b_payload["source"]["f4a_artifact_sha256"]="wrong"
