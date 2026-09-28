@@ -1,0 +1,328 @@
+{
+  "audits": {
+    "evaluation_runner_validation_sha256": "a447efeca4c4398380baf26c80bc762df7e2726c454659b112e8d95272ac0617",
+    "pilot_runner_validation_sha256": "1e9f47159d9abcc896a632b49d86ed4ff18fc208f79d5f19f346a42b0ddc2dd8",
+    "primary_inference_sha256": "3c4f782dec7c2bb5cebb47a60178ed11b251e2f23618e6341ab514d240499cb7",
+    "treatment_validation_sha256": "c833bd2a979da2370f3955f48df20f05fe7562efeede50e2e41b269375c63767"
+  },
+  "claim_boundary": {
+    "aggregate_preregistered_effect_positive": true,
+    "confirmatory_partition_remains_frozen": true,
+    "confirmatory_seeds_executed": false,
+    "evolution_continuous_authority": false,
+    "f4_exit_gate_passed": true,
+    "no_further_experimental_seed_authorized": true,
+    "uniform_family_effect_not_claimed": true
+  },
+  "code": {
+    "evaluation_boundary_sha256": "a5a6fb0bbabbddd9359ed384323ee0c2e0dadbe56edb5e459fe531bd6ba1c2a6",
+    "evaluation_commit": "6772d81c859a776f199f417616fbae8ce99ad40f",
+    "inference_module_sha256": "89aaa4676c7290c8da9f9598bc8c6336b9ebba47469e3e1bce7a1e517f643cf9",
+    "task_runtime_sha256": "0d64659a8c932592c10b9af9476cfa3cac1af0e2a54ee5953febac295094e085",
+    "treatment_module_sha256": "d412ed9af1cfa75def10338a6dfbec97c60cf4ce792645b6d38747c3f47d3469"
+  },
+  "evaluation": {
+    "pair_count": 20,
+    "replacement_seeds_used": false,
+    "reviewed_count": 20,
+    "rows": [
+      {
+        "family": "structural_flow_repair",
+        "pair_sha256": "358b5399b7175aa78d6d9c1f6e00b3f09b532d58f8ecfdf40cef30ea145df09a",
+        "review_sha256": "19d8447d4d226f15201386dfb18d5e5b3114b57c8a6399a80549c09727898932",
+        "review_status": "pass",
+        "seed": 20261221,
+        "valid_for_primary_inference": true
+      },
+      {
+        "family": "structural_flow_repair",
+        "pair_sha256": "36816f82bda8aac1a32f49284baa7461dba7521cd3a51c7b2ff43dafd847bdcc",
+        "review_sha256": "ceb95f273975ad53920bae60aa419f52662b13e942e138194d34de9dc967f8ac",
+        "review_status": "pass",
+        "seed": 20261222,
+        "valid_for_primary_inference": true
+      },
+      {
+        "family": "structural_flow_repair",
+        "pair_sha256": "a2cf68565d8f0f4d726d5fce6a3c5047cada9b3521e17dfb30c6d424726a5b04",
+        "review_sha256": "f6c601c80b1f6998118add6fd14fd2c652febbcc6395e5493b9cdca8ff827b82",
+        "review_status": "pass",
+        "seed": 20261223,
+        "valid_for_primary_inference": true
+      },
+      {
+        "family": "structural_flow_repair",
+        "pair_sha256": "353d285a99272545a989844ce7748304a444e6ef4986c8331dde3ff6dc752490",
+        "review_sha256": "332a03f0cf405c0f244cfb1f67748080ffeec887a5727ca6e255939c72d8743b",
+        "review_status": "pass",
+        "seed": 20261224,
+        "valid_for_primary_inference": true
+      },
+      {
+        "family": "structural_flow_repair",
+        "pair_sha256": "f7441f6c00fa01c4e5cf8a94910172c0aeb793736e7609f9eb1bfbde8a11aba5",
+        "review_sha256": "d931e3bf87adbd06930401f567ba00e519b9d52eca4ea5cddb404744d1d8272a",
+        "review_status": "pass",
+        "seed": 20261225,
+        "valid_for_primary_inference": true
+      },
+      {
+        "family": "fuel_energy_recovery",
+        "pair_sha256": "2da79078f6806d3eea472c6d60a35726afff01e8e4d89bc38be8be5c329ce7d3",
+        "review_sha256": "9af06324f8aae8d5380094b360deb4a98f62072d48d809e27e3e7cc2b7e2223b",
+        "review_status": "pass",
+        "seed": 20261226,
+        "valid_for_primary_inference": true
+      },
+      {
+        "family": "fuel_energy_recovery",
+        "pair_sha256": "d3aa96f3282f91ab9451550d1053a17bae893cadd4a0bc807c5a38df0427e8b2",
+        "review_sha256": "f42991e6b6bba082f24fb79d0c2d70a84f2d6e3dbbe494b015f74ffef93fa0d1",
+        "review_status": "pass",
+        "seed": 20261227,
+        "valid_for_primary_inference": true
+      },
+      {
+        "family": "fuel_energy_recovery",
+        "pair_sha256": "61e49442a2969f7accd7b7a314eaaf579dda40e8f16302ec6a9c5d22299190a7",
+        "review_sha256": "b52b9705cf428fe0324ef9a0a9817a0358c7ef8384ff2ae4ec7dcf7d48121369",
+        "review_status": "pass",
+        "seed": 20261228,
+        "valid_for_primary_inference": true
+      },
+      {
+        "family": "fuel_energy_recovery",
+        "pair_sha256": "95b301de868acbdc05843057ad2a3e1a4f3981139efc0fa064ce9abea7f9d1c6",
+        "review_sha256": "abb8186a07dd7db22334ea91978ac6c38d142c90f7e0b61e1f00104ad93736f7",
+        "review_status": "pass",
+        "seed": 20261229,
+        "valid_for_primary_inference": true
+      },
+      {
+        "family": "fuel_energy_recovery",
+        "pair_sha256": "b9ab236a95c57c888b41c2ed9b834f8413084d63f7f825af0d841ee479d933dd",
+        "review_sha256": "9fbd95886296ce534094a3908fdd18ac699d9c0b2eacde0a2dd5e7fba57f7003",
+        "review_status": "pass",
+        "seed": 20261230,
+        "valid_for_primary_inference": true
+      },
+      {
+        "family": "spatial_logistics_routing",
+        "pair_sha256": "a337489a6b2be0253238714a0e0eda5fe36c5355c0279e675609d89765c3189e",
+        "review_sha256": "09478a49d818c3349e9da8dfaca2c696e7b8c6047fc8c0c5e7acd118b63950a0",
+        "review_status": "pass",
+        "seed": 20261231,
+        "valid_for_primary_inference": true
+      },
+      {
+        "family": "spatial_logistics_routing",
+        "pair_sha256": "7a85eb4f83887e1bdf4e02300743d6886991fc1800b14c4e29826256a4df3577",
+        "review_sha256": "52f5b5ef6ffc27135ccc83e90b0cf7ee0c2d6485fd473ec0f0d2a6df70b043d0",
+        "review_status": "pass",
+        "seed": 20261232,
+        "valid_for_primary_inference": true
+      },
+      {
+        "family": "spatial_logistics_routing",
+        "pair_sha256": "4c12903a3ea3cef2d0922aacaf4add66f9af71888366baab2c766964db2c8818",
+        "review_sha256": "a62e4a027c4969d8c01bcd26e27a1efffc4ad2075e29319fd41a3255bde26e22",
+        "review_status": "pass",
+        "seed": 20261233,
+        "valid_for_primary_inference": true
+      },
+      {
+        "family": "spatial_logistics_routing",
+        "pair_sha256": "6ac608972117bbd2444116e7d8dee8dd4c7447cfa18df9b6966bce65bdb674ee",
+        "review_sha256": "75d2134d04149a8e63313b96950f407b2e6c41d8e34b67b95aa090390dec2328",
+        "review_status": "pass",
+        "seed": 20261234,
+        "valid_for_primary_inference": true
+      },
+      {
+        "family": "spatial_logistics_routing",
+        "pair_sha256": "87c8aa9fa8130cfd24603c983c4c18c7a62f9e2a9fed8d5cc3386400f4a840d3",
+        "review_sha256": "3cd059824cc491699cb310dc600840a8e49ceaebbea8818a9d8293c8de71665f",
+        "review_status": "pass",
+        "seed": 20261235,
+        "valid_for_primary_inference": true
+      },
+      {
+        "family": "production_transition_planning",
+        "pair_sha256": "dc8b3efebd80579738ec9eaee746a2bc5d6bf83a0a7799db50635943128ce880",
+        "review_sha256": "18c7705919e74e0d212291e161817a867772bda83de379460095fc9d953b8757",
+        "review_status": "pass",
+        "seed": 20261236,
+        "valid_for_primary_inference": true
+      },
+      {
+        "family": "production_transition_planning",
+        "pair_sha256": "ddcba3026300fb20c05a27cdb5d10d941d2627eb0dc2b09b11c631c5ce406f48",
+        "review_sha256": "a86fc961700dbe70dcb118b744b7b0b56760a6587150276a2010c48e69e42d31",
+        "review_status": "pass",
+        "seed": 20261237,
+        "valid_for_primary_inference": true
+      },
+      {
+        "family": "production_transition_planning",
+        "pair_sha256": "bfd3fdb31fb2e445fdfb24bbcd8b74770f0d986302fd9fa636d6d4aef35e226b",
+        "review_sha256": "afe66480202dd505ed7e1f055d8d3bb87f8e4c64e55211da8654c3218b7129ea",
+        "review_status": "pass",
+        "seed": 20261238,
+        "valid_for_primary_inference": true
+      },
+      {
+        "family": "production_transition_planning",
+        "pair_sha256": "a41dd16db9d2bc84253c32c9e76f347ab3c17a42189e940eb10c4a2d1ab1e53b",
+        "review_sha256": "423c1ba7ae828144029f969660bf09c3dc6ea1ce59302a2f908993953a3ffa06",
+        "review_status": "pass",
+        "seed": 20261239,
+        "valid_for_primary_inference": true
+      },
+      {
+        "family": "production_transition_planning",
+        "pair_sha256": "b6d835d4d5b80b148edca14c47ade81df54ecd716c337467396448f1024b416e",
+        "review_sha256": "0212254e9e0aa1199cc09c7a9388582942513c682bbc306172a5a3c2d0e0bcc7",
+        "review_status": "pass",
+        "seed": 20261240,
+        "valid_for_primary_inference": true
+      }
+    ],
+    "technical_invalid_count": 0,
+    "valid_primary_count": 20
+  },
+  "generated_at": "2026-09-28T22:13:39.868359+00:00",
+  "pilot": {
+    "excluded_from_primary_inference": true,
+    "instrumentation_only": true,
+    "pair_count": 8,
+    "reviewed_count": 8,
+    "rows": [
+      {
+        "pair_sha256": "84116c6ab65b47c790ac3e9e7188a1ab54ac18b5916f5c534960b35d4c018104",
+        "review_sha256": "c2419e84e7d96ae80636c2e652abb9e634414eb5bf1323e90e09caf778e187e7",
+        "review_status": "pass",
+        "seed": 20261201
+      },
+      {
+        "pair_sha256": "0514906660017041d41e965ba3654eede56170e62a6ee7b4d904f4b480172b7e",
+        "review_sha256": "255da4f8234d7e8eeb4f520617118322218f03546d211c1bca5b18dd26661c44",
+        "review_status": "pass",
+        "seed": 20261202
+      },
+      {
+        "pair_sha256": "2c956b6ca2e89a8a2bd43b6006425b1b04bcc9a1bfbb92e4ca7a27eba9143ab1",
+        "review_sha256": "1ccb227a8b888bf552d21cbbe08c09220b6e874b869a2ec56fe415d5cbb0c9b6",
+        "review_status": "pass",
+        "seed": 20261203
+      },
+      {
+        "pair_sha256": "f331dd197b7237fad7795af36add1372aee5cf485ce8cc6a790c79859509639f",
+        "review_sha256": "10983ceb842a5264730a5bd8caa79059d796f823be6765c5907261b3a3c3247b",
+        "review_status": "pass",
+        "seed": 20261204
+      },
+      {
+        "pair_sha256": "22170a07a8cc7ae59f698854f634505f93eaf416919ccd5a1efba51796687af9",
+        "review_sha256": "4f9e0699dc36f1c5fc6ec4e17d1cab668ed0efd671b1c9f2b6b14590b892a98a",
+        "review_status": "pass",
+        "seed": 20261205
+      },
+      {
+        "pair_sha256": "1e9b0a1907b7178c7e59dd3d271cd515da3d7bf81578bd0bdfee670a1a5ead7c",
+        "review_sha256": "b573f0ed4aba119357c4ca20b78087ca4276461a83f8ff6b7a03eda1bb940778",
+        "review_status": "pass",
+        "seed": 20261206
+      },
+      {
+        "pair_sha256": "3787f83b9407d8f9f958e8aca7793e472b996d36a5cc295a726488ef3396feae",
+        "review_sha256": "b6f86fd291288758cd0a36d7989fb81ae7580d56584880f9ac57e1a56262d4c3",
+        "review_status": "pass",
+        "seed": 20261207
+      },
+      {
+        "pair_sha256": "3556c24246e0280640a165b0e541615b7fa858ada09f0352c925b1758e5cc92a",
+        "review_sha256": "a32a23a8b66d2123780f3ebb66a56b9f5879d82c6083b7e618377cfc8456dd4f",
+        "review_status": "pass",
+        "seed": 20261208
+      }
+    ]
+  },
+  "posthoc_descriptive_by_family": {
+    "fuel_energy_recovery": {
+      "mean_delta_J": 0.6712708333333334,
+      "median_delta_J": 0.6712708333333333,
+      "n": 5,
+      "note": "post-hoc descriptive only; not a preregistered family-level decision rule",
+      "pairs_at_or_above_sesoi": 5
+    },
+    "production_transition_planning": {
+      "mean_delta_J": 0.1353666666666667,
+      "median_delta_J": 0.0003333333333332966,
+      "n": 5,
+      "note": "post-hoc descriptive only; not a preregistered family-level decision rule",
+      "pairs_at_or_above_sesoi": 1
+    },
+    "spatial_logistics_routing": {
+      "mean_delta_J": 0.00040277777777781855,
+      "median_delta_J": 0.0004138888888889358,
+      "n": 5,
+      "note": "post-hoc descriptive only; not a preregistered family-level decision rule",
+      "pairs_at_or_above_sesoi": 0
+    },
+    "structural_flow_repair": {
+      "mean_delta_J": 0.0018375000000000253,
+      "median_delta_J": 0.0018541666666667123,
+      "n": 5,
+      "note": "post-hoc descriptive only; not a preregistered family-level decision rule",
+      "pairs_at_or_above_sesoi": 0
+    }
+  },
+  "primary_inference": {
+    "alpha": 0.05,
+    "confidence_set_95pct": {
+      "alpha": 0.05,
+      "component_count": 1,
+      "components": [
+        [
+          0.06773986111111112,
+          0.336780787037037
+        ]
+      ],
+      "connected": true,
+      "lower": 0.06773986111111112,
+      "upper": 0.336780787037037
+    },
+    "decision": "positive",
+    "family_valid_counts": {
+      "fuel_energy_recovery": 5,
+      "production_transition_planning": 5,
+      "spatial_logistics_routing": 5,
+      "structural_flow_repair": 5
+    },
+    "inference_version": "cortex_f4c_exact_sign_flip_v1",
+    "mean_delta_J": 0.20221944444444445,
+    "median_delta_J": 0.001729166666666726,
+    "minimum_per_family": 3,
+    "minimum_valid_pairs": 16,
+    "one_sided_exact_p": 9.5367431640625e-07,
+    "paired_cohens_dz": 0.6408858430566287,
+    "positive_causal_memory_result": true,
+    "sample_sufficient": true,
+    "sesoi_delta_J": 0.05,
+    "valid_pair_count": 20
+  },
+  "protocol": {
+    "canonical_manifest_sha256": "e6633dccc851470a6943ae426b767cb1c039cedb1bede23dc9e6f1c27c94bdac",
+    "manifest_file_sha256": "82253e71dc94cd5ad803e1340523d4053dfc0a11299848709e6f7dc8414f7c41",
+    "protocol_id": "cortex-f4c-memory-ablation-transfer-v1"
+  },
+  "schema_version": "cortex_f4c_causal_evidence_manifest_v1",
+  "source_memory": {
+    "item_count": 222,
+    "manifest_sha256": "e6aa69816fe992f6b2a6afc8aff529fa5f1572106ca0939cee830af5a6cf3399",
+    "occurrence_count": 759,
+    "quick_check": "ok",
+    "schema_version": "cortex_cognitive_memory_v1"
+  },
+  "status": "frozen_after_primary_inference"
+}
