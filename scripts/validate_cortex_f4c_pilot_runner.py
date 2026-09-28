@@ -21,6 +21,7 @@ from factorio_ai_lab.cortex.causal_pilot_runtime import (
     ProtocolTaskWorldAdapter,
     execute_candidate,
     pilot_arm_order,
+    pilot_sequence_guard,
     pilot_task_from_manifest,
     runner_validation_tasks,
     runtime_contract,
@@ -196,6 +197,19 @@ def build_validation(
         root / "runs" / "f4c_pilot" / str(seed) / "pair.json"
         for seed in manifest["seed_partitions"]["pilot"]
     ]
+    pilot_sequence = [int(seed) for seed in manifest["seed_partitions"]["pilot"]]
+    first_sequence_gate_open = False
+    second_requires_review = False
+    try:
+        pilot_sequence_guard(root, pilot_sequence, pilot_sequence[0])
+    except HarnessValidationError:
+        first_sequence_gate_open = False
+    else:
+        first_sequence_gate_open = True
+    try:
+        pilot_sequence_guard(root, pilot_sequence, pilot_sequence[1])
+    except HarnessValidationError as exc:
+        second_requires_review = "no PASS review" in str(exc)
     runtime = runtime_contract()
     checks = {
         "protocol_matches_frozen_v1": (
@@ -230,6 +244,8 @@ def build_validation(
         "no_canonical_pilot_artifact_exists": not any(
             path.exists() for path in canonical_pilot_artifacts
         ),
+        "first_pilot_sequence_gate_open": first_sequence_gate_open,
+        "second_pilot_requires_first_review": second_requires_review,
         "runtime_has_no_live_factorio_authority": (
             runtime["live_factorio_world"] is False
             and runtime["rcon"] is False
@@ -246,6 +262,8 @@ def build_validation(
     runtime_path = (
         root / "src" / "factorio_ai_lab" / "cortex" / "causal_pilot_runtime.py"
     )
+    pair_auditor_path = root / "scripts" / "audit_cortex_f4c_pilot_pair.py"
+    pair_audit_tests_path = root / "tests" / "test_cortex_f4c_pilot_audit.py"
     doc_path = root / "docs" / "CORTEX_PHASE4_PILOT_RUNNER.md"
     return {
         "schema_version": SCHEMA_VERSION,
@@ -262,6 +280,8 @@ def build_validation(
             "validator_sha256": _sha256(validator_path),
             "tests_sha256": _sha256(tests_path),
             "runtime_sha256": _sha256(runtime_path),
+            "pair_auditor_sha256": _sha256(pair_auditor_path),
+            "pair_audit_tests_sha256": _sha256(pair_audit_tests_path),
             "document_sha256": _sha256(doc_path),
             "treatment_audit_sha256": _sha256(treatment_path),
             "database_before": before.to_dict(),

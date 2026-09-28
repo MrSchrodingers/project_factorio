@@ -46,3 +46,17 @@ pilot pair. It refuses non-pilot seeds, requires a clean tree, requires
 execution_ready=true and a validated runner audit, requires evolution
 inactive+disabled, refuses overwrite of existing canonical pair evidence, and
 has no automatic retry.
+
+
+## Sequential review invariant
+
+Pilot execution is strictly sequential. Before seed N+1 can execute, seed N
+must have a canonical review at runs/f4c_pilot/SEED/review.json with status
+PASS. The review independently verifies task/protocol identity, exact
+checkpoint restore, frozen source memory, matched candidate/tool/budget
+surfaces, retrieval-only ablation, quarantined writes, valid J and delta_J,
+and absence of live Factorio authority.
+
+The runner also rejects any future pair artifact that appears out of order.
+This is the machine-enforced boundary behind the operational rule: execute one
+pair, audit it, then and only then consider the next pilot.

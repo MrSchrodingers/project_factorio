@@ -2265,6 +2265,12 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
     pilot_runtime.write_text("# pilot runtime fixture\n")
     pilot_doc=docs/"CORTEX_PHASE4_PILOT_RUNNER.md"
     pilot_doc.write_text("# pilot runner doc fixture\n")
+    pilot_pair_auditor=tmp_path/"scripts"/"audit_cortex_f4c_pilot_pair.py"
+    pilot_pair_auditor.write_text("# pilot pair auditor fixture\n")
+    pilot_pair_audit_tests=(
+        tmp_path/"tests"/"test_cortex_f4c_pilot_audit.py"
+    )
+    pilot_pair_audit_tests.write_text("# pilot pair audit tests fixture\n")
     pilot_validator=(
         tmp_path/"scripts"/"validate_cortex_f4c_pilot_runner.py"
     )
@@ -2291,6 +2297,10 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
             "tests_sha256":module._sha256(pilot_tests),
             "runtime_sha256":module._sha256(pilot_runtime),
             "document_sha256":module._sha256(pilot_doc),
+            "pair_auditor_sha256":module._sha256(pilot_pair_auditor),
+            "pair_audit_tests_sha256":module._sha256(
+                pilot_pair_audit_tests
+            ),
             "treatment_audit_sha256":module._sha256(treatment_audit),
         },
         "checks":{

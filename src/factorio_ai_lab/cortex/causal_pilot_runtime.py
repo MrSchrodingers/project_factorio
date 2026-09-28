@@ -12,12 +12,14 @@ budget.  Memory can affect only candidate ranking through causal_treatment.
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import asdict, dataclass
 from itertools import pairwise
 from math import ceil
+from pathlib import Path
 from typing import Any
 
 from factorio_ai_lab.cortex.causal_harness import (
@@ -915,4 +917,65 @@ def runner_validation_tasks() -> tuple[dict[str, Any], ...]:
             },
         },
     )
+
+def pilot_sequence_guard(
+    root: Path,
+    pilot_sequence: tuple[int, ...] | list[int],
+    seed: int,
+) -> dict[str, Any]:
+    """Require prior pilot reviews and reject out-of-order future evidence."""
+
+    sequence = tuple(int(value) for value in pilot_sequence)
+    target = int(seed)
+    if target not in sequence:
+        raise HarnessValidationError(f"seed {target} is not in pilot sequence")
+    index = sequence.index(target)
+    prior_reviews: list[dict[str, Any]] = []
+    for prior in sequence[:index]:
+        review_path = root / "runs" / "f4c_pilot" / str(prior) / "review.json"
+        if not review_path.exists():
+            raise HarnessValidationError(
+                f"prior pilot {prior} has no PASS review"
+            )
+        try:
+            review = json.loads(review_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise HarnessValidationError(
+                f"prior pilot {prior} review is unreadable"
+            ) from exc
+        if (
+            not isinstance(review, dict)
+            or review.get("status") != "pass"
+            or int(review.get("seed", -1)) != prior
+        ):
+            raise HarnessValidationError(
+                f"prior pilot {prior} review is not PASS"
+            )
+        prior_reviews.append(
+            {
+                "seed": prior,
+                "review_path": str(review_path),
+                "review_schema": review.get("schema_version"),
+            }
+        )
+
+    unexpected_later = [
+        later
+        for later in sequence[index + 1 :]
+        if (
+            root / "runs" / "f4c_pilot" / str(later) / "pair.json"
+        ).exists()
+    ]
+    if unexpected_later:
+        raise HarnessValidationError(
+            "future pilot evidence exists out of order: "
+            + ",".join(map(str, unexpected_later))
+        )
+    return {
+        "seed": target,
+        "position": index + 1,
+        "total": len(sequence),
+        "prior_reviews": prior_reviews,
+        "future_artifacts_absent": True,
+    }
 

@@ -21,6 +21,7 @@ from factorio_ai_lab.cortex.causal_harness import HarnessBudget, execute_pair
 from factorio_ai_lab.cortex.causal_pilot_runtime import (
     ProtocolTaskWorldAdapter,
     pilot_arm_order,
+    pilot_sequence_guard,
     pilot_task_from_manifest,
     runtime_contract,
 )
@@ -87,6 +88,7 @@ def build_plan(
         "task_fingerprint": task_fingerprint(task),
         "first_condition": first,
         "second_condition": second,
+        "pilot_sequence": list(manifest["seed_partitions"]["pilot"]),
         "runtime_contract": runtime_contract(),
         "artifact_path": str(root / PAIR_ROOT / str(seed) / "pair.json"),
         "world_authority": "protocol_task_world_only",
@@ -120,6 +122,11 @@ def _assert_execute_preflight(
     runner_audit = root / RUNNER_AUDIT
     if not runner_audit.exists():
         raise RuntimeError("pilot runner audit is missing")
+    sequence = pilot_sequence_guard(
+        root,
+        [int(value) for value in plan["pilot_sequence"]],
+        int(plan["seed"]),
+    )
     artifact = Path(str(plan["artifact_path"]))
     if artifact.exists():
         raise FileExistsError(
@@ -132,6 +139,7 @@ def _assert_execute_preflight(
         "runner_validated": True,
         "evolution": evolution,
         "runner_audit_sha256": _sha256(runner_audit),
+        "pilot_sequence_guard": sequence,
     }
 
 

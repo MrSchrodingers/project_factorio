@@ -1640,6 +1640,12 @@ def build_phase_state(
     phase4_pilot_runner_doc_path=(
         state_root / "docs" / "CORTEX_PHASE4_PILOT_RUNNER.md"
     )
+    phase4_pilot_pair_auditor_path=(
+        state_root / "scripts" / "audit_cortex_f4c_pilot_pair.py"
+    )
+    phase4_pilot_pair_audit_tests_path=(
+        state_root / "tests" / "test_cortex_f4c_pilot_audit.py"
+    )
     phase4_pilot_runner_tests_path=(
         state_root / "tests" / "test_cortex_f4c_pilot_runner.py"
     )
@@ -1690,6 +1696,14 @@ def build_phase_state(
             _sha256(phase4_pilot_runner_doc_path)
             if phase4_pilot_runner_doc_path.exists() else None
         ),
+        "pair_auditor_sha256":(
+            _sha256(phase4_pilot_pair_auditor_path)
+            if phase4_pilot_pair_auditor_path.exists() else None
+        ),
+        "pair_audit_tests_sha256":(
+            _sha256(phase4_pilot_pair_audit_tests_path)
+            if phase4_pilot_pair_audit_tests_path.exists() else None
+        ),
         "treatment_audit_sha256":(
             _sha256(phase4_treatment_audit_path)
             if phase4_treatment_audit_path.exists() else None
@@ -1700,6 +1714,8 @@ def build_phase_state(
         and phase4_pilot_runner_script_path.exists()
         and phase4_pilot_runner_runtime_path.exists()
         and phase4_pilot_runner_doc_path.exists()
+        and phase4_pilot_pair_auditor_path.exists()
+        and phase4_pilot_pair_audit_tests_path.exists()
         and phase4_pilot_runner_tests_path.exists()
         and phase4_pilot_runner_validator_path.exists()
         and phase4_pilot_runner_audit
@@ -2234,6 +2250,7 @@ def build_phase_state(
             "script_path":str(phase4_pilot_runner_script_path),
             "runtime_path":str(phase4_pilot_runner_runtime_path),
             "document_path":str(phase4_pilot_runner_doc_path),
+            "pair_auditor_path":str(phase4_pilot_pair_auditor_path),
             "validator_path":str(phase4_pilot_runner_validator_path),
             "audit_path":str(phase4_pilot_runner_audit_path),
             "audit_exists":phase4_pilot_runner_audit,
