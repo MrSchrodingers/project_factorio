@@ -17,10 +17,13 @@ from factorio_ai_lab.cortex.causal_protocol import (
 )
 from factorio_ai_lab.cortex.causal_real_adapters import (
     FUEL_TOOL_SURFACE,
+    PRODUCTION_TOOL_SURFACE,
     SPATIAL_TOOL_SURFACE,
     STRUCTURAL_TOOL_SURFACE,
     FuelRecoveryFixture,
     FuelRecoveryPairedAdapter,
+    ProductionTransitionFixture,
+    ProductionTransitionPairedAdapter,
     SpatialRoutingFixture,
     SpatialRoutingPairedAdapter,
     StructuralFlowPairedAdapter,
@@ -436,6 +439,136 @@ def test_structural_real_adapter_refuses_protocol_partition(tmp_path):
     protocol_task = deepcopy(task)
     protocol_task["partition"] = "pilot"
     protocol_task["seed"] = 20261201
+    access = MemoryAccess(
+        MEMORY_ON,
+        load_memory_records(memory_path),
+        max_queries=4,
+    )
+
+    with pytest.raises(
+        HarnessValidationError,
+        match="accepts NON-PROTOCOL adapter_preflight only",
+    ):
+        adapter.run_arm(
+            protocol_task,
+            access,
+            HarnessBudget.from_manifest(build_protocol_manifest()),
+        )
+
+def _production_task(*, iron_budget: float = 55.0) -> dict:
+    return {
+        "task_id": "adapter-preflight:production-transition:test",
+        "partition": "adapter_preflight",
+        "family": "production_transition_planning",
+        "seed": None,
+        "generator_version": "cortex_f4c_adapter_preflight_v1",
+        "spec": {
+            "candidate_classes": [
+                "production_dag_dependency_plan",
+                "defer_transition",
+            ],
+            "hard_postconditions": [
+                "required_material_budget_satisfied",
+                "dependency_order_valid",
+                "target_stage_functional",
+                "no_validated_capability_regresses",
+            ],
+            "target_item": "logistic-science-pack",
+            "target_count": 10,
+            "target_rate_per_s": 0.1,
+            "material_budget": {
+                "iron-ore": iron_budget,
+                "copper-ore": 15.0,
+            },
+            "available": {
+                "assembling-machine-1": 10.0,
+                "stone-furnace": 4.0,
+            },
+            "raw_sources": ["iron-ore", "copper-ore"],
+            "validated_capabilities": [
+                "iron_backbone",
+                "copper_chain",
+                "steam_power",
+            ],
+            "catalog_profile": "minimal_logistic_science_v1",
+        },
+    }
+
+
+def test_production_real_adapter_binds_dag_and_dependency_planners(tmp_path):
+    memory_path = tmp_path / "memory.sqlite3"
+    _memory(memory_path)
+    task = _production_task()
+    fixture = ProductionTransitionFixture.from_task(task)
+    adapter = ProductionTransitionPairedAdapter(fixture)
+    checkpoint = adapter.state_digest()
+    pair = execute_pair(
+        task=task,
+        first_condition=MEMORY_ON,
+        second_condition=MEMORY_ABLATED,
+        adapter=adapter,
+        memory_records=load_memory_records(memory_path),
+        memory_snapshot=lambda: memory_database_snapshot(memory_path),
+        budget=HarnessBudget.from_manifest(build_protocol_manifest()),
+    )
+
+    assert pair["valid"] is True
+    assert pair["technical_invalidities"] == []
+    assert adapter.arm_start_digests == [checkpoint, checkpoint]
+    assert pair["source_memory_before"] == pair["source_memory_after"]
+    assert (
+        pair["arms"][MEMORY_ON]["observation"]["tool_surface"]
+        == list(PRODUCTION_TOOL_SURFACE)
+    )
+    assert all(
+        pair["arms"][condition]["observation"]["hard_postconditions"][name]
+        for condition in (MEMORY_ON, MEMORY_ABLATED)
+        for name in task["spec"]["hard_postconditions"]
+    )
+    assert pair["arms"][MEMORY_ABLATED]["memory"]["retrievals"][0][
+        "result"
+    ]["results"] == []
+    assert pair["delta_J"] == 0.0
+
+
+def test_production_real_adapter_measures_material_budget_shortfall(tmp_path):
+    memory_path = tmp_path / "memory.sqlite3"
+    _memory(memory_path)
+    task = _production_task(iron_budget=54.0)
+    fixture = ProductionTransitionFixture.from_task(task)
+    adapter = ProductionTransitionPairedAdapter(fixture)
+    pair = execute_pair(
+        task=task,
+        first_condition=MEMORY_ABLATED,
+        second_condition=MEMORY_ON,
+        adapter=adapter,
+        memory_records=load_memory_records(memory_path),
+        memory_snapshot=lambda: memory_database_snapshot(memory_path),
+        budget=HarnessBudget.from_manifest(build_protocol_manifest()),
+    )
+
+    assert pair["valid"] is True
+    for condition in (MEMORY_ON, MEMORY_ABLATED):
+        hard = pair["arms"][condition]["observation"]["hard_postconditions"]
+        assert hard["required_material_budget_satisfied"] is False
+        assert hard["dependency_order_valid"] is True
+        assert hard["target_stage_functional"] is True
+        assert hard["no_validated_capability_regresses"] is True
+        score = pair["arms"][condition]["score"]
+        assert score["valid"] is True
+        assert score["functional_success"] == 0.0
+        assert score["goal_progress"] == 0.75
+
+
+def test_production_real_adapter_refuses_protocol_partition(tmp_path):
+    memory_path = tmp_path / "memory.sqlite3"
+    _memory(memory_path)
+    task = _production_task()
+    fixture = ProductionTransitionFixture.from_task(task)
+    adapter = ProductionTransitionPairedAdapter(fixture)
+    protocol_task = deepcopy(task)
+    protocol_task["partition"] = "evaluation"
+    protocol_task["seed"] = 20261240
     access = MemoryAccess(
         MEMORY_ON,
         load_memory_records(memory_path),

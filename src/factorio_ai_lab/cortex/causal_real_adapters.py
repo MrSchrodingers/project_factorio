@@ -61,9 +61,11 @@ from factorio_ai_lab.planning.delivery import (
     ArmPlacement,
     DeliveryLink,
 )
-from factorio_ai_lab.planning.dependency_plan import DependencyPlan
+from factorio_ai_lab.planning.dependency_plan import DependencyPlan, DependencyPlanner
 from factorio_ai_lab.planning.placement import OUTCOME_BUILD, PlacementPlan
+from factorio_ai_lab.planning.production_dag import ProductionDagPlanner
 from factorio_ai_lab.planning.resupply import FuelSource, plan_supply
+from factorio_ai_lab.planning.runtime_catalog import RuntimeFactorioCatalog
 
 SPATIAL_ADAPTER_VERSION = "cortex_f4c_spatial_real_adapter_v1"
 SPATIAL_TOOL_SURFACE = ("planning.astar.weighted_astar",)
@@ -78,6 +80,11 @@ STRUCTURAL_TOOL_SURFACE = (
     "cortex.structural_execute.compile_structural_action",
     "cortex.structural_execute.StructuralTransactionalAdapter",
     "integrations.fle.TransactionalFLEExecutor",
+)
+PRODUCTION_ADAPTER_VERSION = "cortex_f4c_production_real_adapter_v1"
+PRODUCTION_TOOL_SURFACE = (
+    "planning.production_dag.ProductionDagPlanner",
+    "planning.dependency_plan.DependencyPlanner",
 )
 _ALLOWED_PREFLIGHT_PARTITIONS = frozenset({"adapter_preflight"})
 
@@ -1163,6 +1170,461 @@ class StructuralFlowPairedAdapter:
             llm_calls=0,
             candidate_surface=tuple(map(str, spec["candidate_classes"])),
             tool_surface=STRUCTURAL_TOOL_SURFACE,
+            outcome_extractor_version=OUTCOME_EXTRACTOR_VERSION,
+        )
+
+def _production_item(name: str, amount: float) -> dict[str, Any]:
+    return {"name": name, "type": "item", "amount": amount}
+
+
+def _production_recipe(
+    name: str,
+    *,
+    energy: float,
+    category: str,
+    ingredients: list[dict[str, Any]],
+    products: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "name": name,
+        "categories": [category],
+        "ingredients": ingredients,
+        "products": products,
+        "enabled": True,
+        "enabled_by_default": True,
+        "hidden_from_player_crafting": False,
+        "energy": energy,
+    }
+
+
+def _production_catalog_payload() -> dict[str, Any]:
+    """Small deterministic runtime catalog for NON-PROTOCOL adapter preflight."""
+
+    item = _production_item
+    recipe = _production_recipe
+    return {
+        "connected": True,
+        "factorio_version": "2.0.73",
+        "recipes": [
+            recipe(
+                "iron-plate",
+                energy=3.2,
+                category="smelting",
+                ingredients=[item("iron-ore", 1)],
+                products=[item("iron-plate", 1)],
+            ),
+            recipe(
+                "copper-plate",
+                energy=3.2,
+                category="smelting",
+                ingredients=[item("copper-ore", 1)],
+                products=[item("copper-plate", 1)],
+            ),
+            recipe(
+                "iron-gear-wheel",
+                energy=0.5,
+                category="crafting",
+                ingredients=[item("iron-plate", 2)],
+                products=[item("iron-gear-wheel", 1)],
+            ),
+            recipe(
+                "copper-cable",
+                energy=0.5,
+                category="crafting",
+                ingredients=[item("copper-plate", 1)],
+                products=[item("copper-cable", 2)],
+            ),
+            recipe(
+                "electronic-circuit",
+                energy=0.5,
+                category="crafting",
+                ingredients=[
+                    item("iron-plate", 1),
+                    item("copper-cable", 3),
+                ],
+                products=[item("electronic-circuit", 1)],
+            ),
+            recipe(
+                "transport-belt",
+                energy=0.5,
+                category="crafting",
+                ingredients=[
+                    item("iron-plate", 1),
+                    item("iron-gear-wheel", 1),
+                ],
+                products=[item("transport-belt", 2)],
+            ),
+            recipe(
+                "inserter",
+                energy=0.5,
+                category="crafting",
+                ingredients=[
+                    item("iron-plate", 1),
+                    item("iron-gear-wheel", 1),
+                    item("electronic-circuit", 1),
+                ],
+                products=[item("inserter", 1)],
+            ),
+            recipe(
+                "logistic-science-pack",
+                energy=6.0,
+                category="crafting",
+                ingredients=[
+                    item("transport-belt", 1),
+                    item("inserter", 1),
+                ],
+                products=[item("logistic-science-pack", 1)],
+            ),
+        ],
+        "technologies": [],
+        "machines": [
+            {
+                "name": "assembling-machine-1",
+                "type": "assembling-machine",
+                "crafting_categories": ["crafting"],
+                "crafting_speed": 0.5,
+                "crafting_speed_status": "measured",
+                "mining_speed_status": "absent",
+            },
+            {
+                "name": "stone-furnace",
+                "type": "furnace",
+                "crafting_categories": ["smelting"],
+                "crafting_speed": 1.0,
+                "crafting_speed_status": "measured",
+                "mining_speed_status": "absent",
+            },
+        ],
+        "belts": [],
+    }
+
+
+@dataclass(frozen=True)
+class ProductionTransitionFixture:
+    """Read-only production transition fixture for adapter preflight."""
+
+    target_item: str
+    target_count: int
+    target_rate_per_s: float
+    material_budget: tuple[tuple[str, float], ...]
+    available: tuple[tuple[str, float], ...]
+    raw_sources: tuple[str, ...]
+    validated_capabilities: tuple[str, ...]
+    catalog_profile: str
+
+    @classmethod
+    def from_task(cls, task: dict[str, Any]) -> ProductionTransitionFixture:
+        if task.get("family") != "production_transition_planning":
+            raise HarnessValidationError(
+                "task family must be production_transition_planning"
+            )
+        if task.get("partition") not in _ALLOWED_PREFLIGHT_PARTITIONS:
+            raise HarnessValidationError(
+                "production adapter preflight accepts NON-PROTOCOL "
+                "adapter_preflight only"
+            )
+        if task.get("seed") is not None:
+            raise HarnessValidationError(
+                "production adapter preflight forbids protocol/experimental seeds"
+            )
+        spec = task.get("spec")
+        if not isinstance(spec, dict):
+            raise HarnessValidationError("production task spec missing")
+        required = {
+            "candidate_classes",
+            "hard_postconditions",
+            "target_item",
+            "target_count",
+            "target_rate_per_s",
+            "material_budget",
+            "available",
+            "raw_sources",
+            "validated_capabilities",
+            "catalog_profile",
+        }
+        missing = sorted(required - set(spec))
+        if missing:
+            raise HarnessValidationError(
+                "production task spec missing fields: " + ", ".join(missing)
+            )
+
+        target_item = spec["target_item"]
+        if not isinstance(target_item, str) or not target_item:
+            raise HarnessValidationError("target_item must be a non-empty string")
+        target_count = spec["target_count"]
+        if (
+            isinstance(target_count, bool)
+            or not isinstance(target_count, int)
+            or target_count <= 0
+        ):
+            raise HarnessValidationError("target_count must be a positive integer")
+        target_rate = spec["target_rate_per_s"]
+        if (
+            isinstance(target_rate, bool)
+            or not isinstance(target_rate, (int, float))
+            or float(target_rate) <= 0
+        ):
+            raise HarnessValidationError(
+                "target_rate_per_s must be a positive number"
+            )
+
+        def numeric_mapping(name: str) -> tuple[tuple[str, float], ...]:
+            raw = spec[name]
+            if not isinstance(raw, dict) or not raw:
+                raise HarnessValidationError(f"{name} must be a non-empty mapping")
+            rows: list[tuple[str, float]] = []
+            for key, value in raw.items():
+                if (
+                    not isinstance(key, str)
+                    or not key
+                    or isinstance(value, bool)
+                    or not isinstance(value, (int, float))
+                    or float(value) < 0
+                ):
+                    raise HarnessValidationError(
+                        f"{name} must map non-empty strings to non-negative numbers"
+                    )
+                rows.append((key, float(value)))
+            return tuple(sorted(rows))
+
+        material_budget = numeric_mapping("material_budget")
+        available = numeric_mapping("available")
+        raw_sources_raw = spec["raw_sources"]
+        if (
+            not isinstance(raw_sources_raw, list)
+            or not raw_sources_raw
+            or any(
+                not isinstance(value, str) or not value
+                for value in raw_sources_raw
+            )
+        ):
+            raise HarnessValidationError("raw_sources must be a non-empty string list")
+        capabilities_raw = spec["validated_capabilities"]
+        if (
+            not isinstance(capabilities_raw, list)
+            or not capabilities_raw
+            or any(
+                not isinstance(value, str) or not value
+                for value in capabilities_raw
+            )
+        ):
+            raise HarnessValidationError(
+                "validated_capabilities must be a non-empty string list"
+            )
+        profile = spec["catalog_profile"]
+        if profile != "minimal_logistic_science_v1":
+            raise HarnessValidationError("unsupported production catalog profile")
+        budget_names = {name for name, _ in material_budget}
+        raw_sources = tuple(sorted(set(raw_sources_raw)))
+        missing_budget = sorted(set(raw_sources) - budget_names)
+        if missing_budget:
+            raise HarnessValidationError(
+                "material_budget missing declared raw source(s): "
+                + ", ".join(missing_budget)
+            )
+        return cls(
+            target_item=target_item,
+            target_count=int(target_count),
+            target_rate_per_s=float(target_rate),
+            material_budget=material_budget,
+            available=available,
+            raw_sources=raw_sources,
+            validated_capabilities=tuple(capabilities_raw),
+            catalog_profile=profile,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "target_item": self.target_item,
+            "target_count": self.target_count,
+            "target_rate_per_s": self.target_rate_per_s,
+            "material_budget": dict(self.material_budget),
+            "available": dict(self.available),
+            "raw_sources": list(self.raw_sources),
+            "validated_capabilities": list(self.validated_capabilities),
+            "catalog_profile": self.catalog_profile,
+        }
+
+
+def _production_dependency_order_valid(dag: Any, plan: DependencyPlan) -> bool:
+    dag_order = {node.item: index for index, node in enumerate(dag.nodes)}
+    for node in dag.nodes:
+        consumer = dag_order[node.item]
+        for ingredient in node.recipe.ingredients:
+            dependency = dag_order.get(ingredient.item)
+            if dependency is not None and dependency >= consumer:
+                return False
+
+    plan_order = {step.item: index for index, step in enumerate(plan.steps)}
+    for step in plan.steps:
+        for consumer in step.required_by:
+            consumer_index = plan_order.get(consumer)
+            if consumer_index is not None and plan_order[step.item] >= consumer_index:
+                return False
+    return bool(dag.nodes) and dag.nodes[-1].item == dag.target_item
+
+
+class ProductionTransitionPairedAdapter:
+    """Paired binding over ProductionDagPlanner + DependencyPlanner."""
+
+    def __init__(self, fixture: ProductionTransitionFixture) -> None:
+        self.fixture = fixture
+        self.state: dict[str, Any] = {
+            "adapter_version": PRODUCTION_ADAPTER_VERSION,
+            "fixture": fixture.to_dict(),
+            "validated_capabilities": {
+                name: True for name in fixture.validated_capabilities
+            },
+            "arm_history": [],
+        }
+        self.arm_start_digests: list[str] = []
+
+    def capture_checkpoint(self) -> dict[str, Any]:
+        return deepcopy(self.state)
+
+    def restore_checkpoint(self, checkpoint: dict[str, Any]) -> None:
+        if not isinstance(checkpoint, dict):
+            raise HarnessValidationError("production checkpoint must be a mapping")
+        if checkpoint.get("fixture") != self.fixture.to_dict():
+            raise HarnessValidationError("production checkpoint fixture mismatch")
+        self.state = deepcopy(checkpoint)
+
+    def state_digest(self) -> str:
+        return checkpoint_digest(self.state)
+
+    def _validate_task(self, task: dict[str, Any]) -> dict[str, Any]:
+        expected = ProductionTransitionFixture.from_task(task)
+        if expected != self.fixture:
+            raise HarnessValidationError(
+                "task production fixture differs from disposable adapter fixture"
+            )
+        spec = task["spec"]
+        candidates = tuple(map(str, spec.get("candidate_classes") or ()))
+        if "production_dag_dependency_plan" not in candidates:
+            raise HarnessValidationError(
+                "candidate surface does not expose production_dag_dependency_plan"
+            )
+        expected_hard = {
+            "required_material_budget_satisfied",
+            "dependency_order_valid",
+            "target_stage_functional",
+            "no_validated_capability_regresses",
+        }
+        actual_hard = set(map(str, spec.get("hard_postconditions") or ()))
+        if actual_hard != expected_hard:
+            raise HarnessValidationError(
+                "production hard-postcondition contract mismatch"
+            )
+        return spec
+
+    def run_arm(
+        self,
+        task: dict[str, Any],
+        memory: MemoryAccess,
+        budget: HarnessBudget,
+    ) -> ArmObservation:
+        spec = self._validate_task(task)
+        start_digest = self.state_digest()
+        self.arm_start_digests.append(start_digest)
+
+        retrieval = memory.retrieve(
+            MemoryQuery(
+                query_id=f"real-adapter-preflight:{task.get('task_id', 'production')}",
+                text=(
+                    "production transition dependency dag material budget "
+                    "logistic science machine capacity"
+                ),
+                scope=ValidityScope(),
+                limit=5,
+            )
+        )
+
+        started = time.perf_counter()
+        catalog = RuntimeFactorioCatalog(_production_catalog_payload())
+        dag = ProductionDagPlanner(
+            catalog.recipe_provider,
+            raw_items=set(self.fixture.raw_sources),
+        ).plan(
+            self.fixture.target_item,
+            self.fixture.target_rate_per_s,
+        )
+        plan = DependencyPlanner(catalog, researched=()).plan(
+            self.fixture.target_item,
+            self.fixture.target_count,
+            rate_per_s=self.fixture.target_rate_per_s,
+            available=dict(self.fixture.available),
+            raw_sources=self.fixture.raw_sources,
+        )
+        elapsed = time.perf_counter() - started
+
+        material_budget = dict(self.fixture.material_budget)
+        material_budget_satisfied = all(
+            name in material_budget
+            and float(material_budget[name]) + 1e-12 >= float(required)
+            for name, required in plan.raw_requirements.items()
+        )
+        dependency_order_valid = _production_dependency_order_valid(dag, plan)
+        target_capacity = plan.capacity_for(self.fixture.target_item)
+        target_stage_functional = (
+            plan.feasible
+            and not plan.unresolved_requirements
+            and dag.node(self.fixture.target_item) is not None
+            and plan.step(self.fixture.target_item) is not None
+            and target_capacity is not None
+            and target_capacity.machines is not None
+            and target_capacity.machines > 0
+        )
+        before_capabilities = {
+            name: True for name in self.fixture.validated_capabilities
+        }
+        no_regression = self.state["validated_capabilities"] == before_capabilities
+        hard = {
+            "required_material_budget_satisfied": bool(
+                material_budget_satisfied
+            ),
+            "dependency_order_valid": bool(dependency_order_valid),
+            "target_stage_functional": bool(target_stage_functional),
+            "no_validated_capability_regresses": bool(no_regression),
+        }
+
+        retrieved_ids = [
+            row["memory_id"]
+            for row in retrieval.to_dict().get("results", [])
+            if isinstance(row, dict) and row.get("memory_id")
+        ]
+        memory.quarantine_write(
+            {
+                "kind": "real_adapter_preflight_trace",
+                "adapter_version": PRODUCTION_ADAPTER_VERSION,
+                "task_id": task.get("task_id"),
+                "condition": memory.condition,
+                "retrieved_memory_ids": retrieved_ids,
+                "dag": dag.to_dict(),
+                "dependency_plan": plan.as_dict(),
+                "material_budget": material_budget,
+                "hard_postconditions": hard,
+            }
+        )
+        self.state["arm_history"].append(
+            {
+                "condition": memory.condition,
+                "retrieved_count": len(retrieval.results),
+                "raw_requirements": dict(plan.raw_requirements),
+                "hard_postconditions": hard,
+            }
+        )
+        return ArmObservation(
+            hard_postconditions=hard,
+            action_count=0,
+            observed_game_ticks=0,
+            invalid_or_refused_actions=0,
+            proposed_actions=1,
+            initially_unsatisfied=True,
+            decisions=2,
+            wall_clock_seconds=elapsed,
+            llm_calls=0,
+            candidate_surface=tuple(map(str, spec["candidate_classes"])),
+            tool_surface=PRODUCTION_TOOL_SURFACE,
             outcome_extractor_version=OUTCOME_EXTRACTOR_VERSION,
         )
 
