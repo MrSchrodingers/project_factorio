@@ -1953,7 +1953,9 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
         "continuous_authority":False,
         "source_memory":{"manifest_sha256":"a"*64},
         "seed_partitions":{
-            "confirmatory_reserved":list(range(20261101,20261111))
+            "pilot":list(range(20261201,20261209)),
+            "evaluation":list(range(20261221,20261241)),
+            "confirmatory_reserved":list(range(20261101,20261111)),
         },
     }
     f4c_manifest=configs/"cortex_f4c_causal_ablation_v1.json"
@@ -2343,6 +2345,104 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
     assert f4c_execution_ready["phase4_exit_gate"]["validated"] is False
     assert f4c_execution_ready["resume"]["do_not_start_another_seed"] is False
     assert "one preregistered pilot pair" in f4c_execution_ready["resume"]["action"]
+
+    progress=f4c_execution_ready["phase4_pilot_progress"]
+    assert progress["status"]=="ready"
+    assert progress["total"]==8
+    assert progress["pair_count"]==0
+    assert progress["reviewed_count"]==0
+    assert progress["next_seed"]==20261201
+    assert progress["seed_launch_allowed"] is True
+
+    first_dir=tmp_path/"runs"/"f4c_pilot"/"20261201"
+    first_dir.mkdir(parents=True)
+    first_pair=first_dir/"pair.json"
+    first_pair_payload={
+        "schema_version":"cortex_f4c_pilot_pair_v1",
+        "status":"completed",
+        "seed":20261201,
+        "task_id":"pilot:structural_flow_repair:20261201",
+        "live_factorio_world":False,
+        "factorio_rcon_used":False,
+        "fle_environment_created":False,
+        "world_lease_acquired":False,
+        "automatic_retry":False,
+        "code_revision":{"commit":"pilot-sha","dirty":False},
+        "claim_boundary":{
+            "pilot_only":True,
+            "excluded_from_primary_f4c_inference":True,
+            "evaluation_seed_executed":False,
+            "confirmatory_seed_executed":False,
+        },
+    }
+    first_pair.write_text(json.dumps(first_pair_payload)+"\n")
+    first_pending=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    pending=first_pending["phase4_pilot_progress"]
+    assert pending["status"]=="awaiting_review"
+    assert pending["pair_count"]==1
+    assert pending["reviewed_count"]==0
+    assert pending["awaiting_review_seed"]==20261201
+    assert pending["seed_launch_allowed"] is False
+    assert first_pending["resume"]["do_not_start_another_seed"] is True
+    assert (
+        first_pending["phase4_blocker"]["code"]
+        =="causal_transfer_pilot_review_pending"
+    )
+
+    first_review=first_dir/"review.json"
+    first_review.write_text(json.dumps({
+        "schema_version":"cortex_f4c_pilot_pair_review_v1",
+        "status":"pass",
+        "seed":20261201,
+        "pair_artifact_sha256":module._sha256(first_pair),
+        "claim_boundary":{
+            "instrumentation_only":True,
+            "variance_adaptation_forbidden":True,
+            "primary_f4c_inference":False,
+            "evaluation_partition_untouched":True,
+            "confirmatory_partition_untouched":True,
+        },
+    })+"\n")
+    first_reviewed=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    reviewed=first_reviewed["phase4_pilot_progress"]
+    assert reviewed["status"]=="in_progress"
+    assert reviewed["pair_count"]==1
+    assert reviewed["reviewed_count"]==1
+    assert reviewed["next_seed"]==20261202
+    assert reviewed["seed_launch_allowed"] is True
+    assert first_reviewed["resume"]["do_not_start_another_seed"] is False
+    assert (
+        first_reviewed["phase4_blocker"]["code"]
+        =="causal_transfer_pilot_in_progress"
+    )
+
+    future_dir=tmp_path/"runs"/"f4c_pilot"/"20261203"
+    future_dir.mkdir(parents=True)
+    (future_dir/"pair.json").write_text(json.dumps({
+        **first_pair_payload,
+        "seed":20261203,
+        "task_id":"pilot:fuel_energy_recovery:20261203",
+    })+"\n")
+    out_of_order=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert out_of_order["phase4_pilot_progress"]["valid"] is False
+    assert out_of_order["phase4_pilot_progress"]["out_of_order_seeds"]==[
+        20261203
+    ]
+    assert out_of_order["phase4_blocker"]["code"]==(
+        "causal_transfer_pilot_progress_invalid"
+    )
+    assert out_of_order["resume"]["do_not_start_another_seed"] is True
+    (future_dir/"pair.json").unlink()
+    future_dir.rmdir()
 
     f4b_payload["source"]["f4a_artifact_sha256"]="wrong"
     f4b_audit.write_text(json.dumps(f4b_payload)+"\n")

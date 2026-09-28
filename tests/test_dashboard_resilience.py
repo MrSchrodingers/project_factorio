@@ -176,9 +176,13 @@ def test_dashboard_separates_live_cortex_from_frozen_baseline_evidence() -> None
     assert "LAB ATIVO · PILOT READY · NÃO EXECUTADO" in app
     assert "LAB ATIVO / PILOT READY" in app
     assert "WORLD LIVE · LAB PILOT READY" in app
+    assert "phase4_pilot_progress" in app
+    assert "PILOT TASK-WORLD · SEM AUTORIDADE LIVE" in app
+    assert "Pilot é instrumentation-only" in app
+    assert "pilot 8/8 reviewed · evaluation runner pendente" in app
     assert "EXECUTION PREFLIGHT PASS · SEM AUTORIDADE" in app
-    assert "F4-C · execution preflight PASS · pilot pré-registrado pendente" in app
-    assert "harness + adapters reais PASS · pilot ainda não executado" in app
+    assert "F4-C · execution preflight PASS · pilot 0/8 ready" in app
+    assert "harness + adapters + treatment + runner PASS · pilot 0/8 ready" in app
     assert "outcome causal F4-C" in app
     assert "FROZEN · EVOLUTION OFF" in app
     assert "Replay do último curriculum baseline" in app

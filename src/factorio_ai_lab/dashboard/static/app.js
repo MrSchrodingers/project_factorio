@@ -137,6 +137,16 @@ function cortexOperationalView() {
   const phase4Harness = cortexPhase.phase4_causal_harness || {};
   const phase4Protocol = cortexPhase.phase4_causal_protocol || {};
   const phase4RealAdapters = cortexPhase.phase4_real_adapters || {};
+  const phase4PilotProgress = cortexPhase.phase4_pilot_progress || {};
+  const pilotTotal = Number(phase4PilotProgress.total || 0);
+  const pilotReviewed = Number(phase4PilotProgress.reviewed_count || 0);
+  const pilotPairCount = Number(phase4PilotProgress.pair_count || 0);
+  const pilotStarted = pilotPairCount > 0;
+  const pilotComplete = !!phase4PilotProgress.complete;
+  const pilotAwaitingReview = phase4PilotProgress.awaiting_review_seed ?? null;
+  const pilotLabel = pilotTotal > 0
+    ? pilotReviewed + "/" + pilotTotal
+    : "0/8";
   const executionReady = (
     !!phase4Protocol.execution_ready
     && !!phase4Protocol.real_task_adapters_validated
@@ -159,6 +169,14 @@ function cortexOperationalView() {
     phase4Harness,
     phase4Protocol,
     phase4RealAdapters,
+    phase4PilotProgress,
+    pilotTotal,
+    pilotReviewed,
+    pilotPairCount,
+    pilotStarted,
+    pilotComplete,
+    pilotAwaitingReview,
+    pilotLabel,
     executionReady,
     liveAgent,
     paused,
@@ -1774,7 +1792,11 @@ function renderExperimentContext() {
       ? "Baseline isolada · seed " + seed + " · " + String(context.status || "--")
       : (operational.paused
         ? (operational.executionReady
-          ? "Cortex " + (operational.phase || "--") + " · LAB ATIVO / PILOT READY"
+          ? (operational.pilotComplete
+            ? "Cortex " + (operational.phase || "--") + " · LAB ATIVO / PILOT " + operational.pilotLabel + " COMPLETE"
+            : (operational.pilotStarted
+              ? "Cortex " + (operational.phase || "--") + " · LAB ATIVO / PILOT " + operational.pilotLabel
+              : "Cortex " + (operational.phase || "--") + " · LAB ATIVO / PILOT READY"))
           : (operational.labSimulationActive
             ? "Cortex " + (operational.phase || "--") + " · LAB ATIVO / SIMULAÇÃO"
             : "Cortex " + (operational.phase || "--") + " · PAUSADO / SHADOW"))
@@ -1795,7 +1817,9 @@ function renderExperimentContext() {
       : (operational.paused
         ? (operational.labSimulationActive
           ? (operational.executionReady
-            ? "laboratório ativo · execution preflight PASS · harness + 4 adapters reais validados em NON-PROTOCOL · executor Cortex e evolution OFF · nenhuma seed executada"
+            ? (operational.pilotStarted
+              ? "laboratório ativo · pilot task-world " + operational.pilotLabel + " · instrumentation-only · executor Cortex/evolution live OFF · evaluation/confirmatory congeladas"
+              : "laboratório ativo · execution preflight PASS · treatment + runner validados · executor Cortex/evolution live OFF · pilot 0/8")
             : "laboratório ativo em simulação/replay · executor Cortex e evolution OFF · telemetria WORLD continua live · nenhuma autoridade contínua")
           : "estado global do Cortex · execução autônoma pausada · telemetria WORLD continua live · baselines permanecem isoladas como evidência")
         : "estado global do Cortex · baselines permanecem isoladas como evidência")
@@ -1814,7 +1838,9 @@ function renderExperimentContext() {
   setText(
     "factoryViewLabel",
     operational.executionReady
-      ? "WORLD LIVE · LAB PILOT READY"
+      ? (operational.pilotStarted
+        ? "WORLD LIVE · PILOT TASK-WORLD " + operational.pilotLabel
+        : "WORLD LIVE · LAB PILOT READY")
       : (operational.labSimulationActive
         ? "WORLD LIVE · LAB SIMULAÇÃO"
         : (operational.historicalEvidenceMode ? "WORLD LIVE · CORTEX PAUSADO" : "WORLD LIVE · FÁBRICA"))
@@ -1833,7 +1859,11 @@ function renderExperimentContext() {
       setText(
         "operationalModeTitle",
         operational.executionReady
-          ? "LAB ATIVO · PILOT READY · NÃO EXECUTADO"
+          ? (operational.pilotComplete
+            ? "LAB ATIVO · PILOT 8/8 REVIEW PASS"
+            : (operational.pilotStarted
+              ? "LAB ATIVO · PILOT " + operational.pilotLabel
+              : "LAB ATIVO · PILOT READY · NÃO EXECUTADO"))
           : (operational.labSimulationActive
             ? "LAB ATIVO · simulação/replay F4-C"
             : "CORTEX PAUSADO · nenhum executor controla o mundo")
@@ -1841,7 +1871,9 @@ function renderExperimentContext() {
       setText(
         "operationalModeDetail",
         operational.executionReady
-          ? "F4-C execution preflight PASS: harness pareado e os quatro adapters reais passaram validação NON-PROTOCOL, incluindo restore, ablação retrieval-only e probes negativos fail-closed. Nenhum pilot/evaluation/confirmatory foi executado. Executor Cortex, evolution e runners permanecem OFF."
+          ? (operational.pilotStarted
+            ? "F4-C pilot task-world em progresso: " + operational.pilotLabel + " pares possuem review PASS. Pilot é instrumentation-only e excluído da inferência primária; evaluation/confirmatory continuam congeladas. WORLD live, executor Cortex e evolution permanecem OFF."
+            : "F4-C execution preflight PASS: harness, adapters, treatment causal e pilot runner validados. Pilot 0/8; nenhuma evaluation/confirmatory foi executada. WORLD live, executor Cortex e evolution permanecem OFF.")
           : (operational.phase4Harness.preflight_validated
             ? "F4-B e o pré-registro F4-C estão fechados; o harness pareado passou o preflight sintético. A interface permanece ativa em replay/simulação, enquanto executor Cortex, evolution e runners ficam OFF. Esta atividade visual não executa Factorio, não cria outcome experimental e não conta como evidência F4-C."
             : "F4-B está fechado e o pré-registro F4-C está congelado. Evolution e runners permanecem OFF. A UI pode reproduzir visualmente eventos históricos reais, mas replay visual não executa Factorio, não cria outcome e não conta como evidência F4-C.")
@@ -1849,7 +1881,9 @@ function renderExperimentContext() {
       setClassText(
         "operationalModeBadge",
         operational.executionReady
-          ? "EXECUTION PREFLIGHT PASS · SEM AUTORIDADE"
+          ? (operational.pilotStarted
+            ? "PILOT TASK-WORLD · SEM AUTORIDADE LIVE"
+            : "EXECUTION PREFLIGHT PASS · SEM AUTORIDADE")
           : (operational.labSimulationActive
             ? "SIMULAÇÃO ATIVA · SEM AUTORIDADE"
             : (operational.visualReplayAvailable
@@ -1864,7 +1898,9 @@ function renderExperimentContext() {
     worldNotice.hidden = !(operational.historicalEvidenceMode && worldEmpty);
     if (!worldNotice.hidden) {
       worldNotice.textContent = operational.executionReady
-        ? "WORLD LIVE conectado, porém vazio: 0 entidades é o estado físico observado do player force. O laboratório está PILOT READY, mas nenhum pilot foi executado; executor Cortex/evolution permanecem OFF e o replay não substitui o estado físico live."
+        ? (operational.pilotStarted
+          ? "WORLD LIVE conectado, porém vazio: 0 entidades é o estado físico observado do player force. O pilot " + operational.pilotLabel + " roda somente no task-world determinístico, não no WORLD live. Executor Cortex/evolution permanecem OFF; pilot é instrumentation-only."
+          : "WORLD LIVE conectado, porém vazio: 0 entidades é o estado físico observado do player force. O laboratório está PILOT READY 0/8; executor Cortex/evolution permanecem OFF e o replay não substitui o estado físico live.")
         : (operational.labSimulationActive
           ? "WORLD LIVE conectado, porém vazio: 0 entidades é o estado físico observado do player force. A UI está ATIVA em simulação/replay, mas executor Cortex/evolution permanecem OFF e nada está construindo no mundo. O replay nunca substitui o estado físico live."
           : "WORLD LIVE conectado, porém vazio: 0 entidades é o estado físico observado do player force. Cortex está PAUSADO e não há runner/evolution construindo. O replay visual abaixo usa somente eventos históricos persistidos e nunca substitui o estado físico live.");
@@ -4172,11 +4208,19 @@ function updateMission() {
     const blocker = operational.cortexPhase.phase4_blocker || {};
     const harnessPreflight = !!operational.phase4Harness.preflight_validated;
     const executionReady = operational.executionReady;
+    const pilotProgress = operational.phase4PilotProgress;
+    const pilotStarted = operational.pilotStarted;
+    const pilotComplete = operational.pilotComplete;
+    const pilotLabel = operational.pilotLabel;
     setText("missionTitle", "F4-C — causal memory ablation + held-out transfer");
     setText(
       "missionDetail",
       executionReady
-        ? "Execution preflight PASS: harness pareado + 4 adapters reais validados em fixtures NON-PROTOCOL, com probes negativos fail-closed. Nenhum pilot/evaluation/confirmatory foi executado; ainda não existe outcome causal F4-C."
+        ? (pilotComplete
+          ? "Pilot instrumentation complete 8/8 com reviews PASS. O pilot instrumentation-only não constitui outcome causal F4-C primário, permanece excluído da inferência e não pode orientar adaptação; held-out evaluation/confirmatory ainda não foram executadas."
+          : (pilotStarted
+            ? "Pilot task-world em progresso: " + pilotLabel + " reviews PASS. O pilot é instrumentation-only; nenhum resultado é usado para adaptar o benchmark e evaluation/confirmatory permanecem congeladas."
+            : "Execution preflight PASS: harness, adapters reais, treatment causal e pilot runner validados. Pilot 0/8; evaluation/confirmatory não executadas."))
         : (harnessPreflight
           ? "Harness pareado validado em simulação sintética: restore, isolamento, ablação retrieval-only, budgets, quarentena e J recomputável passaram. Nenhum outcome F4-C foi observado; adapters reais continuam bloqueados."
           : "Pré-registro causal F4-C congelado e elegível. Nenhum outcome F4-C foi observado; validar o paired evaluation harness antes de qualquer pilot seed.")
@@ -4184,7 +4228,11 @@ function updateMission() {
     setText(
       "stageName",
       executionReady
-        ? "F4-C · execution preflight PASS · pilot pré-registrado pendente"
+        ? (pilotComplete
+          ? "F4-C · pilot 8/8 reviewed · evaluation runner pendente"
+          : (pilotStarted
+            ? "F4-C · pilot " + pilotLabel + " · " + String(pilotProgress.status || "in_progress")
+            : "F4-C · execution preflight PASS · pilot 0/8 ready"))
         : (harnessPreflight
           ? "F4-C · harness simulado PASS · adapters reais pendentes"
           : "F4-C · protocol frozen · harness validation")
@@ -4198,12 +4246,27 @@ function updateMission() {
             ? "validate real task adapters in disposable non-protocol world"
             : "validate paired evaluation harness before any pilot seed"))
     );
-    $("stageProgressBar").style.width = executionReady ? "50%" : (harnessPreflight ? "25%" : "0%");
-    setText("stageProgressText", String(blocker.status || "blocked").toUpperCase());
+    const pilotFraction = operational.pilotTotal > 0
+      ? Math.min(1, operational.pilotReviewed / operational.pilotTotal)
+      : 0;
+    $("stageProgressBar").style.width = executionReady
+      ? String(50 + 25 * pilotFraction) + "%"
+      : (harnessPreflight ? "25%" : "0%");
+    setText(
+      "stageProgressText",
+      executionReady
+        ? "PILOT " + pilotLabel + " · " + String(pilotProgress.status || "ready").toUpperCase()
+        : String(blocker.status || "blocked").toUpperCase()
+    );
     setClassText(
       "researchBadge",
       executionReady
-        ? "LAB ATIVO · PILOT READY · NÃO EXECUTADO"
+        ? (pilotComplete
+          ? "LAB ATIVO · PILOT 8/8 REVIEW PASS · EVAL BLOQUEADA"
+          : (pilotStarted
+            ? "LAB ATIVO · PILOT " + pilotLabel
+              + (operational.pilotAwaitingReview ? " · REVIEW PENDENTE" : " · PRÓXIMO READY")
+            : "LAB ATIVO · PILOT READY · NÃO EXECUTADO"))
         : (harnessPreflight
           ? "LAB ATIVO · PREFLIGHT SINTÉTICO PASS"
           : "CORTEX PAUSADO · HARNESS PENDENTE"),
@@ -4406,7 +4469,11 @@ function updateKpis() {
   const baselineCompleted = baselineContext && context.status === "completed";
   const loopLabel = operational.historicalEvidenceMode
     ? (operational.executionReady
-      ? "LAB ATIVO · pilot ready · não executado"
+      ? (operational.pilotComplete
+        ? "LAB ATIVO · pilot 8/8 reviewed"
+        : (operational.pilotStarted
+          ? "LAB ATIVO · pilot " + operational.pilotLabel
+          : "LAB ATIVO · pilot ready · 0/8"))
       : (operational.labSimulationActive ? "LAB ATIVO · simulação/preflight" : "PAUSADO · por desenho"))
     : baselineCompleted
       ? "baseline seed completed"
@@ -4475,7 +4542,9 @@ function updateKpis() {
     setText(
       "engineeringGoalDetail",
       operational.executionReady
-        ? "harness + adapters reais PASS · pilot ainda não executado · memory ON vs retrieval-only ablation · evaluation/confirmatory congeladas"
+        ? (operational.pilotStarted
+          ? "harness + adapters + treatment + runner PASS · pilot " + operational.pilotLabel + " instrumentation-only · evaluation/confirmatory congeladas"
+          : "harness + adapters + treatment + runner PASS · pilot 0/8 ready · memory ON vs retrieval-only ablation · evaluation/confirmatory congeladas")
         : (operational.phase4Harness.preflight_validated
           ? "harness sintético PASS · adapters reais pendentes · memory ON vs retrieval-only ablation · held-out non-confirmatory tasks · leakage control + paired inference"
           : "protocol frozen · harness ainda não validado · memory ON vs retrieval-only ablation · held-out non-confirmatory tasks · leakage control + paired inference")

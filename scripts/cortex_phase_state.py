@@ -1770,6 +1770,169 @@ def build_phase_state(
         and phase4_pilot_runner_valid
     )
 
+    phase4_pilot_raw_seeds=phase4_manifest_partitions.get("pilot")
+    phase4_pilot_seeds=(
+        tuple(int(value) for value in phase4_pilot_raw_seeds)
+        if isinstance(phase4_pilot_raw_seeds,list)
+        else ()
+    )
+    phase4_pilot_rows: list[dict[str,Any]]=[]
+    phase4_pilot_progress_errors: list[str]=[]
+    for pilot_index,pilot_seed in enumerate(phase4_pilot_seeds,start=1):
+        pilot_dir=state_root/"runs"/"f4c_pilot"/str(pilot_seed)
+        pair_path=pilot_dir/"pair.json"
+        review_path=pilot_dir/"review.json"
+        pair_exists=pair_path.exists()
+        review_exists=review_path.exists()
+        pair_payload: dict[str,Any]={}
+        review_payload: dict[str,Any]={}
+        pair_error: str | None=None
+        review_error: str | None=None
+        if pair_exists:
+            try:
+                pair_payload=_load(pair_path)
+            except (OSError,json.JSONDecodeError,TypeError) as exc:
+                pair_error=f"{type(exc).__name__}: {exc}"
+        if review_exists:
+            try:
+                review_payload=_load(review_path)
+            except (OSError,json.JSONDecodeError,TypeError) as exc:
+                review_error=f"{type(exc).__name__}: {exc}"
+        pair_sha=_sha256(pair_path) if pair_exists and pair_error is None else None
+        pair_claim=pair_payload.get("claim_boundary")
+        if not isinstance(pair_claim,dict):
+            pair_claim={}
+        pair_revision=pair_payload.get("code_revision")
+        if not isinstance(pair_revision,dict):
+            pair_revision={}
+        pair_valid=(
+            pair_exists
+            and pair_error is None
+            and pair_payload.get("schema_version")=="cortex_f4c_pilot_pair_v1"
+            and pair_payload.get("status")=="completed"
+            and pair_payload.get("seed")==pilot_seed
+            and isinstance(pair_payload.get("task_id"),str)
+            and pair_payload.get("live_factorio_world") is False
+            and pair_payload.get("factorio_rcon_used") is False
+            and pair_payload.get("fle_environment_created") is False
+            and pair_payload.get("world_lease_acquired") is False
+            and pair_payload.get("automatic_retry") is False
+            and pair_revision.get("dirty") is False
+            and pair_claim.get("pilot_only") is True
+            and pair_claim.get("excluded_from_primary_f4c_inference") is True
+            and pair_claim.get("evaluation_seed_executed") is False
+            and pair_claim.get("confirmatory_seed_executed") is False
+        )
+        review_claim=review_payload.get("claim_boundary")
+        if not isinstance(review_claim,dict):
+            review_claim={}
+        review_valid=(
+            pair_valid
+            and review_exists
+            and review_error is None
+            and review_payload.get("schema_version")
+            =="cortex_f4c_pilot_pair_review_v1"
+            and review_payload.get("status")=="pass"
+            and review_payload.get("seed")==pilot_seed
+            and review_payload.get("pair_artifact_sha256")==pair_sha
+            and review_claim.get("instrumentation_only") is True
+            and review_claim.get("variance_adaptation_forbidden") is True
+            and review_claim.get("primary_f4c_inference") is False
+            and review_claim.get("evaluation_partition_untouched") is True
+            and review_claim.get("confirmatory_partition_untouched") is True
+        )
+        if pair_error is not None:
+            phase4_pilot_progress_errors.append(
+                f"{pilot_seed}:pair_read_error:{pair_error}"
+            )
+        if review_error is not None:
+            phase4_pilot_progress_errors.append(
+                f"{pilot_seed}:review_read_error:{review_error}"
+            )
+        if pair_exists and not pair_valid:
+            phase4_pilot_progress_errors.append(
+                f"{pilot_seed}:pair_invalid"
+            )
+        if review_exists and not review_valid:
+            phase4_pilot_progress_errors.append(
+                f"{pilot_seed}:review_invalid"
+            )
+        phase4_pilot_rows.append({
+            "position":pilot_index,
+            "seed":pilot_seed,
+            "pair_path":str(pair_path),
+            "pair_exists":pair_exists,
+            "pair_valid":pair_valid,
+            "pair_sha256":pair_sha,
+            "pair_read_error":pair_error,
+            "review_path":str(review_path),
+            "review_exists":review_exists,
+            "review_status":review_payload.get("status"),
+            "review_valid":review_valid,
+            "review_read_error":review_error,
+        })
+
+    phase4_pilot_pair_count=sum(
+        1 for row in phase4_pilot_rows if row["pair_exists"]
+    )
+    phase4_pilot_reviewed_count=sum(
+        1 for row in phase4_pilot_rows if row["review_valid"]
+    )
+    phase4_pilot_total=len(phase4_pilot_rows)
+    phase4_pilot_first_gap=None
+    for index,row in enumerate(phase4_pilot_rows):
+        if not row["review_valid"]:
+            phase4_pilot_first_gap=index
+            break
+    phase4_pilot_out_of_order: list[int]=[]
+    if phase4_pilot_first_gap is not None:
+        for row in phase4_pilot_rows[phase4_pilot_first_gap+1:]:
+            if row["pair_exists"] or row["review_exists"]:
+                phase4_pilot_out_of_order.append(int(row["seed"]))
+    if phase4_pilot_out_of_order:
+        phase4_pilot_progress_errors.append(
+            "future_pilot_evidence_out_of_order:"
+            +",".join(map(str,phase4_pilot_out_of_order))
+        )
+
+    phase4_pilot_awaiting_review_seed=None
+    phase4_pilot_next_seed=None
+    if phase4_pilot_first_gap is not None:
+        first_gap_row=phase4_pilot_rows[phase4_pilot_first_gap]
+        if first_gap_row["pair_exists"]:
+            phase4_pilot_awaiting_review_seed=int(first_gap_row["seed"])
+        else:
+            phase4_pilot_next_seed=int(first_gap_row["seed"])
+    phase4_pilot_complete=(
+        phase4_pilot_total==8
+        and phase4_pilot_pair_count==phase4_pilot_total
+        and phase4_pilot_reviewed_count==phase4_pilot_total
+    )
+    phase4_pilot_progress_valid=(
+        phase4_pilot_total==8
+        and not phase4_pilot_progress_errors
+        and not phase4_pilot_out_of_order
+    )
+    phase4_pilot_seed_launch_allowed=(
+        phase4_execution_ready
+        and phase4_pilot_progress_valid
+        and phase4_pilot_awaiting_review_seed is None
+        and phase4_pilot_next_seed is not None
+        and not phase4_pilot_complete
+    )
+    if not phase4_execution_ready:
+        phase4_pilot_progress_status="not_ready"
+    elif not phase4_pilot_progress_valid:
+        phase4_pilot_progress_status="invalid"
+    elif phase4_pilot_complete:
+        phase4_pilot_progress_status="complete"
+    elif phase4_pilot_awaiting_review_seed is not None:
+        phase4_pilot_progress_status="awaiting_review"
+    elif phase4_pilot_reviewed_count>0:
+        phase4_pilot_progress_status="in_progress"
+    else:
+        phase4_pilot_progress_status="ready"
+
     phase2_delivery_actuator_canary_path=(
         state_root
         / "runs"
@@ -2014,12 +2177,37 @@ def build_phase_state(
             )
 
     if phase4_execution_ready:
-        action=(
-            "F4-C execution preflight PASS across harness, real adapters, "
-            "active memory treatment and pilot runner; next controlled action "
-            "is one preregistered pilot pair, while evaluation and confirmatory "
-            "seeds remain frozen"
-        )
+        if not phase4_pilot_progress_valid:
+            action=(
+                "halt F4-C pilot progression: pilot evidence ledger is invalid "
+                "or out of order; inspect canonical pair/review artifacts before "
+                "any later seed"
+            )
+        elif phase4_pilot_awaiting_review_seed is not None:
+            action=(
+                "audit and PASS-review pilot seed "
+                f"{phase4_pilot_awaiting_review_seed} before any later pilot; "
+                "evaluation and confirmatory remain frozen"
+            )
+        elif phase4_pilot_complete:
+            action=(
+                "F4-C pilot instrumentation complete 8/8 with PASS reviews; "
+                "freeze pilot outcomes against adaptation and implement/validate "
+                "the held-out evaluation runner before any evaluation seed"
+            )
+        elif phase4_pilot_next_seed is not None:
+            action=(
+                "F4-C pilot progress "
+                f"{phase4_pilot_reviewed_count}/{phase4_pilot_total} reviewed; "
+                "next controlled action is exactly one preregistered pilot pair "
+                f"seed {phase4_pilot_next_seed}; evaluation and confirmatory "
+                "remain frozen"
+            )
+        else:
+            action=(
+                "F4-C execution preflight PASS but no next pilot seed can be "
+                "resolved; halt before experimental execution"
+            )
     elif phase4_treatment_valid:
         action=(
             "F4-C treatment semantics PASS but pilot runner readiness is not "
@@ -2258,6 +2446,27 @@ def build_phase_state(
             "checks":phase4_pilot_runner_checks,
             "read_error":phase4_pilot_runner_error,
         },
+        "phase4_pilot_progress":{
+            "status":phase4_pilot_progress_status,
+            "total":phase4_pilot_total,
+            "pair_count":phase4_pilot_pair_count,
+            "reviewed_count":phase4_pilot_reviewed_count,
+            "complete":phase4_pilot_complete,
+            "valid":phase4_pilot_progress_valid,
+            "seed_launch_allowed":phase4_pilot_seed_launch_allowed,
+            "next_seed":phase4_pilot_next_seed,
+            "awaiting_review_seed":phase4_pilot_awaiting_review_seed,
+            "out_of_order_seeds":phase4_pilot_out_of_order,
+            "errors":phase4_pilot_progress_errors,
+            "rows":phase4_pilot_rows,
+            "claim_boundary":{
+                "instrumentation_only":True,
+                "variance_adaptation_forbidden":True,
+                "primary_f4c_inference":False,
+                "evaluation_partition_frozen":True,
+                "confirmatory_partition_frozen":True,
+            },
+        },
         "phase4_exit_gate":{
             "memory_substrate":phase4_memory_valid,
             "hybrid_retrieval_consolidation_decay":phase4_retrieval_valid,
@@ -2266,7 +2475,23 @@ def build_phase_state(
         },
         "phase4_blocker":{
             "code":(
-                "causal_transfer_pilot_not_executed"
+                (
+                    "causal_transfer_pilot_progress_invalid"
+                    if not phase4_pilot_progress_valid
+                    else (
+                        "causal_transfer_pilot_review_pending"
+                        if phase4_pilot_awaiting_review_seed is not None
+                        else (
+                            "causal_transfer_evaluation_runner_not_validated"
+                            if phase4_pilot_complete
+                            else (
+                                "causal_transfer_pilot_in_progress"
+                                if phase4_pilot_reviewed_count>0
+                                else "causal_transfer_pilot_not_executed"
+                            )
+                        )
+                    )
+                )
                 if phase4_execution_ready
                 else (
                     "causal_transfer_pilot_runner_not_validated"
@@ -2293,9 +2518,44 @@ def build_phase_state(
             ),
             "detail":(
                 (
-                    "Harness, real adapters, treatment semantics and pilot runner "
-                    "all passed preflight. No pilot outcome exists yet; evaluation "
-                    "and confirmatory seeds remain frozen."
+                    (
+                        "F4-C pilot evidence is invalid or out of order. No later "
+                        "pilot/evaluation/confirmatory seed is authorized."
+                    )
+                    if not phase4_pilot_progress_valid
+                    else (
+                        (
+                            "Pilot pair "
+                            f"{phase4_pilot_awaiting_review_seed} exists but has "
+                            "no canonical PASS review. Audit it before any later "
+                            "pilot; evaluation and confirmatory remain frozen."
+                        )
+                        if phase4_pilot_awaiting_review_seed is not None
+                        else (
+                            (
+                                "All 8 preregistered pilot pairs have canonical "
+                                "PASS reviews. Pilot evidence remains instrumentation-"
+                                "only and excluded from primary F4-C inference. "
+                                "Held-out evaluation runner is not yet validated."
+                            )
+                            if phase4_pilot_complete
+                            else (
+                                (
+                                    "F4-C pilot is in progress with "
+                                    f"{phase4_pilot_reviewed_count}/"
+                                    f"{phase4_pilot_total} pairs PASS-reviewed. "
+                                    f"Next eligible seed is {phase4_pilot_next_seed}; "
+                                    "evaluation and confirmatory remain frozen."
+                                )
+                                if phase4_pilot_reviewed_count>0
+                                else (
+                                    "Harness, real adapters, treatment semantics "
+                                    "and pilot runner passed preflight. Pilot is "
+                                    "0/8; evaluation and confirmatory remain frozen."
+                                )
+                            )
+                        )
+                    )
                 )
                 if phase4_execution_ready
                 else (
@@ -2308,10 +2568,8 @@ def build_phase_state(
                     if phase4_treatment_valid
                     else (
                         (
-                            "Real adapters passed component readiness, but the prior "
-                            "readiness claim was insufficient for causality because "
-                            "retrieval was logged without entering the decision path. "
-                            "Treatment semantics must pass before pilot execution."
+                            "Real adapters passed component readiness, but treatment "
+                            "semantics must pass before pilot execution."
                         )
                         if phase4_real_task_adapters_valid
                         else (
@@ -2329,9 +2587,9 @@ def build_phase_state(
                                 if phase4_causal_protocol_valid
                                 else (
                                     (
-                                    "F4-C causal protocol is not frozen and eligible. "
-                                    "Confirmatory seeds remain frozen."
-                                )
+                                        "F4-C causal protocol is not frozen and eligible. "
+                                        "Confirmatory seeds remain frozen."
+                                    )
                                     if phase4_retrieval_valid
                                     else None
                                 )
@@ -2860,7 +3118,10 @@ def build_phase_state(
                 blocked_running
                 or blocked_invalid
                 or blocked_release
-                or (phase2_exit_gate_valid and not phase4_execution_ready)
+                or (
+                    phase2_exit_gate_valid
+                    and not phase4_pilot_seed_launch_allowed
+                )
             ),
         },
     }
