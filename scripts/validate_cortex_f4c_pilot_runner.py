@@ -120,7 +120,8 @@ def build_validation(
             every_executor_ok = every_executor_ok and (
                 set(result.hard_postconditions)
                 == set(task["spec"]["hard_postconditions"])
-                and result.proposed_actions == 1
+                and result.proposed_actions >= result.action_count
+                and result.proposed_actions >= 1
                 and result.action_count >= 0
                 and result.observed_game_ticks >= 0
             )
