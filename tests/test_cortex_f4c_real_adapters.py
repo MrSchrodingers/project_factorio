@@ -18,10 +18,13 @@ from factorio_ai_lab.cortex.causal_protocol import (
 from factorio_ai_lab.cortex.causal_real_adapters import (
     FUEL_TOOL_SURFACE,
     SPATIAL_TOOL_SURFACE,
+    STRUCTURAL_TOOL_SURFACE,
     FuelRecoveryFixture,
     FuelRecoveryPairedAdapter,
     SpatialRoutingFixture,
     SpatialRoutingPairedAdapter,
+    StructuralFlowPairedAdapter,
+    StructuralRepairFixture,
 )
 from factorio_ai_lab.cortex.memory import (
     CognitiveMemoryStore,
@@ -311,6 +314,128 @@ def test_fuel_real_adapter_refuses_protocol_partition(tmp_path):
     protocol_task = deepcopy(task)
     protocol_task["partition"] = "evaluation"
     protocol_task["seed"] = 20261221
+    access = MemoryAccess(
+        MEMORY_ON,
+        load_memory_records(memory_path),
+        max_queries=4,
+    )
+
+    with pytest.raises(
+        HarnessValidationError,
+        match="accepts NON-PROTOCOL adapter_preflight only",
+    ):
+        adapter.run_arm(
+            protocol_task,
+            access,
+            HarnessBudget.from_manifest(build_protocol_manifest()),
+        )
+
+def _structural_task(*, dead_end_delta: int = 0) -> dict:
+    return {
+        "task_id": "adapter-preflight:structural-flow:test",
+        "partition": "adapter_preflight",
+        "family": "structural_flow_repair",
+        "seed": None,
+        "generator_version": "cortex_f4c_adapter_preflight_v1",
+        "spec": {
+            "candidate_classes": [
+                "structural_transactional_processing",
+                "reroute_existing_flow",
+            ],
+            "hard_postconditions": [
+                "processor_exists",
+                "producer_reaches_processor",
+                "processor_output_increases",
+                "no_new_dead_end",
+            ],
+            "initial_producers_reaching_processor": 3,
+            "initial_processor_output": 0.0,
+            "initial_dead_end_count": 0,
+            "processor_exists_after": True,
+            "dead_end_delta": dead_end_delta,
+        },
+    }
+
+
+def test_structural_real_adapter_uses_transactional_stack_and_commits_pair(
+    tmp_path,
+):
+    memory_path = tmp_path / "memory.sqlite3"
+    _memory(memory_path)
+    task = _structural_task()
+    fixture = StructuralRepairFixture.from_task(task)
+    adapter = StructuralFlowPairedAdapter(fixture)
+    checkpoint = adapter.state_digest()
+    pair = execute_pair(
+        task=task,
+        first_condition=MEMORY_ON,
+        second_condition=MEMORY_ABLATED,
+        adapter=adapter,
+        memory_records=load_memory_records(memory_path),
+        memory_snapshot=lambda: memory_database_snapshot(memory_path),
+        budget=HarnessBudget.from_manifest(build_protocol_manifest()),
+    )
+
+    assert pair["valid"] is True
+    assert pair["technical_invalidities"] == []
+    assert adapter.arm_start_digests == [checkpoint, checkpoint]
+    assert pair["source_memory_before"] == pair["source_memory_after"]
+    assert (
+        pair["arms"][MEMORY_ON]["observation"]["tool_surface"]
+        == list(STRUCTURAL_TOOL_SURFACE)
+    )
+    assert all(
+        pair["arms"][condition]["observation"]["hard_postconditions"][name]
+        for condition in (MEMORY_ON, MEMORY_ABLATED)
+        for name in task["spec"]["hard_postconditions"]
+    )
+    assert pair["arms"][MEMORY_ABLATED]["memory"]["retrievals"][0][
+        "result"
+    ]["results"] == []
+    assert pair["delta_J"] == 0.0
+
+
+def test_structural_real_adapter_rolls_back_new_dead_end(tmp_path):
+    memory_path = tmp_path / "memory.sqlite3"
+    _memory(memory_path)
+    task = _structural_task(dead_end_delta=1)
+    fixture = StructuralRepairFixture.from_task(task)
+    adapter = StructuralFlowPairedAdapter(fixture)
+    pair = execute_pair(
+        task=task,
+        first_condition=MEMORY_ABLATED,
+        second_condition=MEMORY_ON,
+        adapter=adapter,
+        memory_records=load_memory_records(memory_path),
+        memory_snapshot=lambda: memory_database_snapshot(memory_path),
+        budget=HarnessBudget.from_manifest(build_protocol_manifest()),
+    )
+
+    assert pair["valid"] is True
+    for condition in (MEMORY_ON, MEMORY_ABLATED):
+        observation = pair["arms"][condition]["observation"]
+        hard = observation["hard_postconditions"]
+        assert hard["processor_exists"] is False
+        assert hard["producer_reaches_processor"] is False
+        assert hard["processor_output_increases"] is False
+        assert hard["no_new_dead_end"] is True
+        assert observation["action_count"] == 0
+        assert observation["invalid_or_refused_actions"] == 1
+        score = pair["arms"][condition]["score"]
+        assert score["valid"] is True
+        assert score["functional_success"] == 0.0
+        assert score["goal_progress"] == 0.25
+
+
+def test_structural_real_adapter_refuses_protocol_partition(tmp_path):
+    memory_path = tmp_path / "memory.sqlite3"
+    _memory(memory_path)
+    task = _structural_task()
+    fixture = StructuralRepairFixture.from_task(task)
+    adapter = StructuralFlowPairedAdapter(fixture)
+    protocol_task = deepcopy(task)
+    protocol_task["partition"] = "pilot"
+    protocol_task["seed"] = 20261201
     access = MemoryAccess(
         MEMORY_ON,
         load_memory_records(memory_path),

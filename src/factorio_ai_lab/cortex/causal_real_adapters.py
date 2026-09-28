@@ -14,6 +14,16 @@ from dataclasses import dataclass
 from itertools import pairwise
 from typing import Any
 
+from factorio_ai_lab.cortex.actions import (
+    ActionAuthority,
+    ActionCondition,
+    ActionFamily,
+    ActionProvenance,
+    ActionRequest,
+    ActionStatus,
+    ConditionOperator,
+    ConditionState,
+)
 from factorio_ai_lab.cortex.causal_harness import (
     OUTCOME_EXTRACTOR_VERSION,
     ArmObservation,
@@ -24,10 +34,18 @@ from factorio_ai_lab.cortex.causal_harness import (
 )
 from factorio_ai_lab.cortex.memory import ValidityScope
 from factorio_ai_lab.cortex.memory_retrieval import MemoryQuery
+from factorio_ai_lab.cortex.structural import DirectProcessingRecipe, ProcessingBranch
+from factorio_ai_lab.cortex.structural_execute import (
+    StructuralTransactionalAdapter,
+    compile_structural_action,
+)
+from factorio_ai_lab.cortex.structural_prepare import prepare_structural_branch
 from factorio_ai_lab.domain.state import GridPoint
+from factorio_ai_lab.integrations.fle import TransactionalFLEExecutor
 from factorio_ai_lab.learning.repair_loop import (
     DEFICIT_FUEL_STARVED,
     INTENT_INSERT_FUEL,
+    INTENT_PLACE_PROCESSING,
     TOOL_RESUPPLY,
     RepairObservation,
     plan_repairs,
@@ -38,6 +56,13 @@ from factorio_ai_lab.planning.astar import (
     rectangular_bounds,
     weighted_astar,
 )
+from factorio_ai_lab.planning.delivery import (
+    MODE_INSERTER,
+    ArmPlacement,
+    DeliveryLink,
+)
+from factorio_ai_lab.planning.dependency_plan import DependencyPlan
+from factorio_ai_lab.planning.placement import OUTCOME_BUILD, PlacementPlan
 from factorio_ai_lab.planning.resupply import FuelSource, plan_supply
 
 SPATIAL_ADAPTER_VERSION = "cortex_f4c_spatial_real_adapter_v1"
@@ -46,6 +71,13 @@ FUEL_ADAPTER_VERSION = "cortex_f4c_fuel_real_adapter_v1"
 FUEL_TOOL_SURFACE = (
     "learning.repair_loop.plan_repairs",
     "planning.resupply.plan_supply",
+)
+STRUCTURAL_ADAPTER_VERSION = "cortex_f4c_structural_real_adapter_v1"
+STRUCTURAL_TOOL_SURFACE = (
+    "cortex.structural_prepare.prepare_structural_branch",
+    "cortex.structural_execute.compile_structural_action",
+    "cortex.structural_execute.StructuralTransactionalAdapter",
+    "integrations.fle.TransactionalFLEExecutor",
 )
 _ALLOWED_PREFLIGHT_PARTITIONS = frozenset({"adapter_preflight"})
 
@@ -691,6 +723,446 @@ class FuelRecoveryPairedAdapter:
             llm_calls=0,
             candidate_surface=tuple(map(str, spec["candidate_classes"])),
             tool_surface=FUEL_TOOL_SURFACE,
+            outcome_extractor_version=OUTCOME_EXTRACTOR_VERSION,
+        )
+
+@dataclass(frozen=True)
+class _DisposableStructuralAction:
+    agent_idx: int
+    code: str
+    game_state: dict[str, Any] | None
+
+
+def _disposable_structural_action_factory(
+    agent_idx: int,
+    code: str,
+    game_state: dict[str, Any] | None,
+) -> _DisposableStructuralAction:
+    return _DisposableStructuralAction(agent_idx, code, deepcopy(game_state))
+
+
+class _DisposableStructuralEnvironment:
+    """Tiny checkpointed environment used only for NON-PROTOCOL preflight."""
+
+    def __init__(
+        self,
+        *,
+        initial_producers: int,
+        initial_output: float,
+        initial_dead_ends: int,
+        processor_exists_after: bool,
+        dead_end_delta: int,
+    ) -> None:
+        self.processor_exists_after = processor_exists_after
+        self.dead_end_delta = dead_end_delta
+        self.initial = {
+            "producers_reaching_processor": int(initial_producers),
+            "physical_processing_coverage": 0.5,
+            "processor_exists": None,
+            "processor_output": float(initial_output),
+            "dead_end_count": int(initial_dead_ends),
+        }
+        self.state = deepcopy(self.initial)
+        self.last_action: _DisposableStructuralAction | None = None
+
+    def reset(self, *, options=None, seed=None):
+        del seed
+        game_state = None if options is None else options.get("game_state")
+        self.state = deepcopy(self.initial if game_state is None else game_state)
+        return {"state": deepcopy(self.state)}
+
+    def step(self, action: _DisposableStructuralAction):
+        self.last_action = action
+        self.state["producers_reaching_processor"] += 1
+        self.state["physical_processing_coverage"] = 2 / 3
+        self.state["processor_exists"] = self.processor_exists_after
+        self.state["processor_output"] = float(self.state["processor_output"]) + 1.0
+        self.state["dead_end_count"] += self.dead_end_delta
+        return (
+            {"raw_text": action.code},
+            1.0,
+            False,
+            False,
+            {
+                "output_game_state": deepcopy(self.state),
+                "error_occurred": False,
+                "ticks": 120,
+            },
+        )
+
+    def close(self) -> None:
+        pass
+
+
+@dataclass(frozen=True)
+class StructuralRepairFixture:
+    """Disposable transactional structural world for adapter preflight."""
+
+    initial_producers_reaching_processor: int
+    initial_processor_output: float
+    initial_dead_end_count: int
+    processor_exists_after: bool
+    dead_end_delta: int
+
+    @classmethod
+    def from_task(cls, task: dict[str, Any]) -> StructuralRepairFixture:
+        if task.get("family") != "structural_flow_repair":
+            raise HarnessValidationError("task family must be structural_flow_repair")
+        if task.get("partition") not in _ALLOWED_PREFLIGHT_PARTITIONS:
+            raise HarnessValidationError(
+                "structural adapter preflight accepts NON-PROTOCOL "
+                "adapter_preflight only"
+            )
+        if task.get("seed") is not None:
+            raise HarnessValidationError(
+                "structural adapter preflight forbids protocol/experimental seeds"
+            )
+        spec = task.get("spec")
+        if not isinstance(spec, dict):
+            raise HarnessValidationError("structural task spec missing")
+        required = {
+            "candidate_classes",
+            "hard_postconditions",
+            "initial_producers_reaching_processor",
+            "initial_processor_output",
+            "initial_dead_end_count",
+            "processor_exists_after",
+            "dead_end_delta",
+        }
+        missing = sorted(required - set(spec))
+        if missing:
+            raise HarnessValidationError(
+                "structural task spec missing fields: " + ", ".join(missing)
+            )
+
+        producers = spec["initial_producers_reaching_processor"]
+        output = spec["initial_processor_output"]
+        dead_ends = spec["initial_dead_end_count"]
+        dead_end_delta = spec["dead_end_delta"]
+        processor_exists = spec["processor_exists_after"]
+        if (
+            isinstance(producers, bool)
+            or not isinstance(producers, int)
+            or producers < 0
+        ):
+            raise HarnessValidationError(
+                "initial_producers_reaching_processor must be non-negative int"
+            )
+        if (
+            isinstance(output, bool)
+            or not isinstance(output, (int, float))
+            or float(output) < 0
+        ):
+            raise HarnessValidationError(
+                "initial_processor_output must be non-negative number"
+            )
+        if (
+            isinstance(dead_ends, bool)
+            or not isinstance(dead_ends, int)
+            or dead_ends < 0
+        ):
+            raise HarnessValidationError(
+                "initial_dead_end_count must be non-negative int"
+            )
+        if (
+            isinstance(dead_end_delta, bool)
+            or not isinstance(dead_end_delta, int)
+            or dead_end_delta < 0
+        ):
+            raise HarnessValidationError("dead_end_delta must be non-negative int")
+        if not isinstance(processor_exists, bool):
+            raise HarnessValidationError("processor_exists_after must be bool")
+        return cls(
+            initial_producers_reaching_processor=int(producers),
+            initial_processor_output=float(output),
+            initial_dead_end_count=int(dead_ends),
+            processor_exists_after=processor_exists,
+            dead_end_delta=int(dead_end_delta),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "initial_producers_reaching_processor": (
+                self.initial_producers_reaching_processor
+            ),
+            "initial_processor_output": self.initial_processor_output,
+            "initial_dead_end_count": self.initial_dead_end_count,
+            "processor_exists_after": self.processor_exists_after,
+            "dead_end_delta": self.dead_end_delta,
+        }
+
+
+def _structural_dependency_plan() -> DependencyPlan:
+    return DependencyPlan(
+        target_item="stone-furnace",
+        target_count=1.0,
+        target_rate_per_s=None,
+        steps=(),
+        raw_requirements={},
+        unresolved_requirements={},
+        machine_reservations={},
+        machine_requirements={},
+        capacity=(),
+        raw_rate_per_s=None,
+        blockers=(),
+        missing_technologies=(),
+        raw_sources_declared=True,
+        available={"stone-furnace": 1.0},
+    )
+
+
+def _structural_branch(task_id: str) -> ProcessingBranch:
+    request = ActionRequest(
+        action_id=f"{task_id}:structural",
+        family=ActionFamily.PLACEMENT,
+        intent=INTENT_PLACE_PROCESSING,
+        provenance=ActionProvenance(
+            requested_by="cortex-f4c-adapter-preflight",
+            source_component="causal_real_adapters",
+            code_revision=STRUCTURAL_ADAPTER_VERSION,
+        ),
+        targets=("producer-1",),
+    )
+    placement = PlacementPlan(
+        outcome=OUTCOME_BUILD,
+        position=(30.0, 85.0),
+        shift=(0, 0),
+        scanned=1,
+        resource_tiles=0,
+        resource_cost=0.0,
+        resource_names=(),
+        resource_unsurveyed=0,
+    )
+    delivery = DeliveryLink(
+        mode=MODE_INSERTER,
+        lift=ArmPlacement(
+            position=(28.5, 84.5),
+            direction="RIGHT",
+            picks_from=GridPoint(27, 84),
+            drops_at=GridPoint(29, 84),
+        ),
+    )
+    postconditions = (
+        ActionCondition(
+            name="producers_reaching_processor",
+            operator=ConditionOperator.INCREASE,
+            state=ConditionState.UNKNOWN,
+            hard=True,
+        ),
+        ActionCondition(
+            name="dead_end_count",
+            operator=ConditionOperator.UNCHANGED,
+            state=ConditionState.UNKNOWN,
+            hard=True,
+        ),
+    )
+    return ProcessingBranch(
+        material="iron-ore",
+        product="iron-plate",
+        recipe=DirectProcessingRecipe(
+            material="iron-ore",
+            recipe_name="iron-plate",
+            category="smelting",
+            products=("iron-plate",),
+        ),
+        processor="stone-furnace",
+        producers=("producer-1",),
+        buffers=("buffer-1",),
+        source_buffer="buffer-1",
+        machine_dependency=_structural_dependency_plan(),
+        placement=placement,
+        delivery=delivery,
+        request=request,
+        preconditions=(),
+        postconditions=postconditions,
+    )
+
+
+class StructuralFlowPairedAdapter:
+    """Paired binding over the existing structural transactional stack."""
+
+    def __init__(self, fixture: StructuralRepairFixture) -> None:
+        self.fixture = fixture
+        self.state: dict[str, Any] = {
+            "adapter_version": STRUCTURAL_ADAPTER_VERSION,
+            "fixture": fixture.to_dict(),
+            "arm_history": [],
+        }
+        self.arm_start_digests: list[str] = []
+
+    def capture_checkpoint(self) -> dict[str, Any]:
+        return deepcopy(self.state)
+
+    def restore_checkpoint(self, checkpoint: dict[str, Any]) -> None:
+        if not isinstance(checkpoint, dict):
+            raise HarnessValidationError("structural checkpoint must be a mapping")
+        if checkpoint.get("fixture") != self.fixture.to_dict():
+            raise HarnessValidationError("structural checkpoint fixture mismatch")
+        self.state = deepcopy(checkpoint)
+
+    def state_digest(self) -> str:
+        return checkpoint_digest(self.state)
+
+    def _validate_task(self, task: dict[str, Any]) -> dict[str, Any]:
+        expected = StructuralRepairFixture.from_task(task)
+        if expected != self.fixture:
+            raise HarnessValidationError(
+                "task structural fixture differs from disposable adapter fixture"
+            )
+        spec = task["spec"]
+        candidates = tuple(map(str, spec.get("candidate_classes") or ()))
+        if "structural_transactional_processing" not in candidates:
+            raise HarnessValidationError(
+                "candidate surface does not expose structural_transactional_processing"
+            )
+        expected_hard = {
+            "processor_exists",
+            "producer_reaches_processor",
+            "processor_output_increases",
+            "no_new_dead_end",
+        }
+        actual_hard = set(map(str, spec.get("hard_postconditions") or ()))
+        if actual_hard != expected_hard:
+            raise HarnessValidationError(
+                "structural hard-postcondition contract mismatch"
+            )
+        return spec
+
+    def run_arm(
+        self,
+        task: dict[str, Any],
+        memory: MemoryAccess,
+        budget: HarnessBudget,
+    ) -> ArmObservation:
+        spec = self._validate_task(task)
+        start_digest = self.state_digest()
+        self.arm_start_digests.append(start_digest)
+
+        retrieval = memory.retrieve(
+            MemoryQuery(
+                query_id=f"real-adapter-preflight:{task.get('task_id', 'structural')}",
+                text=(
+                    "structural flow repair processing producer buffer "
+                    "transaction rollback dead end"
+                ),
+                scope=ValidityScope(),
+                limit=5,
+            )
+        )
+
+        started = time.perf_counter()
+        branch = _structural_branch(str(task.get("task_id") or "structural"))
+        preparation = prepare_structural_branch(branch)
+        if not preparation.ready or preparation.prepared is None:
+            raise HarnessValidationError("structural branch preparation refused")
+        compilation = compile_structural_action(
+            preparation.prepared,
+            settle_seconds=1,
+        )
+        if not compilation.ready or compilation.compiled is None:
+            raise HarnessValidationError("structural action compilation refused")
+
+        env = _DisposableStructuralEnvironment(
+            initial_producers=self.fixture.initial_producers_reaching_processor,
+            initial_output=self.fixture.initial_processor_output,
+            initial_dead_ends=self.fixture.initial_dead_end_count,
+            processor_exists_after=self.fixture.processor_exists_after,
+            dead_end_delta=self.fixture.dead_end_delta,
+        )
+        tx = TransactionalFLEExecutor(
+            env,
+            action_factory=_disposable_structural_action_factory,
+        )
+        tx.reset(seed=0, game_state=deepcopy(env.initial))
+
+        def measure(_prepared):
+            return deepcopy(env.state)
+
+        result = StructuralTransactionalAdapter().execute(
+            preparation.prepared,
+            authority=ActionAuthority.EXECUTE,
+            executor=tx,
+            measure=measure,
+            settle_seconds=1,
+        )
+        elapsed = time.perf_counter() - started
+
+        final = deepcopy(tx.game_state)
+        before = env.initial
+        committed = result.status is ActionStatus.ACCEPTED
+        processor_exists = committed and final.get("processor_exists") is True
+        producer_reaches = (
+            committed
+            and int(final.get("producers_reaching_processor", -1))
+            > int(before["producers_reaching_processor"])
+        )
+        output_after = final.get("processor_output")
+        processor_output_increases = (
+            committed
+            and isinstance(output_after, (int, float))
+            and not isinstance(output_after, bool)
+            and float(output_after) > float(before["processor_output"])
+        )
+        final_dead_ends = final.get("dead_end_count")
+        no_new_dead_end = (
+            isinstance(final_dead_ends, int)
+            and not isinstance(final_dead_ends, bool)
+            and final_dead_ends <= int(before["dead_end_count"])
+        )
+        hard = {
+            "processor_exists": bool(processor_exists),
+            "producer_reaches_processor": bool(producer_reaches),
+            "processor_output_increases": bool(processor_output_increases),
+            "no_new_dead_end": bool(no_new_dead_end),
+        }
+
+        step_ticks = result.measurements.get("executor_step_ticks")
+        observed_ticks = (
+            int(step_ticks)
+            if isinstance(step_ticks, (int, float))
+            and not isinstance(step_ticks, bool)
+            and step_ticks >= 0
+            else 0
+        )
+        retrieved_ids = [
+            row["memory_id"]
+            for row in retrieval.to_dict().get("results", [])
+            if isinstance(row, dict) and row.get("memory_id")
+        ]
+        memory.quarantine_write(
+            {
+                "kind": "real_adapter_preflight_trace",
+                "adapter_version": STRUCTURAL_ADAPTER_VERSION,
+                "task_id": task.get("task_id"),
+                "condition": memory.condition,
+                "retrieved_memory_ids": retrieved_ids,
+                "preparation_ready": preparation.ready,
+                "compilation_ready": compilation.ready,
+                "transaction_status": result.status.value,
+                "changed_world": result.changed_world,
+                "hard_postconditions": hard,
+            }
+        )
+        self.state["arm_history"].append(
+            {
+                "condition": memory.condition,
+                "retrieved_count": len(retrieval.results),
+                "transaction_status": result.status.value,
+                "hard_postconditions": hard,
+            }
+        )
+        return ArmObservation(
+            hard_postconditions=hard,
+            action_count=1 if committed else 0,
+            observed_game_ticks=observed_ticks,
+            invalid_or_refused_actions=0 if committed else 1,
+            proposed_actions=1,
+            initially_unsatisfied=True,
+            decisions=3,
+            wall_clock_seconds=elapsed,
+            llm_calls=0,
+            candidate_surface=tuple(map(str, spec["candidate_classes"])),
+            tool_surface=STRUCTURAL_TOOL_SURFACE,
             outcome_extractor_version=OUTCOME_EXTRACTOR_VERSION,
         )
 
