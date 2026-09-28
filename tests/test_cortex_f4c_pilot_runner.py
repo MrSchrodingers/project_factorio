@@ -40,7 +40,8 @@ def test_runner_preflight_executes_every_candidate_without_protocol_seed():
             assert set(result.hard_postconditions) == set(
                 task["spec"]["hard_postconditions"]
             )
-            assert result.proposed_actions == 1
+            assert result.proposed_actions >= result.action_count
+            assert result.proposed_actions >= 1
             assert result.action_count >= 0
             assert result.observed_game_ticks >= 0
 

@@ -149,7 +149,7 @@ def _bounded_result(
         action_count=max(0, int(actions)),
         observed_game_ticks=max(0, int(ticks)),
         invalid_or_refused_actions=1 if over else 0,
-        proposed_actions=1,
+        proposed_actions=max(1, int(actions)),
         decisions=max(1, int(decisions)),
         metadata={**metadata, "budget_overrun": over},
     )
