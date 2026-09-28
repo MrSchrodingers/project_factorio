@@ -141,7 +141,7 @@ def _protocol_seed_firewall(
 ) -> bool:
     forbidden = deepcopy(task)
     forbidden["partition"] = "pilot"
-    forbidden["seed"] = 20261201
+    forbidden["seed"] = -1
     adapter = _adapter_for(task)
     access = MemoryAccess(
         MEMORY_ON,

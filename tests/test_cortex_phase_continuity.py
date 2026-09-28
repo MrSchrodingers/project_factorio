@@ -2127,7 +2127,7 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
     real_adapter_tests=tmp_path/"tests"/"test_cortex_f4c_real_adapters.py"
     real_adapter_tests.write_text("# fixture tests\n")
     real_adapter_payload={
-        "schema_version":"cortex_f4c_real_adapter_validation_v1",
+        "schema_version":"cortex_f4c_real_adapters_validation_v1",
         "status":"pass",
         "mode":"real_adapter_preflight",
         "authority_scope":"disposable_non_protocol_only",

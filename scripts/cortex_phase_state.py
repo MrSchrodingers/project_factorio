@@ -1489,7 +1489,7 @@ def build_phase_state(
         and phase4_real_adapter_audit
         and phase4_real_adapter_error is None
         and phase4_real_adapter_payload.get("schema_version")
-        =="cortex_f4c_real_adapter_validation_v1"
+        =="cortex_f4c_real_adapters_validation_v1"
         and phase4_real_adapter_payload.get("status")=="pass"
         and phase4_real_adapter_payload.get("mode")=="real_adapter_preflight"
         and phase4_real_adapter_payload.get("authority_scope")
