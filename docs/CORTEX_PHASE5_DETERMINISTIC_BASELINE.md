@@ -375,3 +375,27 @@ attempt to persist:
 
 This is an observability correction only; it does not change authority,
 postconditions or promotion criteria.
+
+## FLE seed semantics — methodological limitation
+
+FLE 0.4.3 does not apply the Gym seed argument to Factorio world generation.
+FactorioGymEnv.reset accepts seed but does not use it; FactorioInstance.reset
+invokes the reset tool, which resets game state, clears entities/inventory and
+regenerates resources on the existing map topology.
+
+Therefore the frozen F5 development/pilot/held-out integer partitions currently
+serve as preregistered episode identifiers, ordering and data-split keys. They
+must not be described as independent Factorio map seeds.
+
+Consequences:
+
+- current development repetitions test transactional/runtime robustness on the
+  configured world topology, not map-layout generalization;
+- held-out partitioning still protects policy-selection leakage, but by itself
+  does not establish out-of-distribution geography robustness;
+- before F5 held-out physical claims, a separate validated map-generation or
+  world-snapshot partition must bind each experimental id to a reproducible
+  Factorio map/world identity;
+- this limitation does not invalidate the one-shot A2 authority, rollback or
+  physical capability evidence already collected, but it narrows their
+  population of inference.
