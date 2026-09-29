@@ -193,6 +193,12 @@ def test_dashboard_separates_live_cortex_from_frozen_baseline_evidence() -> None
     assert "Bootstrap autonomous factory from empty WORLD" in app
     assert "F5-A · A0 · SEM AUTORIDADE LIVE" in app
     assert "bounded authority bridge" in app
+    assert "phase5AuthorityBridge" in app
+    assert "phase5BridgeReady" in app
+    assert "F5-B · BOUNDED AUTHORITY PASS · A0 AMBIENT" in app
+    assert "A0 AMBIENT · A2 ONE-SHOT READY" in app
+    assert "F5-B PASS · A2 one-shot bridge validated" in app
+    assert "F5-C deterministic autonomous baseline" in app
     assert "function renderPhase5Capabilities(operational)" in app
     assert "phase5CapabilityCard" in index
     assert "phase5CapabilityHealth" in index

@@ -2754,6 +2754,74 @@ def build_phase_state(
         and phase5_exit_gate.get("sesoi_preregistered") is True
     )
 
+    phase5b_doc_path=state_root/"docs"/"CORTEX_PHASE5_BOUNDED_AUTHORITY.md"
+    phase5b_doc=phase5b_doc_path.exists()
+    phase5b_audit_path=(
+        state_root/"runs"/"audits"/"cortex_f5b_authority_bridge.json"
+    )
+    phase5b_audit_exists=phase5b_audit_path.exists()
+    phase5b_audit: dict[str,Any]={}
+    phase5b_audit_error: str | None=None
+    if phase5b_audit_exists:
+        try:
+            phase5b_audit=_load(phase5b_audit_path)
+        except (OSError,json.JSONDecodeError,TypeError) as exc:
+            phase5b_audit_error=f"{type(exc).__name__}: {exc}"
+    phase5b_authority=phase5b_audit.get("authority")
+    if not isinstance(phase5b_authority,dict):
+        phase5b_authority={}
+    phase5b_revision=phase5b_audit.get("code_revision")
+    if not isinstance(phase5b_revision,dict):
+        phase5b_revision={}
+    phase5b_checks=phase5b_audit.get("checks")
+    if not isinstance(phase5b_checks,dict):
+        phase5b_checks={}
+    phase5b_source_hashes=phase5b_audit.get("source_hashes")
+    if not isinstance(phase5b_source_hashes,dict):
+        phase5b_source_hashes={}
+    phase5b_source_paths={
+        "f5_authority":state_root/"src"/"factorio_ai_lab"/"cortex"/"f5_authority.py",
+        "grant_ledger":state_root/"src"/"factorio_ai_lab"/"cortex"/"grant_ledger.py",
+        "option_execute":state_root/"src"/"factorio_ai_lab"/"cortex"/"option_execute.py",
+        "runtime_lease":state_root/"src"/"factorio_ai_lab"/"runtime.py",
+        "authority_schema":(
+            state_root/"configs"/"cortex_f5_authority_schema_v1.json"
+        ),
+        "audit_script":state_root/"scripts"/"validate_cortex_f5b_authority_bridge.py",
+    }
+    phase5b_current_hashes={
+        key:(_sha256(path) if path.exists() else None)
+        for key,path in phase5b_source_paths.items()
+    }
+    phase5b_valid=(
+        phase5_protocol_valid
+        and phase5b_doc
+        and phase5b_audit_exists
+        and phase5b_audit_error is None
+        and phase5b_audit.get("schema_version")
+        =="cortex_f5b_authority_bridge_audit_v1"
+        and phase5b_audit.get("status")=="pass"
+        and phase5b_audit.get("checkpoint")=="F5-B"
+        and phase5b_audit.get("world_mutation") is False
+        and phase5b_audit.get("world_lease_acquired") is False
+        and phase5b_audit.get("grant_issued") is False
+        and phase5b_audit.get("option_executed_live") is False
+        and phase5b_audit.get("live_canary_required_for_f5b") is False
+        and phase5b_audit.get("next_checkpoint")=="F5-C"
+        and phase5b_authority.get("ambient_level")=="A0"
+        and phase5b_authority.get("bounded_grant_level")=="A2"
+        and phase5b_authority.get("max_executions")==1
+        and phase5b_authority.get("continuous_authority") is False
+        and phase5b_authority.get("policy_may_self_grant_authority") is False
+        and phase5b_revision.get("dirty") is False
+        and isinstance(phase5b_revision.get("commit"),str)
+        and bool(phase5b_revision.get("commit"))
+        and bool(phase5b_checks)
+        and all(value is True for value in phase5b_checks.values())
+        and phase5b_source_hashes==phase5b_current_hashes
+        and len(phase5_interventions)==0
+    )
+
     phase2_delivery_actuator_canary_path=(
         state_root
         / "runs"
@@ -2997,11 +3065,17 @@ def build_phase_state(
                 "functional_accept_sustainability_not_proven"
             )
 
-    if phase5_protocol_valid:
+    if phase5b_valid:
         action=(
-            "F5-A protocol freeze complete; validate bounded live authority "
-            "bridge (F5-B) with WORLD observe-only, evolution OFF, and no "
-            "continuous authority"
+            "F5-B bounded authority bridge PASS; implement F5-C deterministic "
+            "autonomous baseline with ambient authority A0 and exactly one "
+            "expiring A2 grant per transactional Option"
+        )
+    elif phase5_protocol_valid:
+        action=(
+            "F5-A protocol freeze complete; validate bounded authority bridge "
+            "(F5-B) in test/shadow with WORLD observe-only, evolution OFF, and "
+            "no continuous authority"
         )
     elif phase4_execution_ready:
         if not phase4_pilot_progress_valid:
@@ -3216,8 +3290,41 @@ def build_phase_state(
                 else ("F4-A" if phase4_memory_valid else None)
             )
         ),
-        "phase5_checkpoint":"F5-A" if phase5_protocol_valid else None,
-        "phase5_next_checkpoint":"F5-B" if phase5_protocol_valid else None,
+        "phase5_checkpoint":(
+            "F5-B"
+            if phase5b_valid
+            else ("F5-A" if phase5_protocol_valid else None)
+        ),
+        "phase5_next_checkpoint":(
+            "F5-C"
+            if phase5b_valid
+            else ("F5-B" if phase5_protocol_valid else None)
+        ),
+        "phase5_authority_bridge":{
+            "document_path":str(phase5b_doc_path),
+            "document_exists":phase5b_doc,
+            "audit_path":str(phase5b_audit_path),
+            "audit_exists":phase5b_audit_exists,
+            "validated":phase5b_valid,
+            "ambient_authority":phase5b_authority.get("ambient_level","A0"),
+            "max_bounded_grant":phase5b_authority.get("bounded_grant_level"),
+            "max_executions":phase5b_authority.get("max_executions"),
+            "continuous_authority":phase5b_authority.get("continuous_authority"),
+            "policy_may_self_grant_authority":phase5b_authority.get(
+                "policy_may_self_grant_authority"
+            ),
+            "world_mutation":phase5b_audit.get("world_mutation"),
+            "world_lease_acquired":phase5b_audit.get("world_lease_acquired"),
+            "grant_issued":phase5b_audit.get("grant_issued"),
+            "option_executed_live":phase5b_audit.get("option_executed_live"),
+            "code_commit":phase5b_revision.get("commit"),
+            "source_hashes_match":(
+                bool(phase5b_source_hashes)
+                and phase5b_source_hashes==phase5b_current_hashes
+            ),
+            "checks":phase5b_checks,
+            "read_error":phase5b_audit_error,
+        },
         "phase5_protocol":{
             "document_path":str(phase5_protocol_doc_path),
             "document_exists":phase5_protocol_doc,

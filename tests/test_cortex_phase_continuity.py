@@ -2968,8 +2968,91 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
     assert f5a["phase5_protocol"]["achieved_capabilities"]==[]
     assert f5a["phase5_protocol"]["artifacts"]["errors"]=={}
     assert f5a["phase5_protocol"]["intervention_ledger"]["count"]==0
-    assert "bounded live authority bridge" in f5a["resume"]["action"]
+    assert "bounded authority bridge" in f5a["resume"]["action"]
     assert f5a["resume"]["do_not_start_another_seed"] is True
+
+    f5b_doc=docs/"CORTEX_PHASE5_BOUNDED_AUTHORITY.md"
+    f5b_doc.write_text("# F5-B bounded authority bridge\n")
+    f5b_sources={
+        "f5_authority":tmp_path/"src/factorio_ai_lab/cortex/f5_authority.py",
+        "grant_ledger":tmp_path/"src/factorio_ai_lab/cortex/grant_ledger.py",
+        "option_execute":tmp_path/"src/factorio_ai_lab/cortex/option_execute.py",
+        "runtime_lease":tmp_path/"src/factorio_ai_lab/runtime.py",
+        "authority_schema":authority_schema,
+        "audit_script":tmp_path/"scripts/validate_cortex_f5b_authority_bridge.py",
+    }
+    for key,path in f5b_sources.items():
+        if key=="authority_schema":
+            continue
+        path.parent.mkdir(parents=True,exist_ok=True)
+        path.write_text(f"# {key}\n")
+    f5b_checks={
+        "clean_committed_source":True,
+        "phase5a_protocol_validated":True,
+        "ambient_authority_is_a0":True,
+        "world_mutation_not_authorized":True,
+        "continuous_authority_off":True,
+        "a2_is_exactly_one_transactional_option":True,
+        "policy_self_grant_forbidden":True,
+        "evolution_inactive_disabled":True,
+        "no_active_world_lease":True,
+        "intervention_ledger_empty":True,
+        "targeted_authority_tests_pass":True,
+    }
+    f5b_audit=audits/"cortex_f5b_authority_bridge.json"
+    f5b_audit.write_text(json.dumps({
+        "schema_version":"cortex_f5b_authority_bridge_audit_v1",
+        "status":"pass",
+        "checkpoint":"F5-B",
+        "authority":{
+            "ambient_level":"A0",
+            "bounded_grant_level":"A2",
+            "max_executions":1,
+            "continuous_authority":False,
+            "policy_may_self_grant_authority":False,
+        },
+        "world_mutation":False,
+        "world_lease_acquired":False,
+        "grant_issued":False,
+        "option_executed_live":False,
+        "live_canary_required_for_f5b":False,
+        "next_checkpoint":"F5-C",
+        "code_revision":{
+            "commit":"f5b-implementation-sha",
+            "dirty":False,
+        },
+        "source_hashes":{
+            key:module._sha256(path)
+            for key,path in f5b_sources.items()
+        },
+        "checks":f5b_checks,
+    })+"\n")
+    f5b=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert f5b["phase"]=="F5"
+    assert f5b["phase5_checkpoint"]=="F5-B"
+    assert f5b["phase5_next_checkpoint"]=="F5-C"
+    assert f5b["phase5_authority_bridge"]["validated"] is True
+    assert f5b["phase5_authority_bridge"]["ambient_authority"]=="A0"
+    assert f5b["phase5_authority_bridge"]["max_bounded_grant"]=="A2"
+    assert f5b["phase5_authority_bridge"]["max_executions"]==1
+    assert f5b["phase5_authority_bridge"]["world_mutation"] is False
+    assert f5b["phase5_authority_bridge"]["grant_issued"] is False
+    assert f5b["phase5_authority_bridge"]["source_hashes_match"] is True
+    assert "F5-C deterministic autonomous baseline" in f5b["resume"]["action"]
+    assert f5b["resume"]["do_not_start_another_seed"] is True
+
+    f5b_sources["f5_authority"].write_text("# tampered F5 authority\n")
+    f5b_tampered=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert f5b_tampered["phase5_checkpoint"]=="F5-A"
+    assert f5b_tampered["phase5_next_checkpoint"]=="F5-B"
+    assert f5b_tampered["phase5_authority_bridge"]["validated"] is False
+    f5b_sources["f5_authority"].write_text("# f5_authority\n")
 
     f4b_payload["source"]["f4a_artifact_sha256"]="wrong"
     f4b_audit.write_text(json.dumps(f4b_payload)+"\n")

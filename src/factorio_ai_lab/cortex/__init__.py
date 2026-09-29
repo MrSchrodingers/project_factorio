@@ -63,6 +63,12 @@ from factorio_ai_lab.cortex.experiment_ledger import (
     observed_episode_from_repair_row,
     verify_observed_episode,
 )
+from factorio_ai_lab.cortex.f5_authority import (
+    F5AuthorityDecision,
+    F5AuthorityExecution,
+    F5AuthorityLevel,
+    F5BoundedAuthorityBridge,
+)
 from factorio_ai_lab.cortex.functional_dependency import (
     FuelCandidateEvaluation,
     FuelDependency,
@@ -184,6 +190,10 @@ __all__ = [
     "ExecutiveGoal",
     "ExecutiveShadowRun",
     "ExecutiveVerification",
+    "F5AuthorityDecision",
+    "F5AuthorityExecution",
+    "F5AuthorityLevel",
+    "F5BoundedAuthorityBridge",
     "FeasibilityAssessment",
     "FeasibilityState",
     "FuelCandidateEvaluation",
