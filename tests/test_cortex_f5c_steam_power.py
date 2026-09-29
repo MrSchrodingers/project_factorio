@@ -140,6 +140,9 @@ def test_compiled_steam_power_uses_native_triggers_real_load_and_survival() -> N
     assert "if cortex_consumer.electrical_id is None:" in code
     assert "cortex_engine_pole=place_entity_next_to(" in code
     assert "cortex_power_network=connect_entities(" not in code
+    assert "cortex_iron_reserve_recovery_refuel=0" in code
+    assert "cortex_iron_reserve_after_recovery" in code
+    assert "endogenous iron reserve recovery failed" in code
     assert "cortex_trigger_iron_plates < 50" in code
     assert "cortex_trigger_copper_plates < 10" in code
     assert "pickup_entity(cortex_copper_furnace)" in code
@@ -206,5 +209,7 @@ def test_steam_power_runner_budget_covers_infrastructure_topup() -> None:
         "pipe_inventory_ready",
         "power_tap_count",
         "consumer_electrical_id",
+        "iron_reserve_recovery_refuel",
+        "iron_reserve_after_recovery",
     ):
         assert f'"{name}"' in source

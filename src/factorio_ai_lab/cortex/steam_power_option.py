@@ -50,6 +50,7 @@ PIPE_SMELT_SECONDS_PER_PLATE=4
 PIPE_MIN_TOPUP_WINDOW_SECONDS=10
 SURVIVAL_COAL_DRAW=3
 IRON_SURVIVAL_ORE_DRAW=2
+IRON_RESERVE_RECOVERY_WINDOW_SECONDS=20
 IRON_TRIGGER_WINDOW_SECONDS=190
 COPPER_TRIGGER_WINDOW_SECONDS=40
 POWER_WINDOW_SECONDS=15
@@ -260,6 +261,7 @@ def compose_steam_power_option(
         "pipe_min_topup_window_seconds":PIPE_MIN_TOPUP_WINDOW_SECONDS,
         "survival_coal_draw":SURVIVAL_COAL_DRAW,
         "iron_survival_ore_draw":IRON_SURVIVAL_ORE_DRAW,
+        "iron_reserve_recovery_window_seconds":IRON_RESERVE_RECOVERY_WINDOW_SECONDS,
         "iron_trigger_window_seconds":IRON_TRIGGER_WINDOW_SECONDS,
         "copper_trigger_window_seconds":COPPER_TRIGGER_WINDOW_SECONDS,
         "power_window_seconds":POWER_WINDOW_SECONDS,

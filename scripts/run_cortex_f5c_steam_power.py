@@ -551,6 +551,8 @@ def _measure(namespace: Any,prepared: Any) -> dict[str,Any]:
         "iron_survival_growth",
         "coal_survival_growth",
         "smelting_survival_growth",
+        "iron_reserve_recovery_refuel",
+        "iron_reserve_after_recovery",
     )
     values={
         "water_source_valid":bool(

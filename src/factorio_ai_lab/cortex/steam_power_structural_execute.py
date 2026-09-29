@@ -100,6 +100,7 @@ def compile_steam_power(operation: StructuralOperation) -> list[str]:
     pipe_min_window=_positive_int(params,"pipe_min_topup_window_seconds")
     survival_coal=_positive_int(params,"survival_coal_draw")
     survival_iron=_positive_int(params,"iron_survival_ore_draw")
+    reserve_window=_positive_int(params,"iron_reserve_recovery_window_seconds")
     iron_window=_positive_int(params,"iron_trigger_window_seconds")
     copper_window=_positive_int(params,"copper_trigger_window_seconds")
     power_window=_positive_int(params,"power_window_seconds")
@@ -534,8 +535,35 @@ def compile_steam_power(operation: StructuralOperation) -> list[str]:
             "cortex_survival_iron_available=inspect_inventory(cortex_iron_buffer)"
             f"[{_prototype('iron-ore')}]"
         ),
+        "cortex_iron_reserve_recovery_refuel=0",
+        "cortex_iron_reserve_after_recovery=cortex_survival_iron_available",
         f"if cortex_survival_iron_available < {survival_iron}:",
-        "    raise RuntimeError('endogenous iron stock below survival draw')",
+        (
+            "    cortex_recovery_coal_available=inspect_inventory("
+            "cortex_coal_buffer)"
+            f"[{_prototype('coal')}]"
+        ),
+        f"    if cortex_recovery_coal_available < {survival_coal + 1}:",
+        "        raise RuntimeError('endogenous coal stock below iron reserve recovery')",
+        "    cortex_iron_reserve_recovery_coal=extract_item(",
+        f"        {_prototype('coal')},",
+        "        cortex_coal_buffer,",
+        "        quantity=1,",
+        "    )",
+        "    cortex_iron_extractor=insert_item(",
+        f"        {_prototype('coal')},",
+        "        cortex_iron_extractor,",
+        "        quantity=1,",
+        "    )",
+        "    cortex_iron_reserve_recovery_refuel=1",
+        f"    sleep({reserve_window})",
+        (
+            "    cortex_iron_reserve_after_recovery=inspect_inventory("
+            "cortex_iron_buffer)"
+            f"[{_prototype('iron-ore')}]"
+        ),
+        f"if cortex_iron_reserve_after_recovery < {survival_iron}:",
+        "    raise RuntimeError('endogenous iron reserve recovery failed')",
         "cortex_survival_iron_draw=extract_item(",
         f"    {_prototype('iron-ore')},",
         "    cortex_iron_buffer,",
@@ -648,5 +676,13 @@ def compile_steam_power(operation: StructuralOperation) -> list[str]:
         "    'iron_survival_growth':cortex_iron_survival_growth,",
         "    'coal_survival_growth':cortex_coal_survival_growth,",
         "    'smelting_survival_growth':cortex_smelting_survival_growth,",
+        (
+            "    'iron_reserve_recovery_refuel':"
+            "cortex_iron_reserve_recovery_refuel,"
+        ),
+        (
+            "    'iron_reserve_after_recovery':"
+            "cortex_iron_reserve_after_recovery,"
+        ),
         "})",
     ]
