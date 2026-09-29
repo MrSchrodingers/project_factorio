@@ -14,7 +14,10 @@ from factorio_ai_lab.cortex.steam_power_option import (
     SteamPowerOptionPlan,
     compose_steam_power_option,
 )
-from factorio_ai_lab.cortex.structural_execute import compile_structural_action
+from factorio_ai_lab.cortex.structural_execute import (
+    compile_structural_action,
+    execution_guard_conditions,
+)
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -107,8 +110,8 @@ def test_steam_power_option_is_inert_schema_aligned_and_no_copper_promotion() ->
         "coal_self_sufficiency_survives",
         "iron_smelting_survives",
         "steam_engine_exists",
-        "electric_consumer_energy",
     }.issubset(names)
+    assert "electric_consumer_energy" not in names
     assert "processor_exists" not in names
     assert "processor_output" not in names
 
@@ -230,3 +233,20 @@ def test_steam_power_runner_budget_covers_infrastructure_topup() -> None:
         "coal_reserve_ready",
     ):
         assert f'"{name}"' in source
+
+
+def test_steam_power_execution_guards_match_frozen_capability_schema() -> None:
+    plan=steam_power_plan()
+    guards=execution_guard_conditions(plan.prepared)
+    names={row.name for row in guards}
+
+    assert names=={"steam_engine_exists"}
+    assert "electric_consumer_energy" not in names
+
+def test_runner_consumer_gate_uses_compiled_supply_evidence_not_instant_buffer() -> None:
+    source=(ROOT/"scripts"/"run_cortex_f5c_steam_power.py").read_text()
+
+    gate=source[source.index('"electric_consumer_supplied":('):]
+    gate=gate.split("),",1)[0]
+    assert 'after["electric_consumer_supplied"] is True' in gate
+    assert 'after["electric_consumer_energy"]>0' not in gate

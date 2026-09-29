@@ -936,13 +936,6 @@ def execution_guard_conditions(
                 expected=True,
                 hard=True,
             ),
-            ActionCondition(
-                name="electric_consumer_energy",
-                operator=ConditionOperator.INCREASE,
-                state=ConditionState.UNKNOWN,
-                expected=None,
-                hard=True,
-            ),
         )
     return (
         ActionCondition(

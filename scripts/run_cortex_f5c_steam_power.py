@@ -859,7 +859,6 @@ def run_steam_power(
                 ),
                 "electric_consumer_supplied":(
                     after["electric_consumer_supplied"] is True
-                    and after["electric_consumer_energy"]>0
                 ),
             }
             survival_gate={
