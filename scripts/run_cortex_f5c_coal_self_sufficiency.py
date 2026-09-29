@@ -39,27 +39,28 @@ from factorio_ai_lab.dashboard.state import FactorioObserver
 from factorio_ai_lab.instrumentation.runtime import runtime_entity_footprints
 from factorio_ai_lab.integrations.fle import (
     TransactionalFLEExecutor,
+    attach_live_factorio_environment,
     enforce_minimum_eval_timeout,
-    list_environments,
 )
 from factorio_ai_lab.paths import RUNS_DIR, code_revision
 from factorio_ai_lab.planning.fuel import TICKS_PER_SECOND
 from factorio_ai_lab.runtime import WORLD_LEASE_STATE, FactorioWorldLease
 
 SCHEMA_VERSION="cortex_f5c_coal_self_sufficiency_v1"
-BASE_SEED=245044303
 DEFAULT_OPTION_SECONDS=120
 DEFAULT_GRANT_TTL_SECONDS=300
 ARENA="cortex_f5c_coal_self_sufficiency"
 OWNER="run_cortex_f5c_coal_self_sufficiency"
-def artifact_for_revision(commit: str) -> Path:
+def artifact_for_revision(base_seed: int,commit: str) -> Path:
+    if not isinstance(base_seed,int) or isinstance(base_seed,bool) or base_seed<=0:
+        raise ValueError("coal continuation artifact requires positive base seed")
     normalized=str(commit).strip().lower()
     if len(normalized)<12 or any(ch not in "0123456789abcdef" for ch in normalized):
         raise ValueError("coal continuation artifact requires a hexadecimal git commit")
     return (
         RUNS_DIR/"audits"/
         (
-            f"cortex_f5c_continuation_{BASE_SEED}_"
+            f"cortex_f5c_continuation_{base_seed}_"
             f"coal_self_sufficiency_{normalized[:12]}.json"
         )
     )
@@ -150,10 +151,18 @@ def _assert_ledger_writable(path: Path) -> dict[str,Any]:
 
 def _positions_from_iron_artifact(
     state: Mapping[str,Any],
-) -> tuple[tuple[float,float],tuple[float,float],Path]:
+) -> tuple[tuple[float,float],tuple[float,float],Path,int]:
     baseline=state.get("phase5_deterministic_baseline")
     if not isinstance(baseline,Mapping):
         raise TypeError("F5-C deterministic baseline state must be an object")
+    raw_seed=baseline.get("seed")
+    if (
+        not isinstance(raw_seed,int)
+        or isinstance(raw_seed,bool)
+        or raw_seed<=0
+        or baseline.get("iron_extraction_validated") is not True
+    ):
+        raise RuntimeError("promoted iron base seed is unavailable")
     raw_path=baseline.get("artifact_path")
     if not isinstance(raw_path,str) or not raw_path:
         raise RuntimeError("promoted iron artifact path missing")
@@ -162,7 +171,7 @@ def _positions_from_iron_artifact(
     if (
         payload.get("status")!="completed"
         or payload.get("capability_promoted")!="iron_extraction"
-        or payload.get("seed")!=BASE_SEED
+        or payload.get("seed")!=raw_seed
     ):
         raise RuntimeError("selected iron artifact is not the promoted base episode")
     plan=payload.get("option_plan")
@@ -173,7 +182,7 @@ def _positions_from_iron_artifact(
         raise TypeError("promoted iron target position must be an object")
     x=float(target["x"])
     y=float(target["y"])
-    return (x,y),(x+0.5,y+1.5),path
+    return (x,y),(x+0.5,y+1.5),path,raw_seed
 
 
 def _entity_at(
@@ -267,7 +276,12 @@ def preflight_coal(
         raise RuntimeError("F5 intervention ledger is not empty")
     ledger_state=_assert_ledger_writable(ledger_path)
 
-    iron_extractor,iron_buffer,iron_artifact=_positions_from_iron_artifact(state)
+    (
+        iron_extractor,
+        iron_buffer,
+        iron_artifact,
+        base_seed,
+    )=_positions_from_iron_artifact(state)
     observer=FactorioObserver()
     try:
         snapshot=observer.snapshot()
@@ -307,7 +321,7 @@ def preflight_coal(
         "world_lease_state":lease,
         "authority_ledger":ledger_state,
         "intervention_count":0,
-        "base_seed":BASE_SEED,
+        "base_seed":base_seed,
         "iron_artifact":str(iron_artifact),
         "incumbent_iron_extractor_position":{
             "x":iron_extractor[0],"y":iron_extractor[1],
@@ -317,6 +331,24 @@ def preflight_coal(
         },
         "world_entity_count":snapshot.get("entity_count"),
     }
+
+
+def _selected_base_seed(
+    reader: PhaseStateReader=phase_state,
+) -> int:
+    state=dict(reader())
+    baseline=state.get("phase5_deterministic_baseline")
+    if not isinstance(baseline,Mapping):
+        raise TypeError("F5-C deterministic baseline state must be an object")
+    seed=baseline.get("seed")
+    if (
+        not isinstance(seed,int)
+        or isinstance(seed,bool)
+        or seed<=0
+        or baseline.get("iron_extraction_validated") is not True
+    ):
+        raise RuntimeError("F5-C promoted iron base seed is unavailable")
+    return seed
 
 
 def _option_request(
@@ -457,7 +489,8 @@ def run_coal(
     commit_value=revision.get("commit")
     if not isinstance(commit_value,str) or not commit_value:
         raise RuntimeError("F5-C coal code revision is unavailable")
-    artifact=artifact or artifact_for_revision(commit_value)
+    selected_seed=_selected_base_seed(phase_state_reader)
+    artifact=artifact or artifact_for_revision(selected_seed,commit_value)
     preflight=preflight_coal(
         artifact=artifact,
         revision=revision,
@@ -475,7 +508,7 @@ def run_coal(
         "schema_version":SCHEMA_VERSION,
         "status":"starting",
         "capability":"coal_self_sufficiency",
-        "base_seed":BASE_SEED,
+        "base_seed":preflight["base_seed"],
         "run_id":run_id,
         "code_revision":revision,
         "preflight":preflight,
@@ -501,11 +534,14 @@ def run_coal(
             service_state_reader
         )
         try:
-            import gym
             from fle.commons.models.game_state import GameState
 
-            list_environments()
-            env=gym.make("open_play",run_idx=0)
+            env=attach_live_factorio_environment()
+            record["live_environment"]={
+                "mode":"attach_existing_world",
+                "task_setup_called":False,
+                "world_reset":False,
+            }
             record["fle_eval_timeout_s"]=enforce_minimum_eval_timeout(
                 env,
                 minimum_seconds=300,
@@ -522,6 +558,33 @@ def run_coal(
             )
             instance=env.unwrapped.instance
             namespace=instance.namespace
+
+            observer_after_attach=FactorioObserver()
+            try:
+                attached_snapshot=observer_after_attach.snapshot()
+            finally:
+                observer_after_attach.close()
+            attached_rows=attached_snapshot.get("entities")
+            if (
+                _entity_at(
+                    attached_rows,
+                    name="burner-mining-drill",
+                    position=iron_extractor,
+                ) is None
+                or _entity_at(
+                    attached_rows,
+                    name="wooden-chest",
+                    position=iron_buffer,
+                ) is None
+            ):
+                raise RuntimeError(
+                    "live FLE attachment changed the promoted iron WORLD before A2"
+                )
+            record["world_after_live_attachment"]={
+                "entity_count":attached_snapshot.get("entity_count"),
+                "incumbent_iron_present":True,
+                "world_reset":False,
+            }
 
             checkpoint=GameState.from_instance(instance)
             executor.game_state=checkpoint
@@ -743,10 +806,11 @@ def main() -> int:
     commit=revision.get("commit")
     if not isinstance(commit,str) or not commit:
         raise RuntimeError("F5-C coal code revision is unavailable")
+    selected_seed=_selected_base_seed()
     artifact=(
         args.artifact.resolve()
         if args.artifact is not None
-        else artifact_for_revision(commit).resolve()
+        else artifact_for_revision(selected_seed,commit).resolve()
     )
     if not args.execute:
         payload=preflight_coal(

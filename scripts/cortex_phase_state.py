@@ -3044,15 +3044,12 @@ def build_phase_state(
     phase5c_coal_artifact: dict[str,Any]={}
     phase5c_coal_artifact_error: str | None=None
     if phase5c_iron_extraction_valid and phase5c_selected_seed is not None:
-        coal_pattern=(
-            f"cortex_f5c_continuation_{phase5c_selected_seed}_"
-            "coal_self_sufficiency_*.json"
-        )
+        coal_pattern="cortex_f5c_continuation_*_coal_self_sufficiency_*.json"
         coal_paths=sorted(
             (state_root/"runs"/"audits").glob(coal_pattern)
         )
         coal_candidates: list[
-            tuple[str,Path,dict[str,Any],str | None,bool]
+            tuple[str,Path,dict[str,Any],str | None,bool,bool]
         ]=[]
         for coal_path in coal_paths:
             payload: dict[str,Any]={}
@@ -3089,11 +3086,16 @@ def build_phase_state(
                 error is None
                 and payload.get("schema_version")
                 =="cortex_f5c_coal_self_sufficiency_v1"
-                and payload.get("base_seed")==phase5c_selected_seed
+                and isinstance(payload.get("base_seed"),int)
+                and not isinstance(payload.get("base_seed"),bool)
                 and payload.get("capability")=="coal_self_sufficiency"
             )
-            valid=(
+            applies_to_selected_seed=(
                 started
+                and payload.get("base_seed")==phase5c_selected_seed
+            )
+            valid=(
+                applies_to_selected_seed
                 and payload.get("status")=="completed"
                 and payload.get("ambient_authority")=="A0"
                 and payload.get("bounded_authority")=="A2"
@@ -3161,12 +3163,28 @@ def build_phase_state(
             )
             started_at=str(payload.get("started_at") or "")
             coal_candidates.append(
-                (started_at,coal_path,payload,error,valid)
+                (
+                    started_at,
+                    coal_path,
+                    payload,
+                    error,
+                    applies_to_selected_seed,
+                    valid,
+                )
             )
         coal_candidates.sort(key=lambda row:(row[0],str(row[1])))
-        for started_at,coal_path,payload,error,valid in coal_candidates:
+        for (
+            started_at,
+            coal_path,
+            payload,
+            error,
+            applies_to_selected_seed,
+            valid,
+        ) in coal_candidates:
             phase5c_coal_attempts.append({
                 "artifact_path":str(coal_path),
+                "base_seed":payload.get("base_seed"),
+                "applies_to_selected_base_seed":applies_to_selected_seed,
                 "status":payload.get("status"),
                 "started_at":started_at or None,
                 "code_commit":(
@@ -3182,7 +3200,10 @@ def build_phase_state(
                 phase5c_coal_artifact_path=coal_path
                 phase5c_coal_artifact=payload
                 phase5c_coal_artifact_error=error
-            elif phase5c_coal_artifact_path is None:
+            elif (
+                applies_to_selected_seed
+                and phase5c_coal_artifact_path is None
+            ):
                 phase5c_coal_artifact_path=coal_path
                 phase5c_coal_artifact=payload
                 phase5c_coal_artifact_error=error

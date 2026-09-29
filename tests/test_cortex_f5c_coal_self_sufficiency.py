@@ -336,12 +336,27 @@ def test_coal_artifact_path_is_bound_to_commit() -> None:
     spec.loader.exec_module(module)
 
     artifact=module.artifact_for_revision(
-        "deadbeefcafe0123456789abcdef0123456789"
+        245044303,
+        "deadbeefcafe0123456789abcdef0123456789",
     )
     assert artifact.name==(
         "cortex_f5c_continuation_245044303_"
         "coal_self_sufficiency_deadbeefcafe.json"
     )
     with pytest.raises(ValueError,match="hexadecimal git commit"):
-        module.artifact_for_revision("not-a-git-sha")
+        module.artifact_for_revision(245044303,"not-a-git-sha")
+
+
+def test_coal_runner_uses_non_provisioning_live_attachment() -> None:
+    source=(
+        Path(__file__).resolve().parents[1]
+        /"scripts"
+        /"run_cortex_f5c_coal_self_sufficiency.py"
+    ).read_text()
+
+    assert "attach_live_factorio_environment()" in source
+    assert 'gym.make("open_play"' not in source
+    assert "list_environments()" not in source
+    assert '"task_setup_called":False' in source
+    assert "live FLE attachment changed the promoted iron WORLD before A2" in source
 

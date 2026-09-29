@@ -54,6 +54,49 @@ def list_environments() -> list[str]:
     return list(list_available_environments())
 
 
+def attach_live_factorio_environment(
+    *,
+    address: str | None=None,
+    tcp_port: int | None=None,
+) -> Any:
+    """Attach a FactorioGymEnv to the existing WORLD without task setup/reset.
+
+    FLE's registry factory provisions a task by calling TaskABC.setup(), which
+    resets the Factorio instance. Continuation experiments must never use that
+    factory because the live WORLD is itself the promoted capability state.
+    """
+    import os
+
+    from fle.env import FactorioInstance
+    from fle.env.gym_env.environment import FactorioGymEnv
+
+    resolved_address=(
+        address
+        or os.getenv("FACTORIO_SERVER_ADDRESS")
+        or "127.0.0.1"
+    )
+    raw_port=(
+        tcp_port
+        if tcp_port is not None
+        else os.getenv("FACTORIO_SERVER_PORT")
+    )
+    resolved_port=27000 if raw_port is None else int(raw_port)
+    instance=FactorioInstance(
+        address=resolved_address,
+        tcp_port=resolved_port,
+        num_agents=1,
+        fast=True,
+        cache_scripts=True,
+        inventory={},
+        all_technologies_researched=False,
+    )
+    return FactorioGymEnv(
+        instance=instance,
+        task=None,
+        enable_vision=False,
+    )
+
+
 def enforce_minimum_eval_timeout(
     environment: Any,
     *,

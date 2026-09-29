@@ -306,8 +306,44 @@ Promotion requires:
 
 Each live attempt writes a commit-bound artifact:
 
-runs/audits/cortex_f5c_continuation_245044303_coal_self_sufficiency_<commit12>.json
+runs/audits/cortex_f5c_continuation_<base_seed>_coal_self_sufficiency_<commit12>.json
 
 A failed attempt is retained as a counterexample and is never overwritten. The
 next attempt requires a new committed/deployed correction. No automatic retry
 or scheduler is permitted.
+
+## Coal counterexample 1 — provisioning reset before A2 execution
+
+The first coal continuation attempt on commit
+191f3399a98aca15dc2ef4406f3e6b9dd96f38c6 is preserved at:
+
+runs/audits/cortex_f5c_continuation_245044303_coal_self_sufficiency_191f3399a98a.json
+
+The A2 grant was issued and validated, but the transaction body never ran.
+The immediate failure was Gym ResetNeeded because the wrapper had not received
+env.reset before step.
+
+A deeper audit identified the causal infrastructure defect: FLE's registered
+open_play factory calls TaskABC.setup(instance), and TaskABC.setup performs
+instance.reset before returning the Gym environment. Consequently,
+gym.make("open_play") reset the live WORLD during environment construction,
+before the A2 Option transaction. The promoted iron cell disappeared from the
+live WORLD even though the Option body did not execute.
+
+This is a continuation-infrastructure counterexample, not a coal capability
+failure. The artifact is immutable and receives no promotion credit.
+
+Correction:
+
+- continuation runners must not instantiate the registered open_play factory;
+- attach_live_factorio_environment creates FactorioInstance + FactorioGymEnv
+  directly with task=None and therefore does not call TaskABC.setup;
+- the runner verifies the incumbent iron entities again immediately after live
+  attachment and before checkpoint/grant;
+- every coal attempt remains bound to the currently selected promoted iron seed;
+- coal counterexamples across older base seeds remain visible in phase-state;
+- the destroyed seed-245 WORLD is not manually repaired.
+
+The next development action is a fresh preregistered episode on seed 1441387776.
+It may intentionally reset the environment as episode initialization and must
+rebuild iron_extraction autonomously before coal continuation is attempted.

@@ -3167,6 +3167,23 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
         "iron_extraction"
     ]
 
+    old_coal_artifact=(
+        audits/
+        "cortex_f5c_continuation_1619515465_"
+        "coal_self_sufficiency_badbadbadbad.json"
+    )
+    old_coal_artifact.write_text(json.dumps({
+        "schema_version":"cortex_f5c_coal_self_sufficiency_v1",
+        "status":"failed",
+        "base_seed":1619515465,
+        "capability":"coal_self_sufficiency",
+        "started_at":"2026-09-29T07:00:00+00:00",
+        "code_revision":{
+            "commit":"badbadbadbad1234",
+            "dirty":False,
+        },
+    })+"\n")
+
     coal_artifact=(
         audits/
         "cortex_f5c_continuation_853367368_"
@@ -3242,10 +3259,19 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
         f5c_coal["phase5_deterministic_baseline"]["coal_self_sufficiency"]
     )
     assert coal_state["validated"] is True
-    assert coal_state["attempt_count"]==1
+    assert coal_state["attempt_count"]==2
+    assert [row["base_seed"] for row in coal_state["attempts"]]==[
+        1619515465,
+        853367368,
+    ]
+    assert [
+        row["applies_to_selected_base_seed"]
+        for row in coal_state["attempts"]
+    ]==[False,True]
     assert coal_state["measurement_final"]["incumbent_iron_bootstrap_removed"]==7
     assert "iron_smelting" in f5c_coal["resume"]["action"]
 
+    old_coal_artifact.unlink()
     coal_artifact.unlink()
     f5c_artifact.unlink()
     f5c_second.unlink()
