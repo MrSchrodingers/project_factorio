@@ -360,3 +360,13 @@ def test_coal_runner_uses_non_provisioning_live_attachment() -> None:
     assert '"task_setup_called":False' in source
     assert "live FLE attachment changed the promoted iron WORLD before A2" in source
 
+
+
+def test_live_fle_attach_preserves_existing_entities() -> None:
+    source=(
+        Path(__file__).parents[1]
+        / "src/factorio_ai_lab/integrations/fle.py"
+    ).read_text()
+
+    assert "clear_entities=False" in source
+    assert "peaceful=False" in source

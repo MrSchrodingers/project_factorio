@@ -47,3 +47,11 @@ def test_runner_subprocess_inherits_src_pythonpath() -> None:
 
     assert 'env["PYTHONPATH"]=str(ROOT/"src")' in source
     assert "env=env" in source
+
+
+def test_coal_preflight_can_repair_missing_iron() -> None:
+    source=(ROOT/"scripts"/"run_cortex_supervisor.py").read_text()
+
+    assert '"promoted iron entities are absent from live WORLD"' in source
+    assert 'payload["repair_frontier"]="iron_extraction"' in source
+    assert '"repairing_prerequisite_execute"' in source

@@ -89,6 +89,8 @@ def attach_live_factorio_environment(
         cache_scripts=True,
         inventory={},
         all_technologies_researched=False,
+        clear_entities=False,
+        peaceful=False,
     )
     return FactorioGymEnv(
         instance=instance,
