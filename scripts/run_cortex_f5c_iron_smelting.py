@@ -54,6 +54,7 @@ ARENA="cortex_f5c_iron_smelting"
 OWNER="run_cortex_f5c_iron_smelting"
 DEFAULT_OPTION_SECONDS=120
 DEFAULT_GRANT_TTL_SECONDS=300
+STONE_FALLBACK_CANDIDATE_LIMIT=8
 
 ServiceStateReader=Callable[[],dict[str,str]]
 PhaseStateReader=Callable[[],dict[str,Any]]
@@ -362,6 +363,8 @@ def _validated_path_waypoints(
 def _stone_route(
     namespace: Any,
     overview: Mapping[str,Any],
+    *,
+    preferred: tuple[float,float] | None=None,
 ) -> tuple[dict[str,Any],tuple[float,float]]:
     player=getattr(namespace,"player_location",None)
     if player is None:
@@ -377,13 +380,21 @@ def _stone_route(
             candidates.append((float(point["x"]),float(point["y"])))
         except (KeyError,TypeError,ValueError):
             continue
-    candidates=sorted(
+    ordered=sorted(
         set(candidates),
         key=lambda pos:(
             (pos[0]-start[0])**2+(pos[1]-start[1])**2,
             pos[0],pos[1],
         ),
-    )[:128]
+    )
+    candidates=[]
+    if preferred is not None and preferred in ordered:
+        candidates.append(preferred)
+    candidates.extend(
+        pos
+        for pos in ordered[:STONE_FALLBACK_CANDIDATE_LIMIT]
+        if pos not in candidates
+    )
     errors=[]
     for candidate in candidates:
         try:
@@ -403,6 +414,26 @@ def _stone_route(
         "no path-validated stone target for iron smelting: "
         +"; ".join(errors[-5:])
     )
+
+
+def _preferred_stone_from_coal_artifact(
+    coal_artifact: Path,
+) -> tuple[float,float] | None:
+    payload=_load(coal_artifact)
+    route=payload.get("bootstrap_route")
+    if not isinstance(route,list):
+        return None
+    for row in route:
+        if not isinstance(row,Mapping) or row.get("resource")!="stone":
+            continue
+        position=row.get("position")
+        if not isinstance(position,Mapping):
+            continue
+        try:
+            return float(position["x"]),float(position["y"])
+        except (KeyError,TypeError,ValueError):
+            return None
+    return None
 
 
 def _option_request(*,run_id: str,commit: str,seconds: int) -> OptionRequest:
@@ -528,7 +559,9 @@ def run_iron_smelting(
         "option_execution_attempts":0,
         "grant_issued":False,
         "started_at":utc_now(),
+        "planning_stage":"starting",
     }
+    _write(artifact,record)
     env=None
     with FactorioWorldLease(run_id=run_id,arena=ARENA,owner=OWNER) as lease:
         record["world_lease"]=dict(lease.active_attestation())
@@ -581,11 +614,33 @@ def run_iron_smelting(
                 "source":"GameState.from_instance",
                 "world_reset":False,
             }
+            record["planning_stage"]="live_attachment_verified"
+            _write(artifact,record)
 
             resources=resource_survey_from_overview(overview)
             if not resources.tiles:
                 raise RuntimeError("iron smelting resource overview is empty")
-            stone_route,stone_end=_stone_route(namespace,overview)
+            record["planning_stage"]="resource_overview_ready"
+            record["resource_point_count"]=len(overview.get("points") or [])
+            _write(artifact,record)
+
+            coal_artifact=Path(str(pf["coal_artifact"]))
+            preferred_stone=_preferred_stone_from_coal_artifact(coal_artifact)
+            record["preferred_stone_position"]=(
+                None
+                if preferred_stone is None
+                else {"x":preferred_stone[0],"y":preferred_stone[1]}
+            )
+            record["planning_stage"]="stone_route_validation"
+            _write(artifact,record)
+            stone_route,stone_end=_stone_route(
+                namespace,
+                overview,
+                preferred=preferred_stone,
+            )
+            record["stone_route"]=stone_route
+            record["planning_stage"]="stone_route_validated"
+            _write(artifact,record)
             physical_rows=world_rows(namespace,resources=False)
             footprints=runtime_entity_footprints(instance)
             placement=plan_placement(
@@ -606,10 +661,15 @@ def run_iron_smelting(
                 float(placement.position[0]),
                 float(placement.position[1]),
             )
-            record["stone_route"]=stone_route
             record["furnace_target_validated_path_waypoints"]=_validated_path_waypoints(
                 namespace,start=stone_end,finish=furnace_position
             )
+            record["furnace_position"]={
+                "x":furnace_position[0],
+                "y":furnace_position[1],
+            }
+            record["planning_stage"]="furnace_route_validated"
+            _write(artifact,record)
 
             option=_option_request(
                 run_id=run_id,commit=commit,seconds=option_seconds
@@ -649,6 +709,7 @@ def run_iron_smelting(
                     +json.dumps(validation.to_dict(),sort_keys=True)
                 )
             record.update({
+                "planning_stage":"grant_validated",
                 "status":"grant_issued_pending_execution",
                 "option_plan":plan.to_dict(),
                 "scope":scope.to_dict(),

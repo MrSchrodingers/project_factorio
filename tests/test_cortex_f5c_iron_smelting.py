@@ -174,3 +174,16 @@ def test_phase_state_requires_full_smelting_evidence_before_promotion() -> None:
         '["iron_extraction","coal_self_sufficiency","iron_smelting"]'
         in source
     )
+
+
+def test_smelting_planner_is_bounded_and_persists_pregrant_progress() -> None:
+    source=(ROOT/"scripts"/"run_cortex_f5c_iron_smelting.py").read_text()
+
+    assert "STONE_FALLBACK_CANDIDATE_LIMIT=8" in source
+    assert "preferred_stone=_preferred_stone_from_coal_artifact" in source
+    assert '"planning_stage":"starting"' in source
+    assert 'record["planning_stage"]="stone_route_validation"' in source
+    assert 'record["planning_stage"]="stone_route_validated"' in source
+    assert source.index("_write(artifact,record)")<source.index(
+        "with FactorioWorldLease"
+    )
