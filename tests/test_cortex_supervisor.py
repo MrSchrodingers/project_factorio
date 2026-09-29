@@ -43,10 +43,13 @@ def test_preflight_block_is_not_terminal_counterexample() -> None:
     assert 'last_result="blocked"' not in source
 
 
-def test_runner_subprocess_inherits_src_pythonpath() -> None:
+def test_runner_subprocess_is_pinned_to_supervisor_release() -> None:
     source=(ROOT/"scripts"/"run_cortex_supervisor.py").read_text()
 
-    assert 'env["PYTHONPATH"]=str(ROOT/"src")' in source
+    assert 'CODE_ROOT=Path(__file__).resolve().parents[1]' in source
+    assert 'env["PYTHONPATH"]=str(CODE_ROOT/"src")' in source
+    assert 'str(CODE_ROOT/"scripts"/script)' in source
+    assert "cwd=STATE_ROOT" in source
     assert "env=env" in source
 
 
@@ -67,3 +70,27 @@ def test_cortex_service_executes_versioned_runtime_release() -> None:
         in unit
     )
     assert "/usr/local/lib/factorio-ai/cortex_supervisor.py" not in unit
+
+
+def test_release_commit_prefers_immutable_build_info(
+    tmp_path: Path,
+) -> None:
+    module=_module()
+    module.CODE_ROOT=tmp_path
+    (tmp_path/"BUILD_INFO.json").write_text(
+        '{"commit":"abc123","dirty":false,"branch":"research/cortex-v1"}\n'
+    )
+
+    assert module.release_commit()=="abc123"
+
+
+def test_supervisor_separates_code_release_from_mutable_state() -> None:
+    source=(ROOT/"scripts"/"run_cortex_supervisor.py").read_text()
+
+    assert 'STATE_ROOT=Path(' in source
+    assert 'os.environ.get("FACTORIO_AI_STATE_ROOT","/srv/factorio-ai-lab")' in source
+    assert 'str(CODE_ROOT/"scripts/cortex_phase_state.py")' in source
+    assert '"--state-root",str(STATE_ROOT)' in source
+    assert '"--protocol",str(CODE_ROOT/"configs/cortex_baseline_v1.json")' in source
+    assert '"code_root":str(CODE_ROOT)' in source
+    assert '"state_root":str(STATE_ROOT)' in source

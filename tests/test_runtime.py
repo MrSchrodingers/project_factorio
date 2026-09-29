@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ from factorio_ai_lab.runtime import (
     WorldBusyError,
     classify_action,
     runtime_status,
+    world_lease_state,
 )
 
 
@@ -137,3 +139,40 @@ def test_runtime_status_reports_live_heartbeat(tmp_path: Path) -> None:
             truncated=False,
             info={},
         )
+
+
+def test_world_lease_state_marks_dead_active_owner_stale_and_reacquires(
+    tmp_path: Path,
+) -> None:
+    lock=tmp_path/"world.lock"
+    state=tmp_path/"lease.json"
+    state.write_text(json.dumps({
+        "status":"active",
+        "pid":2_147_483_647,
+        "run_id":"dead-run",
+        "arena":"f5",
+        "owner":"dead-owner",
+        "lease_id":"dead-lease",
+    }))
+
+    observed=world_lease_state(state)
+    assert observed["recorded_status"]=="active"
+    assert observed["status"]=="stale"
+    assert observed["stale_reason"]=="owner_pid_not_alive"
+    assert observed["owner_pid_alive"] is False
+
+    lease=FactorioWorldLease(
+        run_id="recovered-run",
+        arena="f5",
+        owner="test",
+        path=lock,
+        state_path=state,
+    ).acquire()
+    try:
+        current=json.loads(state.read_text())
+        assert current["status"]=="active"
+        assert current["pid"]==os.getpid()
+        assert current["run_id"]=="recovered-run"
+        assert world_lease_state(state)["status"]=="active"
+    finally:
+        lease.release()

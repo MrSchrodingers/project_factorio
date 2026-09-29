@@ -45,7 +45,7 @@ from factorio_ai_lab.integrations.fle import (
 )
 from factorio_ai_lab.paths import RUNS_DIR, code_revision
 from factorio_ai_lab.planning.fuel import TICKS_PER_SECOND
-from factorio_ai_lab.runtime import WORLD_LEASE_STATE, FactorioWorldLease
+from factorio_ai_lab.runtime import WORLD_LEASE_STATE, FactorioWorldLease, world_lease_state
 
 SCHEMA_VERSION="cortex_f5c_deterministic_baseline_v1"
 DEFAULT_SEED=1619515465
@@ -111,9 +111,7 @@ def evolution_service_state() -> dict[str,str]:
 
 
 def read_world_lease_state(path: Path=WORLD_LEASE_STATE) -> dict[str,Any]:
-    if not path.exists():
-        return {"status":"absent"}
-    return _load_object(path)
+    return world_lease_state(path)
 
 
 def _assert_authority_ledger_writable(path: Path) -> dict[str,Any]:

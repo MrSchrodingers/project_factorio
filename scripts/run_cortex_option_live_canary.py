@@ -62,7 +62,7 @@ from factorio_ai_lab.learning.repair_loop import (
 from factorio_ai_lab.paths import RUNS_DIR, code_revision
 from factorio_ai_lab.planning.fuel import TICKS_PER_SECOND
 from factorio_ai_lab.planning.runtime_catalog import RuntimeFactorioCatalog
-from factorio_ai_lab.runtime import WORLD_LEASE_STATE, FactorioWorldLease
+from factorio_ai_lab.runtime import WORLD_LEASE_STATE, FactorioWorldLease, world_lease_state
 
 DEFAULT_SEED = 424242
 DEFAULT_BOOTSTRAP_SETTLE_SECONDS = 12
@@ -166,19 +166,10 @@ def validate_canary_parameters(
             raise ValueError(f"{label} must be a positive integer")
 
 
-def read_world_lease_state(path: Path = WORLD_LEASE_STATE) -> dict[str, Any]:
-    if not path.exists():
-        return {"status": "absent"}
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise RuntimeError(
-            "cannot establish G4B WorldLease state: "
-            f"{type(exc).__name__}: {exc}"
-        ) from exc
-    if not isinstance(payload, dict):
-        raise TypeError("cannot establish G4B WorldLease state: not an object")
-    return payload
+def read_world_lease_state(
+    path: Path = WORLD_LEASE_STATE,
+) -> dict[str, Any]:
+    return world_lease_state(path)
 
 
 def _assert_evolution_off(

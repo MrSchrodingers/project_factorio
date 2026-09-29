@@ -5,16 +5,20 @@ import json
 import os
 import signal
 import subprocess
+import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-ROOT=Path("/srv/factorio-ai-lab")
-RUNS=ROOT/"runs"
+CODE_ROOT=Path(__file__).resolve().parents[1]
+STATE_ROOT=Path(
+    os.environ.get("FACTORIO_AI_STATE_ROOT","/srv/factorio-ai-lab")
+).expanduser().resolve()
+RUNS=STATE_ROOT/"runs"
 PHASE=RUNS/"cortex_phase_state.json"
 HEARTBEAT=RUNS/"cortex_supervisor.json"
-PYTHON=ROOT/".venv-fle/bin/python"
+PYTHON=Path(sys.executable)
 POLL=float(os.environ.get("FACTORIO_AI_CORTEX_POLL_SECONDS","10"))
 STOP=False
 RUNNERS={
@@ -40,11 +44,11 @@ def write(payload: dict[str,Any]) -> None:
 
 def refresh() -> dict[str,Any]:
     done=subprocess.run([
-        str(PYTHON),str(ROOT/"scripts/cortex_phase_state.py"),
-        "--state-root",str(ROOT),
-        "--protocol",str(ROOT/"configs/cortex_baseline_v1.json"),
+        str(PYTHON),str(CODE_ROOT/"scripts/cortex_phase_state.py"),
+        "--state-root",str(STATE_ROOT),
+        "--protocol",str(CODE_ROOT/"configs/cortex_baseline_v1.json"),
         "--write",
-    ],cwd=ROOT,capture_output=True,text=True,timeout=60,check=False)
+    ],cwd=STATE_ROOT,capture_output=True,text=True,timeout=60,check=False)
     if done.returncode!=0:
         raise RuntimeError((done.stderr or done.stdout or "phase refresh failed")[-1600:])
     return load(PHASE)
@@ -64,12 +68,25 @@ def frontier(state: dict[str,Any]) -> str | None:
             return name
     return None
 
-def git_head() -> str:
+def release_commit() -> str:
+    build_path=CODE_ROOT/"BUILD_INFO.json"
+    if build_path.exists():
+        try:
+            build=load(build_path)
+        except (OSError,json.JSONDecodeError,TypeError):
+            build={}
+        commit=build.get("commit")
+        if isinstance(commit,str) and commit:
+            return commit
     done=subprocess.run(
-        ["git","-c",f"safe.directory={ROOT}","-C",str(ROOT),"rev-parse","HEAD"],
+        [
+            "git","-c",f"safe.directory={CODE_ROOT}",
+            "-C",str(CODE_ROOT),"rev-parse","HEAD",
+        ],
         capture_output=True,text=True,timeout=10,check=False,
     )
     return done.stdout.strip() if done.returncode==0 else "unknown"
+
 
 def runner_args(
     current: str,
@@ -111,15 +128,15 @@ def run(
     execute: bool,
     extra_args: list[str] | None=None,
 ) -> subprocess.CompletedProcess[str]:
-    cmd=[str(PYTHON),str(ROOT/"scripts"/script)]
+    cmd=[str(PYTHON),str(CODE_ROOT/"scripts"/script)]
     cmd.extend(extra_args or [])
     if execute:
         cmd.append("--execute")
     env=dict(os.environ)
-    env["PYTHONPATH"]=str(ROOT/"src")
+    env["PYTHONPATH"]=str(CODE_ROOT/"src")
     return subprocess.run(
         cmd,
-        cwd=ROOT,
+        cwd=STATE_ROOT,
         env=env,
         capture_output=True,
         text=True,
@@ -141,7 +158,7 @@ def main() -> int:
     last_frontier=previous.get("last_attempt_frontier")
     last_result=previous.get("last_result")
     while not STOP:
-        commit=git_head()
+        commit=release_commit()
         payload={
             "schema_version":"cortex_supervisor_v1",
             "active":True,
@@ -149,6 +166,8 @@ def main() -> int:
             "started_at":started,
             "updated_at":now(),
             "commit":commit,
+            "code_root":str(CODE_ROOT),
+            "state_root":str(STATE_ROOT),
             "ambient_authority":"A0",
             "max_transaction_authority":"A2",
             "continuous_authority":False,

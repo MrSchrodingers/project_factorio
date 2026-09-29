@@ -47,7 +47,7 @@ from factorio_ai_lab.integrations.fle import (
 )
 from factorio_ai_lab.paths import RUNS_DIR, code_revision
 from factorio_ai_lab.planning.fuel import TICKS_PER_SECOND
-from factorio_ai_lab.runtime import WORLD_LEASE_STATE, FactorioWorldLease
+from factorio_ai_lab.runtime import FactorioWorldLease, world_lease_state
 
 SCHEMA_VERSION="cortex_f5c_coal_self_sufficiency_v1"
 DEFAULT_OPTION_SECONDS=120
@@ -388,11 +388,7 @@ def preflight_coal(
         )
 
     evolution=_assert_evolution_off(service_state_reader)
-    lease=(
-        _load_object(WORLD_LEASE_STATE)
-        if WORLD_LEASE_STATE.exists()
-        else {"status":"absent"}
-    )
+    lease=world_lease_state()
     if lease.get("status")=="active":
         raise RuntimeError(f"active WorldLease blocks coal continuation: {lease}")
     if _intervention_count()!=0:

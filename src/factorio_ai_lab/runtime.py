@@ -69,6 +69,60 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
+def world_lease_state(
+    path: Path = WORLD_LEASE_STATE,
+) -> dict[str, Any]:
+    """Observe lease metadata without treating a dead owner as a live writer.
+
+    The kernel releases the file lock automatically when a process dies, but
+    JSON attestation cannot run its normal release path after SIGKILL, service
+    restarts or host failures. An active record whose PID no longer exists is
+    stale metadata, not authority. This function is deliberately read-only;
+    the next real acquisition overwrites the stale record only after obtaining
+    the kernel lock.
+    """
+    payload=_read_json(path)
+    if not payload:
+        return {"status":"absent"}
+    if payload.get("status")!="active":
+        return payload
+    raw_pid=payload.get("pid")
+    if isinstance(raw_pid,bool):
+        return {
+            **payload,
+            "owner_pid_alive":None,
+            "pid_verification":"invalid",
+        }
+    try:
+        pid=int(raw_pid)
+    except (TypeError,ValueError):
+        return {
+            **payload,
+            "owner_pid_alive":None,
+            "pid_verification":"unavailable",
+        }
+    if pid<=0:
+        return {
+            **payload,
+            "owner_pid_alive":None,
+            "pid_verification":"invalid",
+        }
+    if _pid_alive(pid):
+        return {
+            **payload,
+            "owner_pid_alive":True,
+            "pid_verification":"alive",
+        }
+    return {
+        **payload,
+        "recorded_status":"active",
+        "status":"stale",
+        "stale_reason":"owner_pid_not_alive",
+        "owner_pid_alive":False,
+        "pid_verification":"dead",
+    }
+
+
 def classify_action(code: str) -> str:
     calls = set(re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(", code))
     if calls & {"set_research", "get_research_progress"}:

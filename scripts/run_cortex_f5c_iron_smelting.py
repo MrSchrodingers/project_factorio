@@ -44,7 +44,7 @@ from factorio_ai_lab.integrations.fle import (
 from factorio_ai_lab.paths import RUNS_DIR, code_revision
 from factorio_ai_lab.planning.fuel import TICKS_PER_SECOND
 from factorio_ai_lab.planning.placement import plan_placement
-from factorio_ai_lab.runtime import WORLD_LEASE_STATE, FactorioWorldLease
+from factorio_ai_lab.runtime import FactorioWorldLease, world_lease_state
 
 SCHEMA_VERSION="cortex_f5c_iron_smelting_v1"
 DEFAULT_LEDGER=RUNS_DIR/"authority"/"cortex_option_grants.sqlite3"
@@ -257,7 +257,7 @@ def preflight(
     if build.get("commit")!=commit or build.get("dirty") is not False:
         raise RuntimeError("iron smelting requires deployed dashboard/runtime at exact HEAD")
     evolution=_assert_evolution_off(service_state_reader)
-    lease=_load(WORLD_LEASE_STATE) if WORLD_LEASE_STATE.exists() else {"status":"absent"}
+    lease=world_lease_state()
     if lease.get("status")=="active":
         raise RuntimeError(f"active WorldLease blocks iron smelting: {lease}")
     if _intervention_count()!=0:
