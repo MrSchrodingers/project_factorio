@@ -1,0 +1,21 @@
+{
+  "authority_is_observation_not_policy_output": true,
+  "record_type": "typed_transition",
+  "required_fields": [
+    "state",
+    "candidate_options",
+    "memory_retrieval",
+    "selected_option",
+    "expected_effect",
+    "authority_level",
+    "execution_trace",
+    "postconditions",
+    "capability_delta",
+    "resource_cost",
+    "rollback",
+    "reward_components",
+    "next_state"
+  ],
+  "schema_version": "cortex_f5_trajectory_schema_v1",
+  "training_runtime_decoupled": true
+}

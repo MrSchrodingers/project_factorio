@@ -98,6 +98,69 @@ const actionLabelsPt = {
   idle: "ocioso",
 };
 
+const phase5CapabilityLabelsPt = {
+  iron_extraction: "extração de ferro",
+  coal_self_sufficiency: "carvão endógeno",
+  iron_smelting: "fundição de ferro",
+  steam_power: "energia a vapor",
+  electric_mining: "mineração elétrica",
+  copper_chain: "cadeia de cobre",
+  powered_manufacturing: "manufatura energizada",
+  automation_science: "ciência de automação",
+  logistic_science: "ciência logística",
+};
+
+function renderPhase5Capabilities(operational) {
+  const card = $("phase5CapabilityCard");
+  if (!card) return;
+  const active = !!operational.phase5Active;
+  card.hidden = !active;
+  setText(
+    "onlineLearningKpiLabel",
+    active ? "HISTÓRICO · APRENDIZADO" : "APRENDIZADO ONLINE"
+  );
+  setText(
+    "evolutionKpiLabel",
+    active ? "HISTÓRICO · SELEÇÃO" : "SELEÇÃO POR SOBREVIVÊNCIA"
+  );
+  if (!active) return;
+
+  const protocol = operational.phase5Protocol || {};
+  const capabilities = Array.isArray(protocol.capabilities)
+    ? protocol.capabilities
+    : [];
+  const achieved = new Set(
+    Array.isArray(protocol.achieved_capabilities)
+      ? protocol.achieved_capabilities
+      : []
+  );
+  const total = Number(protocol.capability_total || capabilities.length || 9);
+  setText(
+    "phase5CapabilityTitle",
+    "Factory capability progression · " + achieved.size + " / " + total
+  );
+  setText(
+    "phase5CapabilityDetail",
+    "F4 COMPLETE · F5-A protocol frozen · cada promoção exige evidência física "
+      + "e preservação de todas as capabilities já aceitas."
+  );
+  setClassText(
+    "phase5AuthorityBadge",
+    String(protocol.authority_level || "A0") + " · OBSERVE ONLY",
+    "badge neutral"
+  );
+  const health = $("phase5CapabilityHealth");
+  if (!health) return;
+  health.innerHTML = capabilities.map((name, index) => {
+    const live = achieved.has(name);
+    const label = phase5CapabilityLabelsPt[name] || String(name).replaceAll("_", " ");
+    return '<span class="capability-chip ' + (live ? "live" : "dormant") + '">'
+      + '<strong>' + escapeHtml(String(index + 1) + ". " + label) + '</strong>'
+      + '<small>' + (live ? "PASS · surviving" : "pending physical evidence") + '</small>'
+      + '</span>';
+  }).join("");
+}
+
 const statusLabelsPt = {
   starting: "iniciando",
   running: "executando",
@@ -134,6 +197,8 @@ function cortexOperationalView() {
   const runner = ((state.status || {}).research_runner) || {};
   const phase = String(cortexPhase.phase || "");
   const phase4Checkpoint = String(cortexPhase.phase4_checkpoint || "");
+  const phase5Checkpoint = String(cortexPhase.phase5_checkpoint || "");
+  const phase5Protocol = cortexPhase.phase5_protocol || {};
   const phase4Harness = cortexPhase.phase4_causal_harness || {};
   const phase4Protocol = cortexPhase.phase4_causal_protocol || {};
   const phase4RealAdapters = cortexPhase.phase4_real_adapters || {};
@@ -172,12 +237,18 @@ function cortexOperationalView() {
   const inferenceDecision = String(
     phase4EvaluationInference.decision || ""
   );
+  const phase5Active = (
+    phase === "F5"
+    && phase5Checkpoint === "F5-A"
+    && !!phase5Protocol.validated
+  );
   const executionReady = (
-    !!phase4Protocol.execution_ready
+    phase !== "F5"
+    && !!phase4Protocol.execution_ready
     && !!phase4Protocol.real_task_adapters_validated
     && !!phase4RealAdapters.validated
   );
-  const globalCortex = context.kind === "global" && ["F3", "F4"].includes(phase);
+  const globalCortex = context.kind === "global" && ["F3", "F4", "F5"].includes(phase);
   const liveAgent = !!runner.active;
   const paused = globalCortex && !liveAgent;
   const researchEvents = Array.isArray(state.research && state.research.events)
@@ -191,6 +262,9 @@ function cortexOperationalView() {
     cortexPhase,
     phase,
     phase4Checkpoint,
+    phase5Checkpoint,
+    phase5Protocol,
+    phase5Active,
     phase4Harness,
     phase4Protocol,
     phase4RealAdapters,
@@ -222,7 +296,7 @@ function cortexOperationalView() {
     paused,
     historicalEvidenceMode: paused,
     visualReplayAvailable: paused && (researchEvents.length > 0 || runEvents.length > 0),
-    labSimulationActive: paused && !!phase4Harness.preflight_validated,
+    labSimulationActive: paused && phase !== "F5" && !!phase4Harness.preflight_validated,
   };
 }
 
@@ -1825,13 +1899,16 @@ function renderExperimentContext() {
   const science = summary.logistic_science_output;
   const worldEntities = Number((state.world || {}).entity_count || 0);
   const operational = cortexOperationalView();
+  renderPhase5Capabilities(operational);
 
   setText(
     "experimentContextTitle",
     baseline
       ? "Baseline isolada · seed " + seed + " · " + String(context.status || "--")
       : (operational.paused
-        ? (operational.executionReady
+        ? (operational.phase5Active
+          ? "Cortex F5 · PROTOCOL FREEZE · A0"
+          : (operational.executionReady
           ? (operational.pilotComplete
             ? (operational.inferenceValidated
               ? "Cortex " + (operational.phase || "--") + " · HELD-OUT INFERENCE " + operational.inferenceDecision.toUpperCase()
@@ -1845,7 +1922,7 @@ function renderExperimentContext() {
               : "Cortex " + (operational.phase || "--") + " · LAB ATIVO / PILOT READY"))
           : (operational.labSimulationActive
             ? "Cortex " + (operational.phase || "--") + " · LAB ATIVO / SIMULAÇÃO"
-            : "Cortex " + (operational.phase || "--") + " · PAUSADO / SHADOW"))
+            : "Cortex " + (operational.phase || "--") + " · PAUSADO / SHADOW")))
         : String(context.label || "Global / Cortex"))
   );
   setText(
@@ -1861,7 +1938,9 @@ function renderExperimentContext() {
           ? " · mundo continua tickando após o snapshot final"
           : "")
       : (operational.paused
-        ? (operational.labSimulationActive
+        ? (operational.phase5Active
+          ? "F4 complete · F5-A protocol frozen · authority A0 observe-only · evolution OFF · WORLD live sem mutação"
+          : (operational.labSimulationActive
           ? (operational.executionReady
             ? (operational.pilotComplete
               ? (operational.inferenceValidated
@@ -1873,7 +1952,7 @@ function renderExperimentContext() {
                 ? "laboratório ativo · pilot task-world " + operational.pilotLabel + " · instrumentation-only · executor Cortex/evolution live OFF · evaluation/confirmatory congeladas"
                 : "laboratório ativo · execution preflight PASS · treatment + runner validados · executor Cortex/evolution live OFF · pilot 0/8"))
             : "laboratório ativo em simulação/replay · executor Cortex e evolution OFF · telemetria WORLD continua live · nenhuma autoridade contínua")
-          : "estado global do Cortex · execução autônoma pausada · telemetria WORLD continua live · baselines permanecem isoladas como evidência")
+          : "estado global do Cortex · execução autônoma pausada · telemetria WORLD continua live · baselines permanecem isoladas como evidência"))
         : "estado global do Cortex · baselines permanecem isoladas como evidência")
   );
   setClassText(
@@ -1914,7 +1993,9 @@ function renderExperimentContext() {
     if (operational.historicalEvidenceMode) {
       setText(
         "operationalModeTitle",
-        operational.executionReady
+        operational.phase5Active
+          ? "F5-A · PROTOCOL FREEZE · A0 OBSERVE ONLY"
+          : (operational.executionReady
           ? (operational.pilotComplete
             ? (operational.inferenceValidated
               ? "LAB ATIVO · HELD-OUT INFERENCE " + operational.inferenceDecision.toUpperCase()
@@ -1928,11 +2009,13 @@ function renderExperimentContext() {
               : "LAB ATIVO · PILOT READY · NÃO EXECUTADO"))
           : (operational.labSimulationActive
             ? "LAB ATIVO · simulação/replay F4-C"
-            : "CORTEX PAUSADO · nenhum executor controla o mundo")
+            : "CORTEX PAUSADO · nenhum executor controla o mundo"))
       );
       setText(
         "operationalModeDetail",
-        operational.executionReady
+        operational.phase5Active
+          ? "F4 está fechado; F5-A congela protocolo, seeds, capabilities e authority schema. WORLD permanece live em A0, sem grants, leases ou mutação; G97/UCB/curriculum são somente histórico."
+          : (operational.executionReady
           ? (operational.pilotComplete
             ? (operational.inferenceValidated
               ? "F4-C held-out 20/20 concluído. A interface mostra apenas inferência agregada pré-registrada; pilot foi excluído e confirmatory continua congelada. WORLD live, executor Cortex e evolution permanecem OFF."
@@ -1944,11 +2027,13 @@ function renderExperimentContext() {
               : "F4-C execution preflight PASS: harness, adapters, treatment causal e pilot runner validados. Pilot 0/8; nenhuma evaluation/confirmatory foi executada. WORLD live, executor Cortex e evolution permanecem OFF."))
           : (operational.phase4Harness.preflight_validated
             ? "F4-B e o pré-registro F4-C estão fechados; o harness pareado passou o preflight sintético. A interface permanece ativa em replay/simulação, enquanto executor Cortex, evolution e runners ficam OFF. Esta atividade visual não executa Factorio, não cria outcome experimental e não conta como evidência F4-C."
-            : "F4-B está fechado e o pré-registro F4-C está congelado. Evolution e runners permanecem OFF. A UI pode reproduzir visualmente eventos históricos reais, mas replay visual não executa Factorio, não cria outcome e não conta como evidência F4-C.")
+            : "F4-B está fechado e o pré-registro F4-C está congelado. Evolution e runners permanecem OFF. A UI pode reproduzir visualmente eventos históricos reais, mas replay visual não executa Factorio, não cria outcome e não conta como evidência F4-C."))
       );
       setClassText(
         "operationalModeBadge",
-        operational.executionReady
+        operational.phase5Active
+          ? "F5-A · A0 · SEM AUTORIDADE LIVE"
+          : (operational.executionReady
           ? (operational.pilotComplete && operational.evaluationReady
             ? (operational.inferenceValidated
               ? "HELD-OUT INFERENCE · SEM AUTORIDADE LIVE"
@@ -1960,8 +2045,8 @@ function renderExperimentContext() {
             ? "SIMULAÇÃO ATIVA · SEM AUTORIDADE"
             : (operational.visualReplayAvailable
               ? "PAUSADO · REPLAY VISUAL DISPONÍVEL"
-              : "PAUSADO · HISTÓRICO PRESERVADO")),
-        operational.executionReady ? "badge good" : "badge warn"
+              : "PAUSADO · HISTÓRICO PRESERVADO"))),
+        operational.phase5Active || operational.executionReady ? "badge good" : "badge warn"
       );
     }
   }
@@ -4278,6 +4363,37 @@ function updateMission() {
     || null;
   const operational = cortexOperationalView();
 
+  if (operational.historicalEvidenceMode && operational.phase5Active) {
+    const capabilityTotal = Number(operational.phase5Protocol.capability_total || 9);
+    const achieved = Array.isArray(operational.phase5Protocol.achieved_capabilities)
+      ? operational.phase5Protocol.achieved_capabilities.length
+      : 0;
+    setText("missionTitle", "F5 — Autonomous Factory Bootstrap & Learned Control");
+    setText(
+      "missionDetail",
+      "F4 COMPLETE · causal memory benefit established. WORLD live permanece "
+        + "em observação enquanto o protocolo F5 congela autoridade, partitions "
+        + "e critérios físicos de promoção."
+    );
+    setText("stageName", "F5-A · PROTOCOL FREEZE · A0");
+    setText(
+      "nextAction",
+      operational.cortexPhase.resume?.action
+        || "validate bounded live authority bridge"
+    );
+    $("stageProgressBar").style.width = "0%";
+    setText(
+      "stageProgressText",
+      "FACTORY CAPABILITIES · " + achieved + " / " + capabilityTotal
+    );
+    setClassText(
+      "researchBadge",
+      "CORTEX F5 · A0 OBSERVE ONLY · EVOLUTION OFF",
+      "badge good"
+    );
+    return;
+  }
+
   if (operational.historicalEvidenceMode && operational.phase4Checkpoint === "F4-B") {
     const blocker = operational.cortexPhase.phase4_blocker || {};
     const harnessPreflight = !!operational.phase4Harness.preflight_validated;
@@ -4535,7 +4651,7 @@ function updateKpis() {
       ? "LAB ATIVO · F4-C READY FOR PILOT"
       : (operational.labSimulationActive
         ? "LAB ATIVO · F4-C PREFLIGHT"
-        : "CORTEX PAUSADO · " + (operational.phase4Checkpoint || operational.phase || "--")))
+        : "CORTEX PAUSADO · " + (operational.phase5Checkpoint || operational.phase4Checkpoint || operational.phase || "--")))
     : baselineContext
       ? "BASELINE · seed " + String(context.seed ?? "--")
       : arenaMode === "open_play"
@@ -4617,7 +4733,9 @@ function updateKpis() {
   setText(
     "researchLoopDetail",
     operational.historicalEvidenceMode
-      ? (operational.executionReady
+      ? (operational.phase5Active
+        ? "F5-A protocol frozen · WORLD observe-only · authority A0 · evolution OFF · next: bounded authority bridge"
+        : (operational.executionReady
         ? (operational.pilotComplete
           ? (operational.inferenceValidated
             ? "held-out 20/20 + inferência agregada concluída · confirmatory congelada · executor/evolution live OFF"
@@ -4627,7 +4745,7 @@ function updateKpis() {
           : "UI/replay ativo · harness + 4 adapters reais PASS · executor/evolution OFF · pilot pré-registrado é a próxima fronteira controlada")
         : (operational.labSimulationActive
           ? "UI/replay ativo · harness sintético PASS · executor/evolution OFF · adapters reais são a fronteira atual"
-          : "no active agent process · evolution OFF · F4-C paired harness validation is the current research task"))
+          : "no active agent process · evolution OFF · F4-C paired harness validation is the current research task")))
       : baselineCompleted
         ? "seed " + String(context.seed ?? "--")
         + " closed · " + String(research.status || context.status || "--")
@@ -4658,7 +4776,18 @@ function updateKpis() {
   const nextGoal = progression.next_goal || null;
   const frontier = Array.isArray(progression.frontier) ? progression.frontier : [];
   const achievedGoals = Array.isArray(progression.achieved) ? progression.achieved : [];
-  if (operational.historicalEvidenceMode) {
+  if (operational.historicalEvidenceMode && operational.phase5Active) {
+    const capabilityTotal = Number(operational.phase5Protocol.capability_total || 9);
+    const achieved = Array.isArray(operational.phase5Protocol.achieved_capabilities)
+      ? operational.phase5Protocol.achieved_capabilities.length
+      : 0;
+    setText("engineeringGoal", "Bootstrap autonomous factory from empty WORLD");
+    setText(
+      "engineeringGoalDetail",
+      "F5-A · factory capabilities " + achieved + "/" + capabilityTotal
+        + " · A0 observe-only · survival invariant frozen · F5-B bounded authority bridge next"
+    );
+  } else if (operational.historicalEvidenceMode) {
     setText("engineeringGoal", "F4-C · causal memory transfer benchmark");
     setText(
       "engineeringGoalDetail",

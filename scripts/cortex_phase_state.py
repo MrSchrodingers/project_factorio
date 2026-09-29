@@ -2468,6 +2468,292 @@ def build_phase_state(
         or phase4_evaluation_seed_launch_allowed
     )
 
+    phase5_protocol_doc_path=(
+        state_root / "docs" / "CORTEX_PHASE5_AUTONOMY_PROTOCOL.md"
+    )
+    phase5_protocol_doc=phase5_protocol_doc_path.exists()
+    phase5_manifest_path=state_root / "configs" / "cortex_f5_autonomy_v1.json"
+    phase5_manifest_exists=phase5_manifest_path.exists()
+    phase5_manifest: dict[str,Any]={}
+    phase5_manifest_error: str | None=None
+    if phase5_manifest_exists:
+        try:
+            phase5_manifest=_load(phase5_manifest_path)
+        except (OSError,json.JSONDecodeError,TypeError) as exc:
+            phase5_manifest_error=f"{type(exc).__name__}: {exc}"
+    phase5_source=phase5_manifest.get("source")
+    if not isinstance(phase5_source,dict):
+        phase5_source={}
+    phase5_authority=phase5_manifest.get("authority")
+    if not isinstance(phase5_authority,dict):
+        phase5_authority={}
+    phase5_evolution=phase5_manifest.get("evolution")
+    if not isinstance(phase5_evolution,dict):
+        phase5_evolution={}
+    phase5_partitions=phase5_manifest.get("seed_partitions")
+    if not isinstance(phase5_partitions,dict):
+        phase5_partitions={}
+    phase5_derivation=phase5_partitions.get("derivation")
+    if not isinstance(phase5_derivation,dict):
+        phase5_derivation={}
+    phase5_expected_capabilities=[
+        "iron_extraction",
+        "coal_self_sufficiency",
+        "iron_smelting",
+        "steam_power",
+        "electric_mining",
+        "copper_chain",
+        "powered_manufacturing",
+        "automation_science",
+        "logistic_science",
+    ]
+    phase5_development=phase5_partitions.get("development")
+    phase5_pilot=phase5_partitions.get("pilot")
+    phase5_held_out=phase5_partitions.get("held_out")
+    phase5_reserved=phase5_partitions.get("f4_confirmatory_reserved")
+    phase5_partition_rows=[phase5_development,phase5_pilot,phase5_held_out]
+    phase5_frozen_seeds=(
+        all(isinstance(row,list) for row in phase5_partition_rows)
+        and len(phase5_development)==8
+        and len(phase5_pilot)==8
+        and len(phase5_held_out)==12
+        and all(
+            isinstance(seed,int) and seed>0
+            for row in phase5_partition_rows
+            for seed in row
+        )
+    )
+    phase5_all_seeds=(
+        phase5_development+phase5_pilot+phase5_held_out
+        if phase5_frozen_seeds
+        else []
+    )
+    phase5_inference_sha=(
+        _sha256(phase4_inference_path)
+        if phase4_inference_path.exists()
+        else None
+    )
+    phase5_protocol_id="cortex-f5-autonomous-factory-bootstrap-v1"
+    phase5_expected_partitions={
+        partition:[
+            int.from_bytes(
+                hashlib.sha256(
+                    f"{phase5_protocol_id}:{partition}:{index}".encode()
+                ).digest()[:4],
+                "big",
+            )
+            %2_000_000_000
+            +1
+            for index in range(count)
+        ]
+        for partition,count in (
+            ("development",8),
+            ("pilot",8),
+            ("held_out",12),
+        )
+    }
+    phase5_artifacts=phase5_manifest.get("artifacts")
+    if not isinstance(phase5_artifacts,dict):
+        phase5_artifacts={}
+    phase5_expected_artifacts={
+        "cortex_f5_capability_schema_v1.json":"cortex_f5_capability_schema_v1",
+        "cortex_f5_trajectory_schema_v1.json":"cortex_f5_trajectory_schema_v1",
+        "cortex_f5_authority_schema_v1.json":"cortex_f5_authority_schema_v1",
+        "cortex_f5_intervention_ledger_schema_v1.json":
+            "cortex_f5_intervention_ledger_schema_v1",
+    }
+    phase5_artifact_payloads: dict[str,dict[str,Any]]={}
+    phase5_artifact_errors: dict[str,str]={}
+    phase5_artifact_hashes: dict[str,str | None]={}
+    for artifact_name,schema_version in phase5_expected_artifacts.items():
+        artifact_path=state_root/"configs"/artifact_name
+        artifact_meta=phase5_artifacts.get(artifact_name)
+        if not isinstance(artifact_meta,dict):
+            artifact_meta={}
+        try:
+            payload=_load(artifact_path)
+            artifact_sha=_sha256(artifact_path)
+            phase5_artifact_payloads[artifact_name]=payload
+            phase5_artifact_hashes[artifact_name]=artifact_sha
+            if artifact_meta.get("path")!=f"configs/{artifact_name}":
+                phase5_artifact_errors[artifact_name]="manifest_path_mismatch"
+            elif artifact_meta.get("sha256")!=artifact_sha:
+                phase5_artifact_errors[artifact_name]="manifest_sha256_mismatch"
+            elif payload.get("schema_version")!=schema_version:
+                phase5_artifact_errors[artifact_name]="schema_version_mismatch"
+        except (OSError,json.JSONDecodeError,TypeError) as exc:
+            phase5_artifact_errors[artifact_name]=f"{type(exc).__name__}: {exc}"
+            phase5_artifact_hashes[artifact_name]=None
+    phase5_capability_schema=phase5_artifact_payloads.get(
+        "cortex_f5_capability_schema_v1.json",
+        {},
+    )
+    phase5_trajectory_schema=phase5_artifact_payloads.get(
+        "cortex_f5_trajectory_schema_v1.json",
+        {},
+    )
+    phase5_authority_schema=phase5_artifact_payloads.get(
+        "cortex_f5_authority_schema_v1.json",
+        {},
+    )
+    phase5_intervention_schema=phase5_artifact_payloads.get(
+        "cortex_f5_intervention_ledger_schema_v1.json",
+        {},
+    )
+    phase5_required_trajectory_fields=[
+        "state",
+        "candidate_options",
+        "memory_retrieval",
+        "selected_option",
+        "expected_effect",
+        "authority_level",
+        "execution_trace",
+        "postconditions",
+        "capability_delta",
+        "resource_cost",
+        "rollback",
+        "reward_components",
+        "next_state",
+    ]
+    phase5_capability_rows=phase5_capability_schema.get("capabilities")
+    if not isinstance(phase5_capability_rows,dict):
+        phase5_capability_rows={}
+    phase5_authority_levels_schema=phase5_authority_schema.get("levels")
+    if not isinstance(phase5_authority_levels_schema,dict):
+        phase5_authority_levels_schema={}
+    phase5_intervention_meta=phase5_manifest.get("intervention_ledger")
+    if not isinstance(phase5_intervention_meta,dict):
+        phase5_intervention_meta={}
+    phase5_intervention_ledger_path=(
+        state_root/"runs"/"cortex_f5_intervention_ledger.json"
+    )
+    phase5_intervention_ledger: dict[str,Any]={}
+    phase5_intervention_error: str | None=None
+    try:
+        phase5_intervention_ledger=_load(phase5_intervention_ledger_path)
+    except (OSError,json.JSONDecodeError,TypeError) as exc:
+        phase5_intervention_error=f"{type(exc).__name__}: {exc}"
+    phase5_interventions=phase5_intervention_ledger.get("interventions")
+    if not isinstance(phase5_interventions,list):
+        phase5_interventions=[]
+    phase5_physical_gate=phase5_manifest.get("physical_success_gate")
+    if not isinstance(phase5_physical_gate,dict):
+        phase5_physical_gate={}
+    phase5_exit_gate=phase5_manifest.get("f5_exit_gate")
+    if not isinstance(phase5_exit_gate,dict):
+        phase5_exit_gate={}
+    phase5_authority_levels=phase5_authority.get("levels")
+    if not isinstance(phase5_authority_levels,dict):
+        phase5_authority_levels={}
+    phase5_protocol_valid=(
+        phase4_exit_gate_valid
+        and phase5_protocol_doc
+        and phase5_manifest_exists
+        and phase5_manifest_error is None
+        and phase5_manifest.get("schema_version")
+        =="cortex_f5_autonomy_protocol_v1"
+        and phase5_manifest.get("protocol_id")
+        =="cortex-f5-autonomous-factory-bootstrap-v1"
+        and phase5_manifest.get("status")=="frozen"
+        and phase5_manifest.get("phase")=="F5"
+        and phase5_manifest.get("checkpoint")=="F5-A"
+        and phase5_source.get("phase4_checkpoint")=="F4-C"
+        and phase5_source.get("phase4_inference_sha256")==phase5_inference_sha
+        and phase5_source.get("required_phase4_decision")=="positive"
+        and phase5_authority.get("initial_level")=="A0"
+        and phase5_authority.get("continuous_authority") is False
+        and phase5_authority.get("world_mutation_authorized") is False
+        and phase5_evolution.get("legacy_evolution_loop")=="off"
+        and phase5_evolution.get("continuous_evolution")=="off"
+        and phase5_manifest.get("capabilities")==phase5_expected_capabilities
+        and phase5_frozen_seeds
+        and len(set(phase5_all_seeds))==28
+        and isinstance(phase5_reserved,list)
+        and phase5_reserved==phase4_expected_confirmatory
+        and not (set(phase5_all_seeds) & set(phase5_reserved))
+        and phase5_derivation.get("namespace")
+        =="cortex-f5-autonomous-factory-bootstrap-v1"
+        and phase5_derivation.get("input")
+        =="<protocol_id>:<partition>:<zero_based_index>"
+        and phase5_development==phase5_expected_partitions["development"]
+        and phase5_pilot==phase5_expected_partitions["pilot"]
+        and phase5_held_out==phase5_expected_partitions["held_out"]
+        and phase5_authority_levels.get("A0")=="observe_only"
+        and phase5_authority_levels.get("A6")
+        =="continuous_authority_forbidden_in_f5"
+        and phase5_evolution.get(
+            "policy_learning_may_rank_options_but_never_grant_authority"
+        ) is True
+        and not phase5_artifact_errors
+        and set(phase5_capability_rows)==set(phase5_expected_capabilities)
+        and all(
+            isinstance(row,dict)
+            and row.get("entity_existence_alone_is_sufficient") is False
+            and bool(row.get("hard_postconditions"))
+            for row in phase5_capability_rows.values()
+        )
+        and phase5_trajectory_schema.get("required_fields")
+        ==phase5_required_trajectory_fields
+        and phase5_trajectory_schema.get("training_runtime_decoupled") is True
+        and phase5_trajectory_schema.get(
+            "authority_is_observation_not_policy_output"
+        ) is True
+        and phase5_authority_schema.get("continuous_authority_allowed") is False
+        and phase5_authority_schema.get("policy_may_self_grant_authority") is False
+        and phase5_intervention_schema.get("ledger_schema_version")
+        =="cortex_f5_intervention_ledger_v1"
+        and phase5_intervention_schema.get("protocol_id")==phase5_protocol_id
+        and phase5_intervention_schema.get("event_required_fields")
+        ==[
+            "at",
+            "run_id",
+            "kind",
+            "actor",
+            "reason",
+            "authority_level",
+            "human_intervention",
+            "external_resource_injection",
+            "authority_override",
+        ]
+        and phase5_authority_levels_schema.get("A0",{}).get("max_executions")==0
+        and phase5_authority_levels_schema.get("A2",{}).get("max_executions")==1
+        and phase5_authority_levels_schema.get("A6",{}).get("allowed") is False
+        and phase5_intervention_error is None
+        and phase5_intervention_meta.get("path")
+        =="runs/cortex_f5_intervention_ledger.json"
+        and phase5_intervention_meta.get("schema_version")
+        =="cortex_f5_intervention_ledger_v1"
+        and phase5_intervention_meta.get("schema_path")
+        =="configs/cortex_f5_intervention_ledger_schema_v1.json"
+        and phase5_intervention_meta.get("initializer_path")
+        =="scripts/init_cortex_f5_state.py"
+        and phase5_intervention_ledger.get("schema_version")
+        =="cortex_f5_intervention_ledger_v1"
+        and phase5_intervention_ledger.get("protocol_id")==phase5_protocol_id
+        and len(phase5_interventions)
+        ==phase5_intervention_meta.get("required_initial_intervention_count")
+        ==0
+        and all(
+            phase5_physical_gate.get(key) is True
+            for key in (
+                "logistic_science_functional",
+                "all_promoted_capabilities_alive",
+                "zero_human_intervention",
+                "no_external_fuel_or_material_injection",
+                "sustainability_soak_required",
+            )
+        )
+        and phase5_exit_gate.get("held_out_complete_runs_min")==10
+        and phase5_exit_gate.get("held_out_total")==12
+        and phase5_exit_gate.get("authority_violations_max")==0
+        and phase5_exit_gate.get("paired_policy_vs_baseline_preregistered") is True
+        and phase5_exit_gate.get("alpha")==0.05
+        and phase5_exit_gate.get(
+            "lower_confidence_bound_must_be_positive"
+        ) is True
+        and phase5_exit_gate.get("sesoi_preregistered") is True
+    )
+
     phase2_delivery_actuator_canary_path=(
         state_root
         / "runs"
@@ -2711,7 +2997,13 @@ def build_phase_state(
                 "functional_accept_sustainability_not_proven"
             )
 
-    if phase4_execution_ready:
+    if phase5_protocol_valid:
+        action=(
+            "F5-A protocol freeze complete; validate bounded live authority "
+            "bridge (F5-B) with WORLD observe-only, evolution OFF, and no "
+            "continuous authority"
+        )
+    elif phase4_execution_ready:
         if not phase4_pilot_progress_valid:
             action=(
                 "halt F4-C pilot progression: pilot evidence ledger is invalid "
@@ -2870,7 +3162,10 @@ def build_phase_state(
             phase2_checkpoint=checkpoint
             break
 
-    if phase4_retrieval_valid or phase4_memory_valid:
+    if phase5_protocol_valid:
+        phase_name="F5"
+        phase_status="active"
+    elif phase4_retrieval_valid or phase4_memory_valid:
         phase_name="F4"
         phase_status="complete" if phase4_exit_gate_valid else "active"
     elif phase3_comparison_valid:
@@ -2921,6 +3216,55 @@ def build_phase_state(
                 else ("F4-A" if phase4_memory_valid else None)
             )
         ),
+        "phase5_checkpoint":"F5-A" if phase5_protocol_valid else None,
+        "phase5_next_checkpoint":"F5-B" if phase5_protocol_valid else None,
+        "phase5_protocol":{
+            "document_path":str(phase5_protocol_doc_path),
+            "document_exists":phase5_protocol_doc,
+            "manifest_path":str(phase5_manifest_path),
+            "manifest_exists":phase5_manifest_exists,
+            "manifest_sha256":(
+                _sha256(phase5_manifest_path)
+                if phase5_manifest_exists
+                else None
+            ),
+            "validated":phase5_protocol_valid,
+            "protocol_id":phase5_manifest.get("protocol_id"),
+            "status":phase5_manifest.get("status"),
+            "authority_level":phase5_authority.get("initial_level"),
+            "continuous_authority":phase5_authority.get("continuous_authority"),
+            "world_mutation_authorized":phase5_authority.get(
+                "world_mutation_authorized"
+            ),
+            "legacy_evolution_loop":phase5_evolution.get(
+                "legacy_evolution_loop"
+            ),
+            "continuous_evolution":phase5_evolution.get(
+                "continuous_evolution"
+            ),
+            "capability_total":len(phase5_expected_capabilities),
+            "capabilities":phase5_expected_capabilities,
+            "achieved_capabilities":[],
+            "seed_partitions":{
+                "development":phase5_development,
+                "pilot":phase5_pilot,
+                "held_out":phase5_held_out,
+                "f4_confirmatory_reserved":phase5_reserved,
+            },
+            "source_f4_inference_sha256":phase5_source.get(
+                "phase4_inference_sha256"
+            ),
+            "artifacts":{
+                "hashes":phase5_artifact_hashes,
+                "errors":phase5_artifact_errors,
+            },
+            "intervention_ledger":{
+                "path":str(phase5_intervention_ledger_path),
+                "count":len(phase5_interventions),
+                "read_error":phase5_intervention_error,
+            },
+            "read_error":phase5_manifest_error,
+        },
         "phase4_next_checkpoint":(
             None
             if phase4_exit_gate_valid

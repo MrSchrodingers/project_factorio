@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Factorio AI Lab</title>
-  <link rel="stylesheet" href="/static/styles.css?v=d8302a43f695">
+  <link rel="stylesheet" href="/static/styles.css?v=f5a001">
   <link rel="stylesheet" href="/static/map/style.css?v=c71c7bfce507">
 </head>
 <body>
@@ -64,6 +64,18 @@
       <span id="operationalModeBadge" class="badge neutral">--</span>
     </section>
 
+    <section id="phase5CapabilityCard" class="card phase5-capability-card" hidden aria-live="polite">
+      <div class="phase5-capability-head">
+        <div>
+          <span class="label">F5 · CAPABILITIES FÍSICAS</span>
+          <strong id="phase5CapabilityTitle">Factory capability progression · 0 / 9</strong>
+          <small id="phase5CapabilityDetail">Promoção exige evidência física e survival invariant.</small>
+        </div>
+        <span id="phase5AuthorityBadge" class="badge neutral">A0 · OBSERVE ONLY</span>
+      </div>
+      <div id="phase5CapabilityHealth" class="capability-health"></div>
+    </section>
+
     <section class="card cortex-program" aria-label="Programa Cortex Research">
       <div class="cortex-program-head">
         <div>
@@ -114,7 +126,7 @@
         <small id="productionSecondary">no measured flow</small>
       </article>
       <article class="card kpi">
-        <span class="label">APRENDIZADO ONLINE</span>
+        <span id="onlineLearningKpiLabel" class="label">APRENDIZADO ONLINE</span>
         <strong id="onlineLearner">idle</strong>
         <small id="onlineLearnerDetail">no real-world trials yet</small>
       </article>
@@ -124,7 +136,7 @@
         <small id="researchLoopDetail">no active agent process</small>
       </article>
       <article class="card kpi evolution-kpi">
-        <span class="label">SELEÇÃO POR SOBREVIVÊNCIA</span>
+        <span id="evolutionKpiLabel" class="label">SELEÇÃO POR SOBREVIVÊNCIA</span>
         <strong id="evolutionKpi">G-- · evaluating</strong>
         <small id="evolutionKpiDetail">Champion -- · Challenger --</small>
       </article>
@@ -739,7 +751,7 @@
     </details>
   </main>
 
-  <script src="/static/app.js?v=f4cevaluation004"></script>
+  <script src="/static/app.js?v=f5a001"></script>
   <script src="/static/map/factory-map.js?v=3dc0844d0d2d"></script>
 </body>
 </html>

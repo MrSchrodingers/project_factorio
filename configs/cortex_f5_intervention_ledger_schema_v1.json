@@ -1,0 +1,32 @@
+{
+  "event_kinds": [
+    "human_action",
+    "external_resource_injection",
+    "authority_override",
+    "emergency_stop"
+  ],
+  "event_required_fields": [
+    "at",
+    "run_id",
+    "kind",
+    "actor",
+    "reason",
+    "authority_level",
+    "human_intervention",
+    "external_resource_injection",
+    "authority_override"
+  ],
+  "ledger_schema_version": "cortex_f5_intervention_ledger_v1",
+  "protocol_id": "cortex-f5-autonomous-factory-bootstrap-v1",
+  "required_top_level_fields": [
+    "schema_version",
+    "protocol_id",
+    "interventions"
+  ],
+  "schema_version": "cortex_f5_intervention_ledger_schema_v1",
+  "zero_intervention_success_requires": {
+    "authority_override": 0,
+    "external_resource_injection": 0,
+    "human_intervention": 0
+  }
+}

@@ -184,6 +184,20 @@ def test_dashboard_separates_live_cortex_from_frozen_baseline_evidence() -> None
     assert "evaluation 20/20 · inference pending" in app
     assert "technical_invalid sem replacement" in app
     assert "held-out inference" in app
+    assert '["F3", "F4", "F5"]' in app
+    assert "operational.phase5Active" in app
+    assert "F5 — Autonomous Factory Bootstrap & Learned Control" in app
+    assert "F5-A · PROTOCOL FREEZE · A0" in app
+    assert "FACTORY CAPABILITIES · " in app
+    assert "CORTEX F5 · A0 OBSERVE ONLY · EVOLUTION OFF" in app
+    assert "Bootstrap autonomous factory from empty WORLD" in app
+    assert "F5-A · A0 · SEM AUTORIDADE LIVE" in app
+    assert "bounded authority bridge" in app
+    assert "function renderPhase5Capabilities(operational)" in app
+    assert "phase5CapabilityCard" in index
+    assert "phase5CapabilityHealth" in index
+    assert "onlineLearningKpiLabel" in index
+    assert "evolutionKpiLabel" in index
     assert "EXECUTION PREFLIGHT PASS · SEM AUTORIDADE" in app
     assert "F4-C · execution preflight PASS · pilot 0/8 ready" in app
     assert "harness + adapters + treatment + runner PASS · pilot 0/8 ready" in app

@@ -1,0 +1,44 @@
+{
+  "continuous_authority_allowed": false,
+  "levels": {
+    "A0": {
+      "max_executions": 0,
+      "scope": "observe_only"
+    },
+    "A1": {
+      "max_executions": 0,
+      "scope": "proposal"
+    },
+    "A2": {
+      "max_executions": 1,
+      "scope": "single_transactional_option"
+    },
+    "A3": {
+      "bounded": true,
+      "scope": "single_capability"
+    },
+    "A4": {
+      "bounded": true,
+      "scope": "single_bootstrap_stage"
+    },
+    "A5": {
+      "bounded": true,
+      "scope": "bounded_autonomous_episode"
+    },
+    "A6": {
+      "allowed": false,
+      "scope": "continuous_authority"
+    }
+  },
+  "policy_may_self_grant_authority": false,
+  "schema_version": "cortex_f5_authority_schema_v1",
+  "transaction_boundary": [
+    "observation",
+    "option",
+    "validate",
+    "authority_grant",
+    "execute",
+    "measure",
+    "commit_or_rollback"
+  ]
+}

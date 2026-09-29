@@ -2772,6 +2772,205 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
     assert eval_positive["phase4_blocker"]["status"]=="clear"
     assert eval_positive["resume"]["do_not_start_another_seed"] is True
 
+    f5_protocol_id="cortex-f5-autonomous-factory-bootstrap-v1"
+    f5_partitions={}
+    for partition,count in (
+        ("development",8),
+        ("pilot",8),
+        ("held_out",12),
+    ):
+        f5_partitions[partition]=[
+            int.from_bytes(
+                hashlib.sha256(
+                    f"{f5_protocol_id}:{partition}:{index}".encode()
+                ).digest()[:4],
+                "big",
+            )
+            %2_000_000_000
+            +1
+            for index in range(count)
+        ]
+    (docs/"CORTEX_PHASE5_AUTONOMY_PROTOCOL.md").write_text(
+        "# F5-A autonomy protocol\n"
+    )
+    capability_schema=configs/"cortex_f5_capability_schema_v1.json"
+    capability_schema.write_text(json.dumps({
+        "schema_version":"cortex_f5_capability_schema_v1",
+        "capabilities":{
+            capability:{
+                "hard_postconditions":["physical_evidence"],
+                "entity_existence_alone_is_sufficient":False,
+            }
+            for capability in (
+                "iron_extraction",
+                "coal_self_sufficiency",
+                "iron_smelting",
+                "steam_power",
+                "electric_mining",
+                "copper_chain",
+                "powered_manufacturing",
+                "automation_science",
+                "logistic_science",
+            )
+        },
+    })+"\n")
+    trajectory_schema=configs/"cortex_f5_trajectory_schema_v1.json"
+    trajectory_schema.write_text(json.dumps({
+        "schema_version":"cortex_f5_trajectory_schema_v1",
+        "required_fields":[
+            "state",
+            "candidate_options",
+            "memory_retrieval",
+            "selected_option",
+            "expected_effect",
+            "authority_level",
+            "execution_trace",
+            "postconditions",
+            "capability_delta",
+            "resource_cost",
+            "rollback",
+            "reward_components",
+            "next_state",
+        ],
+        "training_runtime_decoupled":True,
+        "authority_is_observation_not_policy_output":True,
+    })+"\n")
+    authority_schema=configs/"cortex_f5_authority_schema_v1.json"
+    authority_schema.write_text(json.dumps({
+        "schema_version":"cortex_f5_authority_schema_v1",
+        "continuous_authority_allowed":False,
+        "policy_may_self_grant_authority":False,
+        "levels":{
+            "A0":{"max_executions":0},
+            "A2":{"max_executions":1},
+            "A6":{"allowed":False},
+        },
+    })+"\n")
+    intervention_schema=configs/"cortex_f5_intervention_ledger_schema_v1.json"
+    intervention_schema.write_text(json.dumps({
+        "schema_version":"cortex_f5_intervention_ledger_schema_v1",
+        "ledger_schema_version":"cortex_f5_intervention_ledger_v1",
+        "protocol_id":f5_protocol_id,
+        "event_required_fields":[
+            "at",
+            "run_id",
+            "kind",
+            "actor",
+            "reason",
+            "authority_level",
+            "human_intervention",
+            "external_resource_injection",
+            "authority_override",
+        ],
+    })+"\n")
+    intervention_ledger=tmp_path/"runs"/"cortex_f5_intervention_ledger.json"
+    intervention_ledger.write_text(json.dumps({
+        "schema_version":"cortex_f5_intervention_ledger_v1",
+        "protocol_id":f5_protocol_id,
+        "interventions":[],
+    })+"\n")
+    f5_artifacts={
+        path.name:{
+            "path":"configs/"+path.name,
+            "sha256":module._sha256(path),
+        }
+        for path in (
+            capability_schema,
+            trajectory_schema,
+            authority_schema,
+            intervention_schema,
+        )
+    }
+    (configs/"cortex_f5_autonomy_v1.json").write_text(json.dumps({
+        "schema_version":"cortex_f5_autonomy_protocol_v1",
+        "protocol_id":f5_protocol_id,
+        "status":"frozen",
+        "phase":"F5",
+        "checkpoint":"F5-A",
+        "source":{
+            "phase4_checkpoint":"F4-C",
+            "phase4_inference_sha256":module._sha256(inference_path),
+            "required_phase4_decision":"positive",
+        },
+        "authority":{
+            "initial_level":"A0",
+            "continuous_authority":False,
+            "world_mutation_authorized":False,
+            "levels":{
+                "A0":"observe_only",
+                "A6":"continuous_authority_forbidden_in_f5",
+            },
+        },
+        "evolution":{
+            "legacy_evolution_loop":"off",
+            "continuous_evolution":"off",
+            "policy_learning_may_rank_options_but_never_grant_authority":True,
+        },
+        "capabilities":[
+            "iron_extraction",
+            "coal_self_sufficiency",
+            "iron_smelting",
+            "steam_power",
+            "electric_mining",
+            "copper_chain",
+            "powered_manufacturing",
+            "automation_science",
+            "logistic_science",
+        ],
+        "artifacts":f5_artifacts,
+        "intervention_ledger":{
+            "path":"runs/cortex_f5_intervention_ledger.json",
+            "schema_version":"cortex_f5_intervention_ledger_v1",
+            "schema_path":"configs/cortex_f5_intervention_ledger_schema_v1.json",
+            "initializer_path":"scripts/init_cortex_f5_state.py",
+            "required_initial_intervention_count":0,
+        },
+        "physical_success_gate":{
+            "logistic_science_functional":True,
+            "all_promoted_capabilities_alive":True,
+            "zero_human_intervention":True,
+            "no_external_fuel_or_material_injection":True,
+            "sustainability_soak_required":True,
+        },
+        "f5_exit_gate":{
+            "held_out_complete_runs_min":10,
+            "held_out_total":12,
+            "authority_violations_max":0,
+            "paired_policy_vs_baseline_preregistered":True,
+            "alpha":0.05,
+            "lower_confidence_bound_must_be_positive":True,
+            "sesoi_preregistered":True,
+        },
+        "seed_partitions":{
+            **f5_partitions,
+            "f4_confirmatory_reserved":list(range(20261101,20261111)),
+            "derivation":{
+                "namespace":f5_protocol_id,
+                "input":"<protocol_id>:<partition>:<zero_based_index>",
+            },
+        },
+    })+"\n")
+    f5a=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert f5a["phase"]=="F5"
+    assert f5a["phase_status"]=="active"
+    assert f5a["phase4_checkpoint"]=="F4-C"
+    assert f5a["phase5_checkpoint"]=="F5-A"
+    assert f5a["phase5_next_checkpoint"]=="F5-B"
+    assert f5a["phase5_protocol"]["validated"] is True
+    assert f5a["phase5_protocol"]["authority_level"]=="A0"
+    assert f5a["phase5_protocol"]["world_mutation_authorized"] is False
+    assert f5a["phase5_protocol"]["continuous_authority"] is False
+    assert f5a["phase5_protocol"]["legacy_evolution_loop"]=="off"
+    assert f5a["phase5_protocol"]["capability_total"]==9
+    assert f5a["phase5_protocol"]["achieved_capabilities"]==[]
+    assert f5a["phase5_protocol"]["artifacts"]["errors"]=={}
+    assert f5a["phase5_protocol"]["intervention_ledger"]["count"]==0
+    assert "bounded live authority bridge" in f5a["resume"]["action"]
+    assert f5a["resume"]["do_not_start_another_seed"] is True
+
     f4b_payload["source"]["f4a_artifact_sha256"]="wrong"
     f4b_audit.write_text(json.dumps(f4b_payload)+"\n")
     f4b_wrong_source=module.build_phase_state(

@@ -1,0 +1,93 @@
+{
+  "capabilities": {
+    "automation_science": {
+      "entity_existence_alone_is_sufficient": false,
+      "hard_postconditions": [
+        "automation_science_output_positive",
+        "inputs_endogenous",
+        "production_sustained"
+      ],
+      "ordinal": 8
+    },
+    "coal_self_sufficiency": {
+      "entity_existence_alone_is_sufficient": false,
+      "hard_postconditions": [
+        "coal_mined",
+        "endogenous_coal_reaches_fuel_consumer",
+        "external_bootstrap_fuel_retired"
+      ],
+      "ordinal": 2
+    },
+    "copper_chain": {
+      "entity_existence_alone_is_sufficient": false,
+      "hard_postconditions": [
+        "copper_extraction_live",
+        "copper_smelting_live",
+        "copper_plate_output_positive"
+      ],
+      "ordinal": 6
+    },
+    "electric_mining": {
+      "entity_existence_alone_is_sufficient": false,
+      "hard_postconditions": [
+        "electric_drill_powered",
+        "ore_output_positive",
+        "power_survives_load"
+      ],
+      "ordinal": 5
+    },
+    "iron_extraction": {
+      "entity_existence_alone_is_sufficient": false,
+      "hard_postconditions": [
+        "resource_patch_valid",
+        "drill_operational",
+        "iron_ore_produced",
+        "destination_reachable",
+        "production_positive_during_validation_window"
+      ],
+      "ordinal": 1
+    },
+    "iron_smelting": {
+      "entity_existence_alone_is_sufficient": false,
+      "hard_postconditions": [
+        "iron_ore_input_live",
+        "furnace_operational",
+        "iron_plate_output_positive"
+      ],
+      "ordinal": 3
+    },
+    "logistic_science": {
+      "entity_existence_alone_is_sufficient": false,
+      "hard_postconditions": [
+        "logistic_science_output_positive",
+        "inputs_endogenous",
+        "all_promoted_capabilities_alive",
+        "sustainability_soak_passed"
+      ],
+      "ordinal": 9
+    },
+    "powered_manufacturing": {
+      "entity_existence_alone_is_sufficient": false,
+      "hard_postconditions": [
+        "assembler_powered",
+        "iron_gear_output_positive",
+        "electronic_circuit_output_positive"
+      ],
+      "ordinal": 7
+    },
+    "steam_power": {
+      "entity_existence_alone_is_sufficient": false,
+      "hard_postconditions": [
+        "water_source_valid",
+        "endogenous_fuel_reachable",
+        "steam_generated",
+        "electrical_production_positive",
+        "electric_consumer_supplied"
+      ],
+      "ordinal": 4
+    }
+  },
+  "promotion_rule": "all hard postconditions PASS and every previously promoted capability survives",
+  "rollback_on_regression": true,
+  "schema_version": "cortex_f5_capability_schema_v1"
+}

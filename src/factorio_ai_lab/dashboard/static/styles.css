@@ -2778,3 +2778,28 @@ small { line-height: 1.35; }
     flex-direction: column;
   }
 }
+
+.phase5-capability-card {
+  padding: 14px;
+}
+
+.phase5-capability-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.phase5-capability-head > div {
+  display: grid;
+  gap: 4px;
+}
+
+.phase5-capability-card .capability-health {
+  margin-top: 12px;
+}
+
+.phase5-capability-card .capability-chip {
+  flex: 1 1 150px;
+}
+

@@ -254,3 +254,30 @@ Validation:
 
 This hardening changes presentation/phase-state semantics only. It does not grant authority and does
 not start evolution or a runner.
+
+---
+
+## 15. F5-A operational semantics — F4 closed, physical autonomy not yet granted
+
+After a positive F4-C held-out inference, the global dashboard must not fall back
+to the persisted legacy `research_state.json` as the current operational story.
+Those artifacts remain admissible as historical evidence only.
+
+When `cortex_phase_state.json` reports `phase=F5`,
+`phase5_checkpoint=F5-A` and a validated F5 protocol:
+
+- the primary objective is autonomous physical factory bootstrap;
+- WORLD telemetry remains live and authoritative for physical state;
+- authority is `A0 / observe_only`;
+- WORLD mutation is not authorized;
+- legacy evolution remains OFF;
+- G97, UCB placement, old curriculum progress and the historical 6% indicator
+  are frozen evidence, not current progress;
+- the primary progress quantity is physical factory capability survival,
+  initialized at `0 / 9`;
+- the next engineering boundary is F5-B bounded authority bridge.
+
+F5-A therefore changes protocol and presentation semantics only. It cannot
+create execution grants, acquire a WORLD mutation lease, execute RCON/FLE
+actions or count historical production as a promoted F5 capability.
+

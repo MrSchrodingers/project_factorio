@@ -1,0 +1,137 @@
+{
+  "artifacts": {
+    "cortex_f5_authority_schema_v1.json": {
+      "path": "configs/cortex_f5_authority_schema_v1.json",
+      "sha256": "674c1f2fddf935f2f546f70f4637ab4a312a9eca2bd0036ab819237648ea2a16"
+    },
+    "cortex_f5_capability_schema_v1.json": {
+      "path": "configs/cortex_f5_capability_schema_v1.json",
+      "sha256": "863a0ff1e99617caccef6b0b61899adf3664737dcf968fedf5c12499948e62a8"
+    },
+    "cortex_f5_intervention_ledger_schema_v1.json": {
+      "path": "configs/cortex_f5_intervention_ledger_schema_v1.json",
+      "sha256": "844a165717878a81c3c74a2bcc90563749e62388ad837c630556a663d91cb680"
+    },
+    "cortex_f5_trajectory_schema_v1.json": {
+      "path": "configs/cortex_f5_trajectory_schema_v1.json",
+      "sha256": "62a59348aa95b7de53fd9398284f7abb92c18801c8f98a8b45e2a77bfb3d1599"
+    }
+  },
+  "authority": {
+    "continuous_authority": false,
+    "initial_level": "A0",
+    "levels": {
+      "A0": "observe_only",
+      "A1": "proposal",
+      "A2": "single_transactional_option",
+      "A3": "single_capability",
+      "A4": "single_bootstrap_stage",
+      "A5": "bounded_autonomous_episode",
+      "A6": "continuous_authority_forbidden_in_f5"
+    },
+    "world_mutation_authorized": false
+  },
+  "capabilities": [
+    "iron_extraction",
+    "coal_self_sufficiency",
+    "iron_smelting",
+    "steam_power",
+    "electric_mining",
+    "copper_chain",
+    "powered_manufacturing",
+    "automation_science",
+    "logistic_science"
+  ],
+  "checkpoint": "F5-A",
+  "evolution": {
+    "continuous_evolution": "off",
+    "legacy_evolution_loop": "off",
+    "policy_learning_may_rank_options_but_never_grant_authority": true
+  },
+  "f5_exit_gate": {
+    "alpha": 0.05,
+    "authority_violations_max": 0,
+    "held_out_complete_runs_min": 10,
+    "held_out_total": 12,
+    "lower_confidence_bound_must_be_positive": true,
+    "paired_policy_vs_baseline_preregistered": true,
+    "sesoi_preregistered": true
+  },
+  "intervention_ledger": {
+    "initializer_path": "scripts/init_cortex_f5_state.py",
+    "path": "runs/cortex_f5_intervention_ledger.json",
+    "required_initial_intervention_count": 0,
+    "schema_path": "configs/cortex_f5_intervention_ledger_schema_v1.json",
+    "schema_version": "cortex_f5_intervention_ledger_v1"
+  },
+  "objective": "bootstrap and sustain a real logistic-science factory under progressively bounded Cortex authority",
+  "phase": "F5",
+  "physical_success_gate": {
+    "all_promoted_capabilities_alive": true,
+    "logistic_science_functional": true,
+    "no_external_fuel_or_material_injection": true,
+    "sustainability_soak_required": true,
+    "zero_human_intervention": true
+  },
+  "protocol_id": "cortex-f5-autonomous-factory-bootstrap-v1",
+  "schema_version": "cortex_f5_autonomy_protocol_v1",
+  "seed_partitions": {
+    "derivation": {
+      "algorithm": "sha256-prefix-u32-mod-2000000000-plus-1",
+      "input": "<protocol_id>:<partition>:<zero_based_index>",
+      "namespace": "cortex-f5-autonomous-factory-bootstrap-v1"
+    },
+    "development": [
+      1619515465,
+      853367368,
+      245044303,
+      1441387776,
+      1773655334,
+      1402093191,
+      1947355959,
+      1050682343
+    ],
+    "f4_confirmatory_reserved": [
+      20261101,
+      20261102,
+      20261103,
+      20261104,
+      20261105,
+      20261106,
+      20261107,
+      20261108,
+      20261109,
+      20261110
+    ],
+    "held_out": [
+      622056058,
+      103821794,
+      877445653,
+      1193350577,
+      1500483931,
+      134333095,
+      1929921547,
+      273758933,
+      1397125841,
+      1980668166,
+      919781304,
+      1717735329
+    ],
+    "pilot": [
+      911399256,
+      428306321,
+      252737005,
+      642270530,
+      1525084253,
+      821775588,
+      257016410,
+      432865231
+    ]
+  },
+  "source": {
+    "phase4_checkpoint": "F4-C",
+    "phase4_inference_sha256": "3c4f782dec7c2bb5cebb47a60178ed11b251e2f23618e6341ab514d240499cb7",
+    "required_phase4_decision": "positive"
+  },
+  "status": "frozen"
+}
