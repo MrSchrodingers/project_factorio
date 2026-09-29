@@ -135,9 +135,10 @@ def _assert_f5b_ready(
     bridge=state.get("phase5_authority_bridge")
     if not isinstance(bridge,dict):
         bridge={}
+    checkpoint=state.get("phase5_checkpoint")
     if (
         state.get("phase")!="F5"
-        or state.get("phase5_checkpoint")!="F5-B"
+        or checkpoint not in {"F5-B","F5-C"}
         or state.get("phase5_next_checkpoint")!="F5-C"
         or bridge.get("validated") is not True
         or bridge.get("ambient_authority")!="A0"
@@ -147,11 +148,12 @@ def _assert_f5b_ready(
         or bridge.get("world_mutation") is not False
     ):
         raise RuntimeError(
-            "F5-C requires validated F5-B with ambient A0 and A2 one-shot boundary"
+            "F5-C requires active F5-B/F5-C with validated ambient A0 "
+            "and A2 one-shot authority boundary"
         )
     return {
         "phase":"F5",
-        "phase5_checkpoint":"F5-B",
+        "phase5_checkpoint":checkpoint,
         "phase5_next_checkpoint":"F5-C",
         "authority_bridge_validated":True,
         "ambient_authority":"A0",

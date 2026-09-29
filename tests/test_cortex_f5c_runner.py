@@ -274,3 +274,29 @@ def test_runner_uses_canonical_rcon_resource_overview() -> None:
     assert "resource_overview(max_age_s=0.0)" in source
     assert "resource_survey_from_overview(resource_overview)" in source
     assert "world_rows(namespace,resources=True)" not in source
+
+
+def test_preflight_accepts_f5c_in_progress_after_counterexample(
+    tmp_path: Path,
+) -> None:
+    module=_module()
+    manifest=tmp_path/"manifest.json"
+    interventions=tmp_path/"interventions.json"
+    _write_manifest(manifest)
+    _write_interventions(interventions)
+
+    phase=_phase()
+    phase["phase5_checkpoint"]="F5-C"
+    result=module.preflight_f5c(
+        seed=1619515465,
+        artifact=tmp_path/"artifact.json",
+        revision=_revision(),
+        service_state_reader=_evolution_off,
+        phase_state_reader=lambda:phase,
+        manifest_path=manifest,
+        intervention_ledger_path=interventions,
+        lease_state_path=tmp_path/"lease.json",
+    )
+
+    assert result["status"]=="preflight_pass"
+    assert result["phase_state"]["phase5_checkpoint"]=="F5-C"
