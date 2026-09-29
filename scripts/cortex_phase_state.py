@@ -3037,13 +3037,22 @@ def build_phase_state(
     phase5c_delta=phase5c_trajectory.get("capability_delta")
     if not isinstance(phase5c_delta,dict):
         phase5c_delta={}
+    phase5c_selected_iron_extraction_valid=(
+        phase5c_selected_seed is not None
+        and phase5c_artifact_error is None
+        and bool(phase5c_artifact)
+        and f5c_artifact_valid(
+            phase5c_artifact,
+            seed=phase5c_selected_seed,
+        )
+    )
 
     phase5c_coal_attempts: list[dict[str,Any]]=[]
     phase5c_coal_valid=False
     phase5c_coal_artifact_path: Path | None=None
     phase5c_coal_artifact: dict[str,Any]={}
     phase5c_coal_artifact_error: str | None=None
-    if phase5c_iron_extraction_valid and phase5c_selected_seed is not None:
+    if phase5c_selected_iron_extraction_valid and phase5c_selected_seed is not None:
         coal_pattern="cortex_f5c_continuation_*_coal_self_sufficiency_*.json"
         coal_paths=sorted(
             (state_root/"runs"/"audits").glob(coal_pattern)
@@ -3213,7 +3222,7 @@ def build_phase_state(
         if phase5c_coal_valid
         else (
             ["iron_extraction"]
-            if phase5c_iron_extraction_valid
+            if phase5c_selected_iron_extraction_valid
             else []
         )
     )
@@ -3468,7 +3477,7 @@ def build_phase_state(
             "deterministic baseline with iron_smelting under ambient A0 and "
             "exactly one expiring A2 grant per Option"
         )
-    elif phase5c_iron_extraction_valid:
+    elif phase5c_selected_iron_extraction_valid:
         action=(
             "F5-C iron_extraction capability promoted from physical evidence; "
             "continue deterministic baseline with coal_self_sufficiency under "
@@ -3724,7 +3733,8 @@ def build_phase_state(
             "attempts":phase5c_attempts,
             "attempt_count":len(phase5c_attempts),
             "started":phase5c_started,
-            "iron_extraction_validated":phase5c_iron_extraction_valid,
+            "iron_extraction_validated":phase5c_selected_iron_extraction_valid,
+            "historical_iron_extraction_validated":phase5c_iron_extraction_valid,
             "seed":phase5c_artifact.get("seed",phase5c_selected_seed),
             "partition":phase5c_artifact.get("partition"),
             "status":phase5c_artifact.get("status"),

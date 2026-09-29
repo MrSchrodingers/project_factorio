@@ -3163,9 +3163,39 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
     ]
     assert recovered["seed"]==853367368
     assert recovered["iron_extraction_validated"] is True
+    assert recovered["historical_iron_extraction_validated"] is True
     assert f5c_recovered["phase5_protocol"]["achieved_capabilities"]==[
         "iron_extraction"
     ]
+
+    f5c_third=(
+        audits/
+        "cortex_f5c_development_245044303_iron_extraction.json"
+    )
+    f5c_third.write_text(json.dumps({
+        "schema_version":"cortex_f5c_deterministic_baseline_v1",
+        "status":"rejected",
+        "seed":245044303,
+        "partition":"development",
+        "capability":"iron_extraction",
+        "code_revision":{
+            "commit":"later-failed-commit",
+            "dirty":False,
+        },
+    })+"\n")
+    f5c_current_failed=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    current=(
+        f5c_current_failed["phase5_deterministic_baseline"]
+    )
+    assert current["seed"]==245044303
+    assert current["historical_iron_extraction_validated"] is True
+    assert current["iron_extraction_validated"] is False
+    assert f5c_current_failed["phase5_protocol"]["achieved_capabilities"]==[]
+    assert "without capability promotion" in f5c_current_failed["resume"]["action"]
+    f5c_third.unlink()
 
     old_coal_artifact=(
         audits/
