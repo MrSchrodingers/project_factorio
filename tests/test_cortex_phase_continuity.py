@@ -3475,7 +3475,7 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
             "electric_consumer_supplied":True,
             "steam_amount":20.0,
             "steam_engine_energy":1000.0,
-            "electric_consumer_energy":50.0,
+            "electric_consumer_energy":0.0,
             "iron_extraction_survives":True,
             "coal_self_sufficiency_survives":True,
             "iron_smelting_survives":True,
@@ -3506,6 +3506,12 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
         is True
     )
     assert "electric_mining" in f5c_steam["resume"]["action"]
+    assert (
+        f5c_steam["phase5_deterministic_baseline"]["steam_power"][
+            "measurement_final"
+        ]["electric_consumer_energy"]
+        ==0.0
+    )
 
     steam_invalid=dict(steam_payload)
     steam_invalid["capability_gate"]=dict(steam_payload["capability_gate"])

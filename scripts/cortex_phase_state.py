@@ -3478,9 +3478,6 @@ def build_phase_state(
                 and isinstance(final.get("steam_engine_energy"),(int,float))
                 and not isinstance(final.get("steam_engine_energy"),bool)
                 and float(final.get("steam_engine_energy"))>0
-                and isinstance(final.get("electric_consumer_energy"),(int,float))
-                and not isinstance(final.get("electric_consumer_energy"),bool)
-                and float(final.get("electric_consumer_energy"))>0
                 and final.get("iron_extraction_survives") is True
                 and final.get("coal_self_sufficiency_survives") is True
                 and final.get("iron_smelting_survives") is True
