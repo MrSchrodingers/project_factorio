@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
@@ -112,6 +113,34 @@ def read_world_lease_state(path: Path=WORLD_LEASE_STATE) -> dict[str,Any]:
     if not path.exists():
         return {"status":"absent"}
     return _load_object(path)
+
+
+def _assert_authority_ledger_writable(path: Path) -> dict[str,Any]:
+    parent=path.parent
+    if not parent.exists() or not parent.is_dir():
+        raise RuntimeError(
+            f"F5-C authority ledger directory is unavailable: {parent}"
+        )
+    parent_writable=os.access(parent,os.W_OK|os.X_OK)
+    file_exists=path.exists()
+    file_writable=(
+        (not file_exists)
+        or os.access(path,os.R_OK|os.W_OK)
+    )
+    if not parent_writable or not file_writable:
+        raise RuntimeError(
+            "F5-C authority ledger is not writable before WORLD reset: "
+            f"directory={parent} parent_writable={parent_writable} "
+            f"file={path} file_exists={file_exists} "
+            f"file_writable={file_writable}"
+        )
+    return {
+        "path":str(path),
+        "parent":str(parent),
+        "parent_writable":parent_writable,
+        "file_exists":file_exists,
+        "file_writable":file_writable,
+    }
 
 
 def _assert_evolution_off(
@@ -238,6 +267,7 @@ def preflight_f5c(
     manifest_path: Path=MANIFEST,
     intervention_ledger_path: Path=INTERVENTION_LEDGER,
     lease_state_path: Path=WORLD_LEASE_STATE,
+    ledger_path: Path=DEFAULT_LEDGER,
 ) -> dict[str,Any]:
     manifest=_manifest(manifest_path)
     development=_development_seeds(manifest)
@@ -259,6 +289,7 @@ def preflight_f5c(
             "F5-C preflight found active persisted WorldLease: "
             + json.dumps(lease,sort_keys=True,default=str)[:1200]
         )
+    ledger_state=_assert_authority_ledger_writable(ledger_path)
     interventions=_intervention_count(intervention_ledger_path)
     if interventions!=0:
         raise RuntimeError(
@@ -274,6 +305,7 @@ def preflight_f5c(
         "phase_state":phase,
         "evolution":evolution,
         "world_lease_state":lease,
+        "authority_ledger":ledger_state,
         "intervention_count":interventions,
         "world_mutation":False,
         "world_reset":False,
@@ -447,6 +479,7 @@ def run_f5c(
         revision=revision,
         service_state_reader=service_state_reader,
         phase_state_reader=phase_state_reader,
+        ledger_path=ledger_path,
     )
     commit=str(revision["commit"])
     run_id=datetime.now(UTC).strftime(
@@ -717,6 +750,7 @@ def main() -> int:
             seed=args.seed,
             artifact=artifact,
             revision=revision,
+            ledger_path=args.ledger,
         )
         print(json.dumps(payload,indent=2,sort_keys=True))
         return 0

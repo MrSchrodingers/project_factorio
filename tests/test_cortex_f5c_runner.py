@@ -65,6 +65,12 @@ def _write_interventions(path: Path,rows=None) -> None:
     })+"\n")
 
 
+def _writable_ledger(tmp_path: Path) -> Path:
+    authority=tmp_path/"authority"
+    authority.mkdir(exist_ok=True)
+    return authority/"grants.sqlite3"
+
+
 def test_preflight_f5c_is_read_only_and_bound_to_development_seed(
     tmp_path: Path,
 ) -> None:
@@ -84,6 +90,7 @@ def test_preflight_f5c_is_read_only_and_bound_to_development_seed(
         manifest_path=manifest,
         intervention_ledger_path=interventions,
         lease_state_path=tmp_path/"lease.json",
+            ledger_path=_writable_ledger(tmp_path),
     )
 
     assert result["status"]=="preflight_pass"
@@ -114,6 +121,7 @@ def test_preflight_refuses_dirty_source(tmp_path: Path) -> None:
             manifest_path=manifest,
             intervention_ledger_path=interventions,
             lease_state_path=tmp_path/"lease.json",
+            ledger_path=_writable_ledger(tmp_path),
         )
 
 
@@ -134,6 +142,7 @@ def test_preflight_refuses_seed_outside_development(tmp_path: Path) -> None:
             manifest_path=manifest,
             intervention_ledger_path=interventions,
             lease_state_path=tmp_path/"lease.json",
+            ledger_path=_writable_ledger(tmp_path),
         )
 
 
@@ -159,6 +168,7 @@ def test_preflight_refuses_active_world_lease(tmp_path: Path) -> None:
             manifest_path=manifest,
             intervention_ledger_path=interventions,
             lease_state_path=lease,
+            ledger_path=_writable_ledger(tmp_path),
         )
 
 
@@ -179,6 +189,7 @@ def test_preflight_requires_zero_intervention_ledger(tmp_path: Path) -> None:
             manifest_path=manifest,
             intervention_ledger_path=interventions,
             lease_state_path=tmp_path/"lease.json",
+            ledger_path=_writable_ledger(tmp_path),
         )
 
 
@@ -238,6 +249,7 @@ def test_preflight_second_development_seed_requires_prior_artifact(
             manifest_path=manifest,
             intervention_ledger_path=interventions,
             lease_state_path=tmp_path/"lease.json",
+            ledger_path=_writable_ledger(tmp_path),
         )
 
     module.artifact_for_seed(first).write_text(json.dumps({
@@ -255,6 +267,7 @@ def test_preflight_second_development_seed_requires_prior_artifact(
         manifest_path=manifest,
         intervention_ledger_path=interventions,
         lease_state_path=tmp_path/"lease.json",
+            ledger_path=_writable_ledger(tmp_path),
     )
 
     assert result["status"]=="preflight_pass"
@@ -296,7 +309,32 @@ def test_preflight_accepts_f5c_in_progress_after_counterexample(
         manifest_path=manifest,
         intervention_ledger_path=interventions,
         lease_state_path=tmp_path/"lease.json",
+            ledger_path=_writable_ledger(tmp_path),
     )
 
     assert result["status"]=="preflight_pass"
     assert result["phase_state"]["phase5_checkpoint"]=="F5-C"
+
+
+def test_preflight_refuses_readonly_authority_ledger(tmp_path: Path) -> None:
+    module=_module()
+    manifest=tmp_path/"manifest.json"
+    interventions=tmp_path/"interventions.json"
+    _write_manifest(manifest)
+    _write_interventions(interventions)
+    ledger=_writable_ledger(tmp_path)
+    ledger.write_bytes(b"sqlite-placeholder")
+    ledger.chmod(0o444)
+
+    with pytest.raises(RuntimeError,match="authority ledger is not writable"):
+        module.preflight_f5c(
+            seed=1619515465,
+            artifact=tmp_path/"artifact.json",
+            revision=_revision(),
+            service_state_reader=_evolution_off,
+            phase_state_reader=_phase,
+            manifest_path=manifest,
+            intervention_ledger_path=interventions,
+            lease_state_path=tmp_path/"lease.json",
+            ledger_path=ledger,
+        )

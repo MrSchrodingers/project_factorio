@@ -173,3 +173,42 @@ Correction:
   committed, tested and deployed.
 
 Next eligible development seed after the correction: 853367368.
+
+## Development counterexample 2 — authority ledger writability
+
+Seed 853367368 was initialized after the canonical RCON resource-perception fix.
+The corrected perception succeeded and observed 2562 resource points, including
+624 iron-ore points.
+
+The episode then failed before grant issuance and before Option execution with:
+
+attempt to write a readonly database
+
+Observed result:
+
+- status = failed;
+- resource perception = PASS;
+- option_execution_attempts = 0;
+- no A2 grant issued;
+- no Option executed;
+- no capability promoted;
+- WorldLease released normally;
+- intervention ledger remained empty.
+
+Root cause: runs/authority and cortex_option_grants.sqlite3 were owned by root
+and were readable but not writable by the runtime user ti.
+
+Operational correction:
+
+- runs/authority ownership changed to ti:devs;
+- directory mode changed to 2775;
+- SQLite mode changed to 0664.
+
+Protocol correction:
+
+- F5-C preflight now validates authority-ledger directory/file writability
+  before acquiring WorldLease or resetting the episode;
+- a regression test proves readonly ledger state fails closed in preflight.
+
+Seed 853367368 is preserved as a counterexample and will not be retried.
+Next eligible development seed after committed/deployed correction: 245044303.
