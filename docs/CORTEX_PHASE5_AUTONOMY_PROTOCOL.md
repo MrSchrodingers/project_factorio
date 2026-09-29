@@ -91,15 +91,15 @@ The F4 confirmatory partition remains untouched and is not reusable by F5.
 
 ## 7. Stage plan
 
-### F5-A — Protocol freeze and semantic cleanup
+### F5-A — Protocol freeze and semantic cleanup — COMPLETE
 
 No WORLD mutation. Freeze partitions, capability schema, authority schema and
 UI semantics. Remove G97/UCB/curriculum progress from the current operational
 story; retain them only as historical evidence.
 
-### F5-B — Bounded Authority Bridge
+### F5-B — Bounded Authority Bridge — COMPLETE
 
-Validate A2 with one transactional option and expiring authority grant.
+Validated A2 as one transactional Option with expiring durable authority grant, exact WorldLease attestation and no ambient EXECUTE authority. Closure audit: runs/audits/cortex_f5b_authority_bridge.json.
 
 ### F5-C — Deterministic Autonomous Baseline
 

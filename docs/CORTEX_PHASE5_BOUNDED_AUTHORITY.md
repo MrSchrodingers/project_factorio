@@ -1,6 +1,6 @@
 # Cortex F5-B — Bounded Authority Bridge
 
-Status before audit: **implementation / shadow validation**.
+Status: **PASS / F5-B closed in test-shadow; no live WORLD mutation**.
 
 ## Objective
 
@@ -85,3 +85,40 @@ and reports:
 This checkpoint authorizes implementing F5-C. It does not authorize continuous
 execution, autonomous scheduling, policy self-grant, or more than one Option per
 future A2 grant.
+
+## Closure evidence
+
+F5-B closed on commit 080cd1544da1573cdf21a7c912e7388df45ea383.
+
+Canonical audit: runs/audits/cortex_f5b_authority_bridge.json
+
+SHA-256: 9bcc4328f13e8dabf250bfe3a2d09ffd16994444571217825491ce703737cc2a
+
+Observed closure:
+
+- canonical audit status = pass;
+- targeted authority integration = 36/36 PASS;
+- all audit checks = true;
+- source hashes match the committed implementation;
+- ambient authority remains A0;
+- maximum bounded grant is A2;
+- max_executions = 1;
+- continuous authority = false;
+- policy self-grant = forbidden;
+- evolution = inactive+disabled;
+- no active WorldLease;
+- F5 intervention ledger count = 0;
+- grant issued = false;
+- option executed live = false;
+- WORLD mutation = false.
+
+Machine-readable transition after regeneration:
+
+- phase5_checkpoint = F5-B;
+- phase5_next_checkpoint = F5-C;
+- phase5_authority_bridge.validated = true.
+
+F5-B therefore proves the control-plane boundary. It does not claim physical
+factory progress. F5-C is the first checkpoint allowed to exercise bounded A2
+against the physical deterministic autonomous baseline.
+
