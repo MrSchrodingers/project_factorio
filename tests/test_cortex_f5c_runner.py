@@ -205,3 +205,72 @@ def test_runner_has_exactly_one_a2_execution_and_no_legacy_runner_import() -> No
     assert "open_play_runner" not in source
     assert not any("curriculum_runner" in name for name in imports)
     assert not any("open_play_runner" in name for name in imports)
+
+
+def test_preflight_second_development_seed_requires_prior_artifact(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    module=_module()
+    first=1619515465
+    second=853367368
+    manifest=tmp_path/"manifest.json"
+    manifest.write_text(json.dumps({
+        "seed_partitions":{"development":[first,second]},
+    })+"\n")
+    interventions=tmp_path/"interventions.json"
+    _write_interventions(interventions)
+
+    monkeypatch.setattr(
+        module,
+        "artifact_for_seed",
+        lambda seed: tmp_path/f"seed_{seed}.json",
+    )
+    second_artifact=module.artifact_for_seed(second)
+
+    with pytest.raises(RuntimeError,match="frozen order"):
+        module.preflight_f5c(
+            seed=second,
+            artifact=second_artifact,
+            revision=_revision(),
+            service_state_reader=_evolution_off,
+            phase_state_reader=_phase,
+            manifest_path=manifest,
+            intervention_ledger_path=interventions,
+            lease_state_path=tmp_path/"lease.json",
+        )
+
+    module.artifact_for_seed(first).write_text(json.dumps({
+        "schema_version":"cortex_f5c_deterministic_baseline_v1",
+        "seed":first,
+        "partition":"development",
+        "status":"failed",
+    })+"\n")
+    result=module.preflight_f5c(
+        seed=second,
+        artifact=second_artifact,
+        revision=_revision(),
+        service_state_reader=_evolution_off,
+        phase_state_reader=_phase,
+        manifest_path=manifest,
+        intervention_ledger_path=interventions,
+        lease_state_path=tmp_path/"lease.json",
+    )
+
+    assert result["status"]=="preflight_pass"
+    assert result["development_sequence"]["index"]==1
+    assert result["development_sequence"]["prior_attempts"]==[{
+        "seed":first,
+        "artifact":str(module.artifact_for_seed(first)),
+    }]
+
+
+def test_runner_uses_canonical_rcon_resource_overview() -> None:
+    source=(
+        ROOT/"scripts"/"run_cortex_f5c_deterministic_baseline.py"
+    ).read_text()
+
+    assert "FactorioObserver()" in source
+    assert "resource_overview(max_age_s=0.0)" in source
+    assert "resource_survey_from_overview(resource_overview)" in source
+    assert "world_rows(namespace,resources=True)" not in source

@@ -3103,6 +3103,72 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
     assert "coal_self_sufficiency" in f5c["resume"]["action"]
     f5c_artifact.unlink()
 
+    f5c_artifact.write_text(json.dumps({
+        "schema_version":"cortex_f5c_deterministic_baseline_v1",
+        "status":"failed",
+        "seed":1619515465,
+        "partition":"development",
+        "code_revision":{"commit":"f5c-counterexample","dirty":False},
+    })+"\n")
+    f5c_second=audits/"cortex_f5c_development_853367368_iron_extraction.json"
+    f5c_second.write_text(json.dumps({
+        "schema_version":"cortex_f5c_deterministic_baseline_v1",
+        "status":"completed",
+        "seed":853367368,
+        "partition":"development",
+        "capability":"iron_extraction",
+        "ambient_authority":"A0",
+        "bounded_authority":"A2",
+        "continuous_authority":False,
+        "automatic_retry":False,
+        "option_execution_attempts":1,
+        "external_resource_injection":False,
+        "human_intervention_count":0,
+        "transaction_committed":True,
+        "capability_promoted":"iron_extraction",
+        "code_revision":{"commit":"f5c-fix-sha","dirty":False},
+        "preflight":{
+            "world_mutation":False,
+            "grant_issued":False,
+            "option_executed_live":False,
+        },
+        "capability_gate":{
+            "resource_patch_valid":True,
+            "drill_operational":True,
+            "iron_ore_produced":True,
+            "destination_reachable":True,
+            "production_positive_during_validation_window":True,
+        },
+        "survival_gate":{
+            "previously_promoted":[],
+            "regressed":[],
+            "passed":True,
+        },
+        "trajectory":{
+            "capability_delta":{
+                "promoted":["iron_extraction"],
+                "regressed":[],
+            },
+        },
+    })+"\n")
+    f5c_recovered=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    recovered=f5c_recovered["phase5_deterministic_baseline"]
+    assert recovered["attempt_count"]==2
+    assert [row["status"] for row in recovered["attempts"]]==[
+        "failed",
+        "completed",
+    ]
+    assert recovered["seed"]==853367368
+    assert recovered["iron_extraction_validated"] is True
+    assert f5c_recovered["phase5_protocol"]["achieved_capabilities"]==[
+        "iron_extraction"
+    ]
+    f5c_artifact.unlink()
+    f5c_second.unlink()
+
     f5b_sources["f5_authority"].write_text("# tampered F5 authority\n")
     f5b_tampered=module.build_phase_state(
         state_root=tmp_path,

@@ -136,3 +136,40 @@ After a valid physical artifact:
 F5-C is not complete after the first capability. It remains active until the
 deterministic physical baseline reaches the frozen F5-C completion criterion
 defined by the broader F5 protocol.
+
+## Development counterexample 1 — resource perception boundary
+
+Seed 1619515465 was initialized once under an exclusive WorldLease and produced
+a canonical counterexample before any A2 grant or Option execution.
+
+Observed result:
+
+- status = failed;
+- world_reset = true, initialization only;
+- option_execution_attempts = 0;
+- grant_issued was never reached;
+- capability promotion = none;
+- failure = F5-C resource survey returned no resources;
+- WorldLease was released normally;
+- intervention ledger remained empty.
+
+The failure was not absence of Factorio resources. The canonical RCON resource
+overview on the initialized world observed 2562 resource points inside radius
+192, including 624 iron-ore, 600 coal, 650 copper-ore and 624 stone points.
+
+Root cause: the runner used save_entity_state with resource_entities enabled as
+the resource-patch perception source. That API is not the canonical wide-area
+resource survey used by the dashboard and returned no resource rows in this
+open_play episode.
+
+Correction:
+
+- use FactorioObserver.resource_overview with max_age_s=0;
+- convert it with resource_survey_from_overview;
+- keep save_entity_state for physical player entities/inventory only;
+- preserve the failed seed artifact unchanged;
+- do not retry seed 1619515465;
+- continue with the next frozen development seed only after the correction is
+  committed, tested and deployed.
+
+Next eligible development seed after the correction: 853367368.

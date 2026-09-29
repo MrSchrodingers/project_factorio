@@ -25,11 +25,16 @@ from factorio_ai_lab.cortex.actions import (
 )
 from factorio_ai_lab.cortex.f5_authority import F5BoundedAuthorityBridge
 from factorio_ai_lab.cortex.grant_ledger import PersistentOptionGrantLedger
-from factorio_ai_lab.cortex.live_canary import available_inventory, world_rows
+from factorio_ai_lab.cortex.live_canary import (
+    available_inventory,
+    resource_survey_from_overview,
+    world_rows,
+)
 from factorio_ai_lab.cortex.options import OptionBudget, OptionKind, OptionRequest
 from factorio_ai_lab.cortex.resource_extraction_option import (
     compose_resource_extraction_option,
 )
+from factorio_ai_lab.dashboard.state import FactorioObserver
 from factorio_ai_lab.instrumentation.runtime import runtime_entity_footprints
 from factorio_ai_lab.integrations.fle import (
     TransactionalFLEExecutor,
@@ -38,7 +43,6 @@ from factorio_ai_lab.integrations.fle import (
 )
 from factorio_ai_lab.paths import RUNS_DIR, code_revision
 from factorio_ai_lab.planning.fuel import TICKS_PER_SECOND
-from factorio_ai_lab.planning.placement import WorldSurvey
 from factorio_ai_lab.runtime import WORLD_LEASE_STATE, FactorioWorldLease
 
 SCHEMA_VERSION="cortex_f5c_deterministic_baseline_v1"
@@ -172,6 +176,48 @@ def _development_seeds(manifest: Mapping[str,Any]) -> tuple[int,...]:
     return tuple(raw)
 
 
+def _assert_development_sequence(
+    *,
+    seed: int,
+    development: tuple[int,...],
+    artifact: Path,
+) -> dict[str,Any]:
+    try:
+        index=development.index(seed)
+    except ValueError as exc:
+        raise ValueError(
+            f"seed {seed} is not in frozen F5 development partition"
+        ) from exc
+    prior=[]
+    for prior_seed in development[:index]:
+        path=artifact_for_seed(prior_seed)
+        if not path.exists():
+            raise RuntimeError(
+                "F5-C development seeds must be attempted in frozen order; "
+                f"missing prior seed artifact {prior_seed}"
+            )
+        prior.append({
+            "seed":prior_seed,
+            "artifact":str(path),
+        })
+    for later_seed in development[index+1:]:
+        path=artifact_for_seed(later_seed)
+        if path.exists():
+            raise RuntimeError(
+                "F5-C selected seed is behind an already-recorded later "
+                f"development artifact {later_seed}"
+            )
+    if artifact.exists():
+        raise FileExistsError(
+            "F5-C development artifact already exists; inspect it instead of rerunning"
+        )
+    return {
+        "index":index,
+        "prior_attempts":prior,
+        "remaining":list(development[index+1:]),
+    }
+
+
 def _intervention_count(path: Path=INTERVENTION_LEDGER) -> int:
     payload=_load_object(path)
     rows=payload.get("interventions")
@@ -193,19 +239,16 @@ def preflight_f5c(
 ) -> dict[str,Any]:
     manifest=_manifest(manifest_path)
     development=_development_seeds(manifest)
-    if seed not in development:
-        raise ValueError(
-            f"seed {seed} is not in frozen F5 development partition"
-        )
+    sequence=_assert_development_sequence(
+        seed=seed,
+        development=development,
+        artifact=artifact,
+    )
     commit=revision.get("commit")
     if not isinstance(commit,str) or not commit.strip():
         raise RuntimeError("F5-C requires exact code revision")
     if revision.get("dirty") is not False:
         raise RuntimeError("F5-C requires clean committed source before live execution")
-    if artifact.exists():
-        raise FileExistsError(
-            "F5-C development artifact already exists; inspect it instead of rerunning"
-        )
     phase=_assert_f5b_ready(phase_state_reader)
     evolution=_assert_evolution_off(service_state_reader)
     lease=read_world_lease_state(lease_state_path)
@@ -224,6 +267,7 @@ def preflight_f5c(
         "status":"preflight_pass",
         "seed":seed,
         "partition":"development",
+        "development_sequence":sequence,
         "code_revision":dict(revision),
         "phase_state":phase,
         "evolution":evolution,
@@ -475,15 +519,25 @@ def run_f5c(
                     + json.dumps(injected,sort_keys=True)
                 )
 
-            rows=world_rows(namespace,resources=True)
+            observer=FactorioObserver()
+            try:
+                resource_overview=observer.resource_overview(max_age_s=0.0)
+            finally:
+                observer.close()
+            resources=resource_survey_from_overview(resource_overview)
+            if not resources.tiles:
+                raise RuntimeError(
+                    "F5-C canonical RCON resource overview returned no resources"
+                )
+            record["resource_observation"]={
+                "source":"FactorioObserver.resource_overview",
+                "connected":resource_overview.get("connected"),
+                "center":resource_overview.get("center"),
+                "radius":resource_overview.get("radius"),
+                "point_count":len(resource_overview.get("points") or []),
+                "totals":resource_overview.get("totals"),
+            }
             footprints=runtime_entity_footprints(instance)
-            survey=WorldSurvey.from_entities(
-                rows,
-                footprints=footprints,
-                surveyed=(-500.0,-500.0,500.0,500.0),
-            )
-            if survey.resources is None:
-                raise RuntimeError("F5-C resource survey returned no resources")
 
             option=_option_request(
                 run_id=run_id,
@@ -494,8 +548,8 @@ def run_f5c(
             composed=compose_resource_extraction_option(
                 option,
                 action_request=action,
-                world_entities=survey.entities,
-                resources=survey.resources,
+                world_entities=physical_rows,
+                resources=resources,
                 footprints=footprints,
             )
             if not composed.ready or composed.plan is None:

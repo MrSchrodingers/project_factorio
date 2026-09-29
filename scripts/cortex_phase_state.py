@@ -2880,28 +2880,145 @@ def build_phase_state(
         and len(phase5_interventions)==0
     )
 
-    phase5c_seed=(
-        int(phase5_development[0])
-        if isinstance(phase5_development,list)
-        and phase5_development
-        and isinstance(phase5_development[0],int)
-        and not isinstance(phase5_development[0],bool)
-        else None
+    phase5c_attempts: list[dict[str,Any]]=[]
+    phase5c_started=False
+    phase5c_iron_extraction_valid=False
+    phase5c_selected_seed: int | None=None
+    phase5c_selected_path=(
+        state_root/"runs"/"audits"/"cortex_f5c_development_missing.json"
     )
-    phase5c_artifact_path=(
-        state_root/"runs"/"audits"/
-        f"cortex_f5c_development_{phase5c_seed}_iron_extraction.json"
-        if phase5c_seed is not None
-        else state_root/"runs"/"audits"/"cortex_f5c_development_missing.json"
-    )
+    phase5c_selected_artifact: dict[str,Any]={}
+    phase5c_selected_error: str | None=None
+
+    def f5c_artifact_path(seed: int) -> Path:
+        return (
+            state_root/"runs"/"audits"/
+            f"cortex_f5c_development_{seed}_iron_extraction.json"
+        )
+
+    def f5c_artifact_valid(
+        payload: dict[str,Any],
+        *,
+        seed: int,
+    ) -> bool:
+        preflight=payload.get("preflight")
+        if not isinstance(preflight,dict):
+            preflight={}
+        revision=payload.get("code_revision")
+        if not isinstance(revision,dict):
+            revision={}
+        gate=payload.get("capability_gate")
+        if not isinstance(gate,dict):
+            gate={}
+        survival=payload.get("survival_gate")
+        if not isinstance(survival,dict):
+            survival={}
+        trajectory=payload.get("trajectory")
+        if not isinstance(trajectory,dict):
+            trajectory={}
+        delta=trajectory.get("capability_delta")
+        if not isinstance(delta,dict):
+            delta={}
+        return (
+            phase5b_valid
+            and payload.get("schema_version")
+            =="cortex_f5c_deterministic_baseline_v1"
+            and payload.get("partition")=="development"
+            and payload.get("seed")==seed
+            and payload.get("status")=="completed"
+            and payload.get("capability")=="iron_extraction"
+            and payload.get("ambient_authority")=="A0"
+            and payload.get("bounded_authority")=="A2"
+            and payload.get("continuous_authority") is False
+            and payload.get("automatic_retry") is False
+            and payload.get("option_execution_attempts")==1
+            and payload.get("external_resource_injection") is False
+            and payload.get("human_intervention_count")==0
+            and payload.get("transaction_committed") is True
+            and payload.get("capability_promoted")=="iron_extraction"
+            and revision.get("dirty") is False
+            and preflight.get("world_mutation") is False
+            and preflight.get("grant_issued") is False
+            and preflight.get("option_executed_live") is False
+            and bool(gate)
+            and all(value is True for value in gate.values())
+            and survival.get("passed") is True
+            and survival.get("regressed")==[]
+            and "iron_extraction" in (
+                delta.get("promoted")
+                if isinstance(delta.get("promoted"),list)
+                else []
+            )
+            and len(phase5_interventions)==0
+        )
+
+    if isinstance(phase5_development,list):
+        for raw_seed in phase5_development:
+            if not isinstance(raw_seed,int) or isinstance(raw_seed,bool):
+                continue
+            seed=int(raw_seed)
+            path=f5c_artifact_path(seed)
+            if not path.exists():
+                continue
+            payload: dict[str,Any]={}
+            error: str | None=None
+            try:
+                payload=_load(path)
+            except (OSError,json.JSONDecodeError,TypeError) as exc:
+                error=f"{type(exc).__name__}: {exc}"
+            structurally_started=(
+                error is None
+                and payload.get("schema_version")
+                =="cortex_f5c_deterministic_baseline_v1"
+                and payload.get("partition")=="development"
+                and payload.get("seed")==seed
+            )
+            valid=(
+                structurally_started
+                and f5c_artifact_valid(payload,seed=seed)
+            )
+            phase5c_attempts.append({
+                "seed":seed,
+                "artifact_path":str(path),
+                "status":payload.get("status"),
+                "code_commit":(
+                    payload.get("code_revision",{}).get("commit")
+                    if isinstance(payload.get("code_revision"),dict)
+                    else None
+                ),
+                "started":structurally_started,
+                "iron_extraction_validated":valid,
+                "read_error":error,
+            })
+            if structurally_started:
+                phase5c_started=True
+                phase5c_selected_seed=seed
+                phase5c_selected_path=path
+                phase5c_selected_artifact=payload
+                phase5c_selected_error=error
+            if valid and not phase5c_iron_extraction_valid:
+                phase5c_iron_extraction_valid=True
+                phase5c_selected_seed=seed
+                phase5c_selected_path=path
+                phase5c_selected_artifact=payload
+                phase5c_selected_error=error
+
+    if phase5c_selected_seed is None:
+        phase5c_selected_seed=(
+            int(phase5_development[0])
+            if isinstance(phase5_development,list)
+            and phase5_development
+            and isinstance(phase5_development[0],int)
+            and not isinstance(phase5_development[0],bool)
+            else None
+        )
+        if phase5c_selected_seed is not None:
+            phase5c_selected_path=f5c_artifact_path(phase5c_selected_seed)
+
+    phase5c_artifact_path=phase5c_selected_path
     phase5c_artifact_exists=phase5c_artifact_path.exists()
-    phase5c_artifact: dict[str,Any]={}
-    phase5c_artifact_error: str | None=None
-    if phase5c_artifact_exists:
-        try:
-            phase5c_artifact=_load(phase5c_artifact_path)
-        except (OSError,json.JSONDecodeError,TypeError) as exc:
-            phase5c_artifact_error=f"{type(exc).__name__}: {exc}"
+    phase5c_artifact=phase5c_selected_artifact
+    phase5c_artifact_error=phase5c_selected_error
     phase5c_preflight=phase5c_artifact.get("preflight")
     if not isinstance(phase5c_preflight,dict):
         phase5c_preflight={}
@@ -2920,43 +3037,7 @@ def build_phase_state(
     phase5c_delta=phase5c_trajectory.get("capability_delta")
     if not isinstance(phase5c_delta,dict):
         phase5c_delta={}
-    phase5c_started=(
-        phase5b_valid
-        and phase5c_artifact_exists
-        and phase5c_artifact_error is None
-        and phase5c_artifact.get("schema_version")
-        =="cortex_f5c_deterministic_baseline_v1"
-        and phase5c_artifact.get("partition")=="development"
-        and phase5c_artifact.get("seed")==phase5c_seed
-    )
-    phase5c_iron_extraction_valid=(
-        phase5c_started
-        and phase5c_artifact.get("status")=="completed"
-        and phase5c_artifact.get("capability")=="iron_extraction"
-        and phase5c_artifact.get("ambient_authority")=="A0"
-        and phase5c_artifact.get("bounded_authority")=="A2"
-        and phase5c_artifact.get("continuous_authority") is False
-        and phase5c_artifact.get("automatic_retry") is False
-        and phase5c_artifact.get("option_execution_attempts")==1
-        and phase5c_artifact.get("external_resource_injection") is False
-        and phase5c_artifact.get("human_intervention_count")==0
-        and phase5c_artifact.get("transaction_committed") is True
-        and phase5c_artifact.get("capability_promoted")=="iron_extraction"
-        and phase5c_revision.get("dirty") is False
-        and phase5c_preflight.get("world_mutation") is False
-        and phase5c_preflight.get("grant_issued") is False
-        and phase5c_preflight.get("option_executed_live") is False
-        and bool(phase5c_gate)
-        and all(value is True for value in phase5c_gate.values())
-        and phase5c_survival.get("passed") is True
-        and phase5c_survival.get("regressed")==[]
-        and "iron_extraction" in (
-            phase5c_delta.get("promoted")
-            if isinstance(phase5c_delta.get("promoted"),list)
-            else []
-        )
-        and len(phase5_interventions)==0
-    )
+
     phase5_achieved_capabilities=(
         ["iron_extraction"]
         if phase5c_iron_extraction_valid
@@ -3459,9 +3540,11 @@ def build_phase_state(
         "phase5_deterministic_baseline":{
             "artifact_path":str(phase5c_artifact_path),
             "artifact_exists":phase5c_artifact_exists,
+            "attempts":phase5c_attempts,
+            "attempt_count":len(phase5c_attempts),
             "started":phase5c_started,
             "iron_extraction_validated":phase5c_iron_extraction_valid,
-            "seed":phase5c_artifact.get("seed",phase5c_seed),
+            "seed":phase5c_artifact.get("seed",phase5c_selected_seed),
             "partition":phase5c_artifact.get("partition"),
             "status":phase5c_artifact.get("status"),
             "capability":phase5c_artifact.get("capability"),
