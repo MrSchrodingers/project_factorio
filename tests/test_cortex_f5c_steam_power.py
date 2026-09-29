@@ -126,6 +126,12 @@ def test_compiled_steam_power_uses_native_triggers_real_load_and_survival() -> N
     assert "quantity=56" in code
     assert "quantity=16" in code
     assert "quantity=5" in code
+    assert "quantity=24" in code
+    assert "cortex_infrastructure_iron_shortfall" in code
+    assert "cortex_infrastructure_iron_ready" in code
+    assert "cortex_infrastructure_topup_ore=extract_item(" in code
+    assert "cortex_infrastructure_topup_coal=extract_item(" in code
+    assert "craft_item(Prototype.Pipe,quantity=24)" in code
     assert "cortex_trigger_iron_plates < 50" in code
     assert "cortex_trigger_copper_plates < 10" in code
     assert "pickup_entity(cortex_copper_furnace)" in code
@@ -171,3 +177,17 @@ def test_steam_power_runner_is_bounded_and_uses_canonical_character() -> None:
 def test_supervisor_has_bounded_steam_power_runner() -> None:
     source=(ROOT/"scripts"/"run_cortex_supervisor.py").read_text()
     assert '"steam_power":"run_cortex_f5c_steam_power.py"' in source
+
+
+def test_steam_power_runner_budget_covers_infrastructure_topup() -> None:
+    source=(ROOT/"scripts"/"run_cortex_f5c_steam_power.py").read_text()
+
+    assert "DEFAULT_OPTION_SECONDS=420" in source
+    for name in (
+        "infrastructure_iron_ready",
+        "infrastructure_iron_shortfall",
+        "infrastructure_topup_ore",
+        "infrastructure_topup_coal",
+        "infrastructure_topup_plates",
+    ):
+        assert f'"{name}"' in source

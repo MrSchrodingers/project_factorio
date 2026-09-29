@@ -55,7 +55,7 @@ DASHBOARD_BUILD_INFO=Path(
 RUNTIME_BUILD_INFO=Path("/srv/factorio-ai-runtime/current/BUILD_INFO.json")
 ARENA="cortex_f5c_steam_power"
 OWNER="run_cortex_f5c_steam_power"
-DEFAULT_OPTION_SECONDS=300
+DEFAULT_OPTION_SECONDS=420
 DEFAULT_GRANT_TTL_SECONDS=600
 
 ServiceStateReader=Callable[[],dict[str,str]]
@@ -534,6 +534,11 @@ def _measure(namespace: Any,prepared: Any) -> dict[str,Any]:
         "electric_consumer_energy",
         "trigger_iron_plates",
         "trigger_copper_plates",
+        "infrastructure_iron_ready",
+        "infrastructure_iron_shortfall",
+        "infrastructure_topup_ore",
+        "infrastructure_topup_coal",
+        "infrastructure_topup_plates",
         "iron_survival_growth",
         "coal_survival_growth",
         "smelting_survival_growth",

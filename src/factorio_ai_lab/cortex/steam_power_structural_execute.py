@@ -95,6 +95,10 @@ def compile_steam_power(operation: StructuralOperation) -> list[str]:
     iron_furnace_coal=_positive_int(params,"iron_furnace_trigger_coal")
     copper_furnace_coal=_positive_int(params,"copper_furnace_coal")
     boiler_coal=_positive_int(params,"boiler_coal")
+    pipe_bootstrap=_positive_int(params,"pipe_bootstrap")
+    infrastructure_iron=_positive_int(params,"infrastructure_iron_plates")
+    topup_coal=_positive_int(params,"infrastructure_topup_coal")
+    topup_window=_positive_int(params,"infrastructure_topup_window_seconds")
     survival_coal=_positive_int(params,"survival_coal_draw")
     survival_iron=_positive_int(params,"iron_survival_ore_draw")
     iron_window=_positive_int(params,"iron_trigger_window_seconds")
@@ -183,8 +187,74 @@ def compile_steam_power(operation: StructuralOperation) -> list[str]:
         "cortex_iron_plates_drawn=extract_item(",
         f"    {_prototype('iron-plate')},",
         "    cortex_iron_furnace,",
-        "    quantity=min(60,cortex_trigger_iron_plates),",
+        f"    quantity=min({infrastructure_iron},cortex_trigger_iron_plates),",
         ")",
+        (
+            "cortex_infrastructure_iron_before_topup=inspect_inventory()"
+            f"[{_prototype('iron-plate')}]"
+        ),
+        (
+            f"cortex_infrastructure_iron_shortfall=max(0,{infrastructure_iron}-"
+            "cortex_infrastructure_iron_before_topup)"
+        ),
+        "cortex_infrastructure_topup_ore=0",
+        "cortex_infrastructure_topup_coal=0",
+        "cortex_infrastructure_topup_plates=0",
+        "if cortex_infrastructure_iron_shortfall>0:",
+        (
+            "    cortex_topup_iron_available=inspect_inventory(cortex_iron_buffer)"
+            f"[{_prototype('iron-ore')}]"
+        ),
+        (
+            "    cortex_topup_coal_available=inspect_inventory(cortex_coal_buffer)"
+            f"[{_prototype('coal')}]"
+        ),
+        "    if cortex_topup_iron_available < cortex_infrastructure_iron_shortfall:",
+        "        raise RuntimeError('endogenous iron stock below infrastructure top-up')",
+        f"    if cortex_topup_coal_available < {topup_coal}:",
+        "        raise RuntimeError('endogenous coal stock below infrastructure top-up')",
+        "    cortex_infrastructure_topup_ore=extract_item(",
+        f"        {_prototype('iron-ore')},",
+        "        cortex_iron_buffer,",
+        "        quantity=cortex_infrastructure_iron_shortfall,",
+        "    )",
+        "    cortex_infrastructure_topup_coal=extract_item(",
+        f"        {_prototype('coal')},",
+        "        cortex_coal_buffer,",
+        f"        quantity={topup_coal},",
+        "    )",
+        "    cortex_iron_furnace=insert_item(",
+        f"        {_prototype('coal')},",
+        "        cortex_iron_furnace,",
+        f"        quantity={topup_coal},",
+        "    )",
+        "    cortex_iron_furnace=insert_item(",
+        f"        {_prototype('iron-ore')},",
+        "        cortex_iron_furnace,",
+        "        quantity=cortex_infrastructure_iron_shortfall,",
+        "    )",
+        f"    sleep({topup_window})",
+        "    cortex_iron_furnace=get_entity(",
+        f"        {_prototype('stone-furnace')},",
+        f"        {parsed['iron_furnace']},",
+        "    )",
+        (
+            "    cortex_topup_plate_available=inspect_inventory(cortex_iron_furnace)"
+            f"[{_prototype('iron-plate')}]"
+        ),
+        "    if cortex_topup_plate_available < cortex_infrastructure_iron_shortfall:",
+        "        raise RuntimeError('infrastructure iron top-up did not smelt in time')",
+        "    cortex_infrastructure_topup_plates=extract_item(",
+        f"        {_prototype('iron-plate')},",
+        "        cortex_iron_furnace,",
+        "        quantity=cortex_infrastructure_iron_shortfall,",
+        "    )",
+        (
+            "cortex_infrastructure_iron_ready=inspect_inventory()"
+            f"[{_prototype('iron-plate')}]"
+        ),
+        f"if cortex_infrastructure_iron_ready < {infrastructure_iron}:",
+        "    raise RuntimeError('infrastructure iron budget not met')",
         f"cortex_fast_reposition({parsed['stone']})",
         "harvest_resource(",
         f"    {parsed['stone']},",
@@ -235,6 +305,7 @@ def compile_steam_power(operation: StructuralOperation) -> list[str]:
         f"    quantity={copper_ore},",
         ")",
         "pickup_entity(cortex_copper_furnace)",
+        f"craft_item({_prototype('pipe')},quantity={pipe_bootstrap})",
         f"craft_item({_prototype('small-electric-pole')},quantity=2)",
         f"craft_item({_prototype('inserter')},quantity=1)",
         f"craft_item({_prototype('offshore-pump')},quantity=1)",
@@ -457,6 +528,14 @@ def compile_steam_power(operation: StructuralOperation) -> list[str]:
         "    'electric_consumer_energy':cortex_consumer_energy,",
         "    'trigger_iron_plates':cortex_trigger_iron_plates,",
         "    'trigger_copper_plates':cortex_trigger_copper_plates,",
+        "    'infrastructure_iron_ready':cortex_infrastructure_iron_ready,",
+        (
+            "    'infrastructure_iron_shortfall':"
+            "cortex_infrastructure_iron_shortfall,"
+        ),
+        "    'infrastructure_topup_ore':cortex_infrastructure_topup_ore,",
+        "    'infrastructure_topup_coal':cortex_infrastructure_topup_coal,",
+        "    'infrastructure_topup_plates':cortex_infrastructure_topup_plates,",
         "    'iron_extraction_survives':cortex_iron_extraction_survives,",
         "    'coal_self_sufficiency_survives':cortex_coal_self_sufficiency_survives,",
         "    'iron_smelting_survives':cortex_iron_smelting_survives,",
