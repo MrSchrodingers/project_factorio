@@ -202,32 +202,43 @@ def main() -> int:
                         and "promoted iron entities are absent from live WORLD"
                         in payload["detail"]
                     ):
-                        repair_script="run_cortex_f5c_repair_iron.py"
-                        payload["status"]="repairing_prerequisite"
-                        payload["repair_frontier"]="iron_extraction"
-                        payload["repair_mode"]="technical_recovery_no_reset"
-                        payload["runner"]=repair_script
-                        payload["runner_args"]=[]
-                        write(payload)
-                        repair_preflight=run(repair_script,False,[])
-                        if repair_preflight.returncode==0:
-                            payload["status"]="repairing_prerequisite_execute"
-                            write(payload)
-                            repair_result=run(repair_script,True,[])
-                            last_commit=commit
-                            last_frontier="iron_extraction_recovery"
-                            last_result=(
-                                "completed"
-                                if repair_result.returncode==0
-                                else "failed"
+                        if (
+                            last_commit==commit
+                            and last_frontier=="iron_extraction_recovery"
+                            and last_result in {"failed","rejected"}
+                        ):
+                            payload["status"]="blocked_repair_counterexample"
+                            payload["detail"]=(
+                                "same commit technical recovery already failed; "
+                                "no automatic retry"
                             )
-                            payload["repair_returncode"]=repair_result.returncode
-                            payload["runner_output_tail"]=(
-                                repair_result.stdout
-                                or repair_result.stderr
-                                or ""
-                            )[-3000:]
-                            refresh()
+                        else:
+                            repair_script="run_cortex_f5c_repair_iron.py"
+                            payload["status"]="repairing_prerequisite"
+                            payload["repair_frontier"]="iron_extraction"
+                            payload["repair_mode"]="technical_recovery_no_reset"
+                            payload["runner"]=repair_script
+                            payload["runner_args"]=[]
+                            write(payload)
+                            repair_preflight=run(repair_script,False,[])
+                            if repair_preflight.returncode==0:
+                                payload["status"]="repairing_prerequisite_execute"
+                                write(payload)
+                                repair_result=run(repair_script,True,[])
+                                last_commit=commit
+                                last_frontier="iron_extraction_recovery"
+                                last_result=(
+                                    "completed"
+                                    if repair_result.returncode==0
+                                    else "failed"
+                                )
+                                payload["repair_returncode"]=repair_result.returncode
+                                payload["runner_output_tail"]=(
+                                    repair_result.stdout
+                                    or repair_result.stderr
+                                    or ""
+                                )[-3000:]
+                                refresh()
                 else:
                     payload["status"]="executing"
                     payload["detail"]="one bounded A2 Option in progress"

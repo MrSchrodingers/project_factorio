@@ -162,6 +162,38 @@ def _entity_at(
     return False
 
 
+def _physical_entity_signature(rows: Any) -> list[dict[str,Any]]:
+    """Canonical live-world signature excluding the administrative character."""
+    signature: list[dict[str,Any]]=[]
+    if not isinstance(rows,list):
+        return signature
+    for row in rows:
+        if not isinstance(row,Mapping):
+            continue
+        name=str(row.get("name") or "")
+        entity_type=str(row.get("type") or "")
+        if name=="character" or entity_type=="character":
+            continue
+        position=row.get("position")
+        if not isinstance(position,Mapping):
+            continue
+        try:
+            x=float(position["x"])
+            y=float(position["y"])
+        except (KeyError,TypeError,ValueError):
+            continue
+        signature.append({
+            "name":name,
+            "type":entity_type,
+            "x":x,
+            "y":y,
+        })
+    return sorted(
+        signature,
+        key=lambda row:(row["name"],row["type"],row["x"],row["y"]),
+    )
+
+
 def _option_request(*,run_id: str,commit: str,option_seconds: int) -> OptionRequest:
     return OptionRequest(
         option_id=f"{run_id}:iron-recovery",
@@ -258,6 +290,7 @@ def preflight(*,artifact: Path,revision: Mapping[str,Any] | None=None) -> dict[s
         "promoted_extractor_position":{"x":extractor[0],"y":extractor[1]},
         "promoted_buffer_position":{"x":buffer[0],"y":buffer[1]},
         "world_entity_count":snapshot.get("entity_count"),
+        "world_physical_signature":_physical_entity_signature(rows),
         "world_reset":False,
         "external_resource_injection":False,
         "grant_issued":False,
@@ -334,8 +367,22 @@ def run_repair(
                 overview=observer.resource_overview(max_age_s=0.0)
             finally:
                 observer.close()
-            if after_attach.get("entity_count")!=pf["world_entity_count"]:
-                raise RuntimeError("live FLE attachment changed WORLD before recovery A2")
+            attached_rows=after_attach.get("entities")
+            before_physical=pf.get("world_physical_signature")
+            after_physical=_physical_entity_signature(attached_rows)
+            if before_physical!=after_physical:
+                raise RuntimeError(
+                    "live FLE attachment changed physical WORLD before recovery A2"
+                )
+            record["world_after_live_attachment"]={
+                "entity_count":after_attach.get("entity_count"),
+                "physical_signature":after_physical,
+                "character_only_delta":(
+                    after_attach.get("entity_count")!=pf["world_entity_count"]
+                    and before_physical==after_physical
+                ),
+                "world_reset":False,
+            }
             resources=resource_survey_from_overview(overview)
             if not resources.tiles:
                 raise RuntimeError("technical recovery resource overview is empty")
