@@ -212,3 +212,47 @@ Protocol correction:
 
 Seed 853367368 is preserved as a counterexample and will not be retried.
 Next eligible development seed after committed/deployed correction: 245044303.
+
+## Development success 3 — iron_extraction promoted
+
+Seed 245044303 closed the first physical F5 capability on commit 7045e6df6fd4afa9770e20b9772665c6e7e08710.
+
+Run: cortex-f5c-dev-245044303-20260929T063645Z
+
+Observed physical evidence:
+
+- transaction_committed = true;
+- option_execution_attempts = 1;
+- ambient authority = A0;
+- bounded authority = A2;
+- max_executions = 1;
+- grant consumed before runtime mutation;
+- resource_patch_valid = true;
+- drill_operational = true;
+- iron_ore_produced = true;
+- destination_reachable = true;
+- production_positive_during_validation_window = true;
+- extractor_exists = true;
+- buffer iron ore increased from 0 to 3;
+- external_resource_injection = false;
+- human_intervention_count = 0;
+- survival gate = PASS;
+- evolution remained inactive+disabled;
+- WorldLease released normally;
+- intervention ledger remained empty.
+
+The live WORLD after commit contains the player, one working burner mining drill
+at (15, 70), and one wooden chest at (15.5, 71.5).
+
+Machine-readable state after regeneration:
+
+- phase5_checkpoint = F5-C;
+- iron_extraction_validated = true;
+- achieved capabilities = 1/9;
+- next deterministic target = coal_self_sufficiency.
+
+The observed execution exceeded the requested 60-second Option budget:
+9690 game ticks = 161.5 seconds. This is retained as real temporal evidence and
+must inform later F5-C budget sizing; it does not invalidate the capability
+because the hard physical gate passed and no deadline was preregistered as an
+iron_extraction success criterion.

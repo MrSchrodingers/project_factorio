@@ -5,10 +5,10 @@
 **Repository:** `MrSchrodingers/project_factorio`
 **Live checkout:** `/srv/factorio-ai-lab`
 **Transition branch:** `research/cortex-v1`
-**Current scientific phase:** **F5 ACTIVE — F5-B PASS / A0 AMBIENT**
+**Current scientific phase:** **F5 ACTIVE — F5-C · iron_extraction PASS · 1/9**
 **F3:** COMPLETE / F3-C
 **F4:** COMPLETE / F4-C
-**F5:** ACTIVE / F5-B PASS · next F5-C
+**F5:** ACTIVE / F5-C · next target coal_self_sufficiency
 **Continuous autonomous authority:** OFF / forbidden in F5
 **Confirmatory seeds:** untouched / frozen
 **SentinelX context:** sxc_4557STHZ — always resume latest revision
@@ -63,22 +63,43 @@ Expected scientific state:
 - phase4_checkpoint=F4-C;
 - phase4_exit_gate.validated=true;
 - phase4_evaluation_inference.decision=positive;
-- phase5_checkpoint=F5-B;
+- phase5_checkpoint=F5-C;
 - phase5_next_checkpoint=F5-C;
 - phase5_authority_bridge.validated=true;
 - phase5_authority_bridge.ambient_authority=A0;
 - phase5_authority_bridge.max_bounded_grant=A2;
+- phase5_authority_bridge.max_executions=1;
+- phase5_deterministic_baseline.started=true;
+- phase5_deterministic_baseline.attempt_count=3;
+- phase5_deterministic_baseline.iron_extraction_validated=true;
 - phase5_protocol.validated=true;
 - phase5_protocol.authority_level=A0;
 - phase5_protocol.world_mutation_authorized=false;
 - phase5_protocol.continuous_authority=false;
 - phase5_protocol.capability_total=9;
-- phase5_protocol.achieved_capabilities=[];
+- phase5_protocol.achieved_capabilities=[iron_extraction];
 - phase5_protocol.artifacts.errors is empty;
 - phase5_protocol.intervention_ledger.count=0;
 - resume.do_not_start_another_seed=true.
 
 Machine-readable state outranks remembered conversation state.
+
+### F5-C physical state — 2026-09-29
+
+Development lineage is frozen and sequential:
+
+1. seed 1619515465 — counterexample: wrong resource-perception source; no grant;
+2. seed 853367368 — counterexample: readonly authority ledger; no grant;
+3. seed 245044303 — PASS: iron_extraction promoted physically.
+
+Successful run: cortex-f5c-dev-245044303-20260929T063645Z.
+Code commit: 7045e6df6fd4afa9770e20b9772665c6e7e08710.
+
+The live WORLD contains the surviving iron capability: one working burner
+mining drill at (15, 70) and one wooden chest at (15.5, 71.5). The next
+deterministic target is coal_self_sufficiency. Do not reset into a fresh seed
+merely to advance the next capability: the F5 survival invariant requires
+preserving and revalidating iron_extraction while coal is established.
 
 ## 0.4 Validate runtime separation
 

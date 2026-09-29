@@ -24,8 +24,8 @@ LINHAGEM CIENTÍFICA
 - F0/F1/F2/F3: complete
 - F4: complete / F4-C
 - F4 causal held-out inference: positive
-- F5: active / F5-B PASS
-- next checkpoint: F5-C deterministic autonomous baseline
+- F5: active / F5-C · iron_extraction PASS
+- F5-C next target: coal_self_sufficiency
 - implementation F5-A: 6f998777a1d8304e5481df8f299d03dc630b0550
 - continuous authority: forbidden
 - current ambient authority: A0 observe-only; A2 only by explicit one-shot grant
@@ -62,14 +62,14 @@ ESTADO ESPERADO, QUE DEVE SER REVALIDADO
 - phase=F5
 - phase_status=active
 - phase4_checkpoint=F4-C
-- phase5_checkpoint=F5-B
+- phase5_checkpoint=F5-C
 - phase5_next_checkpoint=F5-C
 - F5 protocol validated=true
 - authority=A0
 - WORLD mutation authorized=false
 - continuous authority=false
 - evolution OFF
-- 9 capabilities, 0 promoted
+- 9 capabilities, 1 promoted: iron_extraction
 - intervention ledger count=0
 - resume.do_not_start_another_seed=true
 
@@ -105,8 +105,21 @@ F5-B EVIDENCE
 - no WorldLease/grant/live execution/world mutation during audit
 - next=F5-C deterministic autonomous baseline
 
+F5-C PHYSICAL EVIDENCE
+- development attempts: 1619515465 failed perception; 853367368 failed readonly ledger; 245044303 PASS
+- successful run=cortex-f5c-dev-245044303-20260929T063645Z
+- code commit=7045e6df6fd4afa9770e20b9772665c6e7e08710
+- iron_extraction promoted
+- buffer iron ore 0 -> 3
+- transaction committed under one A2 grant
+- external resource injection=false
+- human intervention count=0
+- capabilities=1/9
+
 PRÓXIMO TRABALHO
-Implementar F5-C deterministic autonomous baseline. Começar pela primeira capability física, usando o stack determinístico e exatamente uma grant A2 por Option. Cada ação deve preservar Observation -> Option -> Validate -> Authority Grant -> Execute -> Measure -> Commit/Rollback, survival invariant e intervention ledger. Não introduzir learned policy control ainda.
+Continuar F5-C com coal_self_sufficiency. Preservar iron_extraction pelo
+survival invariant; ambient authority continua A0 e cada mutation exige uma
+única grant A2 expiráveis por Option. Não introduzir learned policy control.
 
 NÃO:
 - reativar evolution;

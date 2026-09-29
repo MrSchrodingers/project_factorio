@@ -11,15 +11,15 @@ runs/cortex_phase_state.json. Não usar memória conversacional como autoridade 
 - F0/F1/F2/F3: concluídas
 - F4: COMPLETE / F4-C
 - F4 causal memory inference: positive
-- F5: ACTIVE / F5-B bounded authority bridge PASS
-- Próximo checkpoint: F5-C — deterministic autonomous baseline
+- F5: ACTIVE / F5-C deterministic baseline · iron_extraction PASS
+- F5-C próximo target: coal_self_sufficiency
 - Authority Cortex ambiente: A0 / observe only; A2 somente por grant one-shot explícita
 - WORLD mutation autorizada em F5-A: não
 - Continuous authority: proibida em F5
 - Legacy evolution loop: OFF
 - Research/curriculum runner: OFF
 - WORLD live: conectado; no fechamento F5-A, 0 entities
-- Capabilities F5 promovidas: 0 / 9
+- Capabilities F5 promovidas: 1 / 9 — iron_extraction
 - Intervention ledger: 0
 - Commit F5-A: 6f998777a1d8304e5481df8f299d03dc630b0550
 - Commit F5-B: 080cd1544da1573cdf21a7c912e7388df45ea383
@@ -110,6 +110,22 @@ Objetivo F5-C: usar o stack determinístico para começar a construir fisicament
 - nenhum scheduler contínuo.
 
 F5-C deve iniciar a primeira evidência física F5. A authority ambiente continua A0; cada mutação exige uma nova grant A2 one-shot e WorldLease válida.
+
+## F5-C — primeira capability promovida
+
+- seed development: 245044303
+- implementation commit: 7045e6df6fd4afa9770e20b9772665c6e7e08710
+- run: cortex-f5c-dev-245044303-20260929T063645Z
+- capability: iron_extraction
+- physical gate: PASS
+- transaction committed: true
+- grant A2 one-shot: consumed before mutation
+- external resource injection: false
+- human intervention count: 0
+- next deterministic target: coal_self_sufficiency
+
+As seeds 1619515465 e 853367368 permanecem preservadas como counterexamples de
+percepção de recursos e writability do authority ledger, respectivamente.
 
 ## Regra de retomada
 
