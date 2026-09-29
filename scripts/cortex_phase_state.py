@@ -3372,16 +3372,188 @@ def build_phase_state(
                 phase5c_smelting_artifact=payload
                 phase5c_smelting_artifact_error=error
 
+    phase5c_steam_attempts: list[dict[str,Any]]=[]
+    phase5c_steam_valid=False
+    phase5c_steam_artifact_path: Path | None=None
+    phase5c_steam_artifact: dict[str,Any]={}
+    phase5c_steam_artifact_error: str | None=None
+    if phase5c_smelting_valid and phase5c_selected_seed is not None:
+        steam_pattern="cortex_f5c_continuation_*_steam_power_*.json"
+        steam_candidates=[]
+        for steam_path in sorted(
+            (state_root/"runs"/"audits").glob(steam_pattern)
+        ):
+            payload: dict[str,Any]={}
+            error: str | None=None
+            try:
+                payload=_load(steam_path)
+            except (OSError,json.JSONDecodeError,TypeError) as exc:
+                error=f"{type(exc).__name__}: {exc}"
+            preflight=payload.get("preflight")
+            if not isinstance(preflight,dict):
+                preflight={}
+            preflight_phase=preflight.get("phase_state")
+            if not isinstance(preflight_phase,dict):
+                preflight_phase={}
+            revision=payload.get("code_revision")
+            if not isinstance(revision,dict):
+                revision={}
+            gate=payload.get("capability_gate")
+            if not isinstance(gate,dict):
+                gate={}
+            survival=payload.get("survival_gate")
+            if not isinstance(survival,dict):
+                survival={}
+            final=payload.get("measurement_final")
+            if not isinstance(final,dict):
+                final={}
+            trajectory=payload.get("trajectory")
+            if not isinstance(trajectory,dict):
+                trajectory={}
+            delta=trajectory.get("capability_delta")
+            if not isinstance(delta,dict):
+                delta={}
+            started=(
+                error is None
+                and payload.get("schema_version")=="cortex_f5c_steam_power_v1"
+                and isinstance(payload.get("base_seed"),int)
+                and not isinstance(payload.get("base_seed"),bool)
+                and payload.get("capability")=="steam_power"
+            )
+            applies=(
+                started
+                and payload.get("base_seed")==phase5c_selected_seed
+            )
+            valid=(
+                applies
+                and payload.get("status")=="completed"
+                and payload.get("ambient_authority")=="A0"
+                and payload.get("bounded_authority")=="A2"
+                and payload.get("continuous_authority") is False
+                and payload.get("automatic_retry") is False
+                and payload.get("option_execution_attempts")==1
+                and payload.get("world_reset") is False
+                and payload.get("external_resource_injection") is False
+                and payload.get("persistent_copper_chain") is False
+                and payload.get("human_intervention_count")==0
+                and payload.get("transaction_committed") is True
+                and payload.get("capability_promoted")=="steam_power"
+                and revision.get("dirty") is False
+                and preflight.get("world_mutation") is False
+                and preflight.get("grant_issued") is False
+                and preflight.get("option_executed_live") is False
+                and preflight.get("world_reset") is False
+                and preflight.get("external_resource_injection") is False
+                and preflight.get("persistent_copper_chain") is False
+                and preflight_phase.get("achieved_capabilities")
+                ==[
+                    "iron_extraction",
+                    "coal_self_sufficiency",
+                    "iron_smelting",
+                ]
+                and gate.get("water_source_valid") is True
+                and gate.get("endogenous_fuel_reachable") is True
+                and gate.get("steam_generated") is True
+                and gate.get("electrical_production_positive") is True
+                and gate.get("electric_consumer_supplied") is True
+                and survival.get("previously_promoted")
+                ==[
+                    "iron_extraction",
+                    "coal_self_sufficiency",
+                    "iron_smelting",
+                ]
+                and survival.get("iron_extraction_survives") is True
+                and survival.get("coal_self_sufficiency_survives") is True
+                and survival.get("iron_smelting_survives") is True
+                and survival.get("regressed")==[]
+                and survival.get("passed") is True
+                and final.get("water_source_valid") is True
+                and final.get("endogenous_fuel_reachable") is True
+                and final.get("steam_generated") is True
+                and final.get("electrical_production_positive") is True
+                and final.get("electric_consumer_supplied") is True
+                and isinstance(final.get("steam_amount"),(int,float))
+                and not isinstance(final.get("steam_amount"),bool)
+                and float(final.get("steam_amount"))>0
+                and isinstance(final.get("steam_engine_energy"),(int,float))
+                and not isinstance(final.get("steam_engine_energy"),bool)
+                and float(final.get("steam_engine_energy"))>0
+                and isinstance(final.get("electric_consumer_energy"),(int,float))
+                and not isinstance(final.get("electric_consumer_energy"),bool)
+                and float(final.get("electric_consumer_energy"))>0
+                and final.get("iron_extraction_survives") is True
+                and final.get("coal_self_sufficiency_survives") is True
+                and final.get("iron_smelting_survives") is True
+                and isinstance(final.get("iron_survival_growth"),(int,float))
+                and float(final.get("iron_survival_growth"))>0
+                and isinstance(final.get("coal_survival_growth"),(int,float))
+                and float(final.get("coal_survival_growth"))>0
+                and isinstance(final.get("smelting_survival_growth"),(int,float))
+                and float(final.get("smelting_survival_growth"))>0
+                and "steam_power" in (
+                    delta.get("promoted")
+                    if isinstance(delta.get("promoted"),list)
+                    else []
+                )
+                and delta.get("regressed")==[]
+                and len(phase5_interventions)==0
+            )
+            started_at=str(payload.get("started_at") or "")
+            steam_candidates.append(
+                (started_at,steam_path,payload,error,applies,valid)
+            )
+        steam_candidates.sort(key=lambda row:(row[0],str(row[1])))
+        for (
+            started_at,
+            steam_path,
+            payload,
+            error,
+            applies,
+            valid,
+        ) in steam_candidates:
+            phase5c_steam_attempts.append({
+                "artifact_path":str(steam_path),
+                "base_seed":payload.get("base_seed"),
+                "applies_to_selected_base_seed":applies,
+                "status":payload.get("status"),
+                "started_at":started_at or None,
+                "code_commit":(
+                    payload.get("code_revision",{}).get("commit")
+                    if isinstance(payload.get("code_revision"),dict)
+                    else None
+                ),
+                "validated":valid,
+                "read_error":error,
+            })
+            if valid and not phase5c_steam_valid:
+                phase5c_steam_valid=True
+                phase5c_steam_artifact_path=steam_path
+                phase5c_steam_artifact=payload
+                phase5c_steam_artifact_error=error
+            elif applies and phase5c_steam_artifact_path is None:
+                phase5c_steam_artifact_path=steam_path
+                phase5c_steam_artifact=payload
+                phase5c_steam_artifact_error=error
+
     phase5_achieved_capabilities=(
-        ["iron_extraction","coal_self_sufficiency","iron_smelting"]
-        if phase5c_smelting_valid
+        [
+            "iron_extraction",
+            "coal_self_sufficiency",
+            "iron_smelting",
+            "steam_power",
+        ]
+        if phase5c_steam_valid
         else (
-            ["iron_extraction","coal_self_sufficiency"]
+            ["iron_extraction","coal_self_sufficiency","iron_smelting"]
+            if phase5c_smelting_valid
+            else (
+                ["iron_extraction","coal_self_sufficiency"]
             if phase5c_coal_valid
             else (
                 ["iron_extraction"]
                 if phase5c_selected_iron_extraction_valid
                 else []
+                )
             )
         )
     )
@@ -3629,7 +3801,14 @@ def build_phase_state(
                 "functional_accept_sustainability_not_proven"
             )
 
-    if phase5c_smelting_valid:
+    if phase5c_steam_valid:
+        action=(
+            "F5-C steam_power capability promoted with iron_extraction, "
+            "coal_self_sufficiency and iron_smelting surviving; continue "
+            "deterministic baseline with electric_mining under ambient A0 and "
+            "exactly one expiring A2 grant per Option"
+        )
+    elif phase5c_smelting_valid:
         action=(
             "F5-C iron_smelting capability promoted with iron_extraction and "
             "coal_self_sufficiency surviving; continue deterministic baseline "
@@ -3963,6 +4142,30 @@ def build_phase_state(
                     "measurement_final"
                 ),
                 "read_error":phase5c_smelting_artifact_error,
+            },
+            "steam_power":{
+                "validated":phase5c_steam_valid,
+                "artifact_path":(
+                    None
+                    if phase5c_steam_artifact_path is None
+                    else str(phase5c_steam_artifact_path)
+                ),
+                "attempt_count":len(phase5c_steam_attempts),
+                "attempts":phase5c_steam_attempts,
+                "status":phase5c_steam_artifact.get("status"),
+                "capability_promoted":phase5c_steam_artifact.get(
+                    "capability_promoted"
+                ),
+                "capability_gate":phase5c_steam_artifact.get(
+                    "capability_gate"
+                ),
+                "survival_gate":phase5c_steam_artifact.get(
+                    "survival_gate"
+                ),
+                "measurement_final":phase5c_steam_artifact.get(
+                    "measurement_final"
+                ),
+                "read_error":phase5c_steam_artifact_error,
             },
             "external_resource_injection":phase5c_artifact.get(
                 "external_resource_injection"

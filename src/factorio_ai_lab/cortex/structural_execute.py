@@ -31,10 +31,14 @@ from factorio_ai_lab.cortex.coal_structural_execute import (
 from factorio_ai_lab.cortex.iron_smelting_structural_execute import (
     compile_iron_smelting,
 )
+from factorio_ai_lab.cortex.steam_power_structural_execute import (
+    compile_steam_power,
+)
 from factorio_ai_lab.cortex.structural_prepare import (
     COAL_SELF_SUFFICIENCY_CONTRACT_VERSION,
     IRON_SMELTING_CONTRACT_VERSION,
     RESOURCE_EXTRACTION_CONTRACT_VERSION,
+    STEAM_POWER_CONTRACT_VERSION,
     SUPPORTED_CONTRACT_VERSIONS,
     PreparedStructuralAction,
     StructuralOperation,
@@ -56,6 +60,7 @@ DEFAULT_SETTLE_SECONDS = 8
 MAX_SETTLE_SECONDS = 60
 MAX_COAL_SELF_SUFFICIENCY_SECONDS = 180
 MAX_IRON_SMELTING_SECONDS = 120
+MAX_STEAM_POWER_SECONDS = 360
 
 MeasurementProbe = Callable[[PreparedStructuralAction], Mapping[str, Any]]
 
@@ -493,6 +498,7 @@ def _compile_operation(operation: StructuralOperation) -> list[str]:
         "place_output_buffer": _compile_place_output_buffer,
         "establish_coal_self_sufficiency": compile_coal_self_sufficiency,
         "establish_iron_smelting": compile_iron_smelting,
+        "establish_steam_power": compile_steam_power,
     }
     if operation.op == "verify_postconditions":
         return []
@@ -529,7 +535,11 @@ def compile_structural_action(
         else (
             MAX_IRON_SMELTING_SECONDS
             if prepared.contract_version == IRON_SMELTING_CONTRACT_VERSION
-            else MAX_SETTLE_SECONDS
+            else (
+                MAX_STEAM_POWER_SECONDS
+                if prepared.contract_version == STEAM_POWER_CONTRACT_VERSION
+                else MAX_SETTLE_SECONDS
+            )
         )
     )
     if settle <= 0 or settle > max_settle:
@@ -596,6 +606,45 @@ def compile_structural_action(
                     code=REFUSAL_OPERATION_UNSUPPORTED,
                     detail=(
                         "iron smelting Option budget must cover internal "
+                        f"causal windows ({required_seconds}s)"
+                    ),
+                ),
+            )
+
+    if prepared.contract_version == STEAM_POWER_CONTRACT_VERSION:
+        steam_ops = [
+            operation
+            for operation in prepared.operations
+            if operation.op == "establish_steam_power"
+        ]
+        if len(steam_ops) != 1:
+            return StructuralCompilationResult(
+                prepared=prepared,
+                refusal=Refusal(
+                    code=REFUSAL_OPERATION_UNSUPPORTED,
+                    detail=(
+                        "steam power contract requires exactly one "
+                        "establish_steam_power operation"
+                    ),
+                ),
+            )
+        params=steam_ops[0].parameters
+        required_seconds=sum(
+            int(params.get(key) or 0)
+            for key in (
+                "iron_trigger_window_seconds",
+                "copper_trigger_window_seconds",
+                "power_window_seconds",
+                "survival_window_seconds",
+            )
+        )
+        if settle < required_seconds:
+            return StructuralCompilationResult(
+                prepared=prepared,
+                refusal=Refusal(
+                    code=REFUSAL_OPERATION_UNSUPPORTED,
+                    detail=(
+                        "steam power Option budget must cover internal "
                         f"causal windows ({required_seconds}s)"
                     ),
                 ),
@@ -699,8 +748,9 @@ def compile_structural_action(
     elif prepared.contract_version in {
         COAL_SELF_SUFFICIENCY_CONTRACT_VERSION,
         IRON_SMELTING_CONTRACT_VERSION,
+        STEAM_POWER_CONTRACT_VERSION,
     }:
-        # v5/v6 contain their own causally separated validation windows.
+        # v5/v6/v7 contain their own causally separated validation windows.
         pass
     else:
         lines.extend(
@@ -868,6 +918,26 @@ def execution_guard_conditions(
             ),
             ActionCondition(
                 name="iron_plate_count",
+                operator=ConditionOperator.INCREASE,
+                state=ConditionState.UNKNOWN,
+                expected=None,
+                hard=True,
+            ),
+        )
+    if (
+        prepared is not None
+        and prepared.contract_version == STEAM_POWER_CONTRACT_VERSION
+    ):
+        return (
+            ActionCondition(
+                name="steam_engine_exists",
+                operator=ConditionOperator.EQUALS,
+                state=ConditionState.UNKNOWN,
+                expected=True,
+                hard=True,
+            ),
+            ActionCondition(
+                name="electric_consumer_energy",
                 operator=ConditionOperator.INCREASE,
                 state=ConditionState.UNKNOWN,
                 expected=None,
