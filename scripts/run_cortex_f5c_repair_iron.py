@@ -402,7 +402,7 @@ def run_repair(
                 executor=executor,
                 measure=lambda prepared:_measure(namespace,prepared),
                 tick_source=env,
-                use_checkpoint_for_action=True,
+                use_checkpoint_for_action=False,
             )
             after=_measure(namespace,plan.prepared)
             result=execution.result

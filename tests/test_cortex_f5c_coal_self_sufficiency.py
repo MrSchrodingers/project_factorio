@@ -370,3 +370,13 @@ def test_live_fle_attach_preserves_existing_entities() -> None:
 
     assert "clear_entities=False" in source
     assert "peaceful=False" in source
+
+
+def test_coal_live_action_uses_checkpoint_only_for_rollback() -> None:
+    source=(
+        Path(__file__).parents[1]
+        / "scripts/run_cortex_f5c_coal_self_sufficiency.py"
+    ).read_text()
+
+    assert "use_checkpoint_for_action=False" in source
+    assert "use_checkpoint_for_action=True" not in source

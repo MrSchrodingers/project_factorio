@@ -27,3 +27,10 @@ def test_supervisor_uses_dedicated_no_reset_repair() -> None:
         'repair_script="run_cortex_f5c_repair_iron.py"'
     ):]
     assert 'runner_args("iron_extraction",state)' not in repair_block
+
+
+def test_repair_live_action_uses_checkpoint_only_for_rollback() -> None:
+    source=(ROOT/"scripts"/"run_cortex_f5c_repair_iron.py").read_text()
+
+    assert "use_checkpoint_for_action=False" in source
+    assert "use_checkpoint_for_action=True" not in source
