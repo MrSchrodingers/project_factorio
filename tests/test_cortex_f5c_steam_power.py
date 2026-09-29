@@ -126,12 +126,15 @@ def test_compiled_steam_power_uses_native_triggers_real_load_and_survival() -> N
     assert "quantity=56" in code
     assert "quantity=16" in code
     assert "quantity=5" in code
-    assert "quantity=24" in code
-    assert "cortex_infrastructure_iron_shortfall" in code
-    assert "cortex_infrastructure_iron_ready" in code
-    assert "cortex_infrastructure_topup_ore=extract_item(" in code
-    assert "cortex_infrastructure_topup_coal=extract_item(" in code
-    assert "craft_item(Prototype.Pipe,quantity=24)" in code
+    assert "dry_run=True" in code
+    assert "cortex_water_pipe_required=int(" in code
+    assert "cortex_steam_pipe_required=int(" in code
+    assert "cortex_pipe_required_total=" in code
+    assert "cortex_pipe_iron_shortfall=max(" in code
+    assert "cortex_pipe_topup_ore=extract_item(" in code
+    assert "cortex_pipe_topup_coal=extract_item(" in code
+    assert "quantity=cortex_pipe_to_craft" in code
+    assert "crafted pipe inventory below dry-run requirement" in code
     assert "cortex_trigger_iron_plates < 50" in code
     assert "cortex_trigger_copper_plates < 10" in code
     assert "pickup_entity(cortex_copper_furnace)" in code
@@ -184,10 +187,17 @@ def test_steam_power_runner_budget_covers_infrastructure_topup() -> None:
 
     assert "DEFAULT_OPTION_SECONDS=360" in source
     for name in (
-        "infrastructure_iron_ready",
-        "infrastructure_iron_shortfall",
-        "infrastructure_topup_ore",
-        "infrastructure_topup_coal",
-        "infrastructure_topup_plates",
+        "infrastructure_iron_after_trigger",
+        "water_pipe_required",
+        "steam_pipe_required",
+        "pipe_required_total",
+        "pipe_available_before",
+        "pipe_to_craft",
+        "pipe_iron_shortfall",
+        "pipe_topup_ore",
+        "pipe_topup_coal",
+        "pipe_topup_plates",
+        "pipe_topup_window",
+        "pipe_inventory_ready",
     ):
         assert f'"{name}"' in source

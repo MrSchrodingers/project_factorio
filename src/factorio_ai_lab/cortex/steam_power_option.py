@@ -45,10 +45,9 @@ COAL_INITIAL_REFUEL=1
 IRON_FURNACE_TRIGGER_COAL=5
 COPPER_FURNACE_COAL=1
 BOILER_COAL=8
-PIPE_BOOTSTRAP=24
-INFRASTRUCTURE_IRON_PLATES=70
-INFRASTRUCTURE_TOPUP_COAL=1
-INFRASTRUCTURE_TOPUP_WINDOW_SECONDS=50
+PIPE_TOPUP_COAL=1
+PIPE_SMELT_SECONDS_PER_PLATE=4
+PIPE_MIN_TOPUP_WINDOW_SECONDS=10
 SURVIVAL_COAL_DRAW=3
 IRON_SURVIVAL_ORE_DRAW=2
 IRON_TRIGGER_WINDOW_SECONDS=190
@@ -256,10 +255,9 @@ def compose_steam_power_option(
         "iron_furnace_trigger_coal":IRON_FURNACE_TRIGGER_COAL,
         "copper_furnace_coal":COPPER_FURNACE_COAL,
         "boiler_coal":BOILER_COAL,
-        "pipe_bootstrap":PIPE_BOOTSTRAP,
-        "infrastructure_iron_plates":INFRASTRUCTURE_IRON_PLATES,
-        "infrastructure_topup_coal":INFRASTRUCTURE_TOPUP_COAL,
-        "infrastructure_topup_window_seconds":INFRASTRUCTURE_TOPUP_WINDOW_SECONDS,
+        "pipe_topup_coal":PIPE_TOPUP_COAL,
+        "pipe_smelt_seconds_per_plate":PIPE_SMELT_SECONDS_PER_PLATE,
+        "pipe_min_topup_window_seconds":PIPE_MIN_TOPUP_WINDOW_SECONDS,
         "survival_coal_draw":SURVIVAL_COAL_DRAW,
         "iron_survival_ore_draw":IRON_SURVIVAL_ORE_DRAW,
         "iron_trigger_window_seconds":IRON_TRIGGER_WINDOW_SECONDS,
