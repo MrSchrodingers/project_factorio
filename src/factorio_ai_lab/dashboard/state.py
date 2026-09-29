@@ -1590,7 +1590,7 @@ for _,e in pairs(s.find_entities_filtered{area=area,type="resource"}) do
   end
 end
 local natural={}
-local natural_types={"tree","simple-entity"}
+local natural_types={"tree","simple-entity","cliff"}
 for _,kind in pairs(natural_types) do
   for _,e in pairs(s.find_entities_filtered{area=area,type=kind}) do
     if e.valid and #natural < 900 then

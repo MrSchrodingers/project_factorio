@@ -187,3 +187,17 @@ def test_smelting_planner_is_bounded_and_persists_pregrant_progress() -> None:
     assert source.index("_write(artifact,record)")<source.index(
         "with FactorioWorldLease"
     )
+
+
+def test_smelting_uses_observed_astar_not_fle_pathfinder() -> None:
+    source=(ROOT/"scripts"/"run_cortex_f5c_iron_smelting.py").read_text()
+
+    assert "validate_observed_route" in source
+    assert "map_snapshot(" in source
+    assert "request_path(" not in source
+    assert ".get_path(" not in source
+    assert "enforce_pathfinding_retry_floor" not in source
+    assert 'record["furnace_route_validation"]' in source
+    assert source.index('record["planning_stage"]="stone_route_validated"') < source.index(
+        '"planning_stage":"grant_validated"'
+    )

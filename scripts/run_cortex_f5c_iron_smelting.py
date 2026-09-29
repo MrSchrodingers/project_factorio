@@ -32,6 +32,7 @@ from factorio_ai_lab.cortex.live_canary import (
     world_rows,
 )
 from factorio_ai_lab.cortex.options import OptionBudget, OptionKind, OptionRequest
+from factorio_ai_lab.cortex.spatial_validation import validate_observed_route
 from factorio_ai_lab.dashboard.state import FactorioObserver
 from factorio_ai_lab.instrumentation.runtime import runtime_entity_footprints
 from factorio_ai_lab.integrations.fle import (
@@ -39,7 +40,6 @@ from factorio_ai_lab.integrations.fle import (
     attach_live_factorio_environment,
     bind_fast_reposition_tool,
     enforce_minimum_eval_timeout,
-    enforce_pathfinding_retry_floor,
 )
 from factorio_ai_lab.paths import RUNS_DIR, code_revision
 from factorio_ai_lab.planning.fuel import TICKS_PER_SECOND
@@ -339,31 +339,55 @@ def preflight(
     }
 
 
-def _validated_path_waypoints(
-    namespace: Any,
+def _observed_route_validation(
     *,
     start: tuple[float,float],
     finish: tuple[float,float],
-) -> int:
-    from fle.env.entities import Position
-
-    move_to=namespace.move_to
-    handle=move_to.request_path(
-        start=Position(x=float(start[0]),y=float(start[1])),
-        finish=Position(x=float(finish[0]),y=float(finish[1])),
-        allow_paths_through_own_entities=True,
-        resolution=-1,
+    world_entities: list[dict[str,Any]],
+    footprints: Mapping[str,tuple[int,int]],
+) -> dict[str,Any]:
+    center_x=(float(start[0])+float(finish[0]))/2.0
+    center_y=(float(start[1])+float(finish[1]))/2.0
+    radius=min(
+        96.0,
+        max(
+            12.0,
+            max(
+                abs(float(finish[0])-float(start[0])),
+                abs(float(finish[1])-float(start[1])),
+            )/2.0+12.0,
+        ),
     )
-    path=move_to.get_path(handle,max_attempts=40)
-    if not path:
-        raise RuntimeError(f"empty validated path from {start!r} to {finish!r}")
-    return len(path)
+    observer=FactorioObserver()
+    try:
+        snapshot=observer.map_snapshot(
+            max_age_s=0.0,
+            center_x=center_x,
+            center_y=center_y,
+            radius=radius,
+        )
+    finally:
+        observer.close()
+    validation=validate_observed_route(
+        start=start,
+        goal=finish,
+        map_snapshot=snapshot,
+        world_entities=world_entities,
+        footprints=footprints,
+    )
+    if validation is None:
+        raise RuntimeError(
+            f"observed weighted A* found no route from {start!r} to {finish!r}"
+        )
+    return validation.to_dict()
 
 
 def _stone_route(
     namespace: Any,
     overview: Mapping[str,Any],
     *,
+    world_entities: list[dict[str,Any]],
+    footprints: Mapping[str,tuple[int,int]],
     preferred: tuple[float,float] | None=None,
 ) -> tuple[dict[str,Any],tuple[float,float]]:
     player=getattr(namespace,"player_location",None)
@@ -398,20 +422,24 @@ def _stone_route(
     errors=[]
     for candidate in candidates:
         try:
-            waypoints=_validated_path_waypoints(
-                namespace,start=start,finish=candidate
+            validation=_observed_route_validation(
+                start=start,
+                finish=candidate,
+                world_entities=world_entities,
+                footprints=footprints,
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 - candidate evidence
             errors.append(f"{candidate!r}:{type(exc).__name__}:{exc}")
             continue
         return ({
             "resource":"stone",
             "quantity":STONE_QUANTITY,
             "position":{"x":candidate[0],"y":candidate[1]},
-            "validated_path_waypoints":waypoints,
+            "validated_path_waypoints":int(validation["path_waypoints"]),
+            "route_validation":validation,
         },candidate)
     raise RuntimeError(
-        "no path-validated stone target for iron smelting: "
+        "no observed-A* stone target for iron smelting: "
         +"; ".join(errors[-5:])
     )
 
@@ -572,9 +600,6 @@ def run_iron_smelting(
             record["fle_eval_timeout_s"]=enforce_minimum_eval_timeout(
                 env,minimum_seconds=300
             )
-            record["fle_path_retry_floor"]=enforce_pathfinding_retry_floor(
-                env,minimum_attempts=40
-            )
             record["fle_transactional_reposition_tool"]=bind_fast_reposition_tool(env)
             executor=TransactionalFLEExecutor(
                 env,
@@ -624,6 +649,8 @@ def run_iron_smelting(
             record["resource_point_count"]=len(overview.get("points") or [])
             _write(artifact,record)
 
+            physical_rows=world_rows(namespace,resources=False)
+            footprints=runtime_entity_footprints(instance)
             coal_artifact=Path(str(pf["coal_artifact"]))
             preferred_stone=_preferred_stone_from_coal_artifact(coal_artifact)
             record["preferred_stone_position"]=(
@@ -636,13 +663,16 @@ def run_iron_smelting(
             stone_route,stone_end=_stone_route(
                 namespace,
                 overview,
+                world_entities=physical_rows,
+                footprints=footprints,
                 preferred=preferred_stone,
             )
             record["stone_route"]=stone_route
+            record["spatial_validator"]=stone_route.get("route_validation",{}).get(
+                "validator"
+            )
             record["planning_stage"]="stone_route_validated"
             _write(artifact,record)
-            physical_rows=world_rows(namespace,resources=False)
-            footprints=runtime_entity_footprints(instance)
             placement=plan_placement(
                 entity="stone-furnace",
                 anchor=(iron_buffer[0]+4.0,iron_buffer[1]),
@@ -661,8 +691,15 @@ def run_iron_smelting(
                 float(placement.position[0]),
                 float(placement.position[1]),
             )
-            record["furnace_target_validated_path_waypoints"]=_validated_path_waypoints(
-                namespace,start=stone_end,finish=furnace_position
+            furnace_route=_observed_route_validation(
+                start=stone_end,
+                finish=furnace_position,
+                world_entities=physical_rows,
+                footprints=footprints,
+            )
+            record["furnace_route_validation"]=furnace_route
+            record["furnace_target_validated_path_waypoints"]=int(
+                furnace_route["path_waypoints"]
             )
             record["furnace_position"]={
                 "x":furnace_position[0],
