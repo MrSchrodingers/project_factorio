@@ -157,7 +157,7 @@ Uma divergência temporal entre ambos não é automaticamente corrupção.
 - [ ] commit e push do checkpoint;
 - [ ] dashboard deployado somente se houve mudança de observabilidade.
 
-## 9. Estado atual
+## 9. Estado histórico F1 baseline
 
 Seeds exploratórias válidas: 20261001–20261005.
 
@@ -168,3 +168,22 @@ As cinco seeds concluídas falharam em Logistic science com logistic_science_out
 As seeds confirmatórias 20261101–20261110 permanecem congeladas e não devem ser executadas para tuning ou continuidade automática de F1.
 
 Storage hardening: docs/CORTEX_F1_STORAGE_HARDENING.md.
+
+## 10. Continuidade F5
+
+Quando phase=F5, as fontes adicionais obrigatórias são:
+
+- docs/CORTEX_PHASE5_AUTONOMY_PROTOCOL.md;
+- configs/cortex_f5_autonomy_v1.json;
+- capability/trajectory/authority/intervention schemas versionados;
+- runs/cortex_f5_intervention_ledger.json.
+
+Antes de regenerar o phase-state em um state root novo, inicializar o ledger idempotentemente:
+
+    PYTHONPATH=src .venv-fle/bin/python scripts/init_cortex_f5_state.py
+
+F5-A é observe-only. Se phase5_protocol.validated não for true, ou se houver erro de hash/schema, nenhuma authority live pode ser concedida.
+
+Em F5, resume.do_not_start_another_seed=true também impede interpretar o próximo checkpoint como permissão para executar experimento. F5-B deve primeiro validar o authority bridge em teste/shadow.
+
+Implementation F5-A: 6f998777a1d8304e5481df8f299d03dc630b0550.

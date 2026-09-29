@@ -5,10 +5,11 @@
 **Repository:** `MrSchrodingers/project_factorio`
 **Live checkout:** `/srv/factorio-ai-lab`
 **Transition branch:** `research/cortex-v1`
-**Current scientific phase:** **F4 ACTIVE — F4-B HYBRID MEMORY RETRIEVAL**
+**Current scientific phase:** **F5 ACTIVE — F5-A PROTOCOL FREEZE / A0**
 **F3:** COMPLETE / F3-C
-**F4:** ACTIVE / F4-B SHADOW
-**Continuous autonomous authority:** OFF
+**F4:** COMPLETE / F4-C
+**F5:** ACTIVE / F5-A · next F5-B
+**Continuous autonomous authority:** OFF / forbidden in F5
 **Confirmatory seeds:** untouched / frozen
 **SentinelX context:** sxc_4557STHZ — always resume latest revision
 
@@ -42,9 +43,10 @@ active pytest/ruff/Cortex/evolution/curriculum/open-play processes.
 
 Expected published lineage at this handoff:
 
-- F4-B implementation: a4ff558eccd9df0898fef4138a75fa1b55976a8d;
-- F4-B closure: 9a23b661c86ebd2eddb37eec2e1f3d8198c8b9c3;
-- UI/status epistemic hardening: 0c94090f91ad43c1a3a47a6bec25f377f9e56e00.
+- F4-C closure + inference: 44afff5903366965a564a88740a6035b07ac1597;
+- F5-A implementation + UI semantics: 6f998777a1d8304e5481df8f299d03dc630b0550;
+- F4 inference artifact SHA-256: 3c4f782dec7c2bb5cebb47a60178ed11b251e2f23618e6341ab514d240499cb7;
+- F5 manifest SHA-256: 9ccca2405368d6f74abec6a6beeb2a7e0a514277c47464b362db083ad04147df.
 
 Do not overwrite pre-existing concurrent work. If local HEAD/origin/working tree diverge, audit first.
 
@@ -54,20 +56,23 @@ Regenerate runs/cortex_phase_state.json from scripts/cortex_phase_state.py.
 
 Expected scientific state:
 
-- phase=F4;
+- phase=F5;
 - phase_status=active;
 - phase2_checkpoint=F2-G5;
 - phase3_checkpoint=F3-C;
-- phase4_checkpoint=F4-B;
-- phase4_next_checkpoint=F4-C;
-- phase4_exit_gate.memory_substrate=true;
-- phase4_exit_gate.hybrid_retrieval_consolidation_decay=true;
-- phase4_exit_gate.causal_memory_ablation_transfer=false;
-- phase4_exit_gate.validated=false;
-- phase4_causal_protocol.validated=true;
-- phase4_causal_protocol.eligible=true;
-- phase4_causal_protocol.execution_ready=false;
-- phase4_blocker.code=causal_transfer_evaluation_harness_not_validated;
+- phase4_checkpoint=F4-C;
+- phase4_exit_gate.validated=true;
+- phase4_evaluation_inference.decision=positive;
+- phase5_checkpoint=F5-A;
+- phase5_next_checkpoint=F5-B;
+- phase5_protocol.validated=true;
+- phase5_protocol.authority_level=A0;
+- phase5_protocol.world_mutation_authorized=false;
+- phase5_protocol.continuous_authority=false;
+- phase5_protocol.capability_total=9;
+- phase5_protocol.achieved_capabilities=[];
+- phase5_protocol.artifacts.errors is empty;
+- phase5_protocol.intervention_ledger.count=0;
 - resume.do_not_start_another_seed=true.
 
 Machine-readable state outranks remembered conversation state.
@@ -1062,23 +1067,80 @@ Exit Gate:
 
 memory removal causes a statistically detectable performance loss in transfer tasks.
 
-## F5 — Learned policy / Agentic RL separation
+## F5 — Autonomous Factory Bootstrap & Learned Control
 
-Planned:
+Status atual:
 
-- trajectory schema;
-- offline dataset versioning;
-- rule baseline;
-- contextual bandit where appropriate;
-- value/ranking model;
-- offline RL challenger;
-- shadow/proposal/authority gates;
-- regret/calibration;
-- harness/trainer separation.
+**ACTIVE / F5-A COMPLETE; F5-B NEXT.**
 
-Exit Gate:
+F5 transforma o ganho causal de memória provado em F4 em controle físico
+progressivamente autorizado. O objetivo não é gerar métricas offline: é construir
+e sustentar uma fábrica real preservando capabilities promovidas.
 
-learned choice outperforms decision baseline on holdout with CI + ablation.
+Subfases congeladas:
+
+- F5-A — protocol freeze + capability/trajectory/authority/intervention schemas;
+- F5-B — bounded authority bridge;
+- F5-C — deterministic autonomous baseline;
+- F5-D — typed trajectory dataset;
+- F5-E — learned policy challenger;
+- F5-F — paired policy evaluation;
+- F5-G — bounded autonomous episodes.
+
+Authority ladder:
+
+- A0 observe only;
+- A1 proposal only;
+- A2 one transactional option;
+- A3 one capability;
+- A4 one bootstrap stage;
+- A5 one bounded autonomous episode;
+- A6 continuous authority, forbidden in F5.
+
+Capability ladder:
+
+1. iron extraction;
+2. endogenous coal;
+3. iron smelting;
+4. steam power;
+5. electric mining;
+6. copper chain;
+7. powered manufacturing;
+8. automation science;
+9. logistic science.
+
+Survival invariant:
+
+a new capability can be promoted only if every previously promoted capability
+remains physically valid after the transaction. Any regression rejects and
+rolls back the candidate.
+
+Learning plan:
+
+- deterministic baseline first;
+- typed trajectories with state/options/retrieval/selection/execution/outcome;
+- contextual ranking/bandit before more complex policy classes;
+- offline RL only as challenger;
+- policy can rank options but cannot grant authority;
+- matched paired evaluation against deterministic baseline;
+- holdout/CI/ablation before authority escalation.
+
+Physical success gate:
+
+- logistic science is functionally produced;
+- all promoted capabilities survive;
+- no human intervention;
+- no external fuel/material injection;
+- sustainability soak passes;
+- zero authority violations.
+
+F5 Exit Gate:
+
+at least 10/12 preregistered held-out runs complete the physical gate, zero
+authority violations occur, and the preregistered paired policy-vs-baseline
+inference has a positive lower confidence bound with the frozen SESOI rule.
+
+Canonical protocol: docs/CORTEX_PHASE5_AUTONOMY_PROTOCOL.md.
 
 ## F6 — Zoning, morphology and network design
 

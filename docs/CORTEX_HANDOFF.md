@@ -1,180 +1,140 @@
 # Cortex Research — Handoff Operacional
 
-> **Chat/modelo com zero contexto:** começar por
-> `docs/CORTEX_ZERO_CONTEXT_ROADMAP_HANDOFF.md`. Ele contém a fundamentação teórica, roadmap
-> F0–F12, fontes de verdade, estado operacional, interpretação do dashboard, protocolo
-> SentinelX/GitHub, F2/F3 fechadas e o checkpoint ativo F4-B -> F4-C.
-
-**Documento de continuidade curta.** O contrato completo está em
-`docs/CORTEX_RESEARCH_PROGRAM.md`.
+Chat/modelo com zero contexto: começar por docs/CORTEX_ZERO_CONTEXT_ROADMAP_HANDOFF.md,
+depois ler este arquivo, docs/CORTEX_PHASE5_AUTONOMY_PROTOCOL.md e regenerar
+runs/cortex_phase_state.json. Não usar memória conversacional como autoridade operacional.
 
 ## Estado atual
 
 - Programa: Cortex Research Architecture v0.1
-- Fase: **F4 ACTIVE em F4-B / SHADOW — F3 COMPLETE; continuous authority OFF**
-- Branch: `research/cortex-v1`
-- Baseline imutável de origem: `74a1bf9c0f8792a68d7252b11d477835ec93d508`
-- Tag baseline publicada: `cortex-pre-research-baseline-20260923`
-- Handoff histórico: `docs/HANDOFF-CORTEX.md`
-- Runtime: a última mutação live Cortex permanece F2-G4B. F3/F4 são SHADOW/offline; não há scheduler/grant contínuo. Evolution está inactive+disabled.
+- Branch: research/cortex-v1
+- F0/F1/F2/F3: concluídas
+- F4: COMPLETE / F4-C
+- F4 causal memory inference: positive
+- F5: ACTIVE / F5-A protocol freeze
+- Próximo checkpoint: F5-B — bounded authority bridge
+- Authority Cortex atual: A0 / observe only
+- WORLD mutation autorizada em F5-A: não
+- Continuous authority: proibida em F5
+- Legacy evolution loop: OFF
+- Research/curriculum runner: OFF
+- WORLD live: conectado; no fechamento F5-A, 0 entities
+- Capabilities F5 promovidas: 0 / 9
+- Intervention ledger: 0
+- Commit de implementação F5-A: 6f998777a1d8304e5481df8f299d03dc630b0550
+- Dashboard release F5-A: 6f998777a1d8304e5481df8f299d03dc630b0550
+
+## F4-C encerrada
+
+A inferência primária preregistrada da F4-C fechou com 20/20 pares válidos:
+
+- decision: positive
+- mean delta_J: 0.20221944444444445
+- median delta_J: 0.001729166666666726
+- paired Cohen dz: 0.6408858430566287
+- exact one-sided p: 9.5367431640625e-07
+- 95% confidence set: [0.06773986111111112, 0.336780787037037]
+- SESOI delta_J: 0.05
+- inference artifact SHA-256: 3c4f782dec7c2bb5cebb47a60178ed11b251e2f23618e6341ab514d240499cb7
+
+Pilot não entra na inferência primária. Confirmatory F4 20261101–20261110
+permanece congelada e não deve ser reutilizada para tuning.
+
+## F5-A encerrada
+
+Artefatos canônicos:
+
+- docs/CORTEX_PHASE5_AUTONOMY_PROTOCOL.md
+- configs/cortex_f5_autonomy_v1.json
+- configs/cortex_f5_capability_schema_v1.json
+- configs/cortex_f5_trajectory_schema_v1.json
+- configs/cortex_f5_authority_schema_v1.json
+- configs/cortex_f5_intervention_ledger_schema_v1.json
+- scripts/init_cortex_f5_state.py
+- runtime ledger: runs/cortex_f5_intervention_ledger.json
+- F5 manifest SHA-256: 9ccca2405368d6f74abec6a6beeb2a7e0a514277c47464b362db083ad04147df
+
+Seeds F5 são preregistradas em três partitions independentes:
+
+- development: 8
+- pilot: 8
+- held-out: 12
+- F4 confirmatory reserved: 10, separada e não reutilizável
+
+A ladder física F5 possui 9 capabilities:
+
+1. iron_extraction
+2. coal_self_sufficiency
+3. iron_smelting
+4. steam_power
+5. electric_mining
+6. copper_chain
+7. powered_manufacturing
+8. automation_science
+9. logistic_science
+
+Promoção exige evidência física + survival invariant. Entity existence, score
+offline, memória, loss, UCB, dataset ou inferência não promovem capability.
+
+## Estado do dashboard
+
+A UI atual separa:
+
+1. WORLD LIVE — estado físico RCON;
+2. CORTEX CURRENT — F5-A/A0;
+3. HISTÓRICO — G97, curriculum, UCB, evolution e learning antigos.
+
+O antigo 6% não é mais progresso corrente. G97 e Online placement learning
+podem aparecer apenas como HISTÓRICO/congelado.
+
+## Próxima ação permitida
+
+F5-B — bounded authority bridge.
+
+Objetivo: provar que o Cortex pode receber uma grant A2 para exatamente uma
+option transacional, com:
+
+- scope explícito;
+- max_executions=1;
+- expiração;
+- lease exclusiva;
+- validate antes de execute;
+- measure depois de execute;
+- commit/rollback;
+- fail-closed;
+- nenhuma auto-elevação de authority pela policy;
+- nenhum scheduler contínuo.
+
+Enquanto F5-B não estiver validada, manter A0 e não mutar o WORLD.
 
 ## Regra de retomada
 
-1. Ler `docs/CORTEX_RESEARCH_PROGRAM.md`.
-2. Executar `git status --short --branch`.
-3. Verificar commit/branch contra este arquivo.
-4. Ler a seção da fase ativa e os últimos checkboxes.
-5. Conferir `runs/research_state.json` e `runs/runtime_heartbeat.json`.
-6. Não assumir que serviços/runs permanecem no estado descrito aqui.
-7. Não avançar de fase sem preencher Evidence / Tests / Commit / Decision.
+1. git status --short --branch
+2. confirmar HEAD/origin de research/cortex-v1
+3. confirmar dashboard BUILD_INFO
+4. confirmar evolution inactive
+5. confirmar ausência de runners Cortex/curriculum/evolution
+6. inicializar ledger idempotentemente:
+   PYTHONPATH=src .venv-fle/bin/python scripts/init_cortex_f5_state.py
+7. regenerar phase state:
+   PYTHONPATH=src .venv-fle/bin/python scripts/cortex_phase_state.py --write
+8. ler runs/cortex_phase_state.json
+9. consultar /api/context, /api/world, /api/research, /api/evolution
+10. obedecer resume.do_not_start_another_seed
 
-## Condição encontrada antes da F0
+Estado esperado:
 
-Antes da transição havia mudanças não commitadas pré-existentes em:
+- phase=F5
+- phase_status=active
+- phase4_checkpoint=F4-C
+- phase5_checkpoint=F5-A
+- phase5_next_checkpoint=F5-B
+- phase5_protocol.validated=true
+- phase5_protocol.authority_level=A0
+- phase5_protocol.world_mutation_authorized=false
+- phase5_protocol.artifacts.errors vazio
+- phase5_protocol.intervention_ledger.count=0
+- resume.do_not_start_another_seed=true
 
-- `src/factorio_ai_lab/experiments/curriculum_runner.py`
-- `src/factorio_ai_lab/planning/delivery.py`
-- `tests/test_coal_distribution.py`
-- `tests/test_ore_handoff.py` (untracked)
-- `tests/test_trunk_delivery.py` (untracked)
-
-Essas mudanças pertencem à evolução logística anterior e **não devem ser absorvidas
-silenciosamente pelo commit da F0**.
-
-## Snapshot operacional histórico pré-transição — 2026-09-23 23:59 -03
-
-- `factorio-ai-evolution.service`: active/running
-- `factorio-ai-dashboard.service`: active/running
-- `factorio-ai-llm.service`: active/running
-- LLM local: Qwen3-4B via llama.cpp :18081
-- RSS reportado do serviço LLM: ~8 GB — risco de memória a tratar na F1.
-
-Esse bloco é histórico e NÃO representa os serviços atuais.
-
-## Estado operacional atual revalidado em 2026-09-25
-
-- branch: research/cortex-v1;
-- F4-B closure publicada: 9a23b661c86ebd2eddb37eec2e1f3d8198c8b9c3;
-- UI/status hardening implementation: 0c94090f91ad43c1a3a47a6bec25f377f9e56e00;
-- evolution: inactive+disabled;
-- active curriculum/open-play/evolution/Cortex runner processes: nenhum;
-- phase-state: F4 / active / F4-B;
-- next checkpoint: F4-C;
-- F4-C preregistration: frozen/eligible; execution_ready=false;
-- blocker: causal_transfer_evaluation_harness_not_validated;
-- F4 Exit Gate: aberto;
-- confirmatory seeds 20261101–20261110: todas pending, zero running/completed;
-- WORLD live: RCON conectado e 0 player-force entities no estado observado;
-- 0 entities é estado físico observado. Não inferir renderer travado;
-- G97/curriculum/UCB/model metrics são histórico congelado quando research_runner.active=false.
-
-## Próxima ação
-
-**F4-C — causal memory ablation + held-out transfer benchmark.**
-
-F4-B está validada em SHADOW:
-
-- implementation: a4ff558eccd9df0898fef4138a75fa1b55976a8d;
-- canonical artifact: runs/audits/cortex_f4b_memory_retrieval.json;
-- artifact SHA-256:
-  5fc37b0cee5f121c5ff6b6054fc45f4b0a09bad851e34793958bdd3dc1c5a801;
-- F4-A source artifact hash matches exactly;
-- canonical memory DB: 222 items / 759 occurrences;
-- DB quick_check=ok;
-- database manifest before=after:
-  e6aa69816fe992f6b2a6afc8aff529fa5f1572106ca0939cee830af5a6cf3399;
-- four canonical retrieval queries PASS;
-- structural scope mismatch is fail-closed;
-- lexical similarity changes rank inside the same stage scope;
-- exact symptom retrieval ranks the empirical fuel-resupply procedure first;
-- counterexamples obey explicit stage+phase scope;
-- repeated semantic items=70;
-- semantic duplicate support=432;
-- repeated counterexample items=10;
-- procedural confidence items=1;
-- non-destructive decay probe:
-  low-support weight=0.3339200384203678,
-  high-support weight=0.998542956000045;
-- authority=shadow;
-- world_mutation=false;
-- FLE/RCON/WorldLease/execution grant unused;
-- full gate: 1520 core/FLE + 2 PyTorch PASS plus static/build gates.
-
-F4-B proves retrieval/consolidation/decay mechanics, not memory benefit.
-
-A preregistration F4-C está congelada sem outcomes observados:
-
-- implementation: fa2dff30ec717b18dc7412c2b1246cbb95e0dce8;
-- manifest: configs/cortex_f4c_causal_ablation_v1.json;
-- raw manifest SHA-256:
-  82253e71dc94cd5ad803e1340523d4053dfc0a11299848709e6f7dc8414f7c41;
-- freeze audit SHA-256:
-  6b818ae63d57062fd4a4f70a0a411f49a1356b053418d6b40d2e90ae95b80c81;
-- 4 task families;
-- 8 non-confirmatory pilot pairs: 20261201–20261208;
-- 20 held-out evaluation pairs: 20261221–20261240;
-- MEMORY ON vs MEMORY ABLATED with matched non-memory capabilities;
-- arm order counterbalanced 10/10;
-- primary endpoint J and delta_J fixed before outcomes;
-- SESOI delta_J=0.05;
-- exact paired sign-flip inference and inverted 95% CI;
-- minimum analyzable set 16 pairs overall / 3 per family;
-- missing is never zero;
-- evaluation-derived memory writes quarantined.
-
-Isso resolve o blocker de preregistration, mas NÃO o experimento. O blocker atual é
-causal_transfer_evaluation_harness_not_validated: ainda é necessário provar checkpoint restore,
-arm isolation, budget parity e outcome extraction antes de qualquer pilot seed.
-
-A auditoria que motivou esse desenho permanece válida: 20261001–20261005 eram homogêneos demais e
-85 counterexample runs não equivalem a 85 independent seeds. Ver
-docs/CORTEX_PHASE4_CAUSAL_ABLATION_PROTOCOL.md.
-
-Ainda não executar confirmatory seeds.
-Não habilitar evolution.
-Não conceder continuous autonomous authority.
-Não usar as seeds 20261101–20261110 para tuning do protocolo.
-
-## Protocolo de retomada após interrupção
-
-Não inferir continuidade pela tela. Executar na ordem:
-
-1. git status/HEAD/origin em /srv/factorio-ai-lab;
-2. ler BUILD_INFO do runtime científico;
-3. ler BUILD_INFO do runtime do dashboard;
-4. confirmar factorio-ai-evolution inactive+disabled;
-5. verificar processos de runner/evolution/Cortex;
-6. regenerar runs/cortex_phase_state.json;
-7. consultar /api/context, /api/world e WebSocket;
-8. conferir artifacts/docs/checkpoints;
-9. obedecer resume.do_not_start_another_seed.
-
-Em F4-C, do_not_start_another_seed=true agora significa NÃO lançar seed até o paired evaluation
-harness estar implementado, testado, versionado e com execution_ready=true.
-
-O runtime científico histórico da corrected baseline permanece pinado em
-95c34a53cf1e6f2c4cc73b9c6d7ffd497775c1ac. Source/dashboard podem avançar separadamente.
-
-scripts/launch_corrected_baseline_seed.py pertence ao protocolo de baseline. Não deve ser usado
-automaticamente durante F4-C. Qualquer novo non-confirmatory seed de F4-C deve nascer de
-protocolo/manifest próprio, congelado e testado.
-
-Prompt canônico para a próxima sessão: docs/CORTEX_NEXT_SESSION_PROMPT.md.
-Detalhes de continuidade: docs/CORTEX_CONTINUITY_PROTOCOL.md.
-
-## Evidência de fechamento da F0
-
-F0: **PASS**.
-
-- commit científico: `767b9238202b021ff1c5679eeca4d19f72b39f12`;
-- branch publicada: `origin/research/cortex-v1`;
-- tag publicada: `cortex-pre-research-baseline-20260923`;
-- 50 testes de dashboard: PASS;
-- compileall dashboard: PASS;
-- node --check: PASS;
-- probes HTTP das duas vertentes: PASS;
-- diff --check: PASS;
-- SentinelX: `sxc_4557STHZ` revisão 5.
-
-A F1 deve preservar as mudanças logísticas pré-existentes registradas no manifest e tratá-las
-explicitamente antes de resetar qualquer baseline.
+Não habilitar evolution. Não iniciar seed experimental. Não mutar WORLD apenas
+para mostrar progresso.
