@@ -171,7 +171,7 @@ def main() -> int:
             elif (
                 last_commit==commit
                 and last_frontier==current
-                and last_result in {"failed","blocked","rejected"}
+                and last_result in {"failed","rejected"}
             ):
                 payload["status"]="blocked_counterexample"
                 payload["detail"]="same commit/frontier already failed; no automatic retry"
@@ -186,11 +186,9 @@ def main() -> int:
                 write(payload)
                 preflight=run(script,False,extra_args)
                 if preflight.returncode!=0:
-                    last_commit=commit
-                    last_frontier=current
-                    last_result="blocked"
-                    payload["status"]="blocked"
+                    payload["status"]="preflight_blocked"
                     payload["detail"]=(preflight.stderr or preflight.stdout)[-2200:]
+                    payload["last_preflight_error"]=payload["detail"]
                 else:
                     payload["status"]="executing"
                     payload["detail"]="one bounded A2 Option in progress"

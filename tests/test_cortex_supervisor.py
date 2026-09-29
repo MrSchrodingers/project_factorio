@@ -32,3 +32,11 @@ def test_supervisor_dispatch_is_explicit_and_bounded() -> None:
         "iron_extraction":"run_cortex_f5c_deterministic_baseline.py",
         "coal_self_sufficiency":"run_cortex_f5c_coal_self_sufficiency.py",
     }
+
+
+def test_preflight_block_is_not_terminal_counterexample() -> None:
+    source=(ROOT/"scripts"/"run_cortex_supervisor.py").read_text()
+
+    assert 'last_result in {"failed","rejected"}' in source
+    assert '"preflight_blocked"' in source
+    assert 'last_result="blocked"' not in source
