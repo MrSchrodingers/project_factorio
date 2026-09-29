@@ -135,6 +135,11 @@ def test_compiled_steam_power_uses_native_triggers_real_load_and_survival() -> N
     assert "cortex_pipe_topup_coal=extract_item(" in code
     assert "quantity=cortex_pipe_to_craft" in code
     assert "crafted pipe inventory below dry-run requirement" in code
+    assert "cortex_power_tap_count=0" in code
+    assert "cortex_consumer_pole=place_entity_next_to(" in code
+    assert "if cortex_consumer.electrical_id is None:" in code
+    assert "cortex_engine_pole=place_entity_next_to(" in code
+    assert "cortex_power_network=connect_entities(" not in code
     assert "cortex_trigger_iron_plates < 50" in code
     assert "cortex_trigger_copper_plates < 10" in code
     assert "pickup_entity(cortex_copper_furnace)" in code
@@ -199,5 +204,7 @@ def test_steam_power_runner_budget_covers_infrastructure_topup() -> None:
         "pipe_topup_plates",
         "pipe_topup_window",
         "pipe_inventory_ready",
+        "power_tap_count",
+        "consumer_electrical_id",
     ):
         assert f'"{name}"' in source

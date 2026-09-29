@@ -532,6 +532,8 @@ def _measure(namespace: Any,prepared: Any) -> dict[str,Any]:
         "steam_amount",
         "steam_engine_energy",
         "electric_consumer_energy",
+        "power_tap_count",
+        "consumer_electrical_id",
         "trigger_iron_plates",
         "trigger_copper_plates",
         "infrastructure_iron_after_trigger",
