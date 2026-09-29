@@ -25,7 +25,7 @@ from factorio_ai_lab.cortex.option_execute import (
     OptionExecutionResult,
     OptionExecutionValidation,
 )
-from factorio_ai_lab.cortex.options import ProcessingChainOptionPlan
+from factorio_ai_lab.cortex.options import OptionPlan
 
 F5_CONTROL_PLANE_ISSUER = "cortex_f5_control_plane"
 F5_A2_SCHEMA_VERSION = "cortex_f5_a2_authority_bridge_v1"
@@ -120,7 +120,7 @@ class F5BoundedAuthorityBridge:
 
     def issue_a2_grant(
         self,
-        plan: ProcessingChainOptionPlan,
+        plan: OptionPlan,
         *,
         experiment_id: str,
         reason: str,
@@ -151,7 +151,7 @@ class F5BoundedAuthorityBridge:
 
     def validate_a2(
         self,
-        plan: ProcessingChainOptionPlan,
+        plan: OptionPlan,
         *,
         grant: OptionExecutionGrant,
         scope: OptionExecutionScope,
@@ -245,7 +245,7 @@ class F5BoundedAuthorityBridge:
 
     def execute_a2(
         self,
-        plan: ProcessingChainOptionPlan,
+        plan: OptionPlan,
         *,
         grant: OptionExecutionGrant,
         scope: OptionExecutionScope,

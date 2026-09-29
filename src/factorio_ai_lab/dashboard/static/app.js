@@ -205,6 +205,7 @@ function cortexOperationalView() {
   const phase5Checkpoint = String(cortexPhase.phase5_checkpoint || "");
   const phase5Protocol = cortexPhase.phase5_protocol || {};
   const phase5AuthorityBridge = cortexPhase.phase5_authority_bridge || {};
+  const phase5DeterministicBaseline = cortexPhase.phase5_deterministic_baseline || {};
   const phase4Harness = cortexPhase.phase4_causal_harness || {};
   const phase4Protocol = cortexPhase.phase4_causal_protocol || {};
   const phase4RealAdapters = cortexPhase.phase4_real_adapters || {};
@@ -248,8 +249,12 @@ function cortexOperationalView() {
     && !!phase5Protocol.validated
   );
   const phase5BridgeReady = (
-    phase5Checkpoint === "F5-B"
+    ["F5-B", "F5-C"].includes(phase5Checkpoint)
     && !!phase5AuthorityBridge.validated
+  );
+  const phase5BaselineActive = (
+    phase5Checkpoint === "F5-C"
+    && !!phase5DeterministicBaseline.started
   );
   const executionReady = (
     phase !== "F5"
@@ -274,8 +279,10 @@ function cortexOperationalView() {
     phase5Checkpoint,
     phase5Protocol,
     phase5AuthorityBridge,
+    phase5DeterministicBaseline,
     phase5Active,
     phase5BridgeReady,
+    phase5BaselineActive,
     phase4Harness,
     phase4Protocol,
     phase4RealAdapters,
@@ -2009,9 +2016,11 @@ function renderExperimentContext() {
       setText(
         "operationalModeTitle",
         operational.phase5Active
-          ? (operational.phase5BridgeReady
-            ? "F5-B · BOUNDED AUTHORITY PASS"
-            : "F5-A · PROTOCOL FREEZE · A0 OBSERVE ONLY")
+          ? (operational.phase5BaselineActive
+            ? "F5-C · DETERMINISTIC PHYSICAL BASELINE"
+            : (operational.phase5BridgeReady
+              ? "F5-B · BOUNDED AUTHORITY PASS"
+              : "F5-A · PROTOCOL FREEZE · A0 OBSERVE ONLY"))
           : (operational.executionReady
           ? (operational.pilotComplete
             ? (operational.inferenceValidated
@@ -2031,9 +2040,11 @@ function renderExperimentContext() {
       setText(
         "operationalModeDetail",
         operational.phase5Active
-          ? (operational.phase5BridgeReady
-            ? "F5-B validou A2 one-shot sobre grant persistente + lease attestation + transactional rollback. Authority ambiente continua A0; nenhum grant ou lease F5 está ativo e nenhum canário live foi necessário para fechar o bridge."
-            : "F4 está fechado; F5-A congela protocolo, seeds, capabilities e authority schema. WORLD permanece live em A0, sem grants, leases ou mutação; G97/UCB/curriculum são somente histórico.")
+          ? (operational.phase5BaselineActive
+            ? "F5-C usa open_play de inventário vazio e tech tree real. Cada capability só recebe crédito após postconditions físicos + survival invariant; ambient authority permanece A0 e cada mutação exige A2 one-shot."
+            : (operational.phase5BridgeReady
+              ? "F5-B validou A2 one-shot sobre grant persistente + lease attestation + transactional rollback. Authority ambiente continua A0; nenhum grant ou lease F5 está ativo e nenhum canário live foi necessário para fechar o bridge."
+              : "F4 está fechado; F5-A congela protocolo, seeds, capabilities e authority schema. WORLD permanece live em A0, sem grants, leases ou mutação; G97/UCB/curriculum são somente histórico."))
           : (operational.executionReady
           ? (operational.pilotComplete
             ? (operational.inferenceValidated
@@ -2051,9 +2062,11 @@ function renderExperimentContext() {
       setClassText(
         "operationalModeBadge",
         operational.phase5Active
-          ? (operational.phase5BridgeReady
-            ? "A0 AMBIENT · A2 ONE-SHOT READY"
-            : "F5-A · A0 · SEM AUTORIDADE LIVE")
+          ? (operational.phase5BaselineActive
+            ? "A0 AMBIENT · F5-C · A2 POR OPTION"
+            : (operational.phase5BridgeReady
+              ? "A0 AMBIENT · A2 ONE-SHOT READY"
+              : "F5-A · A0 · SEM AUTORIDADE LIVE"))
           : (operational.executionReady
           ? (operational.pilotComplete && operational.evaluationReady
             ? (operational.inferenceValidated
@@ -4392,18 +4405,26 @@ function updateMission() {
     setText("missionTitle", "F5 — Autonomous Factory Bootstrap & Learned Control");
     setText(
       "missionDetail",
-      operational.phase5BridgeReady
-        ? "F5-B PASS · bridge A2 one-shot validado em test/shadow. Authority "
-          + "ambiente permanece A0; WORLD live ainda não foi mutado por F5."
-        : "F4 COMPLETE · causal memory benefit established. WORLD live permanece "
-          + "em observação enquanto o protocolo F5 congela autoridade, partitions "
-          + "e critérios físicos de promoção."
+      operational.phase5BaselineActive
+        ? (operational.phase5DeterministicBaseline.iron_extraction_validated
+          ? "F5-C LIVE · iron_extraction promovida por evidência física. "
+            + "Baseline determinística continua uma capability por transação A2."
+          : "F5-C registrou um counterexample físico sem promoção. "
+            + "Retry automático permanece proibido.")
+        : (operational.phase5BridgeReady
+          ? "F5-B PASS · bridge A2 one-shot validado em test/shadow. Authority "
+            + "ambiente permanece A0; WORLD live ainda não foi mutado por F5."
+          : "F4 COMPLETE · causal memory benefit established. WORLD live permanece "
+            + "em observação enquanto o protocolo F5 congela autoridade, partitions "
+            + "e critérios físicos de promoção.")
     );
     setText(
       "stageName",
-      operational.phase5BridgeReady
-        ? "F5-B · BOUNDED AUTHORITY PASS · A0 AMBIENT"
-        : "F5-A · PROTOCOL FREEZE · A0"
+      operational.phase5BaselineActive
+        ? "F5-C · DETERMINISTIC BASELINE · A0 + A2 ONE-SHOT"
+        : (operational.phase5BridgeReady
+          ? "F5-B · BOUNDED AUTHORITY PASS · A0 AMBIENT"
+          : "F5-A · PROTOCOL FREEZE · A0")
     );
     setText(
       "nextAction",
@@ -4412,16 +4433,21 @@ function updateMission() {
           ? "implement F5-C deterministic autonomous baseline"
           : "validate bounded authority bridge")
     );
-    $("stageProgressBar").style.width = "0%";
+    $("stageProgressBar").style.width = Math.max(
+      0,
+      Math.min(100, capabilityTotal > 0 ? achieved / capabilityTotal * 100 : 0)
+    ) + "%";
     setText(
       "stageProgressText",
       "FACTORY CAPABILITIES · " + achieved + " / " + capabilityTotal
     );
     setClassText(
       "researchBadge",
-      operational.phase5BridgeReady
-        ? "CORTEX F5 · F5-B PASS · A2 ONE-SHOT READY"
-        : "CORTEX F5 · A0 OBSERVE ONLY · EVOLUTION OFF",
+      operational.phase5BaselineActive
+        ? "CORTEX F5 · F5-C · PHYSICAL BASELINE"
+        : (operational.phase5BridgeReady
+          ? "CORTEX F5 · F5-B PASS · A2 ONE-SHOT READY"
+          : "CORTEX F5 · A0 OBSERVE ONLY · EVOLUTION OFF"),
       "badge good"
     );
     return;
@@ -4819,11 +4845,14 @@ function updateKpis() {
     setText("engineeringGoal", "Bootstrap autonomous factory from empty WORLD");
     setText(
       "engineeringGoalDetail",
-      operational.phase5BridgeReady
-        ? "F5-B PASS · factory capabilities " + achieved + "/" + capabilityTotal
-          + " · ambient A0 · A2 one-shot ready · F5-C deterministic baseline next"
-        : "F5-A · factory capabilities " + achieved + "/" + capabilityTotal
-          + " · A0 observe-only · survival invariant frozen · F5-B bounded authority bridge next"
+      operational.phase5BaselineActive
+        ? "F5-C · factory capabilities " + achieved + "/" + capabilityTotal
+          + " · ambient A0 · A2 one-shot por Option · survival invariant ativo"
+        : (operational.phase5BridgeReady
+          ? "F5-B PASS · factory capabilities " + achieved + "/" + capabilityTotal
+            + " · ambient A0 · A2 one-shot ready · F5-C deterministic baseline next"
+          : "F5-A · factory capabilities " + achieved + "/" + capabilityTotal
+            + " · A0 observe-only · survival invariant frozen · F5-B bounded authority bridge next")
     );
   } else if (operational.historicalEvidenceMode) {
     setText("engineeringGoal", "F4-C · causal memory transfer benchmark");

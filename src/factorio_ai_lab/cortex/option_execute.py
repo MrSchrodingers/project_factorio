@@ -30,7 +30,7 @@ from factorio_ai_lab.cortex.grant_ledger import (
 )
 from factorio_ai_lab.cortex.options import (
     OptionBudget,
-    ProcessingChainOptionPlan,
+    OptionPlan,
 )
 from factorio_ai_lab.cortex.structural_execute import (
     StructuralTransactionalAdapter,
@@ -166,50 +166,58 @@ def _condition_signature(condition: ActionCondition) -> tuple[Any, ...]:
 
 
 def _expected_termination(
-    plan: ProcessingChainOptionPlan,
+    plan: OptionPlan,
 ) -> tuple[ActionCondition, ...]:
-    return prepared_postconditions(plan.prepared) + execution_guard_conditions()
+    return (
+        prepared_postconditions(plan.prepared)
+        + execution_guard_conditions(plan.prepared)
+    )
 
 
-def _lineage_errors(plan: ProcessingChainOptionPlan) -> tuple[str, ...]:
+def _lineage_errors(plan: OptionPlan) -> tuple[str, ...]:
     option = plan.request.provenance
     action = plan.action_request.provenance
-    branch = plan.branch.request.provenance
     errors: list[str] = []
 
     if action.parent_action_id != plan.request.option_id:
         errors.append("ActionRequest parent_action_id does not reference Option")
-    if branch.parent_action_id != plan.action_request.action_id:
-        errors.append(
-            "ProcessingBranch parent_action_id does not reference ActionRequest"
-        )
-    if plan.prepared.action_id != plan.branch.request.action_id:
-        errors.append(
-            "PreparedStructuralAction action_id does not match branch request"
-        )
 
-    revisions = {
-        option.code_revision,
-        action.code_revision,
-        branch.code_revision,
-    }
-    if len(revisions) != 1:
-        errors.append(
-            "code_revision lineage differs across Option/Action/Branch"
-        )
-
+    revisions = {option.code_revision, action.code_revision}
     run_ids = {
         value
-        for value in (option.run_id, action.run_id, branch.run_id)
+        for value in (option.run_id, action.run_id)
         if value is not None
     }
+
+    branch = getattr(plan, "branch", None)
+    branch_request = getattr(branch, "request", None)
+    if branch_request is not None:
+        branch_provenance = branch_request.provenance
+        if branch_provenance.parent_action_id != plan.action_request.action_id:
+            errors.append(
+                "ProcessingBranch parent_action_id does not reference ActionRequest"
+            )
+        if plan.prepared.action_id != branch_request.action_id:
+            errors.append(
+                "PreparedStructuralAction action_id does not match branch request"
+            )
+        revisions.add(branch_provenance.code_revision)
+        if branch_provenance.run_id is not None:
+            run_ids.add(branch_provenance.run_id)
+    elif plan.prepared.action_id != plan.action_request.action_id:
+        errors.append(
+            "PreparedStructuralAction action_id does not match ActionRequest"
+        )
+
+    if len(revisions) != 1:
+        errors.append("code_revision lineage differs across Option plan")
     if len(run_ids) > 1:
-        errors.append("run_id lineage differs across Option/Action/Branch")
+        errors.append("run_id lineage differs across Option plan")
 
     return tuple(errors)
 
 
-def _termination_errors(plan: ProcessingChainOptionPlan) -> tuple[str, ...]:
+def _termination_errors(plan: OptionPlan) -> tuple[str, ...]:
     try:
         expected = _expected_termination(plan)
     except (TypeError, ValueError) as exc:
@@ -229,16 +237,27 @@ def _termination_errors(plan: ProcessingChainOptionPlan) -> tuple[str, ...]:
     return ()
 
 
-def _lineage_payload(plan: ProcessingChainOptionPlan) -> dict[str, Any]:
+def _lineage_payload(plan: OptionPlan) -> dict[str, Any]:
     option = plan.request.provenance
     action = plan.action_request.provenance
-    branch = plan.branch.request.provenance
+    branch = getattr(plan, "branch", None)
+    branch_request = getattr(branch, "request", None)
+    branch_provenance = (
+        None if branch_request is None else branch_request.provenance
+    )
     return {
         "option_id": plan.request.option_id,
+        "option_kind": plan.request.kind.value,
         "action_request_id": plan.action_request.action_id,
         "action_parent_option_id": action.parent_action_id,
-        "branch_action_id": plan.branch.request.action_id,
-        "branch_parent_action_id": branch.parent_action_id,
+        "branch_action_id": (
+            None if branch_request is None else branch_request.action_id
+        ),
+        "branch_parent_action_id": (
+            None
+            if branch_provenance is None
+            else branch_provenance.parent_action_id
+        ),
         "prepared_action_id": plan.prepared.action_id,
         "code_revision": option.code_revision,
         "run_id": option.run_id,
@@ -246,7 +265,7 @@ def _lineage_payload(plan: ProcessingChainOptionPlan) -> dict[str, Any]:
 
 
 def _grant_errors(
-    plan: ProcessingChainOptionPlan,
+    plan: OptionPlan,
     grant: OptionExecutionGrant,
     *,
     digest: str,
@@ -313,7 +332,7 @@ def _tick_feedback(
 
 
 def _refused(
-    plan: ProcessingChainOptionPlan,
+    plan: OptionPlan,
     *,
     authority: ActionAuthority,
     digest: str,
@@ -378,7 +397,7 @@ class OptionExecutionBoundary:
 
     def validate(
         self,
-        plan: ProcessingChainOptionPlan,
+        plan: OptionPlan,
         *,
         grant: OptionExecutionGrant | None,
         scope: OptionExecutionScope | None,
@@ -496,7 +515,7 @@ class OptionExecutionBoundary:
 
     def execute(
         self,
-        plan: ProcessingChainOptionPlan,
+        plan: OptionPlan,
         *,
         authority: ActionAuthority,
         grant: OptionExecutionGrant | None = None,

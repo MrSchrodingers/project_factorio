@@ -101,11 +101,16 @@ story; retain them only as historical evidence.
 
 Validated A2 as one transactional Option with expiring durable authority grant, exact WorldLease attestation and no ambient EXECUTE authority. Closure audit: runs/audits/cortex_f5b_authority_bridge.json.
 
-### F5-C — Deterministic Autonomous Baseline
+### F5-C — Deterministic Autonomous Baseline — ACTIVE / IMPLEMENTATION READY
 
 Use the engineering stack (goal DAG, production DAG, A*, structural planner,
 resupply, memory, universal executor and rollback) to prove physical bootstrap
 without neural policy control.
+
+The first development capability is iron_extraction on frozen seed 1619515465,
+using open_play, empty inventory, ambient A0 and one A2 grant. See
+docs/CORTEX_PHASE5_DETERMINISTIC_BASELINE.md. F5-C remains incomplete until the
+deterministic physical baseline reaches its frozen completion gate.
 
 ### F5-D — Trajectory Dataset
 

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from numbers import Real
 from typing import Any
 
-from fle.env.game_types import Prototype
+from fle.env.game_types import Prototype, Resource
 
 from factorio_ai_lab.cortex.actions import (
     ActionAuthority,
@@ -26,6 +26,7 @@ from factorio_ai_lab.cortex.actions import (
     Refusal,
 )
 from factorio_ai_lab.cortex.structural_prepare import (
+    RESOURCE_EXTRACTION_CONTRACT_VERSION,
     SUPPORTED_CONTRACT_VERSIONS,
     PreparedStructuralAction,
     StructuralOperation,
@@ -110,6 +111,28 @@ def prototype_symbol(name: str) -> str:
     if not matches:
         raise ValueError(f"no FLE Prototype member for {name!r}")
     return f"Prototype.{matches[0]}"
+
+
+def resource_symbol(name: str) -> str:
+    """Resolve a Factorio resource name through FLE's Resource namespace."""
+
+    matches: list[str]=[]
+    for member_name in dir(Resource):
+        if member_name.startswith("_"):
+            continue
+        member=getattr(Resource,member_name,None)
+        factorio_name=(
+            member[0]
+            if isinstance(member,tuple)
+            and member
+            and isinstance(member[0],str)
+            else _prototype_factorio_name(member)
+        )
+        if factorio_name==name:
+            matches.append(member_name)
+    if not matches:
+        raise ValueError(f"no FLE Resource member for {name!r}")
+    return f"Resource.{min(matches)}"
 
 
 def _position(raw: Mapping[str, Any]) -> str:
@@ -279,6 +302,170 @@ def _compile_delivery(operation: StructuralOperation) -> list[str]:
     ]
 
 
+def _compile_harvest_bootstrap_resources(
+    operation: StructuralOperation,
+) -> list[str]:
+    resources = operation.parameters.get("resources")
+    if not isinstance(resources, Sequence) or isinstance(resources, (str, bytes)):
+        raise TypeError("harvest_bootstrap_resources requires resources")
+    lines: list[str] = []
+    for index, raw in enumerate(resources):
+        if not isinstance(raw, Mapping):
+            raise TypeError("bootstrap resource row must be a mapping")
+        resource_name = str(raw.get("resource") or "")
+        quantity = raw.get("quantity")
+        if (
+            not isinstance(quantity, Real)
+            or isinstance(quantity, bool)
+            or int(quantity) <= 0
+            or float(quantity) != float(int(quantity))
+        ):
+            raise ValueError("bootstrap harvest quantity must be a positive integer")
+        amount = int(quantity)
+        radius = raw.get("radius")
+        radius_clause = ""
+        if radius is not None:
+            if (
+                not isinstance(radius, Real)
+                or isinstance(radius, bool)
+                or float(radius) <= 0
+            ):
+                raise ValueError("bootstrap harvest radius must be positive")
+            radius_clause = f", radius={float(radius)!r}"
+        position_var = f"cortex_bootstrap_resource_{index}"
+        lines.extend(
+            (
+                f"{position_var}=nearest({resource_symbol(resource_name)})",
+                f"move_to({position_var})",
+                "harvest_resource(",
+                f"    {position_var},",
+                f"    quantity={amount}{radius_clause},",
+                ")",
+            )
+        )
+    return lines
+
+
+def _compile_bootstrap_smelt_iron(
+    operation: StructuralOperation,
+) -> list[str]:
+    furnace_quantity = operation.parameters.get("furnace_quantity")
+    iron_ore_quantity = operation.parameters.get("iron_ore_quantity")
+    coal_quantity = operation.parameters.get("coal_quantity")
+    settle_seconds = operation.parameters.get("settle_seconds")
+    for label, value in (
+        ("furnace_quantity", furnace_quantity),
+        ("iron_ore_quantity", iron_ore_quantity),
+        ("coal_quantity", coal_quantity),
+        ("settle_seconds", settle_seconds),
+    ):
+        if (
+            not isinstance(value, Real)
+            or isinstance(value, bool)
+            or int(value) <= 0
+            or float(value) != float(int(value))
+        ):
+            raise ValueError(f"{label} must be a positive integer")
+    furnaces = int(furnace_quantity)
+    ore = int(iron_ore_quantity)
+    coal = int(coal_quantity)
+    settle = int(settle_seconds)
+    return [
+        f"craft_item({prototype_symbol('stone-furnace')}, quantity={furnaces})",
+        "cortex_bootstrap_furnace=place_entity_next_to(",
+        f"    {prototype_symbol('stone-furnace')},",
+        "    player_location,",
+        "    direction=Direction.RIGHT,",
+        ")",
+        "cortex_bootstrap_furnace=insert_item(",
+        f"    {prototype_symbol('coal')},",
+        "    cortex_bootstrap_furnace,",
+        f"    quantity={coal},",
+        ")",
+        "cortex_bootstrap_furnace=insert_item(",
+        f"    {prototype_symbol('iron-ore')},",
+        "    cortex_bootstrap_furnace,",
+        f"    quantity={ore},",
+        ")",
+        f"sleep({settle})",
+        (
+            "cortex_bootstrap_plate_count=inspect_inventory("
+            "cortex_bootstrap_furnace)"
+            f"[{prototype_symbol('iron-plate')}]"
+        ),
+        "if cortex_bootstrap_plate_count < 9:",
+        "    raise RuntimeError('bootstrap smelting produced fewer than 9 iron plates')",
+        "extract_item(",
+        f"    {prototype_symbol('iron-plate')},",
+        "    cortex_bootstrap_furnace,",
+        "    quantity=cortex_bootstrap_plate_count,",
+        ")",
+        "pickup_entity(cortex_bootstrap_furnace)",
+    ]
+
+
+def _compile_craft_extraction_cell(
+    operation: StructuralOperation,
+) -> list[str]:
+    extractor = str(operation.parameters.get("extractor") or "")
+    buffer = str(operation.parameters.get("buffer") or "")
+    if not extractor or not buffer:
+        raise ValueError("craft_extraction_cell requires extractor and buffer")
+    return [
+        f"craft_item({prototype_symbol(extractor)}, quantity=1)",
+        f"craft_item({prototype_symbol(buffer)}, quantity=1)",
+    ]
+
+
+def _compile_place_extractor(operation: StructuralOperation) -> list[str]:
+    entity = str(operation.parameters.get("entity") or "")
+    position = operation.parameters.get("position")
+    direction = str(operation.parameters.get("direction") or "DOWN")
+    if not isinstance(position, Mapping):
+        raise TypeError("place_extractor requires position")
+    return [
+        f"move_to({_position(position)})",
+        "cortex_extractor=place_entity(",
+        f"    {prototype_symbol(entity)},",
+        f"    position={_position(position)},",
+        f"    direction={_direction(direction)},",
+        ")",
+    ]
+
+
+def _compile_fuel_extractor(operation: StructuralOperation) -> list[str]:
+    fuel_item = str(operation.parameters.get("fuel_item") or "")
+    quantity = operation.parameters.get("quantity")
+    if (
+        not isinstance(quantity, Real)
+        or isinstance(quantity, bool)
+        or int(quantity) <= 0
+        or float(quantity) != float(int(quantity))
+    ):
+        raise ValueError("fuel_extractor quantity must be a positive integer")
+    return [
+        "cortex_extractor=insert_item(",
+        f"    {prototype_symbol(fuel_item)},",
+        "    cortex_extractor,",
+        f"    quantity={int(quantity)},",
+        ")",
+    ]
+
+
+def _compile_place_output_buffer(operation: StructuralOperation) -> list[str]:
+    entity = str(operation.parameters.get("entity") or "")
+    direction = str(operation.parameters.get("direction") or "DOWN")
+    if not entity:
+        raise ValueError("place_output_buffer requires entity")
+    return [
+        "cortex_buffer=place_entity_next_to(",
+        f"    {prototype_symbol(entity)},",
+        "    cortex_extractor.position,",
+        f"    direction={_direction(direction)},",
+        ")",
+    ]
+
+
 def _compile_operation(operation: StructuralOperation) -> list[str]:
     dispatch = {
         "ensure_item": _compile_ensure_item,
@@ -288,6 +475,12 @@ def _compile_operation(operation: StructuralOperation) -> list[str]:
         "fuel_processor": _compile_fuel_processor,
         "connect_delivery": _compile_delivery,
         "fuel_delivery_actuator": _compile_fuel_delivery_actuator,
+        "harvest_bootstrap_resources": _compile_harvest_bootstrap_resources,
+        "bootstrap_smelt_iron": _compile_bootstrap_smelt_iron,
+        "craft_extraction_cell": _compile_craft_extraction_cell,
+        "place_extractor": _compile_place_extractor,
+        "fuel_extractor": _compile_fuel_extractor,
+        "place_output_buffer": _compile_place_output_buffer,
     }
     if operation.op == "verify_postconditions":
         return []
@@ -330,6 +523,26 @@ def compile_structural_action(
             ),
         )
 
+    final_validation_settle = settle
+    if prepared.contract_version == RESOURCE_EXTRACTION_CONTRACT_VERSION:
+        bootstrap_seconds = sum(
+            int(operation.parameters.get("settle_seconds") or 0)
+            for operation in prepared.operations
+            if operation.op == "bootstrap_smelt_iron"
+        )
+        final_validation_settle = settle - bootstrap_seconds
+        if final_validation_settle <= 0:
+            return StructuralCompilationResult(
+                prepared=prepared,
+                refusal=Refusal(
+                    code=REFUSAL_OPERATION_UNSUPPORTED,
+                    detail=(
+                        "resource extraction Option budget must exceed bootstrap "
+                        f"settle time ({bootstrap_seconds}s)"
+                    ),
+                ),
+            )
+
     lines = [
         "# Cortex F2-E controlled structural transaction",
         f"# action_id={prepared.action_id}",
@@ -364,16 +577,40 @@ def compile_structural_action(
             refusal=Refusal(code=refusal_code, detail=str(exc)),
         )
 
-    lines.extend(
-        (
-            f"sleep({settle})",
+    if prepared.contract_version == RESOURCE_EXTRACTION_CONTRACT_VERSION:
+        lines.extend(
             (
-                "cortex_processor_output=inspect_inventory("
-                "cortex_processor)[cortex_expected_product]"
-            ),
-            "print({'cortex_processor_output':cortex_processor_output})",
+                f"sleep({final_validation_settle})",
+                (
+                    "cortex_buffer_iron_ore=inspect_inventory(cortex_buffer)"
+                    f"[{prototype_symbol('iron-ore')}]"
+                ),
+                (
+                    "cortex_extractor_fuel=inspect_inventory(cortex_extractor)"
+                    f"[{prototype_symbol('coal')}]"
+                ),
+                "cortex_extractor_exists=cortex_extractor is not None",
+                "cortex_destination_reachable=cortex_buffer is not None",
+                "cortex_drill_operational=(cortex_buffer_iron_ore > 0)",
+                "cortex_production_positive=(cortex_buffer_iron_ore > 0)",
+                (
+                    "print({'cortex_buffer_iron_ore':cortex_buffer_iron_ore,"
+                    "'cortex_extractor_fuel':cortex_extractor_fuel,"
+                    "'cortex_drill_operational':cortex_drill_operational})"
+                ),
+            )
         )
-    )
+    else:
+        lines.extend(
+            (
+                f"sleep({settle})",
+                (
+                    "cortex_processor_output=inspect_inventory("
+                    "cortex_processor)[cortex_expected_product]"
+                ),
+                "print({'cortex_processor_output':cortex_processor_output})",
+            )
+        )
     return StructuralCompilationResult(
         prepared=prepared,
         compiled=CompiledStructuralAction(
@@ -456,9 +693,31 @@ def prepared_postconditions(
     return conditions
 
 
-def execution_guard_conditions() -> tuple[ActionCondition, ...]:
+def execution_guard_conditions(
+    prepared: PreparedStructuralAction | None = None,
+) -> tuple[ActionCondition, ...]:
     """Hard guards that prevent topological false-positive commits."""
 
+    if (
+        prepared is not None
+        and prepared.contract_version == RESOURCE_EXTRACTION_CONTRACT_VERSION
+    ):
+        return (
+            ActionCondition(
+                name="extractor_exists",
+                operator=ConditionOperator.EQUALS,
+                state=ConditionState.UNKNOWN,
+                expected=True,
+                hard=True,
+            ),
+            ActionCondition(
+                name="buffer_iron_ore",
+                operator=ConditionOperator.INCREASE,
+                state=ConditionState.UNKNOWN,
+                expected=None,
+                hard=True,
+            ),
+        )
     return (
         ActionCondition(
             name="processor_exists",
@@ -621,7 +880,7 @@ class StructuralTransactionalAdapter:
         try:
             contract = (
                 prepared_postconditions(prepared)
-                + execution_guard_conditions()
+                + execution_guard_conditions(prepared)
             )
         except (TypeError, ValueError) as exc:
             return _refused(

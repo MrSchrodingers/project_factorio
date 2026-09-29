@@ -3044,6 +3044,65 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
     assert "F5-C deterministic autonomous baseline" in f5b["resume"]["action"]
     assert f5b["resume"]["do_not_start_another_seed"] is True
 
+    f5c_artifact=audits/"cortex_f5c_development_1619515465_iron_extraction.json"
+    f5c_artifact.write_text(json.dumps({
+        "schema_version":"cortex_f5c_deterministic_baseline_v1",
+        "status":"completed",
+        "seed":1619515465,
+        "partition":"development",
+        "capability":"iron_extraction",
+        "ambient_authority":"A0",
+        "bounded_authority":"A2",
+        "continuous_authority":False,
+        "automatic_retry":False,
+        "option_execution_attempts":1,
+        "external_resource_injection":False,
+        "human_intervention_count":0,
+        "transaction_committed":True,
+        "capability_promoted":"iron_extraction",
+        "code_revision":{
+            "commit":"f5c-implementation-sha",
+            "dirty":False,
+        },
+        "preflight":{
+            "world_mutation":False,
+            "grant_issued":False,
+            "option_executed_live":False,
+        },
+        "capability_gate":{
+            "resource_patch_valid":True,
+            "drill_operational":True,
+            "iron_ore_produced":True,
+            "destination_reachable":True,
+            "production_positive_during_validation_window":True,
+        },
+        "survival_gate":{
+            "previously_promoted":[],
+            "regressed":[],
+            "passed":True,
+        },
+        "trajectory":{
+            "capability_delta":{
+                "promoted":["iron_extraction"],
+                "regressed":[],
+            },
+        },
+    })+"\n")
+    f5c=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert f5c["phase5_checkpoint"]=="F5-C"
+    assert f5c["phase5_next_checkpoint"]=="F5-C"
+    assert f5c["phase5_deterministic_baseline"]["started"] is True
+    assert (
+        f5c["phase5_deterministic_baseline"]["iron_extraction_validated"]
+        is True
+    )
+    assert f5c["phase5_protocol"]["achieved_capabilities"]==["iron_extraction"]
+    assert "coal_self_sufficiency" in f5c["resume"]["action"]
+    f5c_artifact.unlink()
+
     f5b_sources["f5_authority"].write_text("# tampered F5 authority\n")
     f5b_tampered=module.build_phase_state(
         state_root=tmp_path,

@@ -130,6 +130,11 @@ from factorio_ai_lab.cortex.options import (
     ProcessingChainOptionResult,
     compose_processing_chain_option,
 )
+from factorio_ai_lab.cortex.resource_extraction_option import (
+    ResourceExtractionOptionPlan,
+    ResourceExtractionOptionResult,
+    compose_resource_extraction_option,
+)
 from factorio_ai_lab.cortex.structural import (
     ProcessingBranch,
     StructuralProcessingPlan,
@@ -228,6 +233,8 @@ __all__ = [
     "ProcessingChainOptionPlan",
     "ProcessingChainOptionResult",
     "Refusal",
+    "ResourceExtractionOptionPlan",
+    "ResourceExtractionOptionResult",
     "RetrievalResult",
     "RetrievedMemory",
     "ScoreTablePolicy",
@@ -248,6 +255,7 @@ __all__ = [
     "complete_delivery_actuator_dependency",
     "complete_structural_dependencies",
     "compose_processing_chain_option",
+    "compose_resource_extraction_option",
     "consolidate_memory",
     "execution_guard_conditions",
     "generate_repair_candidates",

@@ -199,6 +199,12 @@ def test_dashboard_separates_live_cortex_from_frozen_baseline_evidence() -> None
     assert "A0 AMBIENT · A2 ONE-SHOT READY" in app
     assert "F5-B PASS · A2 one-shot bridge validated" in app
     assert "F5-C deterministic autonomous baseline" in app
+    assert "phase5DeterministicBaseline" in app
+    assert "phase5BaselineActive" in app
+    assert "F5-C · DETERMINISTIC BASELINE · A0 + A2 ONE-SHOT" in app
+    assert "CORTEX F5 · F5-C · PHYSICAL BASELINE" in app
+    assert "F5-C · DETERMINISTIC PHYSICAL BASELINE" in app
+    assert "A0 AMBIENT · F5-C · A2 POR OPTION" in app
     assert "function renderPhase5Capabilities(operational)" in app
     assert "phase5CapabilityCard" in index
     assert "phase5CapabilityHealth" in index

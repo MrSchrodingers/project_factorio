@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from factorio_ai_lab.cortex.options import ProcessingChainOptionPlan
+from factorio_ai_lab.cortex.options import OptionPlan
 
 GRANT_SCHEMA_VERSION = "cortex_option_execution_grant_v1"
 LEDGER_SCHEMA_VERSION = "cortex_option_grant_ledger_v1"
@@ -45,7 +45,7 @@ def _parse_timestamp(value: str) -> datetime:
     return parsed.astimezone(UTC)
 
 
-def option_plan_digest(plan: ProcessingChainOptionPlan) -> str:
+def option_plan_digest(plan: OptionPlan) -> str:
     """Stable SHA-256 over the exact frozen Option plan."""
 
     import hashlib
@@ -85,7 +85,7 @@ class OptionExecutionScope:
     @classmethod
     def for_plan(
         cls,
-        plan: ProcessingChainOptionPlan,
+        plan: OptionPlan,
         *,
         experiment_id: str,
         world_lease_id: str,
@@ -161,7 +161,7 @@ class OptionExecutionGrant:
     @classmethod
     def for_plan(
         cls,
-        plan: ProcessingChainOptionPlan,
+        plan: OptionPlan,
         *,
         scope: OptionExecutionScope,
         issued_by: str,

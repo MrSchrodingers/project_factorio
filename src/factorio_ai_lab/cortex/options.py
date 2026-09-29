@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
-from typing import Any
+from typing import Any, Protocol
 
 from factorio_ai_lab.cortex.actions import (
     ActionAuthority,
@@ -55,6 +55,7 @@ class OptionKind(StrEnum):
     """Stable temporally extended behaviors available to the Cortex."""
 
     ESTABLISH_PROCESSING_CHAIN = "establish_processing_chain"
+    ESTABLISH_RESOURCE_EXTRACTION = "establish_resource_extraction"
 
 
 class OptionStepKind(StrEnum):
@@ -214,6 +215,17 @@ class OptionStep:
             "provides": list(self.provides),
             "details": dict(self.details),
         }
+
+
+class OptionPlan(Protocol):
+    """Minimal contract shared by all executable temporally extended Options."""
+
+    request: OptionRequest
+    action_request: ActionRequest
+    prepared: PreparedStructuralAction
+    termination_conditions: tuple[ActionCondition, ...]
+
+    def to_dict(self) -> dict[str, Any]: ...
 
 
 @dataclass(frozen=True)

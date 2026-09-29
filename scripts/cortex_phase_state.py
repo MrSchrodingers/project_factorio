@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import sqlite3
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,35 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda:handle.read(1024*1024),b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _git_blob_sha256(
+    state_root: Path,
+    commit: str | None,
+    relative_path: str,
+) -> str | None:
+    if not commit or not relative_path:
+        return None
+    try:
+        done=subprocess.run(
+            [
+                "git",
+                "-c",
+                f"safe.directory={state_root}",
+                "-C",
+                str(state_root),
+                "show",
+                f"{commit}:{relative_path}",
+            ],
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError,subprocess.SubprocessError):
+        return None
+    if done.returncode!=0:
+        return None
+    return hashlib.sha256(done.stdout).hexdigest()
 
 
 def _jsonl_row(path: Path,index: int) -> dict[str, Any] | None:
@@ -2793,6 +2823,34 @@ def build_phase_state(
         key:(_sha256(path) if path.exists() else None)
         for key,path in phase5b_source_paths.items()
     }
+    phase5b_commit=str(phase5b_revision.get("commit") or "")
+    phase5b_relative_paths={
+        key:str(path.relative_to(state_root))
+        for key,path in phase5b_source_paths.items()
+    }
+    phase5b_commit_hashes={
+        key:_git_blob_sha256(state_root,phase5b_commit,relative)
+        for key,relative in phase5b_relative_paths.items()
+    }
+    phase5b_commit_hashes_resolved=(
+        bool(phase5b_commit_hashes)
+        and all(value is not None for value in phase5b_commit_hashes.values())
+    )
+    phase5b_source_hashes_match_commit=(
+        phase5b_commit_hashes_resolved
+        and phase5b_source_hashes==phase5b_commit_hashes
+    )
+    phase5b_source_hashes_match_current=(
+        bool(phase5b_source_hashes)
+        and phase5b_source_hashes==phase5b_current_hashes
+    )
+    phase5b_source_binding_valid=(
+        phase5b_source_hashes_match_commit
+        or (
+            not phase5b_commit_hashes_resolved
+            and phase5b_source_hashes_match_current
+        )
+    )
     phase5b_valid=(
         phase5_protocol_valid
         and phase5b_doc
@@ -2818,8 +2876,91 @@ def build_phase_state(
         and bool(phase5b_revision.get("commit"))
         and bool(phase5b_checks)
         and all(value is True for value in phase5b_checks.values())
-        and phase5b_source_hashes==phase5b_current_hashes
+        and phase5b_source_binding_valid
         and len(phase5_interventions)==0
+    )
+
+    phase5c_seed=(
+        int(phase5_development[0])
+        if isinstance(phase5_development,list)
+        and phase5_development
+        and isinstance(phase5_development[0],int)
+        and not isinstance(phase5_development[0],bool)
+        else None
+    )
+    phase5c_artifact_path=(
+        state_root/"runs"/"audits"/
+        f"cortex_f5c_development_{phase5c_seed}_iron_extraction.json"
+        if phase5c_seed is not None
+        else state_root/"runs"/"audits"/"cortex_f5c_development_missing.json"
+    )
+    phase5c_artifact_exists=phase5c_artifact_path.exists()
+    phase5c_artifact: dict[str,Any]={}
+    phase5c_artifact_error: str | None=None
+    if phase5c_artifact_exists:
+        try:
+            phase5c_artifact=_load(phase5c_artifact_path)
+        except (OSError,json.JSONDecodeError,TypeError) as exc:
+            phase5c_artifact_error=f"{type(exc).__name__}: {exc}"
+    phase5c_preflight=phase5c_artifact.get("preflight")
+    if not isinstance(phase5c_preflight,dict):
+        phase5c_preflight={}
+    phase5c_revision=phase5c_artifact.get("code_revision")
+    if not isinstance(phase5c_revision,dict):
+        phase5c_revision={}
+    phase5c_gate=phase5c_artifact.get("capability_gate")
+    if not isinstance(phase5c_gate,dict):
+        phase5c_gate={}
+    phase5c_survival=phase5c_artifact.get("survival_gate")
+    if not isinstance(phase5c_survival,dict):
+        phase5c_survival={}
+    phase5c_trajectory=phase5c_artifact.get("trajectory")
+    if not isinstance(phase5c_trajectory,dict):
+        phase5c_trajectory={}
+    phase5c_delta=phase5c_trajectory.get("capability_delta")
+    if not isinstance(phase5c_delta,dict):
+        phase5c_delta={}
+    phase5c_started=(
+        phase5b_valid
+        and phase5c_artifact_exists
+        and phase5c_artifact_error is None
+        and phase5c_artifact.get("schema_version")
+        =="cortex_f5c_deterministic_baseline_v1"
+        and phase5c_artifact.get("partition")=="development"
+        and phase5c_artifact.get("seed")==phase5c_seed
+    )
+    phase5c_iron_extraction_valid=(
+        phase5c_started
+        and phase5c_artifact.get("status")=="completed"
+        and phase5c_artifact.get("capability")=="iron_extraction"
+        and phase5c_artifact.get("ambient_authority")=="A0"
+        and phase5c_artifact.get("bounded_authority")=="A2"
+        and phase5c_artifact.get("continuous_authority") is False
+        and phase5c_artifact.get("automatic_retry") is False
+        and phase5c_artifact.get("option_execution_attempts")==1
+        and phase5c_artifact.get("external_resource_injection") is False
+        and phase5c_artifact.get("human_intervention_count")==0
+        and phase5c_artifact.get("transaction_committed") is True
+        and phase5c_artifact.get("capability_promoted")=="iron_extraction"
+        and phase5c_revision.get("dirty") is False
+        and phase5c_preflight.get("world_mutation") is False
+        and phase5c_preflight.get("grant_issued") is False
+        and phase5c_preflight.get("option_executed_live") is False
+        and bool(phase5c_gate)
+        and all(value is True for value in phase5c_gate.values())
+        and phase5c_survival.get("passed") is True
+        and phase5c_survival.get("regressed")==[]
+        and "iron_extraction" in (
+            phase5c_delta.get("promoted")
+            if isinstance(phase5c_delta.get("promoted"),list)
+            else []
+        )
+        and len(phase5_interventions)==0
+    )
+    phase5_achieved_capabilities=(
+        ["iron_extraction"]
+        if phase5c_iron_extraction_valid
+        else []
     )
 
     phase2_delivery_actuator_canary_path=(
@@ -3065,7 +3206,18 @@ def build_phase_state(
                 "functional_accept_sustainability_not_proven"
             )
 
-    if phase5b_valid:
+    if phase5c_iron_extraction_valid:
+        action=(
+            "F5-C iron_extraction capability promoted from physical evidence; "
+            "continue deterministic baseline with coal_self_sufficiency under "
+            "ambient A0 and exactly one expiring A2 grant per Option"
+        )
+    elif phase5c_started:
+        action=(
+            "F5-C development attempt recorded without capability promotion; "
+            "inspect the canonical counterexample and do not retry automatically"
+        )
+    elif phase5b_valid:
         action=(
             "F5-B bounded authority bridge PASS; implement F5-C deterministic "
             "autonomous baseline with ambient authority A0 and exactly one "
@@ -3291,15 +3443,47 @@ def build_phase_state(
             )
         ),
         "phase5_checkpoint":(
-            "F5-B"
-            if phase5b_valid
-            else ("F5-A" if phase5_protocol_valid else None)
+            "F5-C"
+            if phase5c_started
+            else (
+                "F5-B"
+                if phase5b_valid
+                else ("F5-A" if phase5_protocol_valid else None)
+            )
         ),
         "phase5_next_checkpoint":(
             "F5-C"
             if phase5b_valid
             else ("F5-B" if phase5_protocol_valid else None)
         ),
+        "phase5_deterministic_baseline":{
+            "artifact_path":str(phase5c_artifact_path),
+            "artifact_exists":phase5c_artifact_exists,
+            "started":phase5c_started,
+            "iron_extraction_validated":phase5c_iron_extraction_valid,
+            "seed":phase5c_artifact.get("seed",phase5c_seed),
+            "partition":phase5c_artifact.get("partition"),
+            "status":phase5c_artifact.get("status"),
+            "capability":phase5c_artifact.get("capability"),
+            "capability_promoted":phase5c_artifact.get("capability_promoted"),
+            "capability_gate":phase5c_gate,
+            "survival_gate":phase5c_survival,
+            "ambient_authority":phase5c_artifact.get("ambient_authority","A0"),
+            "bounded_authority":phase5c_artifact.get("bounded_authority"),
+            "option_execution_attempts":phase5c_artifact.get(
+                "option_execution_attempts"
+            ),
+            "transaction_committed":phase5c_artifact.get(
+                "transaction_committed"
+            ),
+            "external_resource_injection":phase5c_artifact.get(
+                "external_resource_injection"
+            ),
+            "human_intervention_count":phase5c_artifact.get(
+                "human_intervention_count"
+            ),
+            "read_error":phase5c_artifact_error,
+        },
         "phase5_authority_bridge":{
             "document_path":str(phase5b_doc_path),
             "document_exists":phase5b_doc,
@@ -3318,10 +3502,10 @@ def build_phase_state(
             "grant_issued":phase5b_audit.get("grant_issued"),
             "option_executed_live":phase5b_audit.get("option_executed_live"),
             "code_commit":phase5b_revision.get("commit"),
-            "source_hashes_match":(
-                bool(phase5b_source_hashes)
-                and phase5b_source_hashes==phase5b_current_hashes
-            ),
+            "source_hashes_match":phase5b_source_binding_valid,
+            "source_hashes_match_commit":phase5b_source_hashes_match_commit,
+            "source_hashes_match_current":phase5b_source_hashes_match_current,
+            "audit_commit":phase5b_commit or None,
             "checks":phase5b_checks,
             "read_error":phase5b_audit_error,
         },
@@ -3351,7 +3535,7 @@ def build_phase_state(
             ),
             "capability_total":len(phase5_expected_capabilities),
             "capabilities":phase5_expected_capabilities,
-            "achieved_capabilities":[],
+            "achieved_capabilities":phase5_achieved_capabilities,
             "seed_partitions":{
                 "development":phase5_development,
                 "pilot":phase5_pilot,
