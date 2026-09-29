@@ -146,6 +146,14 @@ def compile_iron_smelting(operation: StructuralOperation) -> list[str]:
         f"if cortex_coal_drawn != {coal_draw}:",
         "    raise RuntimeError('failed exact endogenous coal draw')",
         (
+            "cortex_player_iron_after_draw=inspect_inventory()"
+            f"[{_prototype('iron-ore')}]"
+        ),
+        (
+            "cortex_player_coal_after_draw=inspect_inventory()"
+            f"[{_prototype('coal')}]"
+        ),
+        (
             "cortex_iron_buffer_after_draw=inspect_inventory(cortex_iron_buffer)"
             f"[{_prototype('iron-ore')}]"
         ),
@@ -163,6 +171,10 @@ def compile_iron_smelting(operation: StructuralOperation) -> list[str]:
         "    cortex_coal_extractor,",
         f"    quantity={coal_refuel},",
         ")",
+        (
+            "cortex_player_coal_after_refuel=inspect_inventory()"
+            f"[{_prototype('coal')}]"
+        ),
         f"cortex_fast_reposition({_position(furnace)})",
         "cortex_iron_furnace=place_entity(",
         f"    {_prototype('stone-furnace')},",
@@ -173,34 +185,70 @@ def compile_iron_smelting(operation: StructuralOperation) -> list[str]:
         "    cortex_iron_furnace,",
         f"    quantity={furnace_coal},",
         ")",
+        (
+            "cortex_player_coal_after_furnace_fuel=inspect_inventory()"
+            f"[{_prototype('coal')}]"
+        ),
         "cortex_iron_furnace=insert_item(",
         f"    {_prototype('iron-ore')},",
         "    cortex_iron_furnace,",
         f"    quantity={iron_ore_draw},",
         ")",
-        f"sleep({probe_seconds})",
-        "cortex_furnace_status_observed=str(cortex_iron_furnace.status)",
         (
-            "cortex_furnace_working_observed=("
-            "'WORKING' in cortex_furnace_status_observed.upper())"
-        ),
-        f"sleep({smelt_seconds-probe_seconds})",
-        (
-            "cortex_furnace_iron_remaining=inspect_inventory(cortex_iron_furnace)"
+            "cortex_furnace_iron_after_insert=inspect_inventory(cortex_iron_furnace)"
             f"[{_prototype('iron-ore')}]"
         ),
         (
-            "cortex_iron_plate_count=inspect_inventory(cortex_iron_furnace)"
+            "cortex_furnace_plate_after_insert=inspect_inventory(cortex_iron_furnace)"
+            f"[{_prototype('iron-plate')}]"
+        ),
+        (
+            "cortex_player_iron_after_furnace_insert=inspect_inventory()"
+            f"[{_prototype('iron-ore')}]"
+        ),
+        f"sleep({probe_seconds})",
+        "cortex_iron_furnace_probe=get_entity(",
+        f"    {_prototype('stone-furnace')},",
+        f"    {_position(furnace)},",
+        ")",
+        "cortex_furnace_status_observed=str(cortex_iron_furnace_probe.status)",
+        (
+            "cortex_furnace_iron_after_probe=inspect_inventory("
+            "cortex_iron_furnace_probe)"
+            f"[{_prototype('iron-ore')}]"
+        ),
+        (
+            "cortex_furnace_plate_after_probe=inspect_inventory("
+            "cortex_iron_furnace_probe)"
+            f"[{_prototype('iron-plate')}]"
+        ),
+        (
+            "cortex_furnace_working_observed=("
+            "'WORKING' in cortex_furnace_status_observed.upper() or "
+            "cortex_furnace_plate_after_probe>0)"
+        ),
+        f"sleep({smelt_seconds-probe_seconds})",
+        "cortex_iron_furnace_live=get_entity(",
+        f"    {_prototype('stone-furnace')},",
+        f"    {_position(furnace)},",
+        ")",
+        "cortex_iron_furnace_exists=cortex_iron_furnace_live is not None",
+        (
+            "cortex_furnace_iron_remaining=inspect_inventory(cortex_iron_furnace_live)"
+            f"[{_prototype('iron-ore')}]"
+        ),
+        (
+            "cortex_iron_plate_count=inspect_inventory(cortex_iron_furnace_live)"
             f"[{_prototype('iron-plate')}]"
         ),
         (
             "cortex_iron_ore_input_live=("
-            f"cortex_furnace_iron_remaining < {iron_ore_draw} and "
+            f"cortex_furnace_iron_after_insert == {iron_ore_draw} and "
             "cortex_iron_plate_count>0)"
         ),
         (
             "cortex_furnace_operational=("
-            "cortex_iron_furnace is not None and "
+            "cortex_iron_furnace_exists and "
             "cortex_furnace_working_observed)"
         ),
         "cortex_iron_plate_output_positive=cortex_iron_plate_count>0",
@@ -252,6 +300,22 @@ def compile_iron_smelting(operation: StructuralOperation) -> list[str]:
         "    'furnace_operational':cortex_furnace_operational,",
         "    'iron_plate_output_positive':cortex_iron_plate_output_positive,",
         "    'iron_plate_count':cortex_iron_plate_count,",
+        "    'iron_furnace_exists':cortex_iron_furnace_exists,",
+        "    'furnace_iron_after_insert':cortex_furnace_iron_after_insert,",
+        "    'furnace_plate_after_insert':cortex_furnace_plate_after_insert,",
+        "    'furnace_iron_after_probe':cortex_furnace_iron_after_probe,",
+        "    'furnace_plate_after_probe':cortex_furnace_plate_after_probe,",
+        "    'player_iron_after_draw':cortex_player_iron_after_draw,",
+        "    'player_coal_after_draw':cortex_player_coal_after_draw,",
+        "    'player_coal_after_refuel':cortex_player_coal_after_refuel,",
+        (
+            "    'player_coal_after_furnace_fuel':"
+            "cortex_player_coal_after_furnace_fuel,"
+        ),
+        (
+            "    'player_iron_after_furnace_insert':"
+            "cortex_player_iron_after_furnace_insert,"
+        ),
         "    'iron_extraction_survives':cortex_iron_extraction_survives,",
         "    'coal_self_sufficiency_survives':cortex_coal_self_sufficiency_survives,",
         "    'iron_survival_growth':cortex_iron_survival_growth,",

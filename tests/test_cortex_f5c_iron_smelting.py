@@ -92,7 +92,11 @@ def test_iron_smelting_option_is_inert_and_schema_aligned() -> None:
         "iron_plate_output_positive",
         "iron_extraction_survives",
         "coal_self_sufficiency_survives",
+        "iron_furnace_exists",
+        "iron_plate_count",
     }.issubset(names)
+    assert "processor_exists" not in names
+    assert "processor_output" not in names
 
 
 def test_compiled_iron_smelting_uses_endogenous_buffers_and_survival_window() -> None:
@@ -110,6 +114,12 @@ def test_compiled_iron_smelting_uses_endogenous_buffers_and_survival_window() ->
     assert "cortex_coal_drawn=extract_item(" in code
     assert "cortex_iron_furnace=place_entity(" in code
     assert "pickup_entity(cortex_iron_furnace)" not in code
+    assert "cortex_furnace_iron_after_insert=inspect_inventory(" in code
+    assert "cortex_iron_furnace_probe=get_entity(" in code
+    assert "cortex_iron_furnace_live=get_entity(" in code
+    assert "cortex_iron_furnace_exists=cortex_iron_furnace_live is not None" in code
+    assert "cortex_player_iron_after_draw=inspect_inventory()" in code
+    assert "cortex_player_coal_after_draw=inspect_inventory()" in code
     assert "cortex_iron_plate_output_positive" in code
     assert "cortex_iron_survival_growth" in code
     assert "cortex_coal_survival_growth" in code
@@ -201,3 +211,21 @@ def test_smelting_uses_observed_astar_not_fle_pathfinder() -> None:
     assert source.index('record["planning_stage"]="stone_route_validated"') < source.index(
         '"planning_stage":"grant_validated"'
     )
+
+
+def test_smelting_measurement_exposes_causal_transfer_diagnostics() -> None:
+    source=(ROOT/"scripts"/"run_cortex_f5c_iron_smelting.py").read_text()
+
+    for name in (
+        "iron_furnace_exists",
+        "furnace_iron_after_insert",
+        "furnace_plate_after_insert",
+        "furnace_iron_after_probe",
+        "furnace_plate_after_probe",
+        "player_iron_after_draw",
+        "player_coal_after_draw",
+        "player_coal_after_refuel",
+        "player_coal_after_furnace_fuel",
+        "player_iron_after_furnace_insert",
+    ):
+        assert f'"{name}"' in source

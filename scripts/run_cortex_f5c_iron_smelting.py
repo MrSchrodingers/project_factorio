@@ -510,6 +510,36 @@ def _measure(namespace: Any,prepared: Any) -> dict[str,Any]:
         "iron_plate_count":float(
             getattr(namespace,"cortex_iron_plate_count",0) or 0
         ),
+        "iron_furnace_exists":bool(
+            getattr(namespace,"cortex_iron_furnace_exists",False)
+        ),
+        "furnace_iron_after_insert":float(
+            getattr(namespace,"cortex_furnace_iron_after_insert",0) or 0
+        ),
+        "furnace_plate_after_insert":float(
+            getattr(namespace,"cortex_furnace_plate_after_insert",0) or 0
+        ),
+        "furnace_iron_after_probe":float(
+            getattr(namespace,"cortex_furnace_iron_after_probe",0) or 0
+        ),
+        "furnace_plate_after_probe":float(
+            getattr(namespace,"cortex_furnace_plate_after_probe",0) or 0
+        ),
+        "player_iron_after_draw":float(
+            getattr(namespace,"cortex_player_iron_after_draw",0) or 0
+        ),
+        "player_coal_after_draw":float(
+            getattr(namespace,"cortex_player_coal_after_draw",0) or 0
+        ),
+        "player_coal_after_refuel":float(
+            getattr(namespace,"cortex_player_coal_after_refuel",0) or 0
+        ),
+        "player_coal_after_furnace_fuel":float(
+            getattr(namespace,"cortex_player_coal_after_furnace_fuel",0) or 0
+        ),
+        "player_iron_after_furnace_insert":float(
+            getattr(namespace,"cortex_player_iron_after_furnace_insert",0) or 0
+        ),
         "furnace_status_observed":str(
             getattr(namespace,"cortex_furnace_status_observed","")
         ),

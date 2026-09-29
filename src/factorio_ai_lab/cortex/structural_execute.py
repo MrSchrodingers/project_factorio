@@ -854,6 +854,26 @@ def execution_guard_conditions(
                 hard=True,
             ),
         )
+    if (
+        prepared is not None
+        and prepared.contract_version == IRON_SMELTING_CONTRACT_VERSION
+    ):
+        return (
+            ActionCondition(
+                name="iron_furnace_exists",
+                operator=ConditionOperator.EQUALS,
+                state=ConditionState.UNKNOWN,
+                expected=True,
+                hard=True,
+            ),
+            ActionCondition(
+                name="iron_plate_count",
+                operator=ConditionOperator.INCREASE,
+                state=ConditionState.UNKNOWN,
+                expected=None,
+                hard=True,
+            ),
+        )
     return (
         ActionCondition(
             name="processor_exists",
