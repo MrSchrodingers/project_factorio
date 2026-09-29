@@ -124,6 +124,8 @@ def test_compiled_steam_power_uses_native_triggers_real_load_and_survival() -> N
     assert "set_research(" not in code
     assert ".researched" not in code
     assert "quantity=56" in code
+    assert "quantity=16" in code
+    assert "quantity=5" in code
     assert "cortex_trigger_iron_plates < 50" in code
     assert "cortex_trigger_copper_plates < 10" in code
     assert "pickup_entity(cortex_copper_furnace)" in code
