@@ -62,7 +62,7 @@ Seeds F5 são preregistradas em três partitions independentes:
 - held-out: 12
 - F4 confirmatory reserved: 10, separada e não reutilizável
 
-A ladder física F5 possui 9 capabilities:
+A ladder física F5 preregistrada possui 9 capabilities:
 
 1. iron_extraction
 2. coal_self_sufficiency
@@ -73,6 +73,26 @@ A ladder física F5 possui 9 capabilities:
 7. powered_manufacturing
 8. automation_science
 9. logistic_science
+
+Após validação read-only do tech tree real do Factorio 2.0, uma emenda
+versionada preservou o prefixo já promovido e reordenou somente a cauda
+causalmente impossível. A ordem efetiva é:
+
+1. iron_extraction
+2. coal_self_sufficiency
+3. iron_smelting
+4. steam_power
+5. copper_chain
+6. automation_science
+7. powered_manufacturing
+8. electric_mining
+9. logistic_science
+
+A emenda está em `configs/cortex_f5_capability_order_amendment_v2.json` e
+`docs/CORTEX_PHASE5_CAPABILITY_ORDER_AMENDMENT.md`. O manifest/schema v1,
+seeds, authority e hard postconditions permanecem congelados. Neste handoff,
+as quatro primeiras capabilities já foram promovidas fisicamente; a próxima
+frontier efetiva é `copper_chain`.
 
 Promoção exige evidência física + survival invariant. Entity existence, score
 offline, memória, loss, UCB, dataset ou inferência não promovem capability.

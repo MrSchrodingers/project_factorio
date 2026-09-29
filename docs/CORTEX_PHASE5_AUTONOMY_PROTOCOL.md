@@ -20,7 +20,7 @@ source inference is bound by SHA-256:
 
 ## 2. Physical capability ladder
 
-The canonical progression contains exactly nine physical capabilities:
+The preregistered progression contains exactly nine physical capabilities:
 
 1. `iron_extraction`
 2. `coal_self_sufficiency`
@@ -31,6 +31,30 @@ The canonical progression contains exactly nine physical capabilities:
 7. `powered_manufacturing`
 8. `automation_science`
 9. `logistic_science`
+
+This v1 ordering remains frozen for auditability. After live read-only
+validation of the Factorio 2.0 technology graph, the remaining order was found
+to be causally non-executable without direct research mutation. The accepted
+additive amendment is documented in
+`docs/CORTEX_PHASE5_CAPABILITY_ORDER_AMENDMENT.md` and machine-bound in
+`configs/cortex_f5_capability_order_amendment_v2.json`.
+
+The effective order after the already-promoted `steam_power` prefix is:
+
+1. `iron_extraction`
+2. `coal_self_sufficiency`
+3. `iron_smelting`
+4. `steam_power`
+5. `copper_chain`
+6. `automation_science`
+7. `powered_manufacturing`
+8. `electric_mining`
+9. `logistic_science`
+
+The v1 manifest, seed partitions, authority contract and capability hard
+postconditions are not rewritten by the amendment. If its integrity binding
+to the frozen v1 capability-schema SHA fails, phase-state falls back to the
+preregistered order.
 
 A capability is promoted only from measured physical evidence, never merely
 from entity existence.

@@ -1,0 +1,64 @@
+{
+  "schema_version": "cortex_f5_capability_order_amendment_v2",
+  "amendment_id": "cortex-f5-factorio-2-tech-tree-order-amendment-20260929",
+  "protocol_id": "cortex-f5-autonomous-factory-bootstrap-v1",
+  "status": "accepted_after_live_technology_validation",
+  "effective_after_capability": "steam_power",
+  "original_capability_schema": {
+    "path": "configs/cortex_f5_capability_schema_v1.json",
+    "sha256": "863a0ff1e99617caccef6b0b61899adf3664737dcf968fedf5c12499948e62a8"
+  },
+  "preregistered_order": [
+    "iron_extraction",
+    "coal_self_sufficiency",
+    "iron_smelting",
+    "steam_power",
+    "electric_mining",
+    "copper_chain",
+    "powered_manufacturing",
+    "automation_science",
+    "logistic_science"
+  ],
+  "effective_order": [
+    "iron_extraction",
+    "coal_self_sufficiency",
+    "iron_smelting",
+    "steam_power",
+    "copper_chain",
+    "automation_science",
+    "powered_manufacturing",
+    "electric_mining",
+    "logistic_science"
+  ],
+  "unchanged_promoted_prefix": [
+    "iron_extraction",
+    "coal_self_sufficiency",
+    "iron_smelting",
+    "steam_power"
+  ],
+  "preserves_seed_partitions": true,
+  "preserves_authority_contract": true,
+  "preserves_hard_postconditions": true,
+  "reason": {
+    "code": "factorio_2_0_technology_dependency_incompatibility",
+    "summary": "The preregistered remaining order is not executable without direct research mutation. Live Factorio 2.0 evidence shows electric-mining-drill requires automation science and assembling-machine-1 requires Automation research.",
+    "observed_dependencies": {
+      "electric_mining": {
+        "technology": "electric-mining-drill",
+        "prerequisite": "automation-science-pack",
+        "research_unit_count": 25,
+        "research_unit_ingredient": "automation-science-pack"
+      },
+      "powered_manufacturing": {
+        "technology": "automation",
+        "prerequisite": "automation-science-pack",
+        "research_unit_count": 10,
+        "research_unit_ingredient": "automation-science-pack"
+      },
+      "automation_science": {
+        "recipe": "automation-science-pack",
+        "recipe_enabled_after_steam_power": true
+      }
+    }
+  }
+}

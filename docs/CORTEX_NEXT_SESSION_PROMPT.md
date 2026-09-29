@@ -49,14 +49,16 @@ LEIA NESTA ORDEM
 2. docs/CORTEX_RESEARCH_PROGRAM.md
 3. docs/CORTEX_HANDOFF.md
 4. docs/CORTEX_PHASE5_AUTONOMY_PROTOCOL.md
-5. configs/cortex_f5_autonomy_v1.json
-6. configs/cortex_f5_capability_schema_v1.json
-7. configs/cortex_f5_trajectory_schema_v1.json
-8. configs/cortex_f5_authority_schema_v1.json
-9. configs/cortex_f5_intervention_ledger_schema_v1.json
-10. docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md
-11. docs/CORTEX_CONTINUITY_PROTOCOL.md
-12. F4 docs apenas para reconstruir causal provenance.
+5. docs/CORTEX_PHASE5_CAPABILITY_ORDER_AMENDMENT.md
+6. configs/cortex_f5_autonomy_v1.json
+7. configs/cortex_f5_capability_schema_v1.json
+8. configs/cortex_f5_capability_order_amendment_v2.json
+9. configs/cortex_f5_trajectory_schema_v1.json
+10. configs/cortex_f5_authority_schema_v1.json
+11. configs/cortex_f5_intervention_ledger_schema_v1.json
+12. docs/CORTEX_DASHBOARD_EVIDENCE_SCOPE.md
+13. docs/CORTEX_CONTINUITY_PROTOCOL.md
+14. F4 docs apenas para reconstruir causal provenance.
 
 ESTADO ESPERADO, QUE DEVE SER REVALIDADO
 - phase=F5
@@ -69,7 +71,15 @@ ESTADO ESPERADO, QUE DEVE SER REVALIDADO
 - WORLD mutation authorized=false
 - continuous authority=false
 - evolution OFF
-- 9 capabilities, 1 promoted: iron_extraction
+- 9 capabilities totais
+- ordem preregistrada preservada no protocolo v1
+- capability-order amendment validated=true
+- ordem efetiva após steam_power:
+  iron_extraction -> coal_self_sufficiency -> iron_smelting -> steam_power ->
+  copper_chain -> automation_science -> powered_manufacturing ->
+  electric_mining -> logistic_science
+- 4 promoted: iron_extraction, coal_self_sufficiency, iron_smelting, steam_power
+- next effective frontier=copper_chain
 - intervention ledger count=0
 - resume.do_not_start_another_seed=true
 

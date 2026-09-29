@@ -2537,6 +2537,25 @@ def build_phase_state(
         "automation_science",
         "logistic_science",
     ]
+    phase5_expected_amended_capabilities=[
+        "iron_extraction",
+        "coal_self_sufficiency",
+        "iron_smelting",
+        "steam_power",
+        "copper_chain",
+        "automation_science",
+        "powered_manufacturing",
+        "electric_mining",
+        "logistic_science",
+    ]
+    phase5_effective_capabilities=list(phase5_expected_capabilities)
+    phase5_amendment_path=(
+        state_root/"configs"/"cortex_f5_capability_order_amendment_v2.json"
+    )
+    phase5_amendment_exists=phase5_amendment_path.exists()
+    phase5_amendment: dict[str,Any]={}
+    phase5_amendment_error: str | None=None
+    phase5_amendment_valid=False
     phase5_development=phase5_partitions.get("development")
     phase5_pilot=phase5_partitions.get("pilot")
     phase5_held_out=phase5_partitions.get("held_out")
@@ -2630,6 +2649,50 @@ def build_phase_state(
         "cortex_f5_intervention_ledger_schema_v1.json",
         {},
     )
+
+    if phase5_amendment_exists:
+        try:
+            phase5_amendment=_load(phase5_amendment_path)
+        except (OSError,json.JSONDecodeError,TypeError) as exc:
+            phase5_amendment_error=f"{type(exc).__name__}: {exc}"
+            phase5_amendment={}
+        original_schema=phase5_amendment.get("original_capability_schema")
+        if not isinstance(original_schema,dict):
+            original_schema={}
+        reason=phase5_amendment.get("reason")
+        if not isinstance(reason,dict):
+            reason={}
+        effective_order=phase5_amendment.get("effective_order")
+        preregistered_order=phase5_amendment.get("preregistered_order")
+        unchanged_prefix=phase5_amendment.get("unchanged_promoted_prefix")
+        phase5_amendment_valid=(
+            phase5_amendment_error is None
+            and phase5_amendment.get("schema_version")
+            =="cortex_f5_capability_order_amendment_v2"
+            and phase5_amendment.get("amendment_id")
+            =="cortex-f5-factorio-2-tech-tree-order-amendment-20260929"
+            and phase5_amendment.get("protocol_id")==phase5_protocol_id
+            and phase5_amendment.get("status")
+            =="accepted_after_live_technology_validation"
+            and phase5_amendment.get("effective_after_capability")=="steam_power"
+            and original_schema.get("path")
+            =="configs/cortex_f5_capability_schema_v1.json"
+            and original_schema.get("sha256")
+            ==phase5_artifact_hashes.get("cortex_f5_capability_schema_v1.json")
+            and preregistered_order==phase5_expected_capabilities
+            and effective_order==phase5_expected_amended_capabilities
+            and unchanged_prefix==phase5_expected_capabilities[:4]
+            and set(effective_order or [])==set(phase5_expected_capabilities)
+            and len(effective_order or [])==len(phase5_expected_capabilities)
+            and phase5_amendment.get("preserves_seed_partitions") is True
+            and phase5_amendment.get("preserves_authority_contract") is True
+            and phase5_amendment.get("preserves_hard_postconditions") is True
+            and reason.get("code")
+            =="factorio_2_0_technology_dependency_incompatibility"
+        )
+        if phase5_amendment_valid:
+            phase5_effective_capabilities=list(effective_order)
+
     phase5_required_trajectory_fields=[
         "state",
         "candidate_options",
@@ -3554,6 +3617,15 @@ def build_phase_state(
             )
         )
     )
+    phase5_achieved_set=set(phase5_achieved_capabilities)
+    phase5_next_capability=next(
+        (
+            capability
+            for capability in phase5_effective_capabilities
+            if capability not in phase5_achieved_set
+        ),
+        None,
+    )
 
     phase2_delivery_actuator_canary_path=(
         state_root
@@ -3802,8 +3874,8 @@ def build_phase_state(
         action=(
             "F5-C steam_power capability promoted with iron_extraction, "
             "coal_self_sufficiency and iron_smelting surviving; continue "
-            "deterministic baseline with electric_mining under ambient A0 and "
-            "exactly one expiring A2 grant per Option"
+            f"deterministic baseline with {phase5_next_capability} under "
+            "ambient A0 and exactly one expiring A2 grant per Option"
         )
     elif phase5c_smelting_valid:
         action=(
@@ -4221,9 +4293,32 @@ def build_phase_state(
             "continuous_evolution":phase5_evolution.get(
                 "continuous_evolution"
             ),
-            "capability_total":len(phase5_expected_capabilities),
-            "capabilities":phase5_expected_capabilities,
+            "capability_total":len(phase5_effective_capabilities),
+            "capabilities":phase5_effective_capabilities,
+            "preregistered_capabilities":phase5_expected_capabilities,
             "achieved_capabilities":phase5_achieved_capabilities,
+            "next_capability":phase5_next_capability,
+            "capability_order_amendment":{
+                "path":str(phase5_amendment_path),
+                "exists":phase5_amendment_exists,
+                "validated":phase5_amendment_valid,
+                "sha256":(
+                    _sha256(phase5_amendment_path)
+                    if phase5_amendment_exists
+                    else None
+                ),
+                "schema_version":phase5_amendment.get("schema_version"),
+                "amendment_id":phase5_amendment.get("amendment_id"),
+                "effective_after_capability":phase5_amendment.get(
+                    "effective_after_capability"
+                ),
+                "reason_code":(
+                    phase5_amendment.get("reason",{}).get("code")
+                    if isinstance(phase5_amendment.get("reason"),dict)
+                    else None
+                ),
+                "read_error":phase5_amendment_error,
+            },
             "seed_partitions":{
                 "development":phase5_development,
                 "pilot":phase5_pilot,

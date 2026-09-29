@@ -3513,6 +3513,87 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
         ==0.0
     )
 
+    preregistered_order=[
+        "iron_extraction",
+        "coal_self_sufficiency",
+        "iron_smelting",
+        "steam_power",
+        "electric_mining",
+        "copper_chain",
+        "powered_manufacturing",
+        "automation_science",
+        "logistic_science",
+    ]
+    effective_order=[
+        "iron_extraction",
+        "coal_self_sufficiency",
+        "iron_smelting",
+        "steam_power",
+        "copper_chain",
+        "automation_science",
+        "powered_manufacturing",
+        "electric_mining",
+        "logistic_science",
+    ]
+    amendment=configs/"cortex_f5_capability_order_amendment_v2.json"
+    amendment_payload={
+        "schema_version":"cortex_f5_capability_order_amendment_v2",
+        "amendment_id":"cortex-f5-factorio-2-tech-tree-order-amendment-20260929",
+        "protocol_id":f5_protocol_id,
+        "status":"accepted_after_live_technology_validation",
+        "effective_after_capability":"steam_power",
+        "original_capability_schema":{
+            "path":"configs/cortex_f5_capability_schema_v1.json",
+            "sha256":module._sha256(capability_schema),
+        },
+        "preregistered_order":preregistered_order,
+        "effective_order":effective_order,
+        "unchanged_promoted_prefix":preregistered_order[:4],
+        "preserves_seed_partitions":True,
+        "preserves_authority_contract":True,
+        "preserves_hard_postconditions":True,
+        "reason":{
+            "code":"factorio_2_0_technology_dependency_incompatibility",
+        },
+    }
+    amendment.write_text(json.dumps(amendment_payload)+"\n")
+    f5c_amended=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert f5c_amended["phase5_protocol"]["validated"] is True
+    assert f5c_amended["phase5_protocol"]["preregistered_capabilities"]==(
+        preregistered_order
+    )
+    assert f5c_amended["phase5_protocol"]["capabilities"]==effective_order
+    assert f5c_amended["phase5_protocol"]["next_capability"]=="copper_chain"
+    assert (
+        f5c_amended["phase5_protocol"]["capability_order_amendment"]["validated"]
+        is True
+    )
+    assert "copper_chain" in f5c_amended["resume"]["action"]
+
+    amendment_invalid=json.loads(amendment.read_text())
+    amendment_invalid["original_capability_schema"]["sha256"]="0"*64
+    amendment.write_text(json.dumps(amendment_invalid)+"\n")
+    f5c_bad_amendment=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert (
+        f5c_bad_amendment["phase5_protocol"]["capability_order_amendment"][
+            "validated"
+        ]
+        is False
+    )
+    assert f5c_bad_amendment["phase5_protocol"]["capabilities"]==(
+        preregistered_order
+    )
+    assert f5c_bad_amendment["phase5_protocol"]["next_capability"]==(
+        "electric_mining"
+    )
+    amendment.unlink()
+
     steam_invalid=dict(steam_payload)
     steam_invalid["capability_gate"]=dict(steam_payload["capability_gate"])
     steam_invalid["capability_gate"]["electric_consumer_supplied"]=False
