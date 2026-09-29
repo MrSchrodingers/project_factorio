@@ -132,7 +132,7 @@ def test_compiled_steam_power_uses_native_triggers_real_load_and_survival() -> N
     assert "cortex_pipe_required_total=" in code
     assert "cortex_pipe_iron_shortfall=max(" in code
     assert "cortex_pipe_topup_ore=extract_item(" in code
-    assert "cortex_pipe_topup_coal=extract_item(" in code
+    assert "cortex_pipe_topup_coal_available=inspect_inventory()" in code
     assert "quantity=cortex_pipe_to_craft" in code
     assert "crafted pipe inventory below dry-run requirement" in code
     assert "cortex_power_tap_count=0" in code
@@ -143,6 +143,16 @@ def test_compiled_steam_power_uses_native_triggers_real_load_and_survival() -> N
     assert "cortex_iron_reserve_recovery_refuel=0" in code
     assert "cortex_iron_reserve_after_recovery" in code
     assert "endogenous iron reserve recovery failed" in code
+    assert "cortex_recovery_coal_available" not in code
+    assert "endogenous coal reserve below iron reserve recovery" not in code
+    recovery=code[code.index("cortex_iron_reserve_recovery_refuel=0"):]
+    recovery=recovery.split("cortex_survival_iron_draw=extract_item(",1)[0]
+    assert "insert_item(\n        Prototype.Coal" not in recovery
+    assert "cortex_coal_reserve_target=13" in code
+    assert "cortex_coal_reserve_recovery_refuel=0" in code
+    assert "endogenous coal operating reserve not met" in code
+    assert "endogenous coal reserve below survival draw" in code
+    assert "cortex_survival_coal_draw=3" in code
     assert "cortex_trigger_iron_plates < 50" in code
     assert "cortex_trigger_copper_plates < 10" in code
     assert "pickup_entity(cortex_copper_furnace)" in code
@@ -211,5 +221,12 @@ def test_steam_power_runner_budget_covers_infrastructure_topup() -> None:
         "consumer_electrical_id",
         "iron_reserve_recovery_refuel",
         "iron_reserve_after_recovery",
+        "coal_reserve_before",
+        "coal_reserve_target",
+        "coal_reserve_shortfall",
+        "coal_reserve_draw",
+        "coal_reserve_recovery_refuel",
+        "coal_reserve_recovery_window",
+        "coal_reserve_ready",
     ):
         assert f'"{name}"' in source

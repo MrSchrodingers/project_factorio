@@ -49,6 +49,8 @@ PIPE_TOPUP_COAL=1
 PIPE_SMELT_SECONDS_PER_PLATE=4
 PIPE_MIN_TOPUP_WINDOW_SECONDS=10
 SURVIVAL_COAL_DRAW=3
+COAL_OPERATING_RESERVE=BOILER_COAL+PIPE_TOPUP_COAL+SURVIVAL_COAL_DRAW+1
+COAL_RESERVE_RECOVERY_WINDOW_SECONDS=30
 IRON_SURVIVAL_ORE_DRAW=2
 IRON_RESERVE_RECOVERY_WINDOW_SECONDS=20
 IRON_TRIGGER_WINDOW_SECONDS=190
@@ -260,6 +262,8 @@ def compose_steam_power_option(
         "pipe_smelt_seconds_per_plate":PIPE_SMELT_SECONDS_PER_PLATE,
         "pipe_min_topup_window_seconds":PIPE_MIN_TOPUP_WINDOW_SECONDS,
         "survival_coal_draw":SURVIVAL_COAL_DRAW,
+        "coal_operating_reserve":COAL_OPERATING_RESERVE,
+        "coal_reserve_recovery_window_seconds":COAL_RESERVE_RECOVERY_WINDOW_SECONDS,
         "iron_survival_ore_draw":IRON_SURVIVAL_ORE_DRAW,
         "iron_reserve_recovery_window_seconds":IRON_RESERVE_RECOVERY_WINDOW_SECONDS,
         "iron_trigger_window_seconds":IRON_TRIGGER_WINDOW_SECONDS,

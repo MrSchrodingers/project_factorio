@@ -99,6 +99,8 @@ def compile_steam_power(operation: StructuralOperation) -> list[str]:
     pipe_smelt_seconds=_positive_int(params,"pipe_smelt_seconds_per_plate")
     pipe_min_window=_positive_int(params,"pipe_min_topup_window_seconds")
     survival_coal=_positive_int(params,"survival_coal_draw")
+    coal_reserve=_positive_int(params,"coal_operating_reserve")
+    coal_reserve_window=_positive_int(params,"coal_reserve_recovery_window_seconds")
     survival_iron=_positive_int(params,"iron_survival_ore_draw")
     reserve_window=_positive_int(params,"iron_reserve_recovery_window_seconds")
     iron_window=_positive_int(params,"iron_trigger_window_seconds")
@@ -243,6 +245,72 @@ def compile_steam_power(operation: StructuralOperation) -> list[str]:
         f"    quantity={copper_ore},",
         ")",
         "pickup_entity(cortex_copper_furnace)",
+        (
+            "cortex_coal_reserve_before=inspect_inventory()"
+            f"[{_prototype('coal')}]"
+        ),
+        f"cortex_coal_reserve_target={coal_reserve}",
+        "cortex_coal_reserve_recovery_refuel=0",
+        "cortex_coal_reserve_recovery_window=0",
+        "cortex_coal_reserve_draw=0",
+        (
+            "cortex_coal_reserve_shortfall=max("
+            "0,cortex_coal_reserve_target-cortex_coal_reserve_before)"
+        ),
+        "if cortex_coal_reserve_shortfall>0:",
+        (
+            "    cortex_coal_reserve_buffer_available=inspect_inventory("
+            "cortex_coal_buffer)"
+            f"[{_prototype('coal')}]"
+        ),
+        (
+            "    if cortex_coal_reserve_buffer_available < "
+            "cortex_coal_reserve_shortfall:"
+        ),
+        (
+            "        cortex_coal_reserve_player_available=inspect_inventory()"
+            f"[{_prototype('coal')}]"
+        ),
+        "        if cortex_coal_reserve_player_available < 1:",
+        "            raise RuntimeError('no endogenous coal available for reserve recovery')",
+        "        cortex_coal_extractor=insert_item(",
+        f"            {_prototype('coal')},",
+        "            cortex_coal_extractor,",
+        "            quantity=1,",
+        "        )",
+        "        cortex_coal_reserve_recovery_refuel=1",
+        f"        cortex_coal_reserve_recovery_window={coal_reserve_window}",
+        "        sleep(cortex_coal_reserve_recovery_window)",
+        (
+            "    cortex_coal_reserve_player_now=inspect_inventory()"
+            f"[{_prototype('coal')}]"
+        ),
+        (
+            "    cortex_coal_reserve_shortfall=max("
+            "0,cortex_coal_reserve_target-cortex_coal_reserve_player_now)"
+        ),
+        (
+            "    cortex_coal_reserve_buffer_available=inspect_inventory("
+            "cortex_coal_buffer)"
+            f"[{_prototype('coal')}]"
+        ),
+        (
+            "    if cortex_coal_reserve_buffer_available < "
+            "cortex_coal_reserve_shortfall:"
+        ),
+        "        raise RuntimeError('endogenous coal reserve recovery failed')",
+        "    if cortex_coal_reserve_shortfall>0:",
+        "        cortex_coal_reserve_draw=extract_item(",
+        f"            {_prototype('coal')},",
+        "            cortex_coal_buffer,",
+        "            quantity=cortex_coal_reserve_shortfall,",
+        "        )",
+        (
+            "cortex_coal_reserve_ready=inspect_inventory()"
+            f"[{_prototype('coal')}]"
+        ),
+        "if cortex_coal_reserve_ready < cortex_coal_reserve_target:",
+        "    raise RuntimeError('endogenous coal operating reserve not met')",
         f"craft_item({_prototype('small-electric-pole')},quantity=2)",
         f"craft_item({_prototype('inserter')},quantity=1)",
         f"craft_item({_prototype('offshore-pump')},quantity=1)",
@@ -336,24 +404,19 @@ def compile_steam_power(operation: StructuralOperation) -> list[str]:
             f"[{_prototype('iron-ore')}]"
         ),
         (
-            "    cortex_pipe_topup_coal_available=inspect_inventory("
-            "cortex_coal_buffer)"
+            "    cortex_pipe_topup_coal_available=inspect_inventory()"
             f"[{_prototype('coal')}]"
         ),
         "    if cortex_pipe_topup_iron_available < cortex_pipe_iron_shortfall:",
         "        raise RuntimeError('endogenous iron stock below dynamic pipe top-up')",
         f"    if cortex_pipe_topup_coal_available < {pipe_topup_coal}:",
-        "        raise RuntimeError('endogenous coal stock below dynamic pipe top-up')",
+        "        raise RuntimeError('endogenous coal reserve below dynamic pipe top-up')",
         "    cortex_pipe_topup_ore=extract_item(",
         f"        {_prototype('iron-ore')},",
         "        cortex_iron_buffer,",
         "        quantity=cortex_pipe_iron_shortfall,",
         "    )",
-        "    cortex_pipe_topup_coal=extract_item(",
-        f"        {_prototype('coal')},",
-        "        cortex_coal_buffer,",
-        f"        quantity={pipe_topup_coal},",
-        "    )",
+        f"    cortex_pipe_topup_coal={pipe_topup_coal}",
         "    cortex_iron_furnace=insert_item(",
         f"        {_prototype('coal')},",
         "        cortex_iron_furnace,",
@@ -506,16 +569,12 @@ def compile_steam_power(operation: StructuralOperation) -> list[str]:
             "cortex_consumer.electrical_id is not None)"
         ),
         (
-            "cortex_survival_coal_available=inspect_inventory(cortex_coal_buffer)"
+            "cortex_survival_coal_available=inspect_inventory()"
             f"[{_prototype('coal')}]"
         ),
         f"if cortex_survival_coal_available < {survival_coal}:",
-        "    raise RuntimeError('endogenous coal stock below survival draw')",
-        "cortex_survival_coal_draw=extract_item(",
-        f"    {_prototype('coal')},",
-        "    cortex_coal_buffer,",
-        f"    quantity={survival_coal},",
-        ")",
+        "    raise RuntimeError('endogenous coal reserve below survival draw')",
+        f"cortex_survival_coal_draw={survival_coal}",
         "cortex_iron_extractor=insert_item(",
         f"    {_prototype('coal')},",
         "    cortex_iron_extractor,",
@@ -539,23 +598,10 @@ def compile_steam_power(operation: StructuralOperation) -> list[str]:
         "cortex_iron_reserve_after_recovery=cortex_survival_iron_available",
         f"if cortex_survival_iron_available < {survival_iron}:",
         (
-            "    cortex_recovery_coal_available=inspect_inventory("
-            "cortex_coal_buffer)"
-            f"[{_prototype('coal')}]"
+            "    # The survival draw already refueled the iron drill immediately "
+            "before this branch. Recovery reuses that endogenous fuel instead "
+            "of consuming a second coal unit."
         ),
-        f"    if cortex_recovery_coal_available < {survival_coal + 1}:",
-        "        raise RuntimeError('endogenous coal stock below iron reserve recovery')",
-        "    cortex_iron_reserve_recovery_coal=extract_item(",
-        f"        {_prototype('coal')},",
-        "        cortex_coal_buffer,",
-        "        quantity=1,",
-        "    )",
-        "    cortex_iron_extractor=insert_item(",
-        f"        {_prototype('coal')},",
-        "        cortex_iron_extractor,",
-        "        quantity=1,",
-        "    )",
-        "    cortex_iron_reserve_recovery_refuel=1",
         f"    sleep({reserve_window})",
         (
             "    cortex_iron_reserve_after_recovery=inspect_inventory("
@@ -670,6 +716,19 @@ def compile_steam_power(operation: StructuralOperation) -> list[str]:
         "    'pipe_topup_plates':cortex_pipe_topup_plates,",
         "    'pipe_topup_window':cortex_pipe_topup_window,",
         "    'pipe_inventory_ready':cortex_pipe_inventory_ready,",
+        "    'coal_reserve_before':cortex_coal_reserve_before,",
+        "    'coal_reserve_target':cortex_coal_reserve_target,",
+        "    'coal_reserve_shortfall':cortex_coal_reserve_shortfall,",
+        "    'coal_reserve_draw':cortex_coal_reserve_draw,",
+        (
+            "    'coal_reserve_recovery_refuel':"
+            "cortex_coal_reserve_recovery_refuel,"
+        ),
+        (
+            "    'coal_reserve_recovery_window':"
+            "cortex_coal_reserve_recovery_window,"
+        ),
+        "    'coal_reserve_ready':cortex_coal_reserve_ready,",
         "    'iron_extraction_survives':cortex_iron_extraction_survives,",
         "    'coal_self_sufficiency_survives':cortex_coal_self_sufficiency_survives,",
         "    'iron_smelting_survives':cortex_iron_smelting_survives,",
