@@ -5,10 +5,10 @@
 **Repository:** `MrSchrodingers/project_factorio`
 **Live checkout:** `/srv/factorio-ai-lab`
 **Transition branch:** `research/cortex-v1`
-**Current scientific phase:** **F5 ACTIVE — F5-A PROTOCOL FREEZE / A0**
+**Current scientific phase:** **F5 ACTIVE — F5-B PASS / A0 AMBIENT**
 **F3:** COMPLETE / F3-C
 **F4:** COMPLETE / F4-C
-**F5:** ACTIVE / F5-A · next F5-B
+**F5:** ACTIVE / F5-B PASS · next F5-C
 **Continuous autonomous authority:** OFF / forbidden in F5
 **Confirmatory seeds:** untouched / frozen
 **SentinelX context:** sxc_4557STHZ — always resume latest revision
@@ -63,8 +63,11 @@ Expected scientific state:
 - phase4_checkpoint=F4-C;
 - phase4_exit_gate.validated=true;
 - phase4_evaluation_inference.decision=positive;
-- phase5_checkpoint=F5-A;
-- phase5_next_checkpoint=F5-B;
+- phase5_checkpoint=F5-B;
+- phase5_next_checkpoint=F5-C;
+- phase5_authority_bridge.validated=true;
+- phase5_authority_bridge.ambient_authority=A0;
+- phase5_authority_bridge.max_bounded_grant=A2;
 - phase5_protocol.validated=true;
 - phase5_protocol.authority_level=A0;
 - phase5_protocol.world_mutation_authorized=false;

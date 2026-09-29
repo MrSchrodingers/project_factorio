@@ -281,3 +281,21 @@ F5-A therefore changes protocol and presentation semantics only. It cannot
 create execution grants, acquire a WORLD mutation lease, execute RCON/FLE
 actions or count historical production as a promoted F5 capability.
 
+---
+
+## 16. F5-B authority semantics
+
+When phase5_checkpoint=F5-B, the dashboard must distinguish ambient authority
+from grant capability:
+
+- ambient authority remains A0;
+- A2 ONE-SHOT READY means the control plane can issue one explicit expiring
+  grant for one exact transactional Option;
+- it does not mean a runner, scheduler or policy has EXECUTE authority;
+- 0/9 physical capabilities remains correct until F5-C produces measured
+  physical evidence;
+- historical G97/UCB/curriculum remains historical.
+
+The F5-B audit itself performs no WorldLease acquisition, grant issuance, live
+Option execution or WORLD mutation.
+

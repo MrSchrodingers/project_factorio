@@ -7,7 +7,7 @@
 **Branch de transição:** `research/cortex-v1`
 **Baseline pré-Cortex:** `74a1bf9c0f8792a68d7252b11d477835ec93d508`
 **Tag de baseline:** `cortex-pre-research-baseline-20260923`
-**Status:** F5 ACTIVE em F5-A / A0 OBSERVE ONLY — F4-C COMPLETE; continuous authority e evolution OFF
+**Status:** F5 ACTIVE em F5-B PASS / A0 AMBIENT — F5-C NEXT; F4-C COMPLETE; continuous authority e evolution OFF
 
 > Este arquivo é o contrato científico e operacional do Factorio AI Lab. Em caso de perda de
 > contexto de conversa, troca de operador, troca de modelo ou reinício do host, um operador sem
@@ -19,10 +19,11 @@
 
 - F4 Exit Gate: PASS; causal memory transfer positive em 20/20 held-out pairs.
 - F5-A: PASS; protocol/schemas/partitions congelados.
-- Authority atual: A0 / observe only.
+- F5-B: PASS; A2 one-shot authority bridge validada sem mutação live.
+- Authority ambiente: A0 / observe only; A2 apenas por grant one-shot explícita.
 - WORLD mutation em F5-A: proibida.
 - Legacy evolution: OFF.
-- Próximo checkpoint: F5-B bounded authority bridge.
+- Próximo checkpoint: F5-C deterministic autonomous baseline.
 - Implementação F5-A: 6f998777a1d8304e5481df8f299d03dc630b0550.
 - Fonte operacional: runs/cortex_phase_state.json.
 - Protocolo F5: docs/CORTEX_PHASE5_AUTONOMY_PROTOCOL.md.

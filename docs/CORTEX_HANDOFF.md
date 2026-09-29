@@ -11,9 +11,9 @@ runs/cortex_phase_state.json. Não usar memória conversacional como autoridade 
 - F0/F1/F2/F3: concluídas
 - F4: COMPLETE / F4-C
 - F4 causal memory inference: positive
-- F5: ACTIVE / F5-A protocol freeze
-- Próximo checkpoint: F5-B — bounded authority bridge
-- Authority Cortex atual: A0 / observe only
+- F5: ACTIVE / F5-B bounded authority bridge PASS
+- Próximo checkpoint: F5-C — deterministic autonomous baseline
+- Authority Cortex ambiente: A0 / observe only; A2 somente por grant one-shot explícita
 - WORLD mutation autorizada em F5-A: não
 - Continuous authority: proibida em F5
 - Legacy evolution loop: OFF
@@ -21,8 +21,9 @@ runs/cortex_phase_state.json. Não usar memória conversacional como autoridade 
 - WORLD live: conectado; no fechamento F5-A, 0 entities
 - Capabilities F5 promovidas: 0 / 9
 - Intervention ledger: 0
-- Commit de implementação F5-A: 6f998777a1d8304e5481df8f299d03dc630b0550
-- Dashboard release F5-A: 6f998777a1d8304e5481df8f299d03dc630b0550
+- Commit F5-A: 6f998777a1d8304e5481df8f299d03dc630b0550
+- Commit F5-B: 080cd1544da1573cdf21a7c912e7388df45ea383
+- Audit F5-B SHA-256: 9bcc4328f13e8dabf250bfe3a2d09ffd16994444571217825491ce703737cc2a
 
 ## F4-C encerrada
 
@@ -87,12 +88,15 @@ A UI atual separa:
 O antigo 6% não é mais progresso corrente. G97 e Online placement learning
 podem aparecer apenas como HISTÓRICO/congelado.
 
+## F5-B encerrada
+
+F5-B foi validada em test/shadow, sem mutar Factorio. A bridge reusa PersistentOptionGrantLedger, OptionExecutionBoundary e WorldLease attestation. A2 é estritamente one-shot, expira, é consumida antes da mutação e não pode ser emitida pela learned policy.
+
 ## Próxima ação permitida
 
-F5-B — bounded authority bridge.
+F5-C — deterministic autonomous baseline.
 
-Objetivo: provar que o Cortex pode receber uma grant A2 para exatamente uma
-option transacional, com:
+Objetivo F5-C: usar o stack determinístico para começar a construir fisicamente a capability ladder, concedendo no máximo uma grant A2 por Option, com:
 
 - scope explícito;
 - max_executions=1;
@@ -105,7 +109,7 @@ option transacional, com:
 - nenhuma auto-elevação de authority pela policy;
 - nenhum scheduler contínuo.
 
-Enquanto F5-B não estiver validada, manter A0 e não mutar o WORLD.
+F5-C deve iniciar a primeira evidência física F5. A authority ambiente continua A0; cada mutação exige uma nova grant A2 one-shot e WorldLease válida.
 
 ## Regra de retomada
 
@@ -127,8 +131,8 @@ Estado esperado:
 - phase=F5
 - phase_status=active
 - phase4_checkpoint=F4-C
-- phase5_checkpoint=F5-A
-- phase5_next_checkpoint=F5-B
+- phase5_checkpoint=F5-B
+- phase5_next_checkpoint=F5-C
 - phase5_protocol.validated=true
 - phase5_protocol.authority_level=A0
 - phase5_protocol.world_mutation_authorized=false

@@ -1,8 +1,8 @@
 # CORTEX Phase 5 — Autonomous Factory Bootstrap & Learned Control
 
-Status: **F5-A / protocol freeze**  
-Authority: **A0 / observe only**  
-WORLD mutation: **forbidden in F5-A**  
+Status: **F5-B PASS / bounded authority bridge**  
+Authority: **A0 ambient / A2 explicit one-shot grant available**  
+WORLD mutation: **not performed by F5-B; first physical F5 use belongs to F5-C**  
 Legacy evolution loop: **OFF**  
 Continuous authority: **forbidden throughout F5**
 
@@ -152,3 +152,29 @@ F5-A exits only when:
 4. WORLD remains live but unmodified;
 5. legacy evolution remains OFF;
 6. the next authorized engineering task is F5-B bounded authority bridge.
+
+## 10. F5-B exit condition
+
+F5-B is PASS.
+
+Canonical evidence:
+
+- implementation commit: 080cd1544da1573cdf21a7c912e7388df45ea383
+- audit: runs/audits/cortex_f5b_authority_bridge.json
+- audit SHA-256: 9bcc4328f13e8dabf250bfe3a2d09ffd16994444571217825491ce703737cc2a
+- targeted authority tests: PASS
+- ambient authority: A0
+- maximum bounded grant: A2
+- max_executions: 1
+- continuous authority: false
+- policy self-grant: forbidden
+- WorldLease acquired by audit: false
+- grant issued by audit: false
+- live Option executed by audit: false
+- WORLD mutation by audit: false
+- intervention ledger count: 0
+
+F5-B proves the control-plane boundary. It does not count as physical factory
+progress. The next checkpoint is F5-C deterministic autonomous baseline, whose
+first real Option must use the same A2 grant/lease/transaction path.
+

@@ -24,11 +24,11 @@ LINHAGEM CIENTÍFICA
 - F0/F1/F2/F3: complete
 - F4: complete / F4-C
 - F4 causal held-out inference: positive
-- F5: active / F5-A
-- next checkpoint: F5-B bounded authority bridge
+- F5: active / F5-B PASS
+- next checkpoint: F5-C deterministic autonomous baseline
 - implementation F5-A: 6f998777a1d8304e5481df8f299d03dc630b0550
 - continuous authority: forbidden
-- current authority: A0 observe-only
+- current ambient authority: A0 observe-only; A2 only by explicit one-shot grant
 - legacy evolution: OFF
 
 ANTES DE QUALQUER MUTAÇÃO
@@ -62,8 +62,8 @@ ESTADO ESPERADO, QUE DEVE SER REVALIDADO
 - phase=F5
 - phase_status=active
 - phase4_checkpoint=F4-C
-- phase5_checkpoint=F5-A
-- phase5_next_checkpoint=F5-B
+- phase5_checkpoint=F5-B
+- phase5_next_checkpoint=F5-C
 - F5 protocol validated=true
 - authority=A0
 - WORLD mutation authorized=false
@@ -93,12 +93,20 @@ F5-A EVIDENCE
 - dashboard current story is F5-A/A0; G97/UCB/curriculum are historical only
 - WORLD at closure was connected and empty (0 entities)
 
+F5-B EVIDENCE
+- implementation commit=080cd1544da1573cdf21a7c912e7388df45ea383
+- canonical audit=runs/audits/cortex_f5b_authority_bridge.json
+- audit SHA-256=9bcc4328f13e8dabf250bfe3a2d09ffd16994444571217825491ce703737cc2a
+- ambient authority=A0
+- bounded grant=A2
+- max_executions=1
+- continuous authority=false
+- policy self-grant=false
+- no WorldLease/grant/live execution/world mutation during audit
+- next=F5-C deterministic autonomous baseline
+
 PRÓXIMO TRABALHO
-Implementar F5-B bounded authority bridge SEM executar continuous authority.
-Primeiro prove o contrato A2 em teste/shadow: uma grant, uma option,
-max_executions=1, expiration, exclusive lease, validation, measurement,
-commit/rollback e fail-closed. Só depois de código+artefato+testes+commit
-considerar um canário live explicitamente bounded.
+Implementar F5-C deterministic autonomous baseline. Começar pela primeira capability física, usando o stack determinístico e exatamente uma grant A2 por Option. Cada ação deve preservar Observation -> Option -> Validate -> Authority Grant -> Execute -> Measure -> Commit/Rollback, survival invariant e intervention ledger. Não introduzir learned policy control ainda.
 
 NÃO:
 - reativar evolution;

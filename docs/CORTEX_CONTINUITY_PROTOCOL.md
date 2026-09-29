@@ -187,3 +187,18 @@ F5-A é observe-only. Se phase5_protocol.validated não for true, ou se houver e
 Em F5, resume.do_not_start_another_seed=true também impede interpretar o próximo checkpoint como permissão para executar experimento. F5-B deve primeiro validar o authority bridge em teste/shadow.
 
 Implementation F5-A: 6f998777a1d8304e5481df8f299d03dc630b0550.
+
+### F5-B closure
+
+- implementation: 080cd1544da1573cdf21a7c912e7388df45ea383
+- canonical audit: runs/audits/cortex_f5b_authority_bridge.json
+- audit SHA-256: 9bcc4328f13e8dabf250bfe3a2d09ffd16994444571217825491ce703737cc2a
+- phase5_checkpoint: F5-B
+- phase5_next_checkpoint: F5-C
+- ambient authority: A0
+- A2 is one-shot only
+- audit performed no live mutation
+
+A future F5-C execution must not infer authority from phase membership. It must
+obtain a fresh A2 grant bound to one exact Option and active WorldLease.
+
