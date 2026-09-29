@@ -513,3 +513,50 @@ def fast_reposition(
         agent_idx=agent_idx,
         raw_response=str(response),
     )
+
+
+
+def bind_fast_reposition_tool(
+    environment: Any,
+    *,
+    tool_name: str="cortex_fast_reposition",
+) -> str:
+    """Expose fast_reposition inside FLE eval as a transactional tool.
+
+    Binding itself does not mutate Factorio. The bound callable mutates only
+    when invoked from an evaluated Option action, where normal checkpoint
+    rollback semantics apply.
+    """
+    if not tool_name.isidentifier() or tool_name.startswith("_"):
+        raise ValueError("tool_name must be a public Python identifier")
+    unwrapped=getattr(environment,"unwrapped",environment)
+    instance=getattr(unwrapped,"instance",None)
+    if instance is None:
+        raise TypeError("environment does not expose a FactorioInstance")
+    namespaces=getattr(instance,"namespaces",None)
+    if not isinstance(namespaces,(list,tuple)) or not namespaces:
+        raise TypeError("environment does not expose FLE namespaces")
+
+    for agent_idx,namespace in enumerate(namespaces):
+        def bound(
+            position: Any,
+            *,
+            _agent_idx: int=agent_idx,
+            _namespace: Any=namespace,
+        ) -> Any:
+            x=getattr(position,"x",None)
+            y=getattr(position,"y",None)
+            if not isinstance(x,(int,float)) or isinstance(x,bool):
+                raise TypeError("fast reposition position.x must be numeric")
+            if not isinstance(y,(int,float)) or isinstance(y,bool):
+                raise TypeError("fast reposition position.y must be numeric")
+            fast_reposition(
+                environment,
+                x=float(x),
+                y=float(y),
+                agent_idx=_agent_idx,
+            )
+            return getattr(_namespace,"player_location",position)
+
+        setattr(namespace,tool_name,bound)
+    return tool_name

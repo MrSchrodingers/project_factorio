@@ -9,6 +9,7 @@ incumbent iron capability survives.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
@@ -68,6 +69,7 @@ REFUSAL_COAL_PROVENANCE="f5c_coal_provenance_mismatch"
 REFUSAL_COAL_SURVEY="f5c_coal_resource_survey_required"
 REFUSAL_COAL_TARGET="f5c_coal_target_unavailable"
 REFUSAL_COAL_INCUMBENT="f5c_coal_incumbent_iron_required"
+REFUSAL_COAL_BOOTSTRAP_ROUTE="f5c_coal_bootstrap_route_required"
 
 
 def coal_cell_reserve(
@@ -231,6 +233,49 @@ class CoalSelfSufficiencyOptionResult:
         return self.plan is not None
 
 
+def _validated_bootstrap_route(
+    rows: Sequence[Mapping[str,Any]] | None,
+) -> tuple[dict[str,Any],...] | None:
+    if rows is None or len(rows)!=len(BOOTSTRAP_RESOURCES):
+        return None
+    validated: list[dict[str,Any]]=[]
+    for template,raw in zip(BOOTSTRAP_RESOURCES,rows,strict=True):
+        if not isinstance(raw,Mapping):
+            return None
+        if str(raw.get("resource") or "")!=template["resource"]:
+            return None
+        if raw.get("quantity")!=template["quantity"]:
+            return None
+        if raw.get("radius")!=template.get("radius"):
+            return None
+        position=raw.get("position")
+        if not isinstance(position,Mapping):
+            return None
+        x=position.get("x")
+        y=position.get("y")
+        if (
+            not isinstance(x,(int,float))
+            or isinstance(x,bool)
+            or not isinstance(y,(int,float))
+            or isinstance(y,bool)
+            or not math.isfinite(float(x))
+            or not math.isfinite(float(y))
+        ):
+            return None
+        waypoints=raw.get("validated_path_waypoints")
+        if (
+            not isinstance(waypoints,int)
+            or isinstance(waypoints,bool)
+            or waypoints<=0
+        ):
+            return None
+        row=dict(template)
+        row["position"]={"x":float(x),"y":float(y)}
+        row["validated_path_waypoints"]=int(waypoints)
+        validated.append(row)
+    return tuple(validated)
+
+
 def compose_coal_self_sufficiency_option(
     option: OptionRequest,
     *,
@@ -239,6 +284,7 @@ def compose_coal_self_sufficiency_option(
     resources: ResourceSurvey | None,
     incumbent_iron_extractor_position: tuple[float,float] | None,
     incumbent_iron_buffer_position: tuple[float,float] | None,
+    bootstrap_resources: Sequence[Mapping[str,Any]] | None,
     footprints: Mapping[str,tuple[int,int]] | None=None,
 ) -> CoalSelfSufficiencyOptionResult:
     if option.kind is not OptionKind.ESTABLISH_COAL_SELF_SUFFICIENCY:
@@ -280,6 +326,18 @@ def compose_coal_self_sufficiency_option(
                 code=REFUSAL_COAL_SURVEY,
                 detail="coal self-sufficiency requires observed resource survey",
                 retriable=True,
+            ),
+        )
+    validated_bootstrap=_validated_bootstrap_route(bootstrap_resources)
+    if validated_bootstrap is None:
+        return CoalSelfSufficiencyOptionResult(
+            request=option,
+            refusal=Refusal(
+                code=REFUSAL_COAL_BOOTSTRAP_ROUTE,
+                detail=(
+                    "coal self-sufficiency requires a frozen, path-validated "
+                    "bootstrap resource route"
+                ),
             ),
         )
     if (
@@ -356,7 +414,7 @@ def compose_coal_self_sufficiency_option(
                     "target_position":{"x":target[0],"y":target[1]},
                     "placement":placement.to_dict(),
                     "bootstrap_resources":[
-                        dict(row) for row in BOOTSTRAP_RESOURCES
+                        dict(row) for row in validated_bootstrap
                     ],
                     "bootstrap_furnace_quantity":BOOTSTRAP_FURNACES,
                     "bootstrap_iron_ore_quantity":BOOTSTRAP_SMELT_IRON_ORE,
@@ -403,7 +461,14 @@ def compose_coal_self_sufficiency_option(
                 "x":incumbent_iron_buffer_position[0],
                 "y":incumbent_iron_buffer_position[1],
             },
-            "bootstrap_mode":"world_harvest_then_quarantine",
+            "bootstrap_mode":"path_validated_fast_reposition_then_harvest",
+            "bootstrap_resources":[
+                dict(row) for row in validated_bootstrap
+            ],
+            "bootstrap_path_waypoints_total":sum(
+                int(row["validated_path_waypoints"])
+                for row in validated_bootstrap
+            ),
             "bootstrap_external_injection":False,
             "world_mutation":False,
         },
@@ -461,7 +526,7 @@ def compose_coal_self_sufficiency_option(
                 float(incumbent_iron_buffer_position[1]),
             ),
             bootstrap_resources=tuple(
-                dict(row) for row in BOOTSTRAP_RESOURCES
+                dict(row) for row in validated_bootstrap
             ),
         ),
     )

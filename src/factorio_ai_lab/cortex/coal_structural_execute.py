@@ -80,7 +80,6 @@ def _harvest_lines(resources: object) -> list[str]:
     for index,raw in enumerate(resources):
         if not isinstance(raw,Mapping):
             raise TypeError("coal bootstrap resource row must be a mapping")
-        name=str(raw.get("resource") or "")
         amount=_positive_int(raw,"quantity")
         radius=raw.get("radius")
         radius_clause=""
@@ -92,10 +91,22 @@ def _harvest_lines(resources: object) -> list[str]:
             ):
                 raise ValueError("coal bootstrap radius must be positive")
             radius_clause=f", radius={float(radius)!r}"
+        position=raw.get("position")
+        waypoints=raw.get("validated_path_waypoints")
+        if not isinstance(position,Mapping):
+            raise TypeError("coal bootstrap resource requires validated position")
+        if (
+            not isinstance(waypoints,int)
+            or isinstance(waypoints,bool)
+            or waypoints<=0
+        ):
+            raise ValueError(
+                "coal bootstrap resource requires positive validated path waypoints"
+            )
         var=f"cortex_coal_bootstrap_resource_{index}"
         lines.extend((
-            f"{var}=nearest({_resource(name)})",
-            f"move_to({var})",
+            f"{var}={_position(position)}",
+            f"cortex_fast_reposition({var})",
             "harvest_resource(",
             f"    {var},",
             f"    quantity={amount}{radius_clause},",
@@ -168,7 +179,7 @@ def compile_coal_self_sufficiency(
         "pickup_entity(cortex_coal_bootstrap_furnace)",
         f"craft_item({_prototype('burner-mining-drill')}, quantity=1)",
         f"craft_item({_prototype('wooden-chest')}, quantity=2)",
-        f"move_to({_position(target)})",
+        f"cortex_fast_reposition({_position(target)})",
         "cortex_coal_extractor=place_entity(",
         f"    {_prototype('burner-mining-drill')},",
         f"    position={_position(target)},",

@@ -1,6 +1,6 @@
 import unittest
 
-from factorio_ai_lab.integrations.fle import fast_reposition
+from factorio_ai_lab.integrations.fle import bind_fast_reposition_tool, fast_reposition
 
 
 class Position:
@@ -47,6 +47,22 @@ class FastRepositionTests(unittest.TestCase):
     def test_rejects_non_finite_coordinate(self) -> None:
         with self.assertRaises(ValueError):
             fast_reposition(FakeEnvironment(), x=float("nan"), y=1.0)
+
+
+    def test_binds_reposition_inside_namespace_without_immediate_mutation(self) -> None:
+        env=FakeEnvironment()
+        namespace=env.instance.namespaces[0]
+        before=(namespace.player_location.x,namespace.player_location.y)
+
+        name=bind_fast_reposition_tool(env)
+
+        self.assertEqual(name,"cortex_fast_reposition")
+        self.assertEqual(
+            (namespace.player_location.x,namespace.player_location.y),
+            before,
+        )
+        result=namespace.cortex_fast_reposition(Position(x=12.5,y=34.5))
+        self.assertEqual((result.x,result.y),(12.5,34.5))
 
 
 if __name__ == "__main__":

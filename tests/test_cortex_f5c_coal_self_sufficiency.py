@@ -86,6 +86,33 @@ def coal_plan() -> CoalSelfSufficiencyOptionPlan:
         ),
         incumbent_iron_extractor_position=(15.0,70.0),
         incumbent_iron_buffer_position=(15.5,71.5),
+        bootstrap_resources=(
+            {
+                "resource":"stone",
+                "quantity":30,
+                "position":{"x":-46.5,"y":-0.5},
+                "validated_path_waypoints":51,
+            },
+            {
+                "resource":"coal",
+                "quantity":6,
+                "position":{"x":15.5,"y":-0.5},
+                "validated_path_waypoints":64,
+            },
+            {
+                "resource":"iron-ore",
+                "quantity":16,
+                "position":{"x":15.5,"y":70.5},
+                "validated_path_waypoints":80,
+            },
+            {
+                "resource":"wood",
+                "quantity":10,
+                "radius":24,
+                "position":{"x":0.125,"y":-18.625},
+                "validated_path_waypoints":92,
+            },
+        ),
         footprints={
             "burner-mining-drill":(2,2),
             "wooden-chest":(1,1),
@@ -140,6 +167,9 @@ def test_compiled_coal_transaction_separates_bootstrap_and_endogenous_windows() 
     assert "sleep(30)" in code
     assert "sleep(20)" in code
     assert code.count("harvest_resource(")==4
+    assert code.count("cortex_fast_reposition(")==5
+    assert "nearest(" not in code
+    assert "move_to(" not in code
     assert (
         code.index("cortex_incumbent_iron_bootstrap_removed")
         < code.index("sleep(30)")
@@ -444,3 +474,31 @@ def test_no_fuel_transition_still_requires_post_refuel_iron_survival() -> None:
     assert '"no_fuel"' in source
     assert 'after["incumbent_iron_buffer_growth"]>0' in source
     assert 'after["incumbent_iron_survives"] is True' in source
+
+
+def test_coal_option_requires_frozen_validated_bootstrap_route() -> None:
+    plan=coal_plan()
+    assert plan.prepared.preflight[
+        "bootstrap_mode"
+    ]=="path_validated_fast_reposition_then_harvest"
+    assert plan.prepared.preflight["bootstrap_path_waypoints_total"]>0
+    for row in plan.bootstrap_resources:
+        assert isinstance(row.get("position"),dict)
+        assert int(row.get("validated_path_waypoints",0))>0
+
+
+def test_coal_runner_validates_route_before_grant_and_binds_reposition() -> None:
+    source=(
+        Path(__file__).resolve().parents[1]
+        /"scripts"
+        /"run_cortex_f5c_coal_self_sufficiency.py"
+    ).read_text()
+
+    assert "def _plan_bootstrap_route" in source
+    assert "def _validated_path_waypoints" in source
+    assert "bind_fast_reposition_tool(" in source
+    assert 'record["bootstrap_route"]' in source
+    assert "coal_target_validated_path_waypoints" in source
+    assert source.index("_plan_bootstrap_route(")<source.index(
+        "bridge.issue_a2_grant("
+    )

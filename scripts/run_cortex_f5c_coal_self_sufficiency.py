@@ -26,6 +26,7 @@ from factorio_ai_lab.cortex.actions import (
     ActionRequest,
 )
 from factorio_ai_lab.cortex.coal_self_sufficiency_option import (
+    BOOTSTRAP_RESOURCES,
     compose_coal_self_sufficiency_option,
 )
 from factorio_ai_lab.cortex.f5_authority import F5BoundedAuthorityBridge
@@ -40,6 +41,7 @@ from factorio_ai_lab.instrumentation.runtime import runtime_entity_footprints
 from factorio_ai_lab.integrations.fle import (
     TransactionalFLEExecutor,
     attach_live_factorio_environment,
+    bind_fast_reposition_tool,
     enforce_minimum_eval_timeout,
     enforce_pathfinding_retry_floor,
 )
@@ -209,6 +211,94 @@ def _entity_at(
         if dx<=tolerance and dy<=tolerance:
             return row
     return None
+
+
+def _validated_path_waypoints(
+    namespace: Any,
+    *,
+    start: tuple[float,float],
+    finish: tuple[float,float],
+) -> int:
+    from fle.env.entities import Position
+
+    move_to=namespace.move_to
+    handle=move_to.request_path(
+        start=Position(x=float(start[0]),y=float(start[1])),
+        finish=Position(x=float(finish[0]),y=float(finish[1])),
+        allow_paths_through_own_entities=True,
+        resolution=-1,
+    )
+    path=move_to.get_path(handle,max_attempts=40)
+    if not path:
+        raise RuntimeError(
+            f"empty validated path from {start!r} to {finish!r}"
+        )
+    return len(path)
+
+
+def _plan_bootstrap_route(
+    namespace: Any,
+    overview: Mapping[str,Any],
+) -> tuple[tuple[dict[str,Any],...],tuple[float,float]]:
+    from fle.env.game_types import Resource
+
+    raw_points=overview.get("points")
+    points=raw_points if isinstance(raw_points,list) else []
+    player=getattr(namespace,"player_location",None)
+    if player is None:
+        raise RuntimeError("F5-C coal bootstrap route requires player location")
+    start=(float(player.x),float(player.y))
+    route: list[dict[str,Any]]=[]
+
+    for template in BOOTSTRAP_RESOURCES:
+        resource=str(template["resource"])
+        candidates: list[tuple[float,float]]=[]
+        if resource=="wood":
+            wood=namespace.nearest(Resource.Wood)
+            candidates=[(float(wood.x),float(wood.y))]
+        else:
+            for point in points:
+                if not isinstance(point,Mapping) or point.get("name")!=resource:
+                    continue
+                try:
+                    candidates.append((float(point["x"]),float(point["y"])))
+                except (KeyError,TypeError,ValueError):
+                    continue
+            candidates=sorted(
+                set(candidates),
+                key=lambda pos:(
+                    (pos[0]-start[0])**2+(pos[1]-start[1])**2,
+                    pos[0],
+                    pos[1],
+                ),
+            )[:128]
+        chosen: tuple[float,float] | None=None
+        chosen_waypoints: int | None=None
+        errors: list[str]=[]
+        for candidate in candidates:
+            try:
+                waypoints=_validated_path_waypoints(
+                    namespace,
+                    start=start,
+                    finish=candidate,
+                )
+            except Exception as exc:  # noqa: BLE001 - path probe evidence
+                errors.append(f"{candidate!r}:{type(exc).__name__}:{exc}")
+                continue
+            chosen=candidate
+            chosen_waypoints=waypoints
+            break
+        if chosen is None or chosen_waypoints is None:
+            raise RuntimeError(
+                f"no path-validated bootstrap target for {resource}: "
+                +"; ".join(errors[-5:])
+            )
+        row=dict(template)
+        row["position"]={"x":chosen[0],"y":chosen[1]}
+        row["validated_path_waypoints"]=chosen_waypoints
+        route.append(row)
+        start=chosen
+    return tuple(route),start
 
 
 IRON_TRANSITION_ENTRY_STATUSES=frozenset({"working","no_fuel"})
@@ -586,6 +676,9 @@ def run_coal(
                 env,
                 minimum_attempts=40,
             )
+            record["fle_transactional_reposition_tool"]=bind_fast_reposition_tool(
+                env
+            )
             executor=TransactionalFLEExecutor(
                 env,
                 runtime_context=lambda:{
@@ -654,6 +747,16 @@ def run_coal(
                 "totals":overview.get("totals"),
             }
 
+            bootstrap_route,bootstrap_route_end=_plan_bootstrap_route(
+                namespace,
+                overview,
+            )
+            record["bootstrap_route"]=[dict(row) for row in bootstrap_route]
+            record["bootstrap_path_waypoints_total"]=sum(
+                int(row["validated_path_waypoints"])
+                for row in bootstrap_route
+            )
+
             physical_rows=world_rows(namespace,resources=False)
             footprints=runtime_entity_footprints(instance)
             option=_option_request(
@@ -669,6 +772,7 @@ def run_coal(
                 resources=resources,
                 incumbent_iron_extractor_position=iron_extractor,
                 incumbent_iron_buffer_position=iron_buffer,
+                bootstrap_resources=bootstrap_route,
                 footprints=footprints,
             )
             if not composed.ready or composed.plan is None:
@@ -678,6 +782,19 @@ def run_coal(
                 )
                 raise RuntimeError(f"coal Option composition refused: {refusal}")
             plan=composed.plan
+            target=plan.prepared.preflight.get("target_position")
+            if not isinstance(target,Mapping):
+                raise TypeError("coal Option target_position is unavailable")
+            target_position=(float(target["x"]),float(target["y"]))
+            record["coal_target_validated_path_waypoints"]=_validated_path_waypoints(
+                namespace,
+                start=bootstrap_route_end,
+                finish=target_position,
+            )
+            record["coal_target_position"]={
+                "x":target_position[0],
+                "y":target_position[1],
+            }
             before=_namespace_measure(namespace,plan.prepared)
 
             ledger=PersistentOptionGrantLedger(ledger_path)
