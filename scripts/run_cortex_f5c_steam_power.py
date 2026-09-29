@@ -55,7 +55,7 @@ DASHBOARD_BUILD_INFO=Path(
 RUNTIME_BUILD_INFO=Path("/srv/factorio-ai-runtime/current/BUILD_INFO.json")
 ARENA="cortex_f5c_steam_power"
 OWNER="run_cortex_f5c_steam_power"
-DEFAULT_OPTION_SECONDS=420
+DEFAULT_OPTION_SECONDS=360
 DEFAULT_GRANT_TTL_SECONDS=600
 
 ServiceStateReader=Callable[[],dict[str,str]]

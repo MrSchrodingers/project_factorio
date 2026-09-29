@@ -182,7 +182,7 @@ def test_supervisor_has_bounded_steam_power_runner() -> None:
 def test_steam_power_runner_budget_covers_infrastructure_topup() -> None:
     source=(ROOT/"scripts"/"run_cortex_f5c_steam_power.py").read_text()
 
-    assert "DEFAULT_OPTION_SECONDS=420" in source
+    assert "DEFAULT_OPTION_SECONDS=360" in source
     for name in (
         "infrastructure_iron_ready",
         "infrastructure_iron_shortfall",
