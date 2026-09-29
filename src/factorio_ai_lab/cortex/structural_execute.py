@@ -15,9 +15,6 @@ from typing import Any
 
 from fle.env.game_types import Prototype, Resource
 
-from factorio_ai_lab.cortex.coal_structural_execute import (
-    compile_coal_self_sufficiency,
-)
 from factorio_ai_lab.cortex.actions import (
     ActionAuthority,
     ActionCondition,
@@ -27,6 +24,9 @@ from factorio_ai_lab.cortex.actions import (
     ConditionState,
     EvidenceRef,
     Refusal,
+)
+from factorio_ai_lab.cortex.coal_structural_execute import (
+    compile_coal_self_sufficiency,
 )
 from factorio_ai_lab.cortex.structural_prepare import (
     COAL_SELF_SUFFICIENCY_CONTRACT_VERSION,
@@ -1001,16 +1001,21 @@ class StructuralTransactionalAdapter:
         evaluated: tuple[ActionCondition, ...] = contract
         measurement_error: str | None = None
         transaction_error: str | None = None
+        transaction_result_excerpt: str | None = None
 
         def accept(step: Any) -> bool:
             nonlocal candidate_after
             nonlocal evaluated
             nonlocal measurement_error
             nonlocal transaction_error
+            nonlocal transaction_result_excerpt
 
             info = getattr(step, "info", {})
             if bool(info.get("error_occurred")):
                 transaction_error = "FLE step reported error_occurred"
+                raw_result=info.get("result")
+                if isinstance(raw_result,str) and raw_result.strip():
+                    transaction_result_excerpt=raw_result.strip()[-4000:]
                 return False
             if getattr(step, "candidate_game_state", None) is None:
                 transaction_error = "FLE step returned no candidate_game_state"
@@ -1061,6 +1066,8 @@ class StructuralTransactionalAdapter:
             and raw_step_ticks >= 0
             else None
         )
+        import hashlib
+
         measurements: dict[str, Any] = {
             "before": before,
             "candidate_after": candidate_after,
@@ -1070,11 +1077,16 @@ class StructuralTransactionalAdapter:
             "settle_seconds": compilation.compiled.settle_seconds,
             "checkpoint_used": bool(use_checkpoint_for_action),
             "executor_step_ticks": executor_step_ticks,
+            "compiled_code_sha256":hashlib.sha256(
+                compilation.compiled.code.encode("utf-8")
+            ).hexdigest(),
         }
         if measurement_error is not None:
             measurements["measurement_error"] = measurement_error
         if transaction_error is not None:
             measurements["transaction_error"] = transaction_error
+        if transaction_result_excerpt is not None:
+            measurements["transaction_result_excerpt"]=transaction_result_excerpt
 
         if step.accepted:
             return ActionResult(

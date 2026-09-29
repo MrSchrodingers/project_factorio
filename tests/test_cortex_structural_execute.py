@@ -80,6 +80,11 @@ class FakeStructuralEnvironment:
             {
                 "output_game_state": deepcopy(self.state),
                 "error_occurred": self.engine_error,
+                "result":(
+                    "Error: synthetic engine failure for observability"
+                    if self.engine_error
+                    else "ok"
+                ),
             },
         )
 
@@ -332,6 +337,15 @@ def test_engine_error_is_distinct_from_postcondition_failure() -> None:
     assert result.status is ActionStatus.REJECTED
     assert result.refusal is not None
     assert result.refusal.code == REFUSAL_TRANSACTION_FAILED
+    assert result.measurements["transaction_error"]==(
+        "FLE step reported error_occurred"
+    )
+    assert result.measurements["transaction_result_excerpt"]==(
+        "Error: synthetic engine failure for observability"
+    )
+    code_sha=result.measurements["compiled_code_sha256"]
+    assert isinstance(code_sha,str)
+    assert len(code_sha)==64
     assert env.state["producers_reaching_processor"] == 3
     assert tx.game_state["producers_reaching_processor"] == 3
 

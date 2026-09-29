@@ -347,3 +347,31 @@ Correction:
 The next development action is a fresh preregistered episode on seed 1441387776.
 It may intentionally reset the environment as episode initialization and must
 rebuild iron_extraction autonomously before coal continuation is attempted.
+
+## Iron counterexample 4 — opaque FLE transaction error
+
+Development seed/partition id 1441387776 was executed once on deployed commit
+1e48ccb644140eb4fd5b77cf9e0d7b090f3f99b8.
+
+The A2 grant was issued, validated and atomically consumed. The FLE transaction
+reported error_occurred, the transactional boundary rejected the candidate and
+rolled back to the episode checkpoint. No physical capability was promoted and
+changed_world=false.
+
+Canonical artifact:
+
+runs/audits/cortex_f5c_development_1441387776_iron_extraction.json
+
+This attempt is not retried. The then-current adapter persisted only the generic
+error flag, not the raw FLE eval result, so assigning a more specific cause would
+be speculative.
+
+The structural boundary is therefore hardened before the next development
+attempt to persist:
+
+- compiled_code_sha256;
+- a bounded transaction_result_excerpt from step.info.result whenever
+  error_occurred=true.
+
+This is an observability correction only; it does not change authority,
+postconditions or promotion criteria.
