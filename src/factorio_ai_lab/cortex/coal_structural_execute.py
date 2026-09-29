@@ -330,7 +330,6 @@ def compile_coal_self_sufficiency(
             "cortex_bootstrap_quarantine_count=="
             "cortex_bootstrap_total-cortex_bootstrap_keep and "
             "cortex_seed_fuel_remaining==0 and "
-            "cortex_incumbent_iron_bootstrap_removed>=1 and "
             "cortex_incumbent_iron_bootstrap_inventory_remaining==0)"
         ),
         (

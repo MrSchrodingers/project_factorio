@@ -151,6 +151,7 @@ def test_compiled_coal_transaction_separates_bootstrap_and_endogenous_windows() 
         "cortex_incumbent_iron_bootstrap_inventory_remaining==0"
         in code
     )
+    assert "cortex_incumbent_iron_bootstrap_removed>=1" not in code
     assert "cortex_processor_output" not in code
 
 
@@ -380,3 +381,66 @@ def test_coal_live_action_uses_checkpoint_only_for_rollback() -> None:
 
     assert "use_checkpoint_for_action=False" in source
     assert "use_checkpoint_for_action=True" not in source
+
+
+def _coal_runner_module():
+    import importlib.util
+
+    path=(
+        Path(__file__).resolve().parents[1]
+        /"scripts"
+        /"run_cortex_f5c_coal_self_sufficiency.py"
+    )
+    spec=importlib.util.spec_from_file_location(
+        "run_cortex_f5c_coal_transition_contract",
+        path,
+    )
+    assert spec is not None and spec.loader is not None
+    module=importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize(
+    ("status","requires_refuel"),
+    (("working",False),("no_fuel",True)),
+)
+def test_iron_transition_entry_accepts_working_or_no_fuel(
+    status: str,
+    requires_refuel: bool,
+) -> None:
+    module=_coal_runner_module()
+
+    entry=module._iron_transition_entry({
+        "status":status,
+        "coal_fuel":0,
+        "fuel_remaining":0,
+    })
+
+    assert entry["status"]==status
+    assert entry["requires_endogenous_refuel"] is requires_refuel
+    assert entry["coal_fuel"]==0.0
+    assert entry["fuel_remaining"]==0.0
+
+
+def test_iron_transition_entry_rejects_unrelated_failure_state() -> None:
+    module=_coal_runner_module()
+
+    with pytest.raises(RuntimeError,match="unsupported transition state"):
+        module._iron_transition_entry({
+            "status":"disabled_by_control_behavior",
+            "coal_fuel":0,
+            "fuel_remaining":0,
+        })
+
+
+def test_no_fuel_transition_still_requires_post_refuel_iron_survival() -> None:
+    source=(
+        Path(__file__).resolve().parents[1]
+        /"scripts"
+        /"run_cortex_f5c_coal_self_sufficiency.py"
+    ).read_text()
+
+    assert '"no_fuel"' in source
+    assert 'after["incumbent_iron_buffer_growth"]>0' in source
+    assert 'after["incumbent_iron_survives"] is True' in source

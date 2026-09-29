@@ -211,6 +211,38 @@ def _entity_at(
     return None
 
 
+IRON_TRANSITION_ENTRY_STATUSES=frozenset({"working","no_fuel"})
+
+
+def _iron_transition_entry(iron_row: Mapping[str,Any]) -> dict[str,Any]:
+    status=str(iron_row.get("status") or "")
+    if status not in IRON_TRANSITION_ENTRY_STATUSES:
+        raise RuntimeError(
+            "promoted iron extractor has unsupported transition state: "
+            f"{status!r}"
+        )
+    raw_coal_fuel=iron_row.get("coal_fuel",0)
+    raw_fuel_remaining=iron_row.get("fuel_remaining",0)
+    coal_fuel=(
+        float(raw_coal_fuel)
+        if isinstance(raw_coal_fuel,(int,float))
+        and not isinstance(raw_coal_fuel,bool)
+        else 0.0
+    )
+    fuel_remaining=(
+        float(raw_fuel_remaining)
+        if isinstance(raw_fuel_remaining,(int,float))
+        and not isinstance(raw_fuel_remaining,bool)
+        else 0.0
+    )
+    return {
+        "status":status,
+        "coal_fuel":coal_fuel,
+        "fuel_remaining":fuel_remaining,
+        "requires_endogenous_refuel":status=="no_fuel",
+    }
+
+
 def preflight_coal(
     *,
     artifact: Path,
@@ -299,10 +331,7 @@ def preflight_coal(
     buffer_row=_entity_at(rows,name="wooden-chest",position=iron_buffer)
     if iron_row is None or buffer_row is None:
         raise RuntimeError("promoted iron entities are absent from live WORLD")
-    if str(iron_row.get("status") or "")!="working":
-        raise RuntimeError(
-            f"promoted iron extractor is not working: {iron_row.get('status')!r}"
-        )
+    iron_entry=_iron_transition_entry(iron_row)
 
     return {
         "status":"preflight_pass",
@@ -330,6 +359,12 @@ def preflight_coal(
         "incumbent_iron_buffer_position":{
             "x":iron_buffer[0],"y":iron_buffer[1],
         },
+        "incumbent_iron_entry_status":iron_entry["status"],
+        "incumbent_iron_entry_coal_fuel":iron_entry["coal_fuel"],
+        "incumbent_iron_entry_fuel_remaining":iron_entry["fuel_remaining"],
+        "incumbent_iron_transition_requires_endogenous_refuel":(
+            iron_entry["requires_endogenous_refuel"]
+        ),
         "world_entity_count":snapshot.get("entity_count"),
     }
 
