@@ -28,8 +28,12 @@ from factorio_ai_lab.cortex.actions import (
 from factorio_ai_lab.cortex.coal_structural_execute import (
     compile_coal_self_sufficiency,
 )
+from factorio_ai_lab.cortex.iron_smelting_structural_execute import (
+    compile_iron_smelting,
+)
 from factorio_ai_lab.cortex.structural_prepare import (
     COAL_SELF_SUFFICIENCY_CONTRACT_VERSION,
+    IRON_SMELTING_CONTRACT_VERSION,
     RESOURCE_EXTRACTION_CONTRACT_VERSION,
     SUPPORTED_CONTRACT_VERSIONS,
     PreparedStructuralAction,
@@ -51,6 +55,7 @@ REFUSAL_WORLD_FUEL_DRAW_UNSUPPORTED = "structural_world_fuel_draw_unsupported"
 DEFAULT_SETTLE_SECONDS = 8
 MAX_SETTLE_SECONDS = 60
 MAX_COAL_SELF_SUFFICIENCY_SECONDS = 180
+MAX_IRON_SMELTING_SECONDS = 120
 
 MeasurementProbe = Callable[[PreparedStructuralAction], Mapping[str, Any]]
 
@@ -487,6 +492,7 @@ def _compile_operation(operation: StructuralOperation) -> list[str]:
         "fuel_extractor": _compile_fuel_extractor,
         "place_output_buffer": _compile_place_output_buffer,
         "establish_coal_self_sufficiency": compile_coal_self_sufficiency,
+        "establish_iron_smelting": compile_iron_smelting,
     }
     if operation.op == "verify_postconditions":
         return []
@@ -520,7 +526,11 @@ def compile_structural_action(
     max_settle = (
         MAX_COAL_SELF_SUFFICIENCY_SECONDS
         if prepared.contract_version == COAL_SELF_SUFFICIENCY_CONTRACT_VERSION
-        else MAX_SETTLE_SECONDS
+        else (
+            MAX_IRON_SMELTING_SECONDS
+            if prepared.contract_version == IRON_SMELTING_CONTRACT_VERSION
+            else MAX_SETTLE_SECONDS
+        )
     )
     if settle <= 0 or settle > max_settle:
         return StructuralCompilationResult(
@@ -550,6 +560,43 @@ def compile_structural_action(
                     detail=(
                         "resource extraction Option budget must exceed bootstrap "
                         f"settle time ({bootstrap_seconds}s)"
+                    ),
+                ),
+            )
+
+    if prepared.contract_version == IRON_SMELTING_CONTRACT_VERSION:
+        smelting_ops = [
+            operation
+            for operation in prepared.operations
+            if operation.op == "establish_iron_smelting"
+        ]
+        if len(smelting_ops) != 1:
+            return StructuralCompilationResult(
+                prepared=prepared,
+                refusal=Refusal(
+                    code=REFUSAL_OPERATION_UNSUPPORTED,
+                    detail=(
+                        "iron smelting contract requires exactly one "
+                        "establish_iron_smelting operation"
+                    ),
+                ),
+            )
+        params=smelting_ops[0].parameters
+        required_seconds=sum(
+            int(params.get(key) or 0)
+            for key in (
+                "smelt_window_seconds",
+                "survival_window_seconds",
+            )
+        )
+        if settle < required_seconds:
+            return StructuralCompilationResult(
+                prepared=prepared,
+                refusal=Refusal(
+                    code=REFUSAL_OPERATION_UNSUPPORTED,
+                    detail=(
+                        "iron smelting Option budget must cover internal "
+                        f"causal windows ({required_seconds}s)"
                     ),
                 ),
             )
@@ -649,8 +696,11 @@ def compile_structural_action(
                 ),
             )
         )
-    elif prepared.contract_version == COAL_SELF_SUFFICIENCY_CONTRACT_VERSION:
-        # v5 contains its own causally separated seed/endogenous windows.
+    elif prepared.contract_version in {
+        COAL_SELF_SUFFICIENCY_CONTRACT_VERSION,
+        IRON_SMELTING_CONTRACT_VERSION,
+    }:
+        # v5/v6 contain their own causally separated validation windows.
         pass
     else:
         lines.extend(

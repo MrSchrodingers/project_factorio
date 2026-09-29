@@ -31,6 +31,7 @@ def test_supervisor_dispatch_is_explicit_and_bounded() -> None:
     assert module.RUNNERS=={
         "iron_extraction":"run_cortex_f5c_deterministic_baseline.py",
         "coal_self_sufficiency":"run_cortex_f5c_coal_self_sufficiency.py",
+        "iron_smelting":"run_cortex_f5c_iron_smelting.py",
     }
 
 
