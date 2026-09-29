@@ -40,3 +40,10 @@ def test_preflight_block_is_not_terminal_counterexample() -> None:
     assert 'last_result in {"failed","rejected"}' in source
     assert '"preflight_blocked"' in source
     assert 'last_result="blocked"' not in source
+
+
+def test_runner_subprocess_inherits_src_pythonpath() -> None:
+    source=(ROOT/"scripts"/"run_cortex_supervisor.py").read_text()
+
+    assert 'env["PYTHONPATH"]=str(ROOT/"src")' in source
+    assert "env=env" in source

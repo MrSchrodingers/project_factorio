@@ -114,8 +114,16 @@ def run(
     cmd.extend(extra_args or [])
     if execute:
         cmd.append("--execute")
+    env=dict(os.environ)
+    env["PYTHONPATH"]=str(ROOT/"src")
     return subprocess.run(
-        cmd,cwd=ROOT,capture_output=True,text=True,timeout=900,check=False
+        cmd,
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=900,
+        check=False,
     )
 
 def handle(signum: int,frame: object) -> None:
