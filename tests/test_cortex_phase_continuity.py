@@ -3166,6 +3166,87 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
     assert f5c_recovered["phase5_protocol"]["achieved_capabilities"]==[
         "iron_extraction"
     ]
+
+    coal_artifact=(
+        audits/
+        "cortex_f5c_continuation_853367368_"
+        "coal_self_sufficiency_deadbeefcafe.json"
+    )
+    coal_artifact.write_text(json.dumps({
+        "schema_version":"cortex_f5c_coal_self_sufficiency_v1",
+        "status":"completed",
+        "base_seed":853367368,
+        "capability":"coal_self_sufficiency",
+        "ambient_authority":"A0",
+        "bounded_authority":"A2",
+        "continuous_authority":False,
+        "automatic_retry":False,
+        "option_execution_attempts":1,
+        "world_reset":False,
+        "external_resource_injection":False,
+        "human_intervention_count":0,
+        "transaction_committed":True,
+        "capability_promoted":"coal_self_sufficiency",
+        "started_at":"2026-09-29T08:00:00+00:00",
+        "code_revision":{
+            "commit":"deadbeefcafe1234",
+            "dirty":False,
+        },
+        "preflight":{
+            "world_mutation":False,
+            "grant_issued":False,
+            "option_executed_live":False,
+            "world_reset":False,
+            "phase_state":{
+                "achieved_capabilities":["iron_extraction"],
+            },
+        },
+        "capability_gate":{
+            "coal_mined":True,
+            "endogenous_coal_reaches_fuel_consumer":True,
+            "external_bootstrap_fuel_retired":True,
+        },
+        "survival_gate":{
+            "previously_promoted":["iron_extraction"],
+            "iron_extraction_survives":True,
+            "regressed":[],
+            "passed":True,
+        },
+        "measurement_final":{
+            "coal_mined":True,
+            "endogenous_coal_reaches_fuel_consumer":True,
+            "external_bootstrap_fuel_retired":True,
+            "incumbent_iron_bootstrap_removed":7,
+            "incumbent_iron_bootstrap_remaining":0,
+            "coal_endogenous_growth":4,
+            "incumbent_iron_buffer_growth":5,
+        },
+        "trajectory":{
+            "capability_delta":{
+                "promoted":["coal_self_sufficiency"],
+                "regressed":[],
+            },
+        },
+    })+"\n")
+    f5c_coal=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert f5c_coal["phase5_checkpoint"]=="F5-C"
+    assert f5c_coal["phase5_next_checkpoint"]=="F5-C"
+    assert f5c_coal["phase5_protocol"]["achieved_capabilities"]==[
+        "iron_extraction",
+        "coal_self_sufficiency",
+    ]
+    coal_state=(
+        f5c_coal["phase5_deterministic_baseline"]["coal_self_sufficiency"]
+    )
+    assert coal_state["validated"] is True
+    assert coal_state["attempt_count"]==1
+    assert coal_state["measurement_final"]["incumbent_iron_bootstrap_removed"]==7
+    assert "iron_smelting" in f5c_coal["resume"]["action"]
+
+    coal_artifact.unlink()
     f5c_artifact.unlink()
     f5c_second.unlink()
 

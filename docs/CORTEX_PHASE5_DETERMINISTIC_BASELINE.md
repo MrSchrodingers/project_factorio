@@ -1,6 +1,6 @@
 # Cortex Phase 5-C — Deterministic Autonomous Baseline
 
-Status: **implementation gate / first development capability pending live execution**
+Status: **F5-C ACTIVE — iron_extraction promoted; coal_self_sufficiency implementation gate pending live execution**
 
 ## Objective
 
@@ -9,7 +9,7 @@ policy must beat under matched authority and physical constraints. The baseline
 does not receive ambient EXECUTE authority. The control plane remains A0 and
 each physical mutation requires one expiring A2 grant for one exact Option.
 
-The first capability is iron_extraction.
+The first capability, iron_extraction, is promoted. The active deterministic target is coal_self_sufficiency.
 
 ## First development episode
 
@@ -256,3 +256,58 @@ The observed execution exceeded the requested 60-second Option budget:
 must inform later F5-C budget sizing; it does not invalidate the capability
 because the hard physical gate passed and no deadline was preregistered as an
 iron_extraction success criterion.
+
+## Next capability protocol — coal_self_sufficiency
+
+The coal capability continues on the surviving seed-245044303 WORLD. It does
+not reset the environment. Before A2 is issued, the runner verifies:
+
+- iron_extraction is the only promoted capability;
+- the deployed dashboard/runtime commit equals the clean source HEAD;
+- evolution is inactive+disabled;
+- no WorldLease is active;
+- the F5 intervention ledger is empty;
+- the persistent A2 ledger is writable;
+- the promoted iron drill and output chest exist at their canonical positions;
+- the iron drill is physically working.
+
+The transaction captures the exact current FLE GameState as rollback checkpoint
+and then composes one inert establish_coal_self_sufficiency Option.
+
+Causal bootstrap isolation:
+
+1. bootstrap materials are harvested from the same WORLD; no inventory injection;
+2. exactly one bootstrap coal item is retained as the coal-drill seed;
+3. all excess harvested bootstrap coal is quarantined;
+4. all pre-existing bootstrap fuel in the promoted iron drill is removed and
+   quarantined before the causal seed window;
+5. the seed coal must be exhausted;
+6. coal produced by the new drill is then transferred to both the coal drill and
+   the incumbent iron drill;
+7. the iron buffer baseline is measured only after the bootstrap-fuel retirement
+   window, preventing residual burning energy from receiving survival credit;
+8. the endogenous window must show positive coal growth and positive iron-buffer
+   growth.
+
+Promotion requires:
+
+- coal_mined = true;
+- endogenous_coal_reaches_fuel_consumer = true;
+- external_bootstrap_fuel_retired = true;
+- incumbent_iron_bootstrap_removed > 0;
+- incumbent_iron_bootstrap_remaining = 0;
+- coal_endogenous_growth > 0;
+- incumbent_iron_buffer_growth > 0;
+- survival gate preserves iron_extraction;
+- one A2 execution attempt;
+- transaction commit;
+- zero human intervention;
+- zero external resource injection.
+
+Each live attempt writes a commit-bound artifact:
+
+runs/audits/cortex_f5c_continuation_245044303_coal_self_sufficiency_<commit12>.json
+
+A failed attempt is retained as a counterexample and is never overwritten. The
+next attempt requires a new committed/deployed correction. No automatic retry
+or scheduler is permitted.

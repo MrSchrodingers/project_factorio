@@ -15,6 +15,9 @@ from typing import Any
 
 from fle.env.game_types import Prototype, Resource
 
+from factorio_ai_lab.cortex.coal_structural_execute import (
+    compile_coal_self_sufficiency,
+)
 from factorio_ai_lab.cortex.actions import (
     ActionAuthority,
     ActionCondition,
@@ -26,6 +29,7 @@ from factorio_ai_lab.cortex.actions import (
     Refusal,
 )
 from factorio_ai_lab.cortex.structural_prepare import (
+    COAL_SELF_SUFFICIENCY_CONTRACT_VERSION,
     RESOURCE_EXTRACTION_CONTRACT_VERSION,
     SUPPORTED_CONTRACT_VERSIONS,
     PreparedStructuralAction,
@@ -46,6 +50,7 @@ REFUSAL_WORLD_FUEL_DRAW_UNSUPPORTED = "structural_world_fuel_draw_unsupported"
 
 DEFAULT_SETTLE_SECONDS = 8
 MAX_SETTLE_SECONDS = 60
+MAX_COAL_SELF_SUFFICIENCY_SECONDS = 180
 
 MeasurementProbe = Callable[[PreparedStructuralAction], Mapping[str, Any]]
 
@@ -481,6 +486,7 @@ def _compile_operation(operation: StructuralOperation) -> list[str]:
         "place_extractor": _compile_place_extractor,
         "fuel_extractor": _compile_fuel_extractor,
         "place_output_buffer": _compile_place_output_buffer,
+        "establish_coal_self_sufficiency": compile_coal_self_sufficiency,
     }
     if operation.op == "verify_postconditions":
         return []
@@ -511,13 +517,18 @@ def compile_structural_action(
         )
 
     settle = int(settle_seconds)
-    if settle <= 0 or settle > MAX_SETTLE_SECONDS:
+    max_settle = (
+        MAX_COAL_SELF_SUFFICIENCY_SECONDS
+        if prepared.contract_version == COAL_SELF_SUFFICIENCY_CONTRACT_VERSION
+        else MAX_SETTLE_SECONDS
+    )
+    if settle <= 0 or settle > max_settle:
         return StructuralCompilationResult(
             prepared=prepared,
             refusal=Refusal(
                 code=REFUSAL_OPERATION_UNSUPPORTED,
                 detail=(
-                    f"settle_seconds must be within 1..{MAX_SETTLE_SECONDS}, "
+                    f"settle_seconds must be within 1..{max_settle}, "
                     f"got {settle_seconds!r}"
                 ),
             ),
@@ -539,6 +550,44 @@ def compile_structural_action(
                     detail=(
                         "resource extraction Option budget must exceed bootstrap "
                         f"settle time ({bootstrap_seconds}s)"
+                    ),
+                ),
+            )
+
+    if prepared.contract_version == COAL_SELF_SUFFICIENCY_CONTRACT_VERSION:
+        coal_ops = [
+            operation
+            for operation in prepared.operations
+            if operation.op == "establish_coal_self_sufficiency"
+        ]
+        if len(coal_ops) != 1:
+            return StructuralCompilationResult(
+                prepared=prepared,
+                refusal=Refusal(
+                    code=REFUSAL_OPERATION_UNSUPPORTED,
+                    detail=(
+                        "coal self-sufficiency contract requires exactly one "
+                        "establish_coal_self_sufficiency operation"
+                    ),
+                ),
+            )
+        params = coal_ops[0].parameters
+        required_seconds = sum(
+            int(params.get(key) or 0)
+            for key in (
+                "bootstrap_smelt_seconds",
+                "seed_window_seconds",
+                "endogenous_window_seconds",
+            )
+        )
+        if settle < required_seconds:
+            return StructuralCompilationResult(
+                prepared=prepared,
+                refusal=Refusal(
+                    code=REFUSAL_OPERATION_UNSUPPORTED,
+                    detail=(
+                        "coal self-sufficiency Option budget must cover internal "
+                        f"causal windows ({required_seconds}s)"
                     ),
                 ),
             )
@@ -600,6 +649,9 @@ def compile_structural_action(
                 ),
             )
         )
+    elif prepared.contract_version == COAL_SELF_SUFFICIENCY_CONTRACT_VERSION:
+        # v5 contains its own causally separated seed/endogenous windows.
+        pass
     else:
         lines.extend(
             (
@@ -712,6 +764,40 @@ def execution_guard_conditions(
             ),
             ActionCondition(
                 name="buffer_iron_ore",
+                operator=ConditionOperator.INCREASE,
+                state=ConditionState.UNKNOWN,
+                expected=None,
+                hard=True,
+            ),
+        )
+    if (
+        prepared is not None
+        and prepared.contract_version == COAL_SELF_SUFFICIENCY_CONTRACT_VERSION
+    ):
+        return (
+            ActionCondition(
+                name="coal_extractor_exists",
+                operator=ConditionOperator.EQUALS,
+                state=ConditionState.UNKNOWN,
+                expected=True,
+                hard=True,
+            ),
+            ActionCondition(
+                name="coal_endogenous_growth",
+                operator=ConditionOperator.INCREASE,
+                state=ConditionState.UNKNOWN,
+                expected=None,
+                hard=True,
+            ),
+            ActionCondition(
+                name="incumbent_iron_survives",
+                operator=ConditionOperator.EQUALS,
+                state=ConditionState.UNKNOWN,
+                expected=True,
+                hard=True,
+            ),
+            ActionCondition(
+                name="incumbent_iron_buffer_growth",
                 operator=ConditionOperator.INCREASE,
                 state=ConditionState.UNKNOWN,
                 expected=None,

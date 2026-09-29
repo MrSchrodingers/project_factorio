@@ -3038,10 +3038,163 @@ def build_phase_state(
     if not isinstance(phase5c_delta,dict):
         phase5c_delta={}
 
+    phase5c_coal_attempts: list[dict[str,Any]]=[]
+    phase5c_coal_valid=False
+    phase5c_coal_artifact_path: Path | None=None
+    phase5c_coal_artifact: dict[str,Any]={}
+    phase5c_coal_artifact_error: str | None=None
+    if phase5c_iron_extraction_valid and phase5c_selected_seed is not None:
+        coal_pattern=(
+            f"cortex_f5c_continuation_{phase5c_selected_seed}_"
+            "coal_self_sufficiency_*.json"
+        )
+        coal_paths=sorted(
+            (state_root/"runs"/"audits").glob(coal_pattern)
+        )
+        coal_candidates: list[
+            tuple[str,Path,dict[str,Any],str | None,bool]
+        ]=[]
+        for coal_path in coal_paths:
+            payload: dict[str,Any]={}
+            error: str | None=None
+            try:
+                payload=_load(coal_path)
+            except (OSError,json.JSONDecodeError,TypeError) as exc:
+                error=f"{type(exc).__name__}: {exc}"
+            preflight=payload.get("preflight")
+            if not isinstance(preflight,dict):
+                preflight={}
+            preflight_phase=preflight.get("phase_state")
+            if not isinstance(preflight_phase,dict):
+                preflight_phase={}
+            revision=payload.get("code_revision")
+            if not isinstance(revision,dict):
+                revision={}
+            gate=payload.get("capability_gate")
+            if not isinstance(gate,dict):
+                gate={}
+            survival=payload.get("survival_gate")
+            if not isinstance(survival,dict):
+                survival={}
+            final=payload.get("measurement_final")
+            if not isinstance(final,dict):
+                final={}
+            trajectory=payload.get("trajectory")
+            if not isinstance(trajectory,dict):
+                trajectory={}
+            delta=trajectory.get("capability_delta")
+            if not isinstance(delta,dict):
+                delta={}
+            started=(
+                error is None
+                and payload.get("schema_version")
+                =="cortex_f5c_coal_self_sufficiency_v1"
+                and payload.get("base_seed")==phase5c_selected_seed
+                and payload.get("capability")=="coal_self_sufficiency"
+            )
+            valid=(
+                started
+                and payload.get("status")=="completed"
+                and payload.get("ambient_authority")=="A0"
+                and payload.get("bounded_authority")=="A2"
+                and payload.get("continuous_authority") is False
+                and payload.get("automatic_retry") is False
+                and payload.get("option_execution_attempts")==1
+                and payload.get("world_reset") is False
+                and payload.get("external_resource_injection") is False
+                and payload.get("human_intervention_count")==0
+                and payload.get("transaction_committed") is True
+                and payload.get("capability_promoted")
+                =="coal_self_sufficiency"
+                and revision.get("dirty") is False
+                and isinstance(revision.get("commit"),str)
+                and bool(revision.get("commit"))
+                and preflight.get("world_mutation") is False
+                and preflight.get("grant_issued") is False
+                and preflight.get("option_executed_live") is False
+                and preflight.get("world_reset") is False
+                and preflight_phase.get("achieved_capabilities")
+                ==["iron_extraction"]
+                and bool(gate)
+                and all(value is True for value in gate.values())
+                and survival.get("previously_promoted")
+                ==["iron_extraction"]
+                and survival.get("iron_extraction_survives") is True
+                and survival.get("regressed")==[]
+                and survival.get("passed") is True
+                and final.get("coal_mined") is True
+                and final.get(
+                    "endogenous_coal_reaches_fuel_consumer"
+                ) is True
+                and final.get("external_bootstrap_fuel_retired") is True
+                and isinstance(
+                    final.get("incumbent_iron_bootstrap_removed"),
+                    (int,float),
+                )
+                and not isinstance(
+                    final.get("incumbent_iron_bootstrap_removed"),
+                    bool,
+                )
+                and float(
+                    final.get("incumbent_iron_bootstrap_removed")
+                )>0
+                and final.get("incumbent_iron_bootstrap_remaining")==0
+                and isinstance(final.get("coal_endogenous_growth"),(int,float))
+                and not isinstance(final.get("coal_endogenous_growth"),bool)
+                and float(final.get("coal_endogenous_growth"))>0
+                and isinstance(
+                    final.get("incumbent_iron_buffer_growth"),
+                    (int,float),
+                )
+                and not isinstance(
+                    final.get("incumbent_iron_buffer_growth"),
+                    bool,
+                )
+                and float(final.get("incumbent_iron_buffer_growth"))>0
+                and "coal_self_sufficiency" in (
+                    delta.get("promoted")
+                    if isinstance(delta.get("promoted"),list)
+                    else []
+                )
+                and delta.get("regressed")==[]
+                and len(phase5_interventions)==0
+            )
+            started_at=str(payload.get("started_at") or "")
+            coal_candidates.append(
+                (started_at,coal_path,payload,error,valid)
+            )
+        coal_candidates.sort(key=lambda row:(row[0],str(row[1])))
+        for started_at,coal_path,payload,error,valid in coal_candidates:
+            phase5c_coal_attempts.append({
+                "artifact_path":str(coal_path),
+                "status":payload.get("status"),
+                "started_at":started_at or None,
+                "code_commit":(
+                    payload.get("code_revision",{}).get("commit")
+                    if isinstance(payload.get("code_revision"),dict)
+                    else None
+                ),
+                "validated":valid,
+                "read_error":error,
+            })
+            if valid and not phase5c_coal_valid:
+                phase5c_coal_valid=True
+                phase5c_coal_artifact_path=coal_path
+                phase5c_coal_artifact=payload
+                phase5c_coal_artifact_error=error
+            elif phase5c_coal_artifact_path is None:
+                phase5c_coal_artifact_path=coal_path
+                phase5c_coal_artifact=payload
+                phase5c_coal_artifact_error=error
+
     phase5_achieved_capabilities=(
-        ["iron_extraction"]
-        if phase5c_iron_extraction_valid
-        else []
+        ["iron_extraction","coal_self_sufficiency"]
+        if phase5c_coal_valid
+        else (
+            ["iron_extraction"]
+            if phase5c_iron_extraction_valid
+            else []
+        )
     )
 
     phase2_delivery_actuator_canary_path=(
@@ -3287,7 +3440,14 @@ def build_phase_state(
                 "functional_accept_sustainability_not_proven"
             )
 
-    if phase5c_iron_extraction_valid:
+    if phase5c_coal_valid:
+        action=(
+            "F5-C coal_self_sufficiency capability promoted with incumbent "
+            "iron_extraction surviving and bootstrap fuel retired; continue "
+            "deterministic baseline with iron_smelting under ambient A0 and "
+            "exactly one expiring A2 grant per Option"
+        )
+    elif phase5c_iron_extraction_valid:
         action=(
             "F5-C iron_extraction capability promoted from physical evidence; "
             "continue deterministic baseline with coal_self_sufficiency under "
@@ -3559,6 +3719,30 @@ def build_phase_state(
             "transaction_committed":phase5c_artifact.get(
                 "transaction_committed"
             ),
+            "coal_self_sufficiency":{
+                "validated":phase5c_coal_valid,
+                "artifact_path":(
+                    None
+                    if phase5c_coal_artifact_path is None
+                    else str(phase5c_coal_artifact_path)
+                ),
+                "attempt_count":len(phase5c_coal_attempts),
+                "attempts":phase5c_coal_attempts,
+                "status":phase5c_coal_artifact.get("status"),
+                "capability_promoted":phase5c_coal_artifact.get(
+                    "capability_promoted"
+                ),
+                "capability_gate":phase5c_coal_artifact.get(
+                    "capability_gate"
+                ),
+                "survival_gate":phase5c_coal_artifact.get(
+                    "survival_gate"
+                ),
+                "measurement_final":phase5c_coal_artifact.get(
+                    "measurement_final"
+                ),
+                "read_error":phase5c_coal_artifact_error,
+            },
             "external_resource_injection":phase5c_artifact.get(
                 "external_resource_injection"
             ),
