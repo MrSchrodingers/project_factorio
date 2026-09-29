@@ -123,6 +123,20 @@ def test_compiled_iron_smelting_uses_endogenous_buffers_and_survival_window() ->
     assert "cortex_iron_plate_output_positive" in code
     assert "cortex_iron_survival_growth" in code
     assert "cortex_coal_survival_growth" in code
+    assert "cortex_iron_survival_refuel=0" in code
+    assert "cortex_coal_survival_refuel=0" in code
+    assert "cortex_player_coal_after_survival_refuel=inspect_inventory()" in code
+    assert code.index("cortex_iron_survival_refuel=0") < code.index(
+        "cortex_iron_survival_before=inspect_inventory"
+    )
+    survival_refuel_block=code[
+        code.index("cortex_iron_survival_refuel=0"):
+        code.index("cortex_iron_survival_before=inspect_inventory")
+    ]
+    assert "cortex_iron_extractor_live" not in survival_refuel_block
+    assert "cortex_coal_extractor_live" not in survival_refuel_block
+    assert "cortex_iron_extractor," in survival_refuel_block
+    assert "cortex_coal_extractor," in survival_refuel_block
     assert "sleep(20)" in code
 
 
@@ -227,5 +241,8 @@ def test_smelting_measurement_exposes_causal_transfer_diagnostics() -> None:
         "player_coal_after_refuel",
         "player_coal_after_furnace_fuel",
         "player_iron_after_furnace_insert",
+        "iron_survival_refuel",
+        "coal_survival_refuel",
+        "player_coal_after_survival_refuel",
     ):
         assert f'"{name}"' in source

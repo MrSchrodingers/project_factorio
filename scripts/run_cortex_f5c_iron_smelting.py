@@ -540,6 +540,19 @@ def _measure(namespace: Any,prepared: Any) -> dict[str,Any]:
         "player_iron_after_furnace_insert":float(
             getattr(namespace,"cortex_player_iron_after_furnace_insert",0) or 0
         ),
+        "iron_survival_refuel":float(
+            getattr(namespace,"cortex_iron_survival_refuel",0) or 0
+        ),
+        "coal_survival_refuel":float(
+            getattr(namespace,"cortex_coal_survival_refuel",0) or 0
+        ),
+        "player_coal_after_survival_refuel":float(
+            getattr(
+                namespace,
+                "cortex_player_coal_after_survival_refuel",
+                0,
+            ) or 0
+        ),
         "furnace_status_observed":str(
             getattr(namespace,"cortex_furnace_status_observed","")
         ),

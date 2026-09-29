@@ -252,6 +252,26 @@ def compile_iron_smelting(operation: StructuralOperation) -> list[str]:
             "cortex_furnace_working_observed)"
         ),
         "cortex_iron_plate_output_positive=cortex_iron_plate_count>0",
+        "cortex_iron_survival_refuel=0",
+        f"if inspect_inventory()[{_prototype('coal')}]>={iron_refuel}:",
+        "    cortex_iron_extractor=insert_item(",
+        f"        {_prototype('coal')},",
+        "        cortex_iron_extractor,",
+        f"        quantity={iron_refuel},",
+        "    )",
+        f"    cortex_iron_survival_refuel={iron_refuel}",
+        "cortex_coal_survival_refuel=0",
+        f"if inspect_inventory()[{_prototype('coal')}]>={coal_refuel}:",
+        "    cortex_coal_extractor=insert_item(",
+        f"        {_prototype('coal')},",
+        "        cortex_coal_extractor,",
+        f"        quantity={coal_refuel},",
+        "    )",
+        f"    cortex_coal_survival_refuel={coal_refuel}",
+        (
+            "cortex_player_coal_after_survival_refuel=inspect_inventory()"
+            f"[{_prototype('coal')}]"
+        ),
         (
             "cortex_iron_survival_before=inspect_inventory(cortex_iron_buffer)"
             f"[{_prototype('iron-ore')}]"
@@ -320,5 +340,11 @@ def compile_iron_smelting(operation: StructuralOperation) -> list[str]:
         "    'coal_self_sufficiency_survives':cortex_coal_self_sufficiency_survives,",
         "    'iron_survival_growth':cortex_iron_survival_growth,",
         "    'coal_survival_growth':cortex_coal_survival_growth,",
+        "    'iron_survival_refuel':cortex_iron_survival_refuel,",
+        "    'coal_survival_refuel':cortex_coal_survival_refuel,",
+        (
+            "    'player_coal_after_survival_refuel':"
+            "cortex_player_coal_after_survival_refuel,"
+        ),
         "})",
     ]
