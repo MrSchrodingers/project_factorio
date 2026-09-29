@@ -55,3 +55,14 @@ def test_coal_preflight_can_repair_missing_iron() -> None:
     assert '"promoted iron entities are absent from live WORLD"' in source
     assert 'payload["repair_frontier"]="iron_extraction"' in source
     assert '"repairing_prerequisite_execute"' in source
+
+
+def test_cortex_service_executes_versioned_runtime_release() -> None:
+    unit=(ROOT/"ops"/"systemd"/"factorio-ai-cortex.service").read_text()
+
+    assert (
+        "ExecStart=/srv/factorio-ai-lab/.venv-fle/bin/python "
+        "/srv/factorio-ai-runtime/current/scripts/run_cortex_supervisor.py"
+        in unit
+    )
+    assert "/usr/local/lib/factorio-ai/cortex_supervisor.py" not in unit

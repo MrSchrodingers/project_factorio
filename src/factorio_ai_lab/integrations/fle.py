@@ -154,6 +154,75 @@ def enforce_minimum_eval_timeout(
     return minimum
 
 
+def enforce_pathfinding_retry_floor(
+    environment: Any,
+    *,
+    minimum_attempts: int,
+) -> int:
+    """Raise FLE move_to path polling attempts without modifying site-packages.
+
+    FLE 0.4.3 hard-codes GetPath(max_attempts=10) inside MoveTo. Large or busy
+    worlds can leave a valid path in pending state beyond that short polling
+    window. This shim is instance-local and monotonic: it only raises the
+    lower bound while preserving callers that explicitly request more attempts.
+    """
+    minimum=int(minimum_attempts)
+    if minimum<=0:
+        raise ValueError("minimum_attempts must be positive")
+
+    unwrapped=getattr(environment,"unwrapped",environment)
+    instance=getattr(unwrapped,"instance",None)
+    if instance is None:
+        raise TypeError("environment does not expose a FactorioInstance")
+    namespaces=getattr(instance,"namespaces",None)
+    if not isinstance(namespaces,(list,tuple)):
+        namespace=getattr(instance,"namespace",None)
+        namespaces=[] if namespace is None else [namespace]
+
+    patched=0
+    current_floor=0
+    for namespace in namespaces:
+        move_to=getattr(namespace,"move_to",None)
+        tool=getattr(move_to,"__wrapped__",None)
+        original=getattr(tool,"get_path",None) if tool is not None else None
+        if tool is None or not callable(original):
+            continue
+        current=int(
+            getattr(tool,"_factorio_ai_path_retry_floor",0) or 0
+        )
+        current_floor=max(current_floor,current)
+        if current>=minimum:
+            patched+=1
+            continue
+        base=getattr(tool,"_factorio_ai_original_get_path",None)
+        if base is None:
+            base=original
+            tool._factorio_ai_original_get_path=base
+
+        def get_path_with_floor(
+            path_handle: int,
+            max_attempts: int=10,
+            *,
+            _base: Any=base,
+            _minimum: int=minimum,
+        ) -> Any:
+            return _base(
+                path_handle,
+                max_attempts=max(int(max_attempts),_minimum),
+            )
+
+        tool.get_path=get_path_with_floor
+        tool._factorio_ai_path_retry_floor=minimum
+        if move_to is not None:
+            move_to.get_path=get_path_with_floor
+        patched+=1
+        current_floor=max(current_floor,minimum)
+
+    if patched==0:
+        raise TypeError("environment does not expose patchable move_to tools")
+    return max(current_floor,minimum)
+
+
 _INTERVENTION_CALLS = {
     "harvest_resource": "manual_harvest_calls",
     "insert_item": "manual_insert_calls",

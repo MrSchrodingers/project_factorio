@@ -37,6 +37,7 @@ from factorio_ai_lab.integrations.fle import (
     TransactionalFLEExecutor,
     attach_live_factorio_environment,
     enforce_minimum_eval_timeout,
+    enforce_pathfinding_retry_floor,
 )
 from factorio_ai_lab.paths import RUNS_DIR, code_revision
 from factorio_ai_lab.planning.fuel import TICKS_PER_SECOND
@@ -312,6 +313,10 @@ def run_repair(
                 "world_reset":False,
             }
             enforce_minimum_eval_timeout(env,minimum_seconds=300)
+            record["fle_path_retry_floor"]=enforce_pathfinding_retry_floor(
+                env,
+                minimum_attempts=40,
+            )
             executor=TransactionalFLEExecutor(
                 env,
                 runtime_context=lambda:{

@@ -40,6 +40,7 @@ from factorio_ai_lab.instrumentation.runtime import runtime_entity_footprints
 from factorio_ai_lab.integrations.fle import (
     TransactionalFLEExecutor,
     enforce_minimum_eval_timeout,
+    enforce_pathfinding_retry_floor,
     list_environments,
 )
 from factorio_ai_lab.paths import RUNS_DIR, code_revision
@@ -526,6 +527,10 @@ def run_f5c(
             record["fle_eval_timeout_s"]=enforce_minimum_eval_timeout(
                 env,
                 minimum_seconds=300,
+            )
+            record["fle_path_retry_floor"]=enforce_pathfinding_retry_floor(
+                env,
+                minimum_attempts=40,
             )
             executor=TransactionalFLEExecutor(
                 env,

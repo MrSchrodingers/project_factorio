@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from factorio_ai_lab.integrations.fle import (
     TransactionalFLEExecutor,
     enforce_minimum_eval_timeout,
+    enforce_pathfinding_retry_floor,
 )
 
 
@@ -60,6 +61,40 @@ class FakeWrappedEnvironment:
         self.unwrapped = self
 
 
+class FakeGetPath:
+    def __init__(self) -> None:
+        self.attempts: list[int] = []
+
+    def __call__(self, path_handle: int, max_attempts: int=10):
+        self.attempts.append(int(max_attempts))
+        return [path_handle]
+
+
+class FakeMoveTool:
+    def __init__(self) -> None:
+        self.get_path=FakeGetPath()
+
+
+class FakePathInstance:
+    def __init__(self) -> None:
+        tool=FakeMoveTool()
+
+        def move_to(position):
+            return position
+
+        move_to.__wrapped__=tool
+        move_to.get_path=tool.get_path
+        namespace=type("FakeNamespace",(),{})()
+        namespace.move_to=move_to
+        self.namespaces=[namespace]
+
+
+class FakePathEnvironment:
+    def __init__(self) -> None:
+        self.instance=FakePathInstance()
+        self.unwrapped=self
+
+
 class TransactionalFLEExecutorTests(unittest.TestCase):
     def test_eval_timeout_floor_is_local_idempotent_and_monotonic(self) -> None:
         env = FakeWrappedEnvironment()
@@ -81,6 +116,30 @@ class TransactionalFLEExecutorTests(unittest.TestCase):
         self.assertEqual(applied_again, 300)
         env.instance.eval("again", timeout=60)
         self.assertEqual(env.instance.timeouts[-1], 300)
+
+    def test_path_retry_floor_is_local_idempotent_and_monotonic(self) -> None:
+        env=FakePathEnvironment()
+        move_to=env.instance.namespaces[0].move_to
+        tool=move_to.__wrapped__
+        original=tool.get_path
+
+        applied=enforce_pathfinding_retry_floor(
+            env,
+            minimum_attempts=40,
+        )
+        self.assertEqual(applied,40)
+
+        tool.get_path(7,max_attempts=5)
+        tool.get_path(8,max_attempts=60)
+        self.assertEqual(original.attempts,[40,60])
+
+        applied_again=enforce_pathfinding_retry_floor(
+            env,
+            minimum_attempts=20,
+        )
+        self.assertEqual(applied_again,40)
+        tool.get_path(9)
+        self.assertEqual(original.attempts[-1],40)
 
     def test_commits_accepted_state(self) -> None:
         env = FakeEnvironment()
