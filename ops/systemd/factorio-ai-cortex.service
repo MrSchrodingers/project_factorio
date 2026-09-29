@@ -1,0 +1,26 @@
+[Unit]
+Description=Factorio AI Cortex bounded autonomous supervisor
+After=docker.service factorio-ai-dashboard.service factorio-ai-llm.service
+Wants=docker.service factorio-ai-dashboard.service factorio-ai-llm.service
+Conflicts=factorio-ai-evolution.service factorio-ai-curriculum.service
+
+[Service]
+Type=simple
+User=ti
+Group=devs
+WorkingDirectory=/srv/factorio-ai-lab
+Environment=HOME=/home/ti
+Environment=FACTORIO_AI_STATE_ROOT=/srv/factorio-ai-lab
+Environment=PYTHONUNBUFFERED=1
+Environment=FACTORIO_AI_CORTEX_POLL_SECONDS=10
+ExecStart=/srv/factorio-ai-lab/.venv-fle/bin/python /usr/local/lib/factorio-ai/cortex_supervisor.py
+Restart=always
+RestartSec=5
+Nice=5
+CPUWeight=60
+TimeoutStopSec=45
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

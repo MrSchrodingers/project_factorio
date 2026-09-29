@@ -2772,6 +2772,25 @@ class DashboardState:
                 },
             }
 
+        supervisor_active = _process_running("cortex_supervisor.py")
+        if supervisor_active:
+            path = RUNS_DIR / "cortex_supervisor.json"
+            supervisor: dict[str, Any] = {}
+            try:
+                value = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(value, dict):
+                    supervisor = value
+            except (OSError, json.JSONDecodeError):
+                supervisor = {}
+            return {
+                "active": True,
+                "process": "cortex_supervisor",
+                "arena": "cortex_f5",
+                "phase": str(supervisor.get("status") or "active"),
+                "model_training": False,
+                "heartbeat": supervisor,
+            }
+
         evolution_loop_active = _process_running(
             "factorio_ai_lab.experiments.evolution_loop"
         )

@@ -4397,7 +4397,7 @@ function updateMission() {
     || null;
   const operational = cortexOperationalView();
 
-  if (operational.historicalEvidenceMode && operational.phase5Active) {
+  if (operational.phase5Active) {
     const capabilityTotal = Number(operational.phase5Protocol.capability_total || 9);
     const achieved = Array.isArray(operational.phase5Protocol.achieved_capabilities)
       ? operational.phase5Protocol.achieved_capabilities.length
@@ -4837,7 +4837,7 @@ function updateKpis() {
   const nextGoal = progression.next_goal || null;
   const frontier = Array.isArray(progression.frontier) ? progression.frontier : [];
   const achievedGoals = Array.isArray(progression.achieved) ? progression.achieved : [];
-  if (operational.historicalEvidenceMode && operational.phase5Active) {
+  if (operational.phase5Active) {
     const capabilityTotal = Number(operational.phase5Protocol.capability_total || 9);
     const achieved = Array.isArray(operational.phase5Protocol.achieved_capabilities)
       ? operational.phase5Protocol.achieved_capabilities.length
@@ -5152,7 +5152,15 @@ function updateSocketBadge(degraded = false) {
     return;
   }
   const operational = cortexOperationalView();
-  if (operational.historicalEvidenceMode) {
+  const runner = ((state.status || {}).research_runner) || {};
+  if (operational.phase5Active && runner.active) {
+    setClassText(
+      "socketBadge",
+      "Cortex ativo · telemetria live · "
+        + String(runner.phase || "active").replaceAll("_", " "),
+      "badge live"
+    );
+  } else if (operational.historicalEvidenceMode) {
     setClassText(
       "socketBadge",
       operational.labSimulationActive
