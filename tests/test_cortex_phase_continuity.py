@@ -3244,6 +3244,10 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
             "grant_issued":False,
             "option_executed_live":False,
             "world_reset":False,
+            "incumbent_iron_entry_status":"working",
+            "incumbent_iron_entry_coal_fuel":7.0,
+            "incumbent_iron_entry_fuel_remaining":1.0,
+            "incumbent_iron_transition_requires_endogenous_refuel":False,
             "phase_state":{
                 "achieved_capabilities":["iron_extraction"],
             },
@@ -3300,6 +3304,45 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
     ]==[False,True]
     assert coal_state["measurement_final"]["incumbent_iron_bootstrap_removed"]==7
     assert "iron_smelting" in f5c_coal["resume"]["action"]
+
+    coal_no_fuel=json.loads(coal_artifact.read_text())
+    coal_no_fuel["preflight"].update({
+        "incumbent_iron_entry_status":"no_fuel",
+        "incumbent_iron_entry_coal_fuel":0.0,
+        "incumbent_iron_entry_fuel_remaining":0.0,
+        "incumbent_iron_transition_requires_endogenous_refuel":True,
+    })
+    coal_no_fuel["measurement_final"][
+        "incumbent_iron_bootstrap_removed"
+    ]=0
+    coal_artifact.write_text(json.dumps(coal_no_fuel)+"\n")
+    f5c_coal_no_fuel=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert f5c_coal_no_fuel["phase5_protocol"]["achieved_capabilities"]==[
+        "iron_extraction",
+        "coal_self_sufficiency",
+    ]
+    assert (
+        f5c_coal_no_fuel["phase5_deterministic_baseline"][
+            "coal_self_sufficiency"
+        ]["validated"]
+        is True
+    )
+
+    coal_invalid=json.loads(coal_artifact.read_text())
+    coal_invalid["preflight"][
+        "incumbent_iron_entry_status"
+    ]="disabled_by_control_behavior"
+    coal_artifact.write_text(json.dumps(coal_invalid)+"\n")
+    f5c_coal_invalid=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert f5c_coal_invalid["phase5_protocol"]["achieved_capabilities"]==[
+        "iron_extraction"
+    ]
 
     old_coal_artifact.unlink()
     coal_artifact.unlink()

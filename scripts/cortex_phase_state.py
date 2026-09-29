@@ -3103,6 +3103,36 @@ def build_phase_state(
                 started
                 and payload.get("base_seed")==phase5c_selected_seed
             )
+            removed_bootstrap=final.get("incumbent_iron_bootstrap_removed")
+            removed_bootstrap_numeric=(
+                isinstance(removed_bootstrap,(int,float))
+                and not isinstance(removed_bootstrap,bool)
+            )
+            entry_status=preflight.get("incumbent_iron_entry_status")
+            entry_coal_fuel=preflight.get("incumbent_iron_entry_coal_fuel")
+            entry_coal_fuel_numeric=(
+                isinstance(entry_coal_fuel,(int,float))
+                and not isinstance(entry_coal_fuel,bool)
+            )
+            entry_requires_refuel=preflight.get(
+                "incumbent_iron_transition_requires_endogenous_refuel"
+            )
+            iron_bootstrap_retirement_valid=(
+                (
+                    entry_status=="working"
+                    and entry_requires_refuel is False
+                    and removed_bootstrap_numeric
+                    and float(removed_bootstrap)>0
+                )
+                or (
+                    entry_status=="no_fuel"
+                    and entry_requires_refuel is True
+                    and entry_coal_fuel_numeric
+                    and float(entry_coal_fuel)==0.0
+                    and removed_bootstrap_numeric
+                    and float(removed_bootstrap)==0.0
+                )
+            )
             valid=(
                 applies_to_selected_seed
                 and payload.get("status")=="completed"
@@ -3138,17 +3168,7 @@ def build_phase_state(
                     "endogenous_coal_reaches_fuel_consumer"
                 ) is True
                 and final.get("external_bootstrap_fuel_retired") is True
-                and isinstance(
-                    final.get("incumbent_iron_bootstrap_removed"),
-                    (int,float),
-                )
-                and not isinstance(
-                    final.get("incumbent_iron_bootstrap_removed"),
-                    bool,
-                )
-                and float(
-                    final.get("incumbent_iron_bootstrap_removed")
-                )>0
+                and iron_bootstrap_retirement_valid
                 and final.get("incumbent_iron_bootstrap_remaining")==0
                 and isinstance(final.get("coal_endogenous_growth"),(int,float))
                 and not isinstance(final.get("coal_endogenous_growth"),bool)
