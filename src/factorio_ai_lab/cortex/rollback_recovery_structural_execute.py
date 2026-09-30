@@ -66,21 +66,10 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
 
     return [
         f"cortex_fast_reposition({stone_pos})",
-        (
-            "cortex_recovery_stone_before=inspect_inventory()"
-            f"[{_prototype('stone')}]"
-        ),
         "cortex_recovery_stone_harvested=harvest_resource(",
-        f"    {stone_pos},quantity={stone_required}",
+        f"    {stone_pos},quantity={stone_required},radius=3",
         ")",
-        (
-            "cortex_recovery_stone_after=inspect_inventory()"
-            f"[{_prototype('stone')}]"
-        ),
-        (
-            f"if cortex_recovery_stone_after-cortex_recovery_stone_before < "
-            f"{stone_required}:"
-        ),
+        f"if cortex_recovery_stone_harvested < {stone_required}:",
         "    raise RuntimeError('rollback recovery stone harvest incomplete')",
         f"craft_item({_prototype('stone-furnace')},quantity=1)",
         (
