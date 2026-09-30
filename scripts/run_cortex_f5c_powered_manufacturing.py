@@ -162,6 +162,29 @@ def _contents_count(row: Mapping[str,Any],item: str) -> float:
     return total
 
 
+def _factory_fingerprint(snapshot: Mapping[str,Any]) -> tuple[tuple[str,float,float],...]:
+    rows=snapshot.get("entities")
+    if not isinstance(rows,list):
+        return ()
+    fingerprint: list[tuple[str,float,float]]=[]
+    for row in rows:
+        if not isinstance(row,Mapping):
+            continue
+        name=row.get("name")
+        if not isinstance(name,str) or name=="character":
+            continue
+        pos=row.get("position")
+        if not isinstance(pos,Mapping):
+            continue
+        try:
+            x=round(float(pos["x"]),3)
+            y=round(float(pos["y"]),3)
+        except (KeyError,TypeError,ValueError):
+            continue
+        fingerprint.append((name,x,y))
+    return tuple(sorted(fingerprint))
+
+
 def _promoted_positions(
     state: Mapping[str,Any],
 ) -> tuple[int,dict[str,tuple[float,float]],Path]:
@@ -350,6 +373,7 @@ def preflight(
         "science_stock":science_stock,
         "coal_stock":coal_stock,
         "world_entity_count":snapshot.get("entity_count"),
+        "world_factory_fingerprint":_factory_fingerprint(snapshot),
         "evolution":evolution,
         "intervention_count":0,
         "world_lease_state":lease,
@@ -524,9 +548,10 @@ def run_powered_manufacturing(
                 after_attach=observer.snapshot()
             finally:
                 observer.close()
-            if after_attach.get("entity_count")!=pf["world_entity_count"]:
+            if _factory_fingerprint(after_attach)!=pf["world_factory_fingerprint"]:
                 raise RuntimeError(
-                    "live FLE attachment changed WORLD before powered-manufacturing A2"
+                    "live FLE attachment changed factory entities before "
+                    "powered-manufacturing A2"
                 )
 
             raw_positions=pf["positions"]

@@ -33,7 +33,7 @@ def powered_plan() -> PoweredManufacturingOptionPlan:
             code_revision="powered-test-sha",
             run_id="powered-test-run",
         ),
-        budget=OptionBudget(requested_ticks=715*60),
+        budget=OptionBudget(requested_ticks=720*60),
         authority=ActionAuthority.SHADOW,
     )
     action=ActionRequest(
@@ -144,6 +144,9 @@ def test_powered_runner_is_one_shot_no_reset_and_native_research() -> None:
     assert '"native_research_queue":True' in source
     assert '"direct_research_completion_mutation":False' in source
     assert "OptionKind.ESTABLISH_POWERED_MANUFACTURING" in source
+    assert '"world_factory_fingerprint"' in source
+    assert 'name=="character"' in source
+    assert 'after_attach.get("entity_count")!=pf["world_entity_count"]' not in source
     assert "executor.reset(" not in source
 
 
