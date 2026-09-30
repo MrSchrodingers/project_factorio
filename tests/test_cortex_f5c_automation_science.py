@@ -130,10 +130,10 @@ def test_compiled_automation_science_uses_two_endogenous_batches_and_survival() 
 def test_automation_science_budget_covers_all_internal_causal_windows() -> None:
     plan=science_plan()
 
-    compiled=compile_structural_action(plan.prepared,settle_seconds=208)
+    compiled=compile_structural_action(plan.prepared,settle_seconds=218)
     assert compiled.ready is False
     assert compiled.refusal is not None
-    assert "209" in compiled.refusal.detail
+    assert "219" in compiled.refusal.detail
 
     compiled=compile_structural_action(plan.prepared,settle_seconds=220)
     assert compiled.ready is True
