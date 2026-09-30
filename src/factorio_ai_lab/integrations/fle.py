@@ -55,14 +55,92 @@ def _snapshot_entity_identity(row: Mapping[str, Any]) -> tuple[str, float, float
     return name, x, y, direction
 
 
-def _capture_fle_entity_rows(environment: Any) -> list[dict[str, Any]]:
+def _capture_rcon_entity_rows(environment: Any) -> list[dict[str, Any]] | None:
+    """Capture physical entity identities through RCON if the FLE saver is stale.
+
+    FLE 0.4.3 may return an empty saver payload immediately after a
+    game-state reset even though the Factorio surface is live. This fallback
+    is observation-only: entity replay still uses the exact checkpoint rows.
+    """
+
+    unwrapped = getattr(environment, "unwrapped", environment)
+    instance = getattr(unwrapped, "instance", None)
+    rcon = getattr(instance, "rcon_client", None)
+    send = getattr(rcon, "send_command", None)
+    if not callable(send):
+        return None
+
+    command = (
+        "/c local p=storage.agent_characters and storage.agent_characters[1]; "
+        "local s=(p and p.surface) or game.surfaces[1]; "
+        "local f=(p and p.force) or game.forces.player; "
+        "if not s or not f then rcon.print('CORTEX_CAPTURE_ERROR') return end; "
+        "local area={{-500,-500},{500,500}}; "
+        "rcon.print('CORTEX_CAPTURE_BEGIN'); "
+        "for _,e in pairs(s.find_entities_filtered{area=area,force=f}) do "
+        "if e.valid and e.name~='character' then "
+        "rcon.print('CORTEX_ENTITY|'..e.name..'|'..e.position.x..'|'.."
+        "e.position.y..'|'..(e.direction or 0)) end end; "
+        "for _,e in pairs(s.find_entities_filtered{area=area,name='item-on-ground'}) do "
+        "if e.valid then rcon.print('CORTEX_ENTITY|item-on-ground|'.."
+        "e.position.x..'|'..e.position.y..'|0') end end; "
+        "rcon.print('CORTEX_CAPTURE_END')"
+    )
+    try:
+        response = send(command)
+    except (OSError, RuntimeError, TypeError, ValueError, AttributeError):
+        return None
+    if response is None:
+        return None
+
+    lines = [line.strip() for line in str(response).splitlines()]
+    if (
+        "CORTEX_CAPTURE_BEGIN" not in lines
+        or "CORTEX_CAPTURE_END" not in lines
+        or "CORTEX_CAPTURE_ERROR" in lines
+    ):
+        return None
+
+    rows: list[dict[str, Any]] = []
+    for line in lines:
+        if not line.startswith("CORTEX_ENTITY|"):
+            continue
+        parts = line.split("|")
+        if len(parts) != 5:
+            return None
+        try:
+            x = float(parts[2])
+            y = float(parts[3])
+            direction = int(float(parts[4]))
+        except (TypeError, ValueError):
+            return None
+        rows.append(
+            {
+                "name": parts[1],
+                "position": {"x": x, "y": y},
+                "direction": direction,
+            }
+        )
+    return rows
+
+
+def _capture_fle_entity_rows(
+    environment: Any,
+) -> list[dict[str, Any]] | None:
     unwrapped = getattr(environment, "unwrapped", environment)
     instance = getattr(unwrapped, "instance", None)
     namespace = getattr(instance, "first_namespace", None)
     saver = getattr(namespace, "_save_entity_state", None)
-    if not callable(saver):
-        return []
-    return _decode_fle_entity_snapshot(saver(compress=True, encode=True))
+    if callable(saver):
+        try:
+            rows = _decode_fle_entity_snapshot(
+                saver(compress=True, encode=True)
+            )
+        except (OSError, RuntimeError, TypeError, ValueError, AttributeError):
+            rows = []
+        if rows:
+            return rows
+    return _capture_rcon_entity_rows(environment)
 
 
 def _repair_missing_checkpoint_entities(
@@ -90,7 +168,7 @@ def _repair_missing_checkpoint_entities(
         }
 
     actual = _capture_fle_entity_rows(environment)
-    if not actual:
+    if actual is None:
         raise RuntimeError("rollback integrity check could not capture restored WORLD")
 
     expected_by_id = {
@@ -119,6 +197,10 @@ def _repair_missing_checkpoint_entities(
         loader(rows, decompress=False)
         replayed = len(rows)
         actual_after = _capture_fle_entity_rows(environment)
+        if actual_after is None:
+            raise RuntimeError(
+                "rollback integrity check could not recapture WORLD after replay"
+            )
         actual_after_ids = {
             _snapshot_entity_identity(row)
             for row in actual_after

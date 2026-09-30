@@ -53,14 +53,15 @@ def _encode_entities(rows):
 
 
 class FakeSnapshotNamespace:
-    def __init__(self, rows) -> None:
+    def __init__(self, rows, *, force_empty_save: bool=False) -> None:
         self.rows=[dict(row) for row in rows]
         self.loaded_batches=[]
+        self.force_empty_save=force_empty_save
 
     def _save_entity_state(self, compress=True, encode=True):
         assert compress is True
         assert encode is True
-        return _encode_entities(self.rows)
+        return _encode_entities([] if self.force_empty_save else self.rows)
 
     def _load_entity_state(self, rows, decompress=False):
         assert decompress is False
@@ -78,13 +79,40 @@ class FakeSnapshotNamespace:
         return True
 
 
-class FakeSnapshotInstance:
+class FakeRconClient:
     def __init__(self, namespace) -> None:
+        self.namespace=namespace
+
+    def send_command(self, command):
+        assert "CORTEX_CAPTURE_BEGIN" in command
+        lines=["CORTEX_CAPTURE_BEGIN"]
+        for row in self.namespace.rows:
+            name=str(row["name"]).replace('"',"")
+            if name=="character":
+                continue
+            position=row["position"]
+            direction=int(row.get("direction") or 0)
+            lines.append(
+                f"CORTEX_ENTITY|{name}|{position['x']}|{position['y']}|{direction}"
+            )
+        lines.append("CORTEX_CAPTURE_END")
+        return "\n".join(lines)
+
+
+class FakeSnapshotInstance:
+    def __init__(self, namespace, *, rcon_client=None) -> None:
         self.first_namespace=namespace
+        self.rcon_client=rcon_client
 
 
 class FakeRollbackEnvironment(FakeEnvironment):
-    def __init__(self, checkpoint, *, lose_name: str) -> None:
+    def __init__(
+        self,
+        checkpoint,
+        *,
+        lose_name: str,
+        force_empty_save: bool=False,
+    ) -> None:
         super().__init__()
         self.checkpoint=checkpoint
         self.lose_name=lose_name
@@ -92,9 +120,11 @@ class FakeRollbackEnvironment(FakeEnvironment):
             [
                 row for row in checkpoint.rows
                 if str(row["name"]).replace('"',"") != lose_name
-            ]
+            ],
+            force_empty_save=force_empty_save,
         )
-        self.instance=FakeSnapshotInstance(self.namespace)
+        rcon=FakeRconClient(self.namespace) if force_empty_save else None
+        self.instance=FakeSnapshotInstance(self.namespace,rcon_client=rcon)
         self.unwrapped=self
 
     def reset(self, *, options=None, seed=None):
@@ -301,6 +331,62 @@ class TransactionalFLEExecutorTests(unittest.TestCase):
         }
         self.assertIn(("stone-furnace",20.0,69.0),identities)
         self.assertIn(("stone-furnace",-63.0,69.0),identities)
+
+
+    def test_rejected_checkpoint_uses_rcon_when_fle_saver_is_empty(self) -> None:
+        rows=[
+            {
+                "name": '"stone-furnace"',
+                "position":{"x":"20","y":"69"},
+                "direction":0,
+            },
+            {
+                "name": '"stone-furnace"',
+                "position":{"x":"-63","y":"69"},
+                "direction":0,
+            },
+        ]
+        checkpoint=FakeCheckpoint(rows)
+        env=FakeRollbackEnvironment(
+            checkpoint,
+            lose_name="never",
+            force_empty_save=True,
+        )
+        original_reset=env.reset
+
+        def reset_with_one_missing(*,options=None,seed=None):
+            result=original_reset(options=options,seed=seed)
+            if options is not None and options.get("game_state") is checkpoint:
+                env.namespace.rows=[dict(rows[0])]
+            return result
+
+        env.reset=reset_with_one_missing
+        executor=TransactionalFLEExecutor(env,action_factory=fake_action_factory)
+        executor.game_state=checkpoint
+
+        rejected=executor.execute("bad",accept=lambda _:False)
+
+        self.assertFalse(rejected.accepted)
+        integrity=executor.rollback_integrity_snapshot()
+        self.assertIsNotNone(integrity)
+        assert integrity is not None
+        self.assertEqual(integrity["status"],"repaired")
+        self.assertEqual(integrity["replayed_entities"],1)
+        identities={
+            (
+                str(row["name"]).replace('"',""),
+                float(row["position"]["x"]),
+                float(row["position"]["y"]),
+            )
+            for row in env.namespace.rows
+        }
+        self.assertEqual(
+            identities,
+            {
+                ("stone-furnace",20.0,69.0),
+                ("stone-furnace",-63.0,69.0),
+            },
+        )
 
 
     def test_intervention_counters_respect_rollback(self) -> None:
