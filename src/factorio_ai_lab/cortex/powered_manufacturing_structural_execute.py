@@ -98,6 +98,12 @@ def compile_powered_manufacturing(
 
     research_round=max(10,research_window//5)
     manufacturing_round=max(3,manufacturing_window//2)
+    iron_batch1=(iron_target+1)//2
+    iron_batch2=iron_target-iron_batch1
+    smelt_batch1=max(1,(smelt_window*iron_batch1)//iron_target)
+    smelt_batch2=smelt_window-smelt_batch1
+    if iron_batch2<=0 or smelt_batch2<=0:
+        raise ValueError("powered manufacturing requires two bounded iron batches")
 
     code=f"""
 cortex_iron_extractor=get_entity({_prototype('burner-mining-drill')},{parsed['iron_extractor']})
@@ -188,26 +194,44 @@ cortex_copper_furnace=insert_item(
 cortex_boiler=insert_item(
     {_prototype('coal')},cortex_boiler,quantity=4
 )
-cortex_iron_furnace=insert_item(
-    {_prototype('iron-ore')},cortex_iron_furnace,quantity={iron_target}
+cortex_iron_batch1_inserted=insert_item(
+    {_prototype('iron-ore')},cortex_iron_furnace,quantity={iron_batch1}
 )
+if cortex_iron_batch1_inserted < {iron_batch1}:
+    raise RuntimeError('powered-manufacturing first iron batch did not fit furnace')
 cortex_copper_furnace=insert_item(
     {_prototype('copper-ore')},cortex_copper_furnace,quantity={copper_target}
 )
-sleep({smelt_window})
+sleep({smelt_batch1})
 
-cortex_iron_plate_available=inspect_inventory(cortex_iron_furnace)[{_prototype('iron-plate')}]
+cortex_iron_batch1_available=inspect_inventory(cortex_iron_furnace)[{_prototype('iron-plate')}]
 cortex_copper_plate_available=inspect_inventory(cortex_copper_furnace)[{_prototype('copper-plate')}]
-if cortex_iron_plate_available < {iron_target}:
-    raise RuntimeError('powered-manufacturing iron smelting incomplete')
+if cortex_iron_batch1_available < {iron_batch1}:
+    raise RuntimeError('powered-manufacturing first iron smelting batch incomplete')
 if cortex_copper_plate_available < {copper_target}:
     raise RuntimeError('powered-manufacturing copper smelting incomplete')
-cortex_iron_plate_ready=extract_item(
-    {_prototype('iron-plate')},cortex_iron_furnace,quantity={iron_target}
+cortex_iron_batch1_ready=extract_item(
+    {_prototype('iron-plate')},cortex_iron_furnace,quantity={iron_batch1}
 )
 cortex_copper_plate_ready=extract_item(
     {_prototype('copper-plate')},cortex_copper_furnace,quantity={copper_target}
 )
+
+cortex_iron_batch2_inserted=insert_item(
+    {_prototype('iron-ore')},cortex_iron_furnace,quantity={iron_batch2}
+)
+if cortex_iron_batch2_inserted < {iron_batch2}:
+    raise RuntimeError('powered-manufacturing second iron batch did not fit furnace')
+sleep({smelt_batch2})
+cortex_iron_batch2_available=inspect_inventory(cortex_iron_furnace)[{_prototype('iron-plate')}]
+if cortex_iron_batch2_available < {iron_batch2}:
+    raise RuntimeError('powered-manufacturing second iron smelting batch incomplete')
+cortex_iron_batch2_ready=extract_item(
+    {_prototype('iron-plate')},cortex_iron_furnace,quantity={iron_batch2}
+)
+cortex_iron_plate_ready=cortex_iron_batch1_ready+cortex_iron_batch2_ready
+if cortex_iron_plate_ready < {iron_target}:
+    raise RuntimeError('powered-manufacturing iron plate budget incomplete')
 
 craft_item({_prototype('copper-cable')},quantity=30)
 craft_item({_prototype('electronic-circuit')},quantity=10)

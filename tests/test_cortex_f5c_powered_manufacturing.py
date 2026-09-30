@@ -93,7 +93,7 @@ def test_powered_manufacturing_option_is_inert_and_schema_aligned() -> None:
 
 def test_compiled_powered_manufacturing_is_causal_and_dual_output() -> None:
     plan=powered_plan()
-    compiled=compile_structural_action(plan.prepared,settle_seconds=715)
+    compiled=compile_structural_action(plan.prepared,settle_seconds=720)
 
     assert compiled.ready
     assert compiled.compiled is not None
@@ -113,6 +113,9 @@ def test_compiled_powered_manufacturing_is_causal_and_dual_output() -> None:
     assert "cortex_coal_amplification_rounds" in code
     assert "sleep(30)" in code
     assert "sleep(200)" in code
+    assert "sleep(115)" in code
+    assert "cortex_iron_batch1_inserted" in code
+    assert "cortex_iron_batch2_inserted" in code
     assert "cortex_science_replenished" in code
     assert "cortex_automation_science_survives" in code
     assert "cortex_steam_power_survives" in code
@@ -121,12 +124,12 @@ def test_compiled_powered_manufacturing_is_causal_and_dual_output() -> None:
 def test_powered_manufacturing_budget_covers_internal_windows() -> None:
     plan=powered_plan()
 
-    compiled=compile_structural_action(plan.prepared,settle_seconds=706)
+    compiled=compile_structural_action(plan.prepared,settle_seconds=716)
     assert compiled.ready is False
     assert compiled.refusal is not None
-    assert "707" in compiled.refusal.detail
+    assert "717" in compiled.refusal.detail
 
-    compiled=compile_structural_action(plan.prepared,settle_seconds=715)
+    compiled=compile_structural_action(plan.prepared,settle_seconds=720)
     assert compiled.ready is True
 
 
