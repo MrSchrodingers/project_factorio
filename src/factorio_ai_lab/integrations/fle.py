@@ -65,6 +65,12 @@ def _capture_rcon_entity_rows(environment: Any) -> list[dict[str, Any]] | None:
 
     unwrapped = getattr(environment, "unwrapped", environment)
     instance = getattr(unwrapped, "instance", None)
+    ensure_connected = getattr(instance, "ensure_connected", None)
+    if callable(ensure_connected):
+        try:
+            ensure_connected()
+        except (OSError, RuntimeError, ConnectionError):
+            return None
     rcon = getattr(instance, "rcon_client", None)
     send = getattr(rcon, "send_command", None)
     if not callable(send):
@@ -72,6 +78,7 @@ def _capture_rcon_entity_rows(environment: Any) -> list[dict[str, Any]] | None:
 
     command = (
         "/c local p=storage.agent_characters and storage.agent_characters[1]; "
+        "if p and not p.valid then p=nil end; "
         "local s=(p and p.surface) or game.surfaces[1]; "
         "local f=(p and p.force) or game.forces.player; "
         "if not s or not f then rcon.print('CORTEX_CAPTURE_ERROR') return end; "
@@ -638,11 +645,28 @@ class TransactionalFLEExecutor:
             # create_entity failures. Verify the restored structure and replay
             # only exact missing rows from the checkpoint before calling the
             # rollback complete.
-            self.environment.reset(options={'game_state': checkpoint})
-            self._last_rollback_integrity = _repair_missing_checkpoint_entities(
-                self.environment,
-                checkpoint,
-            )
+            try:
+                self.environment.reset(options={'game_state': checkpoint})
+                self._last_rollback_integrity = _repair_missing_checkpoint_entities(
+                    self.environment,
+                    checkpoint,
+                )
+            except (
+                OSError,
+                RuntimeError,
+                TypeError,
+                ValueError,
+                AttributeError,
+                ConnectionError,
+            ) as rollback_error:
+                original_result = result.info.get("result")
+                original_error = result.info.get("error_occurred")
+                raise RuntimeError(
+                    "rollback integrity failure after rejected FLE action; "
+                    f"original_error_occurred={original_error!r}; "
+                    f"original_result={original_result!r}; "
+                    f"rollback_error={rollback_error}"
+                ) from rollback_error
             self.game_state = checkpoint
 
         if self._action_runtime is not None and runtime_token is not None:
