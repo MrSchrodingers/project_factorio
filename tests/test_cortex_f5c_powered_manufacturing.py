@@ -116,6 +116,9 @@ def test_compiled_powered_manufacturing_is_causal_and_dual_output() -> None:
     assert "sleep(115)" in code
     assert code.count("quantity=33")>=2
     assert code.count("sleep(115)")==2
+    assert "cortex_iron_ore_draw_batch1" in code
+    assert "cortex_iron_ore_draw_batch2" in code
+    assert "cortex_iron_ore_draw=cortex_iron_ore_draw_batch1+cortex_iron_ore_draw_batch2" in code
     assert "cortex_science_replenished" in code
     assert "cortex_automation_science_survives" in code
     assert "cortex_steam_power_survives" in code

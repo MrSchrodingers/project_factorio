@@ -172,12 +172,16 @@ if cortex_iron_ore_available < {iron_target}:
 if cortex_copper_ore_available < {copper_target}:
     raise RuntimeError('endogenous copper ore below powered-manufacturing budget')
 
-cortex_iron_ore_draw=extract_item(
-    {_prototype('iron-ore')},cortex_iron_buffer,quantity={iron_target}
+cortex_iron_ore_draw_batch1=extract_item(
+    {_prototype('iron-ore')},cortex_iron_buffer,quantity={iron_batch1}
 )
+if cortex_iron_ore_draw_batch1 < {iron_batch1}:
+    raise RuntimeError('first powered-manufacturing iron transfer incomplete')
 cortex_copper_ore_draw=extract_item(
     {_prototype('copper-ore')},cortex_copper_buffer,quantity={copper_target}
 )
+if cortex_copper_ore_draw < {copper_target}:
+    raise RuntimeError('powered-manufacturing copper transfer incomplete')
 
 cortex_process_coal_available=inspect_inventory(cortex_coal_buffer)[{_prototype('coal')}]
 if cortex_process_coal_available < 12:
@@ -215,6 +219,12 @@ cortex_copper_plate_ready=extract_item(
     {_prototype('copper-plate')},cortex_copper_furnace,quantity={copper_target}
 )
 
+cortex_iron_ore_draw_batch2=extract_item(
+    {_prototype('iron-ore')},cortex_iron_buffer,quantity={iron_batch2}
+)
+if cortex_iron_ore_draw_batch2 < {iron_batch2}:
+    raise RuntimeError('second powered-manufacturing iron transfer incomplete')
+cortex_iron_ore_draw=cortex_iron_ore_draw_batch1+cortex_iron_ore_draw_batch2
 cortex_iron_furnace=insert_item(
     {_prototype('iron-ore')},cortex_iron_furnace,quantity={iron_batch2}
 )
