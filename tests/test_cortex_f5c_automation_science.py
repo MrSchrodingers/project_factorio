@@ -112,6 +112,9 @@ def test_compiled_automation_science_uses_two_endogenous_batches_and_survival() 
     )==2
     assert "cortex_science_batch1" in code
     assert "cortex_science_batch2" in code
+    assert "cortex_science_buffer_count" in code
+    assert "cortex_persistent_science_buffer" in code
+    assert "insert_item(" in code
     assert "cortex_inputs_endogenous" in code
     assert "cortex_production_sustained" in code
     assert "cortex_copper_chain_survives" in code
@@ -145,6 +148,8 @@ def test_automation_science_runner_is_bounded_no_reset_and_no_powered_manufactur
     assert '"world_reset":False' in source
     assert '"external_resource_injection":False' in source
     assert '"persistent_science_inventory":True' in source
+    assert '"persistent_science_buffer"' in source
+    assert '"continuity_gate":continuity_gate' in source
     assert '"uses_powered_manufacturing":False' in source
     assert "executor.reset(" not in source
     assert "set_research(" not in source

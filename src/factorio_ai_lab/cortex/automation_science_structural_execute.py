@@ -319,6 +319,24 @@ def compile_automation_science(operation: StructuralOperation) -> list[str]:
             "cortex_automation_science_inventory=max(0,"
             "cortex_science_after_batch2-cortex_science_before)"
         ),
+        f"if cortex_automation_science_inventory < {target}:",
+        "    raise RuntimeError('automation-science target inventory incomplete')",
+        "cortex_copper_buffer=insert_item(",
+        f"    {_prototype('automation-science-pack')},",
+        "    cortex_copper_buffer,",
+        f"    quantity={target},",
+        ")",
+        (
+            "cortex_science_buffer_count=inspect_inventory(cortex_copper_buffer)"
+            f"[{_prototype('automation-science-pack')}]"
+        ),
+        (
+            "cortex_science_player_remaining=inspect_inventory()"
+            f"[{_prototype('automation-science-pack')}]"
+        ),
+        (
+            f"cortex_persistent_science_buffer=(cortex_science_buffer_count>={target})"
+        ),
         (
             f"cortex_inputs_endogenous=(cortex_iron_plate_ready>={iron_target} "
             f"and cortex_copper_plate_ready>={copper_target} "
@@ -486,6 +504,9 @@ def compile_automation_science(operation: StructuralOperation) -> list[str]:
         "    'inputs_endogenous':cortex_inputs_endogenous,",
         "    'production_sustained':cortex_production_sustained,",
         "    'automation_science_inventory':cortex_automation_science_inventory,",
+        "    'science_buffer_count':cortex_science_buffer_count,",
+        "    'science_player_remaining':cortex_science_player_remaining,",
+        "    'persistent_science_buffer':cortex_persistent_science_buffer,",
         "    'science_batch1':cortex_science_batch1,",
         "    'science_batch2':cortex_science_batch2,",
         "    'iron_plate_ready':cortex_iron_plate_ready,",

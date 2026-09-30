@@ -3726,6 +3726,13 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
             "inputs_endogenous":True,
             "production_sustained":True,
         },
+        "continuity_gate":{
+            "persistent_science_buffer":True,
+            "science_buffer_count":10.0,
+            "science_player_remaining":0.0,
+            "storage_role":"copper_buffer",
+            "storage_position":{"x":-70.5,"y":71.5},
+        },
         "survival_gate":{
             "previously_promoted":[
                 "iron_extraction",
@@ -3746,6 +3753,9 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
             "automation_science_output_positive":True,
             "inputs_endogenous":True,
             "production_sustained":True,
+            "persistent_science_buffer":True,
+            "science_buffer_count":10.0,
+            "science_player_remaining":0.0,
             "automation_science_inventory":10.0,
             "science_batch1":5.0,
             "science_batch2":5.0,

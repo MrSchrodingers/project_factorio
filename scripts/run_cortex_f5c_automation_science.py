@@ -382,6 +382,8 @@ def _measure(namespace: Any,prepared: Any) -> dict[str,Any]:
         "automation_science_inventory",
         "science_batch1",
         "science_batch2",
+        "science_buffer_count",
+        "science_player_remaining",
         "iron_plate_ready",
         "copper_plate_ready",
         "iron_topup_ore",
@@ -405,6 +407,9 @@ def _measure(namespace: Any,prepared: Any) -> dict[str,Any]:
         ),
         "production_sustained":bool(
             getattr(namespace,"cortex_production_sustained",False)
+        ),
+        "persistent_science_buffer":bool(
+            getattr(namespace,"cortex_persistent_science_buffer",False)
         ),
         "iron_extraction_survives":bool(
             getattr(namespace,"cortex_iron_extraction_survives",False)
@@ -599,6 +604,16 @@ def run_automation_science(
                     and after["science_batch2"]>0
                 ),
             }
+            continuity_gate={
+                "persistent_science_buffer":(
+                    after["persistent_science_buffer"] is True
+                    and after["science_buffer_count"]>=TARGET_PACKS
+                ),
+                "science_buffer_count":after["science_buffer_count"],
+                "science_player_remaining":after["science_player_remaining"],
+                "storage_role":"copper_buffer",
+                "storage_position":pf["positions"]["copper_buffer"],
+            }
             survival_gate={
                 "previously_promoted":[
                     "iron_extraction","coal_self_sufficiency","iron_smelting",
@@ -642,6 +657,7 @@ def run_automation_science(
             promoted=(
                 accepted
                 and all(capability_gate.values())
+                and continuity_gate["persistent_science_buffer"] is True
                 and survival_gate["passed"] is True
             )
             record.update({
@@ -650,6 +666,7 @@ def run_automation_science(
                 "option_execution":execution.to_dict(),
                 "measurement_final":after,
                 "capability_gate":capability_gate,
+                "continuity_gate":continuity_gate,
                 "survival_gate":survival_gate,
                 "capability_promoted":(
                     "automation_science" if promoted else None
@@ -675,6 +692,7 @@ def run_automation_science(
                     "authority_level":"A2",
                     "execution_trace":execution.to_dict(),
                     "postconditions":after,
+                    "continuity_gate":continuity_gate,
                     "capability_delta":{
                         "promoted":[
                             "automation_science"

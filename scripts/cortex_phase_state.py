@@ -3794,6 +3794,9 @@ def build_phase_state(
             survival=payload.get("survival_gate")
             if not isinstance(survival,dict):
                 survival={}
+            continuity=payload.get("continuity_gate")
+            if not isinstance(continuity,dict):
+                continuity={}
             final=payload.get("measurement_final")
             if not isinstance(final,dict):
                 final={}
@@ -3851,6 +3854,13 @@ def build_phase_state(
                 and gate.get("automation_science_output_positive") is True
                 and gate.get("inputs_endogenous") is True
                 and gate.get("production_sustained") is True
+                and continuity.get("persistent_science_buffer") is True
+                and isinstance(
+                    continuity.get("science_buffer_count"),(int,float)
+                )
+                and not isinstance(continuity.get("science_buffer_count"),bool)
+                and float(continuity.get("science_buffer_count"))>=10
+                and continuity.get("storage_role")=="copper_buffer"
                 and survival.get("previously_promoted")
                 ==[
                     "iron_extraction",
@@ -3869,6 +3879,10 @@ def build_phase_state(
                 and final.get("automation_science_output_positive") is True
                 and final.get("inputs_endogenous") is True
                 and final.get("production_sustained") is True
+                and final.get("persistent_science_buffer") is True
+                and isinstance(final.get("science_buffer_count"),(int,float))
+                and not isinstance(final.get("science_buffer_count"),bool)
+                and float(final.get("science_buffer_count"))>=10
                 and isinstance(
                     final.get("automation_science_inventory"),(int,float)
                 )
@@ -4679,6 +4693,9 @@ def build_phase_state(
                 ),
                 "capability_gate":phase5c_automation_artifact.get(
                     "capability_gate"
+                ),
+                "continuity_gate":phase5c_automation_artifact.get(
+                    "continuity_gate"
                 ),
                 "survival_gate":phase5c_automation_artifact.get(
                     "survival_gate"
