@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import base64
+import json
 import re
+import zlib
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -23,6 +26,121 @@ class FactorioEnvironment(Protocol):
 
 ActionFactory = Callable[[int, str, Any | None], Any]
 AcceptancePredicate = Callable[['FLEStep'], bool]
+
+
+def _decode_fle_entity_snapshot(raw: Any) -> list[dict[str, Any]]:
+    """Decode one FLE save_entity_state payload without importing FLE eagerly."""
+
+    if not isinstance(raw, str) or not raw:
+        return []
+    try:
+        decoded = zlib.decompress(base64.b64decode(raw)).decode("utf-8")
+        value = json.loads(decoded)
+    except (OSError, ValueError, TypeError, zlib.error):
+        return []
+    if not isinstance(value, list):
+        return []
+    return [dict(row) for row in value if isinstance(row, Mapping)]
+
+
+def _snapshot_entity_identity(row: Mapping[str, Any]) -> tuple[str, float, float, int]:
+    raw_name = row.get("name")
+    name = str(raw_name or "").replace('"', "")
+    pos = row.get("position")
+    if not isinstance(pos, Mapping):
+        raise TypeError(f"entity snapshot has no position: {dict(row)!r}")
+    x = round(float(pos["x"]), 4)
+    y = round(float(pos["y"]), 4)
+    direction = int(row.get("direction") or 0)
+    return name, x, y, direction
+
+
+def _capture_fle_entity_rows(environment: Any) -> list[dict[str, Any]]:
+    unwrapped = getattr(environment, "unwrapped", environment)
+    instance = getattr(unwrapped, "instance", None)
+    namespace = getattr(instance, "first_namespace", None)
+    saver = getattr(namespace, "_save_entity_state", None)
+    if not callable(saver):
+        return []
+    return _decode_fle_entity_snapshot(saver(compress=True, encode=True))
+
+
+def _repair_missing_checkpoint_entities(
+    environment: Any,
+    checkpoint: Any,
+) -> dict[str, Any]:
+    """Verify FLE rollback structure and replay only missing checkpoint entities.
+
+    FLE 0.4.3 resets the whole surface before loading a GameState and its Lua
+    loader silently ignores create_entity failures. F5 cannot accept a rollback
+    that loses an incumbent factory entity. This guard compares the checkpoint
+    entity identities with the restored world and, when necessary, asks FLE's
+    own loader to replay only the exact missing serialized rows. No new entity
+    specification or resource value is synthesized here.
+    """
+
+    expected = _decode_fle_entity_snapshot(getattr(checkpoint, "entities", None))
+    if not expected:
+        return {
+            "status": "not_applicable",
+            "expected_entities": 0,
+            "missing_before_repair": [],
+            "missing_after_repair": [],
+            "replayed_entities": 0,
+        }
+
+    actual = _capture_fle_entity_rows(environment)
+    if not actual:
+        raise RuntimeError("rollback integrity check could not capture restored WORLD")
+
+    expected_by_id = {
+        _snapshot_entity_identity(row): row
+        for row in expected
+        if str(row.get("name") or "").replace('"', "") != "character"
+    }
+    actual_ids = {
+        _snapshot_entity_identity(row)
+        for row in actual
+        if str(row.get("name") or "").replace('"', "") != "character"
+    }
+    missing = sorted(set(expected_by_id) - actual_ids)
+    replayed = 0
+
+    if missing:
+        unwrapped = getattr(environment, "unwrapped", environment)
+        instance = getattr(unwrapped, "instance", None)
+        namespace = getattr(instance, "first_namespace", None)
+        loader = getattr(namespace, "_load_entity_state", None)
+        if not callable(loader):
+            raise RuntimeError(
+                "rollback lost checkpoint entities and no FLE loader is available"
+            )
+        rows = [expected_by_id[key] for key in missing]
+        loader(rows, decompress=False)
+        replayed = len(rows)
+        actual_after = _capture_fle_entity_rows(environment)
+        actual_after_ids = {
+            _snapshot_entity_identity(row)
+            for row in actual_after
+            if str(row.get("name") or "").replace('"', "") != "character"
+        }
+        remaining = sorted(set(expected_by_id) - actual_after_ids)
+    else:
+        remaining = []
+
+    if remaining:
+        raise RuntimeError(
+            "FLE rollback integrity failure; checkpoint entities remain missing: "
+            + repr(remaining)
+        )
+
+    return {
+        "status": "repaired" if missing else "verified",
+        "expected_entities": len(expected_by_id),
+        "missing_before_repair": [list(key) for key in missing],
+        "missing_after_repair": [list(key) for key in remaining],
+        "replayed_entities": replayed,
+    }
 
 
 @dataclass(frozen=True)
@@ -286,6 +404,7 @@ class TransactionalFLEExecutor:
         self._committed_infrastructure: dict[str, int] = {}
         self._attempted_repair: dict[str, int] = {}
         self._committed_repair: dict[str, int] = {}
+        self._last_rollback_integrity: dict[str, Any] | None = None
         self._action_runtime = (
             ActionRuntimeRecorder(context_provider=runtime_context)
             if runtime_context is not None
@@ -300,6 +419,7 @@ class TransactionalFLEExecutor:
         self._committed_infrastructure = {}
         self._attempted_repair = {}
         self._committed_repair = {}
+        self._last_rollback_integrity = None
         return self.environment.reset(
             options={'game_state': game_state},
             seed=seed,
@@ -312,6 +432,13 @@ class TransactionalFLEExecutor:
     ) -> None:
         for key, value in counts.items():
             target[key] = int(target.get(key, 0)) + int(value)
+
+    def rollback_integrity_snapshot(self) -> dict[str, Any] | None:
+        return (
+            None
+            if self._last_rollback_integrity is None
+            else dict(self._last_rollback_integrity)
+        )
 
     def intervention_snapshot(self) -> dict[str, dict[str, int]]:
         return {
@@ -422,10 +549,18 @@ class TransactionalFLEExecutor:
         if accepted:
             self._accumulate(committed_counter, counts)
             self.game_state = candidate_state
+            self._last_rollback_integrity = None
         else:
-            # Restore the exact pre-action checkpoint. Passing None restores
-            # the environment's initial task state on the first rejected step.
+            # Restore the exact pre-action checkpoint. FLE 0.4.3 clears the
+            # surface before replaying GameState entities and silently ignores
+            # create_entity failures. Verify the restored structure and replay
+            # only exact missing rows from the checkpoint before calling the
+            # rollback complete.
             self.environment.reset(options={'game_state': checkpoint})
+            self._last_rollback_integrity = _repair_missing_checkpoint_entities(
+                self.environment,
+                checkpoint,
+            )
             self.game_state = checkpoint
 
         if self._action_runtime is not None and runtime_token is not None:

@@ -1,4 +1,7 @@
+import base64
+import json
 import unittest
+import zlib
 from dataclasses import dataclass
 
 from factorio_ai_lab.integrations.fle import (
@@ -40,6 +43,76 @@ class FakeEnvironment:
 
     def close(self):
         pass
+
+
+
+
+def _encode_entities(rows):
+    raw=json.dumps(rows).encode("utf-8")
+    return base64.b64encode(zlib.compress(raw)).decode("ascii")
+
+
+class FakeSnapshotNamespace:
+    def __init__(self, rows) -> None:
+        self.rows=[dict(row) for row in rows]
+        self.loaded_batches=[]
+
+    def _save_entity_state(self, compress=True, encode=True):
+        assert compress is True
+        assert encode is True
+        return _encode_entities(self.rows)
+
+    def _load_entity_state(self, rows, decompress=False):
+        assert decompress is False
+        batch=[dict(row) for row in rows]
+        self.loaded_batches.append(batch)
+        existing={
+            (str(row["name"]),str(row["position"]["x"]),str(row["position"]["y"]))
+            for row in self.rows
+        }
+        for row in batch:
+            key=(str(row["name"]),str(row["position"]["x"]),str(row["position"]["y"]))
+            if key not in existing:
+                self.rows.append(row)
+                existing.add(key)
+        return True
+
+
+class FakeSnapshotInstance:
+    def __init__(self, namespace) -> None:
+        self.first_namespace=namespace
+
+
+class FakeRollbackEnvironment(FakeEnvironment):
+    def __init__(self, checkpoint, *, lose_name: str) -> None:
+        super().__init__()
+        self.checkpoint=checkpoint
+        self.lose_name=lose_name
+        self.namespace=FakeSnapshotNamespace(
+            [
+                row for row in checkpoint.rows
+                if str(row["name"]).replace('"',"") != lose_name
+            ]
+        )
+        self.instance=FakeSnapshotInstance(self.namespace)
+        self.unwrapped=self
+
+    def reset(self, *, options=None, seed=None):
+        game_state=None if options is None else options.get("game_state")
+        self.reset_calls.append((game_state,seed))
+        self.state='initial' if game_state is None else game_state
+        if game_state is self.checkpoint:
+            self.namespace.rows=[
+                dict(row) for row in self.checkpoint.rows
+                if str(row["name"]).replace('"',"") != self.lose_name
+            ]
+        return {'state':self.state}
+
+
+class FakeCheckpoint:
+    def __init__(self, rows) -> None:
+        self.rows=[dict(row) for row in rows]
+        self.entities=_encode_entities(self.rows)
 
 
 def fake_action_factory(agent_idx, code, game_state):
@@ -182,6 +255,53 @@ class TransactionalFLEExecutorTests(unittest.TestCase):
         self.assertEqual(rejected.checkpoint_before, 'initial|good')
         self.assertEqual(executor.game_state, 'initial|good')
         self.assertEqual(env.state, 'initial|good')
+
+
+    def test_rejected_fle_checkpoint_repairs_exact_missing_entity(self) -> None:
+        rows=[
+            {
+                "name": '"stone-furnace"',
+                "position":{"x":"20","y":"69"},
+                "direction":0,
+            },
+            {
+                "name": '"stone-furnace"',
+                "position":{"x":"-63","y":"69"},
+                "direction":0,
+            },
+        ]
+        checkpoint=FakeCheckpoint(rows)
+        env=FakeRollbackEnvironment(checkpoint,lose_name="never")
+        env.namespace.rows=[dict(rows[0])]
+        original_reset=env.reset
+        def reset_with_one_missing(*,options=None,seed=None):
+            result=original_reset(options=options,seed=seed)
+            if options is not None and options.get("game_state") is checkpoint:
+                env.namespace.rows=[dict(rows[0])]
+            return result
+        env.reset=reset_with_one_missing
+        executor=TransactionalFLEExecutor(env,action_factory=fake_action_factory)
+        executor.game_state=checkpoint
+
+        rejected=executor.execute("bad",accept=lambda _:False)
+
+        self.assertFalse(rejected.accepted)
+        integrity=executor.rollback_integrity_snapshot()
+        self.assertIsNotNone(integrity)
+        assert integrity is not None
+        self.assertEqual(integrity["status"],"repaired")
+        self.assertEqual(integrity["replayed_entities"],1)
+        identities={
+            (
+                str(row["name"]).replace('"',""),
+                float(row["position"]["x"]),
+                float(row["position"]["y"]),
+            )
+            for row in env.namespace.rows
+        }
+        self.assertIn(("stone-furnace",20.0,69.0),identities)
+        self.assertIn(("stone-furnace",-63.0,69.0),identities)
+
 
     def test_intervention_counters_respect_rollback(self) -> None:
         env = FakeEnvironment()
