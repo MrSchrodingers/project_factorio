@@ -119,8 +119,8 @@ def test_compiled_automation_science_uses_two_endogenous_batches_and_survival() 
     assert "cortex_production_sustained" in code
     assert "cortex_copper_chain_survives" in code
     assert "cortex_steam_power_survives" in code
-    assert "quantity=2" in code
-    assert "sleep(45)" in code
+    assert "quantity=3" in code
+    assert "sleep(90)" in code
     assert "cortex_iron_survival_growth" in code
     assert "cortex_coal_survival_growth" in code
     assert "cortex_copper_survival_growth" in code
@@ -130,10 +130,10 @@ def test_compiled_automation_science_uses_two_endogenous_batches_and_survival() 
 def test_automation_science_budget_covers_all_internal_causal_windows() -> None:
     plan=science_plan()
 
-    compiled=compile_structural_action(plan.prepared,settle_seconds=163)
+    compiled=compile_structural_action(plan.prepared,settle_seconds=208)
     assert compiled.ready is False
     assert compiled.refusal is not None
-    assert "164" in compiled.refusal.detail
+    assert "209" in compiled.refusal.detail
 
     compiled=compile_structural_action(plan.prepared,settle_seconds=220)
     assert compiled.ready is True
