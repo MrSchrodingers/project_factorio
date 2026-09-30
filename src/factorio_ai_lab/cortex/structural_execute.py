@@ -28,6 +28,9 @@ from factorio_ai_lab.cortex.actions import (
 from factorio_ai_lab.cortex.coal_structural_execute import (
     compile_coal_self_sufficiency,
 )
+from factorio_ai_lab.cortex.copper_chain_structural_execute import (
+    compile_copper_chain,
+)
 from factorio_ai_lab.cortex.iron_smelting_structural_execute import (
     compile_iron_smelting,
 )
@@ -36,6 +39,7 @@ from factorio_ai_lab.cortex.steam_power_structural_execute import (
 )
 from factorio_ai_lab.cortex.structural_prepare import (
     COAL_SELF_SUFFICIENCY_CONTRACT_VERSION,
+    COPPER_CHAIN_CONTRACT_VERSION,
     IRON_SMELTING_CONTRACT_VERSION,
     RESOURCE_EXTRACTION_CONTRACT_VERSION,
     STEAM_POWER_CONTRACT_VERSION,
@@ -61,6 +65,7 @@ MAX_SETTLE_SECONDS = 60
 MAX_COAL_SELF_SUFFICIENCY_SECONDS = 180
 MAX_IRON_SMELTING_SECONDS = 120
 MAX_STEAM_POWER_SECONDS = 360
+MAX_COPPER_CHAIN_SECONDS = 240
 
 MeasurementProbe = Callable[[PreparedStructuralAction], Mapping[str, Any]]
 
@@ -499,6 +504,7 @@ def _compile_operation(operation: StructuralOperation) -> list[str]:
         "establish_coal_self_sufficiency": compile_coal_self_sufficiency,
         "establish_iron_smelting": compile_iron_smelting,
         "establish_steam_power": compile_steam_power,
+        "establish_copper_chain": compile_copper_chain,
     }
     if operation.op == "verify_postconditions":
         return []
@@ -538,7 +544,11 @@ def compile_structural_action(
             else (
                 MAX_STEAM_POWER_SECONDS
                 if prepared.contract_version == STEAM_POWER_CONTRACT_VERSION
-                else MAX_SETTLE_SECONDS
+                else (
+                    MAX_COPPER_CHAIN_SECONDS
+                    if prepared.contract_version == COPPER_CHAIN_CONTRACT_VERSION
+                    else MAX_SETTLE_SECONDS
+                )
             )
         )
     )
@@ -650,6 +660,47 @@ def compile_structural_action(
                 ),
             )
 
+    if prepared.contract_version == COPPER_CHAIN_CONTRACT_VERSION:
+        copper_ops = [
+            operation
+            for operation in prepared.operations
+            if operation.op == "establish_copper_chain"
+        ]
+        if len(copper_ops) != 1:
+            return StructuralCompilationResult(
+                prepared=prepared,
+                refusal=Refusal(
+                    code=REFUSAL_OPERATION_UNSUPPORTED,
+                    detail=(
+                        "copper chain contract requires exactly one "
+                        "establish_copper_chain operation"
+                    ),
+                ),
+            )
+        params=copper_ops[0].parameters
+        required_seconds=sum(
+            int(params.get(key) or 0)
+            for key in (
+                "iron_recovery_window_seconds",
+                "iron_smelt_window_seconds",
+                "copper_extract_window_seconds",
+                "copper_smelt_window_seconds",
+                "survival_recovery_window_seconds",
+                "survival_window_seconds",
+            )
+        )
+        if settle < required_seconds:
+            return StructuralCompilationResult(
+                prepared=prepared,
+                refusal=Refusal(
+                    code=REFUSAL_OPERATION_UNSUPPORTED,
+                    detail=(
+                        "copper chain Option budget must cover internal "
+                        f"causal windows ({required_seconds}s)"
+                    ),
+                ),
+            )
+
     if prepared.contract_version == COAL_SELF_SUFFICIENCY_CONTRACT_VERSION:
         coal_ops = [
             operation
@@ -749,8 +800,9 @@ def compile_structural_action(
         COAL_SELF_SUFFICIENCY_CONTRACT_VERSION,
         IRON_SMELTING_CONTRACT_VERSION,
         STEAM_POWER_CONTRACT_VERSION,
+        COPPER_CHAIN_CONTRACT_VERSION,
     }:
-        # v5/v6/v7 contain their own causally separated validation windows.
+        # v5/v6/v7/v8 contain their own causally separated validation windows.
         pass
     else:
         lines.extend(
@@ -931,6 +983,26 @@ def execution_guard_conditions(
         return (
             ActionCondition(
                 name="steam_engine_exists",
+                operator=ConditionOperator.EQUALS,
+                state=ConditionState.UNKNOWN,
+                expected=True,
+                hard=True,
+            ),
+        )
+    if (
+        prepared is not None
+        and prepared.contract_version == COPPER_CHAIN_CONTRACT_VERSION
+    ):
+        return (
+            ActionCondition(
+                name="copper_extractor_exists",
+                operator=ConditionOperator.EQUALS,
+                state=ConditionState.UNKNOWN,
+                expected=True,
+                hard=True,
+            ),
+            ActionCondition(
+                name="copper_furnace_exists",
                 operator=ConditionOperator.EQUALS,
                 state=ConditionState.UNKNOWN,
                 expected=True,

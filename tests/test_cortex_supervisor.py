@@ -33,6 +33,7 @@ def test_supervisor_dispatch_is_explicit_and_bounded() -> None:
         "coal_self_sufficiency":"run_cortex_f5c_coal_self_sufficiency.py",
         "iron_smelting":"run_cortex_f5c_iron_smelting.py",
         "steam_power":"run_cortex_f5c_steam_power.py",
+        "copper_chain":"run_cortex_f5c_copper_chain.py",
     }
 
 

@@ -59,6 +59,7 @@ class OptionKind(StrEnum):
     ESTABLISH_COAL_SELF_SUFFICIENCY = "establish_coal_self_sufficiency"
     ESTABLISH_IRON_SMELTING = "establish_iron_smelting"
     ESTABLISH_STEAM_POWER = "establish_steam_power"
+    ESTABLISH_COPPER_CHAIN = "establish_copper_chain"
 
 
 class OptionStepKind(StrEnum):

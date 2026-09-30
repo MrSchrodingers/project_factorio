@@ -3573,6 +3573,112 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
     )
     assert "copper_chain" in f5c_amended["resume"]["action"]
 
+    copper_artifact=(
+        audits/
+        "cortex_f5c_continuation_853367368_"
+        "copper_chain_deadbeefcafe.json"
+    )
+    copper_payload={
+        "schema_version":"cortex_f5c_copper_chain_v1",
+        "status":"completed",
+        "base_seed":853367368,
+        "capability":"copper_chain",
+        "ambient_authority":"A0",
+        "bounded_authority":"A2",
+        "continuous_authority":False,
+        "automatic_retry":False,
+        "option_execution_attempts":1,
+        "world_reset":False,
+        "external_resource_injection":False,
+        "persistent_copper_chain":True,
+        "human_intervention_count":0,
+        "transaction_committed":True,
+        "capability_promoted":"copper_chain",
+        "started_at":"2026-09-29T11:00:00+00:00",
+        "code_revision":{"commit":"deadbeefcafe1234","dirty":False},
+        "preflight":{
+            "world_mutation":False,
+            "grant_issued":False,
+            "option_executed_live":False,
+            "world_reset":False,
+            "external_resource_injection":False,
+            "persistent_copper_chain":True,
+            "phase_state":{
+                "achieved_capabilities":[
+                    "iron_extraction",
+                    "coal_self_sufficiency",
+                    "iron_smelting",
+                    "steam_power",
+                ],
+                "next_capability":"copper_chain",
+            },
+        },
+        "capability_gate":{
+            "copper_extraction_live":True,
+            "copper_smelting_live":True,
+            "copper_plate_output_positive":True,
+        },
+        "survival_gate":{
+            "previously_promoted":[
+                "iron_extraction",
+                "coal_self_sufficiency",
+                "iron_smelting",
+                "steam_power",
+            ],
+            "iron_extraction_survives":True,
+            "coal_self_sufficiency_survives":True,
+            "iron_smelting_survives":True,
+            "steam_power_survives":True,
+            "regressed":[],
+            "passed":True,
+        },
+        "measurement_final":{
+            "copper_extraction_live":True,
+            "copper_smelting_live":True,
+            "copper_plate_output_positive":True,
+            "copper_ore_count":6.0,
+            "copper_plate_count":5.0,
+            "iron_extraction_survives":True,
+            "coal_self_sufficiency_survives":True,
+            "iron_smelting_survives":True,
+            "steam_power_survives":True,
+            "iron_survival_growth":4.0,
+            "coal_survival_growth":4.0,
+            "smelting_survival_growth":2.0,
+            "steam_survival_amount":200.0,
+            "steam_survival_energy":1000.0,
+        },
+        "trajectory":{
+            "capability_delta":{
+                "promoted":["copper_chain"],
+                "regressed":[],
+            },
+        },
+    }
+    copper_artifact.write_text(json.dumps(copper_payload)+"\n")
+    f5c_copper=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert f5c_copper["phase5_protocol"]["achieved_capabilities"]==[
+        "iron_extraction",
+        "coal_self_sufficiency",
+        "iron_smelting",
+        "steam_power",
+        "copper_chain",
+    ]
+    assert (
+        f5c_copper["phase5_deterministic_baseline"]["copper_chain"][
+            "validated"
+        ]
+        is True
+    )
+    assert f5c_copper["phase5_protocol"]["next_capability"]==(
+        "automation_science"
+    )
+    assert "automation_science" in f5c_copper["resume"]["action"]
+    copper_artifact.unlink()
+
     amendment_invalid=json.loads(amendment.read_text())
     amendment_invalid["original_capability_schema"]["sha256"]="0"*64
     amendment.write_text(json.dumps(amendment_invalid)+"\n")
