@@ -37,6 +37,9 @@ from factorio_ai_lab.cortex.copper_chain_structural_execute import (
 from factorio_ai_lab.cortex.iron_smelting_structural_execute import (
     compile_iron_smelting,
 )
+from factorio_ai_lab.cortex.powered_manufacturing_structural_execute import (
+    compile_powered_manufacturing,
+)
 from factorio_ai_lab.cortex.steam_power_structural_execute import (
     compile_steam_power,
 )
@@ -45,6 +48,7 @@ from factorio_ai_lab.cortex.structural_prepare import (
     COAL_SELF_SUFFICIENCY_CONTRACT_VERSION,
     COPPER_CHAIN_CONTRACT_VERSION,
     IRON_SMELTING_CONTRACT_VERSION,
+    POWERED_MANUFACTURING_CONTRACT_VERSION,
     RESOURCE_EXTRACTION_CONTRACT_VERSION,
     STEAM_POWER_CONTRACT_VERSION,
     SUPPORTED_CONTRACT_VERSIONS,
@@ -71,6 +75,7 @@ MAX_IRON_SMELTING_SECONDS = 120
 MAX_STEAM_POWER_SECONDS = 360
 MAX_COPPER_CHAIN_SECONDS = 240
 MAX_AUTOMATION_SCIENCE_SECONDS = 300
+MAX_POWERED_MANUFACTURING_SECONDS = 720
 
 MeasurementProbe = Callable[[PreparedStructuralAction], Mapping[str, Any]]
 
@@ -511,6 +516,7 @@ def _compile_operation(operation: StructuralOperation) -> list[str]:
         "establish_steam_power": compile_steam_power,
         "establish_copper_chain": compile_copper_chain,
         "establish_automation_science": compile_automation_science,
+        "establish_powered_manufacturing": compile_powered_manufacturing,
     }
     if operation.op == "verify_postconditions":
         return []
@@ -554,10 +560,15 @@ def compile_structural_action(
                     MAX_COPPER_CHAIN_SECONDS
                     if prepared.contract_version == COPPER_CHAIN_CONTRACT_VERSION
                     else (
-                        MAX_AUTOMATION_SCIENCE_SECONDS
+                        MAX_POWERED_MANUFACTURING_SECONDS
                         if prepared.contract_version
-                        == AUTOMATION_SCIENCE_CONTRACT_VERSION
-                        else MAX_SETTLE_SECONDS
+                        == POWERED_MANUFACTURING_CONTRACT_VERSION
+                        else (
+                            MAX_AUTOMATION_SCIENCE_SECONDS
+                            if prepared.contract_version
+                            == AUTOMATION_SCIENCE_CONTRACT_VERSION
+                            else MAX_SETTLE_SECONDS
+                        )
                     )
                 )
             )
@@ -707,6 +718,48 @@ def compile_structural_action(
                     code=REFUSAL_OPERATION_UNSUPPORTED,
                     detail=(
                         "automation science Option budget must cover internal "
+                        f"causal windows ({required_seconds}s)"
+                    ),
+                ),
+            )
+
+    if prepared.contract_version == POWERED_MANUFACTURING_CONTRACT_VERSION:
+        powered_ops = [
+            operation
+            for operation in prepared.operations
+            if operation.op == "establish_powered_manufacturing"
+        ]
+        if len(powered_ops) != 1:
+            return StructuralCompilationResult(
+                prepared=prepared,
+                refusal=Refusal(
+                    code=REFUSAL_OPERATION_UNSUPPORTED,
+                    detail=(
+                        "powered manufacturing contract requires exactly one "
+                        "establish_powered_manufacturing operation"
+                    ),
+                ),
+            )
+        params=powered_ops[0].parameters
+        required_seconds=sum(
+            int(params.get(key) or 0)
+            for key in (
+                "coal_recovery_window_seconds",
+                "ore_recovery_window_seconds",
+                "smelt_window_seconds",
+                "research_window_seconds",
+                "manufacturing_window_seconds",
+                "survival_recovery_window_seconds",
+                "survival_window_seconds",
+            )
+        )
+        if settle < required_seconds:
+            return StructuralCompilationResult(
+                prepared=prepared,
+                refusal=Refusal(
+                    code=REFUSAL_OPERATION_UNSUPPORTED,
+                    detail=(
+                        "powered manufacturing Option budget must cover internal "
                         f"causal windows ({required_seconds}s)"
                     ),
                 ),
@@ -1044,7 +1097,10 @@ def execution_guard_conditions(
         )
     if (
         prepared is not None
-        and prepared.contract_version == AUTOMATION_SCIENCE_CONTRACT_VERSION
+        and prepared.contract_version in {
+            AUTOMATION_SCIENCE_CONTRACT_VERSION,
+            POWERED_MANUFACTURING_CONTRACT_VERSION,
+        }
     ):
         return ()
     if (

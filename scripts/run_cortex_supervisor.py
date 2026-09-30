@@ -28,6 +28,7 @@ RUNNERS={
     "steam_power":"run_cortex_f5c_steam_power.py",
     "copper_chain":"run_cortex_f5c_copper_chain.py",
     "automation_science":"run_cortex_f5c_automation_science.py",
+    "powered_manufacturing":"run_cortex_f5c_powered_manufacturing.py",
 }
 
 def now() -> str:

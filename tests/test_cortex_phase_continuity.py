@@ -3802,6 +3802,135 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
         "powered_manufacturing"
     )
     assert "powered_manufacturing" in f5c_automation["resume"]["action"]
+
+    powered_artifact=(
+        audits/
+        "cortex_f5c_continuation_853367368_"
+        "powered_manufacturing_deadbeefcafe.json"
+    )
+    powered_payload={
+        "schema_version":"cortex_f5c_powered_manufacturing_v1",
+        "status":"completed",
+        "base_seed":853367368,
+        "capability":"powered_manufacturing",
+        "ambient_authority":"A0",
+        "bounded_authority":"A2",
+        "continuous_authority":False,
+        "automatic_retry":False,
+        "option_execution_attempts":1,
+        "world_reset":False,
+        "external_resource_injection":False,
+        "native_research_queue":True,
+        "direct_research_completion_mutation":False,
+        "human_intervention_count":0,
+        "transaction_committed":True,
+        "capability_promoted":"powered_manufacturing",
+        "started_at":"2026-09-29T13:00:00+00:00",
+        "code_revision":{"commit":"deadbeefcafefeed","dirty":False},
+        "preflight":{
+            "world_mutation":False,
+            "grant_issued":False,
+            "option_executed_live":False,
+            "world_reset":False,
+            "external_resource_injection":False,
+            "native_research_queue":True,
+            "direct_research_completion_mutation":False,
+            "phase_state":{
+                "achieved_capabilities":[
+                    "iron_extraction",
+                    "coal_self_sufficiency",
+                    "iron_smelting",
+                    "steam_power",
+                    "copper_chain",
+                    "automation_science",
+                ],
+                "next_capability":"powered_manufacturing",
+            },
+        },
+        "capability_gate":{
+            "assembler_powered":True,
+            "iron_gear_output_positive":True,
+            "electronic_circuit_output_positive":True,
+        },
+        "continuity_gate":{
+            "automation_research_completed":True,
+            "native_research_queue":True,
+            "direct_research_completion_mutation":False,
+            "science_replenished":1.0,
+            "science_buffer_after":1.0,
+        },
+        "survival_gate":{
+            "previously_promoted":[
+                "iron_extraction",
+                "coal_self_sufficiency",
+                "iron_smelting",
+                "steam_power",
+                "copper_chain",
+                "automation_science",
+            ],
+            "iron_extraction_survives":True,
+            "coal_self_sufficiency_survives":True,
+            "iron_smelting_survives":True,
+            "steam_power_survives":True,
+            "copper_chain_survives":True,
+            "automation_science_survives":True,
+            "regressed":[],
+            "passed":True,
+        },
+        "measurement_final":{
+            "assembler_powered":True,
+            "iron_gear_output_positive":True,
+            "electronic_circuit_output_positive":True,
+            "research_completed":True,
+            "research_remaining_count":0.0,
+            "gear_output":1.0,
+            "circuit_output":1.0,
+            "automation_science_survives":True,
+            "science_replenished":1.0,
+            "science_buffer_after":1.0,
+            "iron_extraction_survives":True,
+            "coal_self_sufficiency_survives":True,
+            "iron_smelting_survives":True,
+            "steam_power_survives":True,
+            "copper_chain_survives":True,
+            "iron_survival_growth":4.0,
+            "coal_survival_growth":4.0,
+            "smelting_survival_growth":2.0,
+            "copper_survival_growth":4.0,
+            "copper_smelting_growth":2.0,
+            "steam_survival_amount":180.0,
+            "steam_survival_energy":1000.0,
+        },
+        "trajectory":{
+            "capability_delta":{
+                "promoted":["powered_manufacturing"],
+                "regressed":[],
+            },
+        },
+    }
+    powered_artifact.write_text(json.dumps(powered_payload)+"\n")
+    f5c_powered=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert f5c_powered["phase5_protocol"]["achieved_capabilities"]==[
+        "iron_extraction",
+        "coal_self_sufficiency",
+        "iron_smelting",
+        "steam_power",
+        "copper_chain",
+        "automation_science",
+        "powered_manufacturing",
+    ]
+    assert (
+        f5c_powered["phase5_deterministic_baseline"][
+            "powered_manufacturing"
+        ]["validated"]
+        is True
+    )
+    assert f5c_powered["phase5_protocol"]["next_capability"]=="electric_mining"
+    assert "electric_mining" in f5c_powered["resume"]["action"]
+    powered_artifact.unlink()
     automation_artifact.unlink()
     copper_artifact.unlink()
 
