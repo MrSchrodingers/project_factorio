@@ -265,6 +265,7 @@ function cortexOperationalView() {
   const globalCortex = context.kind === "global" && ["F3", "F4", "F5"].includes(phase);
   const liveAgent = !!runner.active;
   const paused = globalCortex && !liveAgent;
+  const legacyResearchHistorical = phase5Active || paused;
   const researchEvents = Array.isArray(state.research && state.research.events)
     ? state.research.events
     : [];
@@ -313,7 +314,9 @@ function cortexOperationalView() {
     liveAgent,
     paused,
     historicalEvidenceMode: paused,
-    visualReplayAvailable: paused && (researchEvents.length > 0 || runEvents.length > 0),
+    legacyResearchHistorical,
+    visualReplayAvailable: legacyResearchHistorical
+      && (researchEvents.length > 0 || runEvents.length > 0),
     labSimulationActive: paused && phase !== "F5" && !!phase4Harness.preflight_validated,
   };
 }
@@ -1391,13 +1394,18 @@ function drawOfflineLearning() {
 function drawOnlineLearning() {
   const online = (state.research && state.research.online_learning) || {};
   const rows = online.history || [];
+  const historical = cortexOperationalView().legacyResearchHistorical;
   drawLineChart("onlineLearningCanvas", rows, (r) => r.episode ?? r.trial ?? r.index, [
     { value: (r) => r.reward, color: "#64d98b", width: 2.1 },
     { value: (r) => r.output ?? r.iron_output, color: "rgba(106,181,247,.6)", width: 1.35 },
   ], "waiting for real Factorio trials");
   setText(
     "onlineLearningSource",
-    online.algorithm ? online.algorithm + " · " + rows.length + " trials" : "no online learner"
+    online.algorithm
+      ? (historical ? "HISTÓRICO · " : "")
+        + online.algorithm + " · " + rows.length + " trials"
+        + (historical ? " · frozen" : "")
+      : "no online learner"
   );
 }
 
@@ -1756,7 +1764,7 @@ function renderLearningObservatory() {
   const causalBar = $("causalProgressBar");
   if (causalBar) causalBar.style.width = causalProgress + "%";
   const operational = cortexOperationalView();
-  const historical = operational.historicalEvidenceMode;
+  const historical = operational.legacyResearchHistorical;
   setClassText(
     "causalLearningBadge",
     historical ? "FROZEN DATASET" : causalReady ? "elegível para treino" : "coletando",
@@ -2494,7 +2502,7 @@ function renderEvolution() {
     return;
   }
   const operational = cortexOperationalView();
-  if (operational.historicalEvidenceMode) {
+  if (operational.legacyResearchHistorical) {
     const champion = evolution.champion;
     const challenger = evolution.challenger || {};
     const history = Array.isArray(evolution.history) ? evolution.history.slice(-10) : [];
@@ -2836,7 +2844,7 @@ function renderResearchCockpit() {
 
   const experimentContext = state.experimentContext || {};
   const operational = cortexOperationalView();
-  const historical = operational.historicalEvidenceMode;
+  const historical = operational.legacyResearchHistorical;
   const baselineSeed = experimentContext.kind === "baseline_seed"
     ? experimentContext.seed
     : null;
@@ -2939,7 +2947,10 @@ function renderResearchCockpit() {
 
   const healthDetail = historical
     ? "evidência histórica congelada · nenhum processo G" + String(generation || "?")
-      + " está ativo · current Cortex work = F4-C paired harness validation"
+      + " controla o WORLD · current Cortex work = "
+      + (operational.phase5Active
+        ? "F5-C frontier " + String(operational.phase5Protocol.next_capability || "complete")
+        : "F4-C paired harness validation")
     : running
       ? (baselineSeed !== null && baselineSeed !== undefined
         ? "seed " + String(baselineSeed) + " is collecting isolated evidence · "
@@ -4033,9 +4044,15 @@ function renderResearchAnalytics() {
 function renderCurriculum() {
   const list = $("curriculumList");
   const operational = cortexOperationalView();
-  const historical = operational.historicalEvidenceMode;
-  setText("curriculumLabel", historical ? "EVIDÊNCIA HISTÓRICA" : "EXECUÇÃO AUTÔNOMA");
-  setText("curriculumTitle", historical ? "Replay do último curriculum baseline" : "Curriculum");
+  const historical = operational.legacyResearchHistorical;
+  setText(
+    "curriculumLabel",
+    historical ? "HISTÓRICO · LEGACY CURRICULUM" : "EXECUÇÃO AUTÔNOMA"
+  );
+  setText(
+    "curriculumTitle",
+    historical ? "Curriculum legado congelado · não controla o WORLD" : "Curriculum"
+  );
   const curriculum = Array.isArray(state.research && state.research.curriculum)
     ? state.research.curriculum
     : [];
@@ -4131,7 +4148,7 @@ function renderHistoricalReplay(advance = false) {
 
 function renderTimeline() {
   const operational = cortexOperationalView();
-  const historical = operational.historicalEvidenceMode;
+  const historical = operational.legacyResearchHistorical;
   setText("timelineLabel", historical ? "EVIDÊNCIA HISTÓRICA" : "RASTRO DE DECISÕES");
   setText("timelineTitle", historical ? "Replay histórico · última timeline persistida" : "Linha do tempo");
   const events = [];
@@ -4185,7 +4202,7 @@ function renderKnowledge() {
     ? state.knowledge.lessons
     : [];
   const count = Number((state.knowledge && state.knowledge.count) || lessons.length || 0);
-  const historical = cortexOperationalView().historicalEvidenceMode;
+  const historical = cortexOperationalView().legacyResearchHistorical;
   setText(
     "knowledgeCount",
     count + " lesson" + (count === 1 ? "" : "s")
@@ -4226,7 +4243,7 @@ function renderTruthTable() {
     offlineEpisodes > 0 ? offlineEpisodes + " episodes" : "not trained",
     offlineEpisodes > 0 ? "good" : "muted"
   );
-  const historical = cortexOperationalView().historicalEvidenceMode;
+  const historical = cortexOperationalView().legacyResearchHistorical;
   setClassText(
     "truthOnline",
     onlineHistory.length
@@ -4403,14 +4420,16 @@ function updateMission() {
       ? operational.phase5Protocol.achieved_capabilities.length
       : 0;
     setText("missionTitle", "F5 — Autonomous Factory Bootstrap & Learned Control");
+    const nextCapability = String(
+      operational.phase5Protocol.next_capability || "baseline complete"
+    );
     setText(
       "missionDetail",
       operational.phase5BaselineActive
-        ? (operational.phase5DeterministicBaseline.iron_extraction_validated
-          ? "F5-C LIVE · iron_extraction promovida por evidência física. "
-            + "Baseline determinística continua uma capability por transação A2."
-          : "F5-C registrou um counterexample físico sem promoção. "
-            + "Retry automático permanece proibido.")
+        ? "F5-C LIVE · " + achieved + "/" + capabilityTotal
+          + " capabilities promovidas por evidência física · frontier "
+          + nextCapability
+          + " · ambient A0 · exatamente uma A2 expiráveis por Option."
         : (operational.phase5BridgeReady
           ? "F5-B PASS · bridge A2 one-shot validado em test/shadow. Authority "
             + "ambiente permanece A0; WORLD live ainda não foi mutado por F5."
@@ -4705,8 +4724,18 @@ function updateKpis() {
   const baselineContext = context.kind === "baseline_seed";
   const operational = cortexOperationalView();
   const arenaMode = String(arena.mode || "unknown");
-  const arenaLabel = operational.historicalEvidenceMode
-    ? (operational.executionReady
+  const phase5Achieved = Array.isArray(operational.phase5Protocol.achieved_capabilities)
+    ? operational.phase5Protocol.achieved_capabilities.length
+    : 0;
+  const phase5Total = Number(operational.phase5Protocol.capability_total || 9);
+  const phase5Frontier = String(
+    operational.phase5Protocol.next_capability || "baseline complete"
+  );
+  const arenaLabel = operational.phase5Active
+    ? "CORTEX F5 · " + (operational.phase5Checkpoint || "F5")
+      + " · " + phase5Achieved + "/" + phase5Total + " · A0"
+    : operational.historicalEvidenceMode
+      ? (operational.executionReady
       ? "LAB ATIVO · F4-C READY FOR PILOT"
       : (operational.labSimulationActive
         ? "LAB ATIVO · F4-C PREFLIGHT"
@@ -4721,9 +4750,11 @@ function updateKpis() {
   setClassText(
     "arenaBadge",
     arenaLabel,
-    operational.historicalEvidenceMode
-      ? "badge warn"
-      : baselineContext
+    operational.phase5Active
+      ? "badge good"
+      : operational.historicalEvidenceMode
+        ? "badge warn"
+        : baselineContext
         ? "badge good"
         : arenaMode === "open_play"
           ? "badge live"
@@ -4753,8 +4784,12 @@ function updateKpis() {
     && researchPromotion
     && !researchPromotion.promoted;
   const baselineCompleted = baselineContext && context.status === "completed";
-  const loopLabel = operational.historicalEvidenceMode
-    ? (operational.executionReady
+  const loopLabel = operational.phase5Active
+    ? (runner.active
+      ? "CORTEX ATIVO · frontier " + phase5Frontier
+      : "CORTEX F5 · frontier " + phase5Frontier + " · supervisor idle")
+    : operational.historicalEvidenceMode
+      ? (operational.executionReady
       ? (operational.pilotComplete
         ? (operational.inferenceValidated
           ? "LAB ATIVO · held-out inference " + operational.inferenceDecision
@@ -4791,12 +4826,13 @@ function updateKpis() {
   );
   setText(
     "researchLoopDetail",
-    operational.historicalEvidenceMode
-      ? (operational.phase5Active
-        ? (operational.phase5BridgeReady
-          ? "F5-B PASS · A2 one-shot bridge validated · ambient A0 · evolution OFF · next: F5-C deterministic baseline"
-          : "F5-A protocol frozen · WORLD observe-only · authority A0 · evolution OFF · next: bounded authority bridge")
-        : (operational.executionReady
+    operational.phase5Active
+      ? "F5-C · " + phase5Achieved + "/" + phase5Total
+        + " capabilities físicas · frontier " + phase5Frontier
+        + " · " + String((runner.heartbeat || {}).detail || runner.phase || "A0 supervisor")
+        + " · legacy evolution OFF"
+      : operational.historicalEvidenceMode
+        ? (operational.executionReady
         ? (operational.pilotComplete
           ? (operational.inferenceValidated
             ? "held-out 20/20 + inferência agregada concluída · confirmatory congelada · executor/evolution live OFF"
@@ -4806,7 +4842,7 @@ function updateKpis() {
           : "UI/replay ativo · harness + 4 adapters reais PASS · executor/evolution OFF · pilot pré-registrado é a próxima fronteira controlada")
         : (operational.labSimulationActive
           ? "UI/replay ativo · harness sintético PASS · executor/evolution OFF · adapters reais são a fronteira atual"
-          : "no active agent process · evolution OFF · F4-C paired harness validation is the current research task")))
+          : "no active agent process · evolution OFF · F4-C paired harness validation is the current research task"))
       : baselineCompleted
         ? "seed " + String(context.seed ?? "--")
         + " closed · " + String(research.status || context.status || "--")

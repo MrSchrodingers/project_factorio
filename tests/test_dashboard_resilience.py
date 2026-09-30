@@ -197,7 +197,7 @@ def test_dashboard_separates_live_cortex_from_frozen_baseline_evidence() -> None
     assert "phase5BridgeReady" in app
     assert "F5-B · BOUNDED AUTHORITY PASS · A0 AMBIENT" in app
     assert "A0 AMBIENT · A2 ONE-SHOT READY" in app
-    assert "F5-B PASS · A2 one-shot bridge validated" in app
+    assert "F5-B PASS · A2 one-shot bridge validado" in app
     assert "F5-C deterministic autonomous baseline" in app
     assert "phase5DeterministicBaseline" in app
     assert "phase5BaselineActive" in app
@@ -205,6 +205,13 @@ def test_dashboard_separates_live_cortex_from_frozen_baseline_evidence() -> None
     assert "CORTEX F5 · F5-C · PHYSICAL BASELINE" in app
     assert "F5-C · DETERMINISTIC PHYSICAL BASELINE" in app
     assert "A0 AMBIENT · F5-C · A2 POR OPTION" in app
+    assert "legacyResearchHistorical = phase5Active || paused" in app
+    assert "CORTEX ATIVO · frontier " in app
+    assert "HISTÓRICO · LEGACY CURRICULUM" in app
+    assert "HISTÓRICO · " in app
+    assert " · frozen" in app
+    assert "controla o WORLD · current Cortex work = " in app
+    assert "F5-C frontier " in app
     assert "function renderPhase5Capabilities(operational)" in app
     assert "phase5CapabilityCard" in index
     assert "phase5CapabilityHealth" in index
@@ -215,7 +222,7 @@ def test_dashboard_separates_live_cortex_from_frozen_baseline_evidence() -> None
     assert "harness + adapters + treatment + runner PASS · pilot 0/8 ready" in app
     assert "outcome causal F4-C" in app
     assert "FROZEN · EVOLUTION OFF" in app
-    assert "Replay do último curriculum baseline" in app
+    assert "Curriculum legado congelado · não controla o WORLD" in app
     assert "WORLD LIVE conectado, porém vazio" in app
     assert 'id="operationalModeNotice"' in index
     assert 'id="worldStateNotice"' in index
