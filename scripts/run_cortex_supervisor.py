@@ -263,6 +263,48 @@ def main() -> int:
                                     or ""
                                 )[-3000:]
                                 refresh()
+                    elif (
+                        current=="powered_manufacturing"
+                        and "promoted entity absent from WORLD: copper_furnace"
+                        in payload["detail"]
+                    ):
+                        if (
+                            last_commit==commit
+                            and last_frontier=="copper_furnace_recovery"
+                            and last_result in {"failed","rejected"}
+                        ):
+                            payload["status"]="blocked_repair_counterexample"
+                            payload["detail"]=(
+                                "same commit copper-furnace recovery already failed; "
+                                "no automatic retry"
+                            )
+                        else:
+                            repair_script="run_cortex_f5c_repair_copper_furnace.py"
+                            payload["status"]="repairing_prerequisite"
+                            payload["repair_frontier"]="copper_furnace"
+                            payload["repair_mode"]="technical_rollback_recovery"
+                            payload["runner"]=repair_script
+                            payload["runner_args"]=[]
+                            write(payload)
+                            repair_preflight=run(repair_script,False,[])
+                            if repair_preflight.returncode==0:
+                                payload["status"]="repairing_prerequisite_execute"
+                                write(payload)
+                                repair_result=run(repair_script,True,[])
+                                last_commit=commit
+                                last_frontier="copper_furnace_recovery"
+                                last_result=(
+                                    "completed"
+                                    if repair_result.returncode==0
+                                    else "failed"
+                                )
+                                payload["repair_returncode"]=repair_result.returncode
+                                payload["runner_output_tail"]=(
+                                    repair_result.stdout
+                                    or repair_result.stderr
+                                    or ""
+                                )[-3000:]
+                                refresh()
                 else:
                     payload["status"]="executing"
                     payload["detail"]="one bounded A2 Option in progress"

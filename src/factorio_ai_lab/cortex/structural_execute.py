@@ -40,6 +40,9 @@ from factorio_ai_lab.cortex.iron_smelting_structural_execute import (
 from factorio_ai_lab.cortex.powered_manufacturing_structural_execute import (
     compile_powered_manufacturing,
 )
+from factorio_ai_lab.cortex.rollback_recovery_structural_execute import (
+    compile_rollback_recovery,
+)
 from factorio_ai_lab.cortex.steam_power_structural_execute import (
     compile_steam_power,
 )
@@ -50,6 +53,7 @@ from factorio_ai_lab.cortex.structural_prepare import (
     IRON_SMELTING_CONTRACT_VERSION,
     POWERED_MANUFACTURING_CONTRACT_VERSION,
     RESOURCE_EXTRACTION_CONTRACT_VERSION,
+    ROLLBACK_RECOVERY_CONTRACT_VERSION,
     STEAM_POWER_CONTRACT_VERSION,
     SUPPORTED_CONTRACT_VERSIONS,
     PreparedStructuralAction,
@@ -516,6 +520,7 @@ def _compile_operation(operation: StructuralOperation) -> list[str]:
         "establish_steam_power": compile_steam_power,
         "establish_copper_chain": compile_copper_chain,
         "establish_automation_science": compile_automation_science,
+        "recover_promoted_copper_furnace": compile_rollback_recovery,
         "establish_powered_manufacturing": compile_powered_manufacturing,
     }
     if operation.op == "verify_postconditions":
@@ -1103,6 +1108,7 @@ def execution_guard_conditions(
         and prepared.contract_version in {
             AUTOMATION_SCIENCE_CONTRACT_VERSION,
             POWERED_MANUFACTURING_CONTRACT_VERSION,
+            ROLLBACK_RECOVERY_CONTRACT_VERSION,
         }
     ):
         return ()

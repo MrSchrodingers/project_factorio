@@ -62,6 +62,7 @@ class OptionKind(StrEnum):
     ESTABLISH_COPPER_CHAIN = "establish_copper_chain"
     ESTABLISH_AUTOMATION_SCIENCE = "establish_automation_science"
     ESTABLISH_POWERED_MANUFACTURING = "establish_powered_manufacturing"
+    RESTORE_PROMOTED_ENTITY = "restore_promoted_entity"
 
 
 class OptionStepKind(StrEnum):
