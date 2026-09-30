@@ -194,11 +194,9 @@ cortex_copper_furnace=insert_item(
 cortex_boiler=insert_item(
     {_prototype('coal')},cortex_boiler,quantity=4
 )
-cortex_iron_batch1_inserted=insert_item(
+cortex_iron_furnace=insert_item(
     {_prototype('iron-ore')},cortex_iron_furnace,quantity={iron_batch1}
 )
-if cortex_iron_batch1_inserted < {iron_batch1}:
-    raise RuntimeError('powered-manufacturing first iron batch did not fit furnace')
 cortex_copper_furnace=insert_item(
     {_prototype('copper-ore')},cortex_copper_furnace,quantity={copper_target}
 )
@@ -217,11 +215,9 @@ cortex_copper_plate_ready=extract_item(
     {_prototype('copper-plate')},cortex_copper_furnace,quantity={copper_target}
 )
 
-cortex_iron_batch2_inserted=insert_item(
+cortex_iron_furnace=insert_item(
     {_prototype('iron-ore')},cortex_iron_furnace,quantity={iron_batch2}
 )
-if cortex_iron_batch2_inserted < {iron_batch2}:
-    raise RuntimeError('powered-manufacturing second iron batch did not fit furnace')
 sleep({smelt_batch2})
 cortex_iron_batch2_available=inspect_inventory(cortex_iron_furnace)[{_prototype('iron-plate')}]
 if cortex_iron_batch2_available < {iron_batch2}:
