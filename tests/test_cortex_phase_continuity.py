@@ -3677,6 +3677,122 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
         "automation_science"
     )
     assert "automation_science" in f5c_copper["resume"]["action"]
+
+    automation_artifact=(
+        audits/
+        "cortex_f5c_continuation_853367368_"
+        "automation_science_deadbeefcafe.json"
+    )
+    automation_payload={
+        "schema_version":"cortex_f5c_automation_science_v1",
+        "status":"completed",
+        "base_seed":853367368,
+        "capability":"automation_science",
+        "ambient_authority":"A0",
+        "bounded_authority":"A2",
+        "continuous_authority":False,
+        "automatic_retry":False,
+        "option_execution_attempts":1,
+        "world_reset":False,
+        "external_resource_injection":False,
+        "persistent_science_inventory":True,
+        "uses_powered_manufacturing":False,
+        "human_intervention_count":0,
+        "transaction_committed":True,
+        "capability_promoted":"automation_science",
+        "started_at":"2026-09-29T12:00:00+00:00",
+        "code_revision":{"commit":"deadbeefcafe5678","dirty":False},
+        "preflight":{
+            "world_mutation":False,
+            "grant_issued":False,
+            "option_executed_live":False,
+            "world_reset":False,
+            "external_resource_injection":False,
+            "persistent_science_inventory":True,
+            "uses_powered_manufacturing":False,
+            "phase_state":{
+                "achieved_capabilities":[
+                    "iron_extraction",
+                    "coal_self_sufficiency",
+                    "iron_smelting",
+                    "steam_power",
+                    "copper_chain",
+                ],
+                "next_capability":"automation_science",
+            },
+        },
+        "capability_gate":{
+            "automation_science_output_positive":True,
+            "inputs_endogenous":True,
+            "production_sustained":True,
+        },
+        "survival_gate":{
+            "previously_promoted":[
+                "iron_extraction",
+                "coal_self_sufficiency",
+                "iron_smelting",
+                "steam_power",
+                "copper_chain",
+            ],
+            "iron_extraction_survives":True,
+            "coal_self_sufficiency_survives":True,
+            "iron_smelting_survives":True,
+            "steam_power_survives":True,
+            "copper_chain_survives":True,
+            "regressed":[],
+            "passed":True,
+        },
+        "measurement_final":{
+            "automation_science_output_positive":True,
+            "inputs_endogenous":True,
+            "production_sustained":True,
+            "automation_science_inventory":10.0,
+            "science_batch1":5.0,
+            "science_batch2":5.0,
+            "iron_extraction_survives":True,
+            "coal_self_sufficiency_survives":True,
+            "iron_smelting_survives":True,
+            "steam_power_survives":True,
+            "copper_chain_survives":True,
+            "iron_survival_growth":4.0,
+            "coal_survival_growth":4.0,
+            "smelting_survival_growth":2.0,
+            "copper_survival_growth":4.0,
+            "copper_smelting_growth":2.0,
+            "steam_survival_amount":180.0,
+            "steam_survival_energy":1000.0,
+        },
+        "trajectory":{
+            "capability_delta":{
+                "promoted":["automation_science"],
+                "regressed":[],
+            },
+        },
+    }
+    automation_artifact.write_text(json.dumps(automation_payload)+"\n")
+    f5c_automation=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert f5c_automation["phase5_protocol"]["achieved_capabilities"]==[
+        "iron_extraction",
+        "coal_self_sufficiency",
+        "iron_smelting",
+        "steam_power",
+        "copper_chain",
+        "automation_science",
+    ]
+    assert (
+        f5c_automation["phase5_deterministic_baseline"][
+            "automation_science"
+        ]["validated"]
+        is True
+    )
+    assert f5c_automation["phase5_protocol"]["next_capability"]==(
+        "powered_manufacturing"
+    )
+    assert "powered_manufacturing" in f5c_automation["resume"]["action"]
+    automation_artifact.unlink()
     copper_artifact.unlink()
 
     amendment_invalid=json.loads(amendment.read_text())
