@@ -83,13 +83,12 @@ def test_compiled_recovery_uses_endogenous_stone_and_exact_promoted_position() -
     assert compiled.compiled is not None
     code=compiled.compiled.code
     ast.parse(code)
-    assert "harvest_resource(" in code
-    assert "cortex_recovery_stone_after_primary" in code
-    assert "nearest(Resource.Stone)" in code
+    assert "cortex_mine_exact_resource(" in code
+    assert "harvest_resource(" not in code
     assert "cortex_recovery_stone_inventory_growth" in code
-    assert "rollback recovery stone did not reach inventory" in code
-    assert "quantity=5,radius=3" in code
-    assert "cortex_recovery_stone_fallback_harvested" in code
+    assert "rollback recovery native stone mining incomplete" in code
+    assert "quantity=5" in code
+    assert "radius=1.5" in code
     assert "Position(x=-46.5,y=-0.5)" in code
     assert "craft_item(Prototype.StoneFurnace,quantity=1)" in code
     assert "Position(x=-63.0,y=69.0)" in code
@@ -108,6 +107,8 @@ def test_copper_furnace_recovery_runner_is_one_shot_and_no_reset() -> None:
     assert "executor.reset(" not in source
     assert "set_research(" not in source
     assert "STONE_POS=" in source
+    assert "bind_exact_resource_mining_tool" in source
+    assert '"fle_transactional_resource_mining_tool"' in source
     assert 'positions["stone"]=resolved_stone' in source
     assert '"stone_anchor"' in source
     assert '"stone_harvest_position"' in source

@@ -757,6 +757,172 @@ def fast_reposition(
 
 
 
+
+
+@dataclass(frozen=True)
+class ExactResourceMineResult:
+    resource_name: str
+    requested_quantity: int
+    inventory_before: int
+    inventory_after: int
+    inventory_growth: int
+    attempts: int
+    agent_idx: int
+    raw_response: str
+
+
+def mine_exact_resource(
+    environment: Any,
+    *,
+    x: float,
+    y: float,
+    resource_name: str,
+    quantity: int,
+    radius: float=1.5,
+    agent_idx: int=0,
+) -> ExactResourceMineResult:
+    """Mine endogenous resources with Factorio native character mining.
+
+    FLE 0.4.3 fast harvest can report a calculated yield even when its manual
+    inventory insertion fails. This helper calls the native mine_entity
+    primitive and accepts only the measured main-inventory delta as evidence.
+    """
+    import math
+
+    target_x=float(x)
+    target_y=float(y)
+    search_radius=float(radius)
+    if not math.isfinite(target_x) or not math.isfinite(target_y):
+        raise ValueError("resource mining coordinates must be finite")
+    if not math.isfinite(search_radius) or search_radius<=0 or search_radius>3:
+        raise ValueError("resource mining radius must be within 0..3")
+    if agent_idx<0:
+        raise ValueError("agent_idx must be non-negative")
+    if (
+        not isinstance(quantity,int)
+        or isinstance(quantity,bool)
+        or quantity<=0
+        or quantity>50
+    ):
+        raise ValueError("resource mining quantity must be within 1..50")
+    allowed={"stone","coal","iron-ore","copper-ore"}
+    if resource_name not in allowed:
+        raise ValueError(f"unsupported exact resource {resource_name!r}")
+
+    unwrapped=getattr(environment,"unwrapped",environment)
+    instance=getattr(unwrapped,"instance",None)
+    if instance is None:
+        raise TypeError("environment does not expose a FactorioInstance")
+
+    character_index=agent_idx+1
+    quoted=json.dumps(resource_name)
+    max_attempts=max(quantity*4,quantity+4)
+    command=(
+        "/c "
+        f"local p=storage.agent_characters[{character_index}]; "
+        "if not p or not p.valid then error('agent character unavailable') end; "
+        "local inv=p.get_main_inventory(); "
+        "if not inv or not inv.valid then error('agent inventory unavailable') end; "
+        f"local q={{x={target_x},y={target_y}}}; "
+        f"local name={quoted}; "
+        "local before=p.get_item_count(name); "
+        "local attempts=0; "
+        f"local target={quantity}; "
+        f"local max_attempts={max_attempts}; "
+        "while (p.get_item_count(name)-before)<target and attempts<max_attempts do "
+        "local best=nil; local bestd=nil; "
+        "for _,e in pairs(p.surface.find_entities_filtered{"
+        f"position=q,radius={search_radius},type='resource',name=name"
+        "}) do "
+        "if e.valid and e.minable then "
+        "local dx=e.position.x-q.x; local dy=e.position.y-q.y; "
+        "local d=dx*dx+dy*dy; "
+        "if bestd==nil or d<bestd then best=e; bestd=d end "
+        "end "
+        "end; "
+        "if not best then break end; "
+        "local ok=p.mine_entity(best); "
+        "attempts=attempts+1; "
+        "if not ok then break end; "
+        "end; "
+        "local after=p.get_item_count(name); "
+        "local growth=after-before; "
+        "rcon.print(before..','..after..','..growth..','..attempts)"
+    )
+    response=instance.rcon_client.send_command(command)
+    if response is None:
+        raise RuntimeError("exact resource mining returned no measurement")
+    parts=str(response).strip().split(",")
+    if len(parts)!=4:
+        raise RuntimeError(f"unexpected exact resource mining response: {response!r}")
+    try:
+        before,after,growth,attempts=(int(float(value)) for value in parts)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"invalid exact resource mining response: {response!r}"
+        ) from exc
+    if growth<quantity:
+        raise RuntimeError(
+            f"native mining produced {growth}/{quantity} {resource_name}"
+        )
+    return ExactResourceMineResult(
+        resource_name=resource_name,
+        requested_quantity=quantity,
+        inventory_before=before,
+        inventory_after=after,
+        inventory_growth=growth,
+        attempts=attempts,
+        agent_idx=agent_idx,
+        raw_response=str(response),
+    )
+
+
+def bind_exact_resource_mining_tool(
+    environment: Any,
+    *,
+    tool_name: str="cortex_mine_exact_resource",
+) -> str:
+    """Expose native endogenous mining inside a transactional FLE Option."""
+    if not tool_name.isidentifier() or tool_name.startswith("_"):
+        raise ValueError("tool_name must be a public Python identifier")
+    unwrapped=getattr(environment,"unwrapped",environment)
+    instance=getattr(unwrapped,"instance",None)
+    if instance is None:
+        raise TypeError("environment does not expose a FactorioInstance")
+    namespaces=getattr(instance,"namespaces",None)
+    if not isinstance(namespaces,(list,tuple)) or not namespaces:
+        raise TypeError("environment does not expose FLE namespaces")
+
+    for agent_idx,namespace in enumerate(namespaces):
+        def bound(
+            position: Any,
+            resource_name: str,
+            *,
+            quantity: int,
+            radius: float=1.5,
+            _agent_idx: int=agent_idx,
+        ) -> int:
+            x=getattr(position,"x",None)
+            y=getattr(position,"y",None)
+            if not isinstance(x,(int,float)) or isinstance(x,bool):
+                raise TypeError("exact resource position.x must be numeric")
+            if not isinstance(y,(int,float)) or isinstance(y,bool):
+                raise TypeError("exact resource position.y must be numeric")
+            result=mine_exact_resource(
+                environment,
+                x=float(x),
+                y=float(y),
+                resource_name=str(resource_name),
+                quantity=quantity,
+                radius=radius,
+                agent_idx=_agent_idx,
+            )
+            return result.inventory_growth
+
+        setattr(namespace,tool_name,bound)
+    return tool_name
+
+
 def bind_fast_reposition_tool(
     environment: Any,
     *,

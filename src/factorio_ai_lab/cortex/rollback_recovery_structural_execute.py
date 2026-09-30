@@ -70,26 +70,12 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
             "cortex_recovery_stone_before=inspect_inventory()"
             f"[{_prototype('stone')}]"
         ),
-        "cortex_recovery_stone_harvested=harvest_resource(",
-        f"    {stone_pos},quantity={stone_required},radius=3",
+        "cortex_recovery_stone_harvested=cortex_mine_exact_resource(",
+        f"    {stone_pos},",
+        "    'stone',",
+        f"    quantity={stone_required},",
+        "    radius=1.5,",
         ")",
-        (
-            "cortex_recovery_stone_after_primary=inspect_inventory()"
-            f"[{_prototype('stone')}]"
-        ),
-        (
-            f"cortex_recovery_stone_missing=max(0,{stone_required}-"
-            "(cortex_recovery_stone_after_primary-cortex_recovery_stone_before))"
-        ),
-        "cortex_recovery_stone_fallback_harvested=0",
-        "if cortex_recovery_stone_missing>0:",
-        "    cortex_recovery_stone_nearest=nearest(Resource.Stone)",
-        "    cortex_fast_reposition(cortex_recovery_stone_nearest)",
-        "    cortex_recovery_stone_fallback_harvested=harvest_resource(",
-        "        cortex_recovery_stone_nearest,",
-        "        quantity=cortex_recovery_stone_missing,",
-        "        radius=3,",
-        "    )",
         (
             "cortex_recovery_stone_after=inspect_inventory()"
             f"[{_prototype('stone')}]"
@@ -99,7 +85,7 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
             "max(0,cortex_recovery_stone_after-cortex_recovery_stone_before)"
         ),
         f"if cortex_recovery_stone_inventory_growth < {stone_required}:",
-        "    raise RuntimeError('rollback recovery stone did not reach inventory')",
+        "    raise RuntimeError('rollback recovery native stone mining incomplete')",
         f"craft_item({_prototype('stone-furnace')},quantity=1)",
         (
             "cortex_recovery_furnace_inventory=inspect_inventory()"
