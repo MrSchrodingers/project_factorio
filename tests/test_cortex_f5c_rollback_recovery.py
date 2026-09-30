@@ -103,6 +103,10 @@ def test_copper_furnace_recovery_runner_is_one_shot_and_no_reset() -> None:
     assert '"world_reset":False' in source
     assert "executor.reset(" not in source
     assert "set_research(" not in source
+    assert "STONE_POS=" in source
+    assert 'positions["stone"]=resolved_stone' in source
+    assert '"stone_anchor"' in source
+    assert '"stone_harvest_position"' in source
 
 
 def test_supervisor_routes_missing_copper_furnace_to_technical_recovery() -> None:

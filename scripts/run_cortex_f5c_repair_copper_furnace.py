@@ -418,8 +418,14 @@ def run_recovery(
                 f"local f={{x={furnace[0]},y={furnace[1]}}}; "
                 f"local q={{x={stone[0]},y={stone[1]}}}; "
                 "rcon.print('CAN='..tostring(s.can_place_entity{name='stone-furnace',position=f,force=p.force})); "
-                "local n=0; for _,e in pairs(s.find_entities_filtered{position=q,radius=3,name='stone'}) do "
-                "n=n+(e.amount or 0) end; rcon.print('STONE='..n)"
+                "local n=0; local best=nil; local bestd=nil; "
+                "for _,e in pairs(s.find_entities_filtered{position=q,radius=3,name='stone',type='resource'}) do "
+                "n=n+(e.amount or 0); "
+                "local dx=e.position.x-q.x; local dy=e.position.y-q.y; "
+                "local d=dx*dx+dy*dy; "
+                "if bestd==nil or d<bestd then best=e; bestd=d end end; "
+                "rcon.print('STONE='..n); "
+                "if best then rcon.print('STONE_POS='..best.position.x..','..best.position.y) end"
             )
             record["live_recovery_precheck"]=str(check)
             if "CAN=true" not in str(check):
@@ -430,6 +436,29 @@ def run_recovery(
             raw_stone=str(check).split(marker,1)[1].splitlines()[0].strip()
             if float(raw_stone)<STONE_REQUIRED:
                 raise RuntimeError("accepted endogenous stone resource is exhausted")
+            position_marker="STONE_POS="
+            if position_marker not in str(check):
+                raise RuntimeError("no live stone resource within accepted recovery radius")
+            raw_position=(
+                str(check).split(position_marker,1)[1].splitlines()[0].strip()
+            )
+            try:
+                stone_x,stone_y=(float(value) for value in raw_position.split(",",1))
+            except (TypeError,ValueError) as exc:
+                raise RuntimeError("invalid live stone recovery position") from exc
+            stone_anchor=stone
+            if (
+                (stone_x-stone_anchor[0])**2
+                +(stone_y-stone_anchor[1])**2
+                > 9.0001
+            ):
+                raise RuntimeError("resolved stone escaped accepted recovery radius")
+            resolved_stone=(stone_x,stone_y)
+            positions["stone"]=resolved_stone
+            record["stone_anchor"]={"x":stone_anchor[0],"y":stone_anchor[1]}
+            record["stone_harvest_position"]={
+                "x":resolved_stone[0],"y":resolved_stone[1]
+            }
 
             option=_option_request(run_id=run_id,commit=commit)
             action=_action_request(run_id=run_id,commit=commit)
