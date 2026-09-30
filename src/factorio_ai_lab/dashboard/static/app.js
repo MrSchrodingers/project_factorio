@@ -139,20 +139,29 @@ function renderPhase5Capabilities(operational) {
     "phase5CapabilityTitle",
     "Factory capability progression · " + achieved.size + " / " + total
   );
+  const frontier = String(protocol.next_capability || "baseline complete");
   setText(
     "phase5CapabilityDetail",
-    operational.phase5BridgeReady
-      ? "F5-B PASS · A2 one-shot bridge validado · nenhuma capability física "
-        + "promovida ainda; F5-C é a próxima fronteira."
-      : "F4 COMPLETE · F5-A protocol frozen · cada promoção exige evidência física "
-        + "e preservação de todas as capabilities já aceitas."
+    operational.phase5BaselineActive
+      ? "F5-C LIVE · " + achieved.size + "/" + total
+        + " capabilities físicas promovidas · frontier " + frontier
+        + " · cada nova promoção exige gate físico + sobrevivência das anteriores."
+      : (operational.phase5BridgeReady
+        ? "F5-B PASS · A2 one-shot bridge validado · nenhuma capability física "
+          + "promovida ainda; F5-C é a próxima fronteira."
+        : "F4 COMPLETE · F5-A protocol frozen · cada promoção exige evidência física "
+          + "e preservação de todas as capabilities já aceitas.")
   );
   setClassText(
     "phase5AuthorityBadge",
-    operational.phase5BridgeReady
-      ? "A0 AMBIENT · A2 ONE-SHOT READY"
-      : String(protocol.authority_level || "A0") + " · OBSERVE ONLY",
-    operational.phase5BridgeReady ? "badge good" : "badge neutral"
+    operational.phase5BaselineActive
+      ? "A0 AMBIENT · F5-C · A2 POR OPTION"
+      : (operational.phase5BridgeReady
+        ? "A0 AMBIENT · A2 ONE-SHOT READY"
+        : String(protocol.authority_level || "A0") + " · OBSERVE ONLY"),
+    (operational.phase5BaselineActive || operational.phase5BridgeReady)
+      ? "badge good"
+      : "badge neutral"
   );
   const health = $("phase5CapabilityHealth");
   if (!health) return;
@@ -200,6 +209,9 @@ function cortexOperationalView() {
   const context = state.experimentContext || {};
   const cortexPhase = context.cortex_phase || {};
   const runner = ((state.status || {}).research_runner) || {};
+  const supervisor = (runner.heartbeat && typeof runner.heartbeat === "object")
+    ? runner.heartbeat
+    : runner;
   const phase = String(cortexPhase.phase || "");
   const phase4Checkpoint = String(cortexPhase.phase4_checkpoint || "");
   const phase5Checkpoint = String(cortexPhase.phase5_checkpoint || "");
@@ -281,6 +293,8 @@ function cortexOperationalView() {
     phase5Protocol,
     phase5AuthorityBridge,
     phase5DeterministicBaseline,
+    runner,
+    supervisor,
     phase5Active,
     phase5BridgeReady,
     phase5BaselineActive,
@@ -4423,13 +4437,21 @@ function updateMission() {
     const nextCapability = String(
       operational.phase5Protocol.next_capability || "baseline complete"
     );
+    const supervisor = operational.supervisor || {};
+    const supervisorStatus = String(supervisor.status || "unknown");
+    const supervisorFrontier = String(supervisor.frontier || nextCapability);
+    const supervisorDetail = String(supervisor.detail || "");
+    const recoveryActive = supervisorStatus.startsWith("repairing_");
+    const counterexampleBlocked = supervisorStatus.includes("counterexample");
+    const executing = supervisorStatus === "executing";
     setText(
       "missionDetail",
       operational.phase5BaselineActive
         ? "F5-C LIVE · " + achieved + "/" + capabilityTotal
           + " capabilities promovidas por evidência física · frontier "
-          + nextCapability
-          + " · ambient A0 · exatamente uma A2 expiráveis por Option."
+          + supervisorFrontier
+          + " · supervisor " + supervisorStatus.replaceAll("_", " ")
+          + " · ambient A0 · exatamente uma A2 expirável por Option."
         : (operational.phase5BridgeReady
           ? "F5-B PASS · bridge A2 one-shot validado em test/shadow. Authority "
             + "ambiente permanece A0; WORLD live ainda não foi mutado por F5."
@@ -4440,14 +4462,15 @@ function updateMission() {
     setText(
       "stageName",
       operational.phase5BaselineActive
-        ? "F5-C · DETERMINISTIC BASELINE · A0 + A2 ONE-SHOT"
+        ? "F5-C · " + supervisorFrontier + " · A0 + A2 ONE-SHOT"
         : (operational.phase5BridgeReady
           ? "F5-B · BOUNDED AUTHORITY PASS · A0 AMBIENT"
           : "F5-A · PROTOCOL FREEZE · A0")
     );
     setText(
       "nextAction",
-      operational.cortexPhase.resume?.action
+      supervisorDetail
+        || operational.cortexPhase.resume?.action
         || (operational.phase5BridgeReady
           ? "implement F5-C deterministic autonomous baseline"
           : "validate bounded authority bridge")
@@ -4463,11 +4486,17 @@ function updateMission() {
     setClassText(
       "researchBadge",
       operational.phase5BaselineActive
-        ? "CORTEX F5 · F5-C · PHYSICAL BASELINE"
+        ? (recoveryActive
+          ? "CORTEX F5 · F5-C · TECHNICAL RECOVERY"
+          : (executing
+            ? "CORTEX F5 · F5-C · A2 EXECUTING"
+            : (counterexampleBlocked
+              ? "CORTEX F5 · F5-C · COUNTEREXAMPLE BLOCKED"
+              : "CORTEX F5 · F5-C · PHYSICAL BASELINE")))
         : (operational.phase5BridgeReady
           ? "CORTEX F5 · F5-B PASS · A2 ONE-SHOT READY"
           : "CORTEX F5 · A0 OBSERVE ONLY · EVOLUTION OFF"),
-      "badge good"
+      counterexampleBlocked ? "badge warn" : "badge good"
     );
     return;
   }

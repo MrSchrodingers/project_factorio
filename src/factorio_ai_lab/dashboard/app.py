@@ -50,27 +50,23 @@ app = FastAPI(
     version="0.11.0",
     lifespan=lifespan,
 )
-class _VersionedStatic(StaticFiles):
-    """Static files that are safe to cache only when the URL is versioned.
+class _RevalidatingStatic(StaticFiles):
+    """Always revalidate dashboard assets across runtime releases.
 
-    The pages reference the bundle with a content hash (?v=<hash>, stamped by
-    frontend/stamp.mjs), so a hashed URL can be cached hard. Without the hash
-    the browser has to revalidate, otherwise a rebuild is invisible to anyone
-    holding the previous copy - which is exactly what happened: the bundle was
-    rebuilt repeatedly while phones kept serving a stale one from cache.
+    The dashboard is deployed as immutable release directories, but clients may
+    keep the same public URL across many releases. A stale app.js can therefore
+    present historical research state as live even when the backend already
+    advanced. Revalidation is cheap on the local/Tailnet dashboard and keeps
+    HTML, JavaScript and CSS on the same release.
     """
 
     async def get_response(self, path: str, scope):
         response = await super().get_response(path, scope)
-        query = scope.get("query_string", b"").decode("latin-1")
-        if "v=" in query:
-            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
-        else:
-            response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
         return response
 
 
-app.mount("/static", _VersionedStatic(directory=STATIC_DIR), name="static")
+app.mount("/static", _RevalidatingStatic(directory=STATIC_DIR), name="static")
 
 
 class RuntimePatch(BaseModel):

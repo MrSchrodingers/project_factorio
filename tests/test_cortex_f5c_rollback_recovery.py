@@ -84,8 +84,12 @@ def test_compiled_recovery_uses_endogenous_stone_and_exact_promoted_position() -
     code=compiled.compiled.code
     ast.parse(code)
     assert "harvest_resource(" in code
+    assert "cortex_recovery_stone_after_primary" in code
+    assert "nearest(Resource.Stone)" in code
+    assert "cortex_recovery_stone_inventory_growth" in code
+    assert "rollback recovery stone did not reach inventory" in code
     assert "quantity=5,radius=3" in code
-    assert "cortex_recovery_stone_harvested < 5" in code
+    assert "cortex_recovery_stone_fallback_harvested" in code
     assert "Position(x=-46.5,y=-0.5)" in code
     assert "craft_item(Prototype.StoneFurnace,quantity=1)" in code
     assert "Position(x=-63.0,y=69.0)" in code

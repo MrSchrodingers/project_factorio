@@ -189,6 +189,7 @@ def test_dashboard_separates_live_cortex_from_frozen_baseline_evidence() -> None
     assert "F5 — Autonomous Factory Bootstrap & Learned Control" in app
     assert "F5-A · PROTOCOL FREEZE · A0" in app
     assert "FACTORY CAPABILITIES · " in app
+    assert "capabilities físicas promovidas · frontier " in app
     assert "CORTEX F5 · A0 OBSERVE ONLY · EVOLUTION OFF" in app
     assert "Bootstrap autonomous factory from empty WORLD" in app
     assert "F5-A · A0 · SEM AUTORIDADE LIVE" in app
@@ -201,7 +202,7 @@ def test_dashboard_separates_live_cortex_from_frozen_baseline_evidence() -> None
     assert "F5-C deterministic autonomous baseline" in app
     assert "phase5DeterministicBaseline" in app
     assert "phase5BaselineActive" in app
-    assert "F5-C · DETERMINISTIC BASELINE · A0 + A2 ONE-SHOT" in app
+    assert '"F5-C · " + supervisorFrontier + " · A0 + A2 ONE-SHOT"' in app
     assert "CORTEX F5 · F5-C · PHYSICAL BASELINE" in app
     assert "F5-C · DETERMINISTIC PHYSICAL BASELINE" in app
     assert "A0 AMBIENT · F5-C · A2 POR OPTION" in app
@@ -228,3 +229,21 @@ def test_dashboard_separates_live_cortex_from_frozen_baseline_evidence() -> None
     assert 'id="worldStateNotice"' in index
     assert "Factorio ao vivo · mundo vazio" in map_source
     assert "mundo live esvaziado · sem fábrica ativa" in map_source
+
+
+def test_dashboard_f5_header_uses_live_supervisor_and_assets_revalidate() -> None:
+    root=Path(__file__).parents[1]
+    app=(root/"src/factorio_ai_lab/dashboard/static/app.js").read_text()
+    index=(root/"src/factorio_ai_lab/dashboard/static/index.html").read_text()
+    server=(root/"src/factorio_ai_lab/dashboard/app.py").read_text()
+
+    assert "runner.heartbeat" in app
+    assert "const supervisor = operational.supervisor || {};" in app
+    assert "CORTEX F5 · F5-C · TECHNICAL RECOVERY" in app
+    assert "CORTEX F5 · F5-C · A2 EXECUTING" in app
+    assert "CORTEX F5 · F5-C · COUNTEREXAMPLE BLOCKED" in app
+    assert "supervisorStatus.replaceAll" in app
+    assert "/static/app.js?v=" not in index
+    assert "/static/styles.css?v=" not in index
+    assert 'response.headers["Cache-Control"] = "no-cache, must-revalidate"' in server
+    assert "_VersionedStatic" not in server
