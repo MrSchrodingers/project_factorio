@@ -126,6 +126,8 @@ def test_compiled_copper_chain_uses_endogenous_resources_and_survival() -> None:
     assert "cortex_copper_smelting_live" in code
     assert "cortex_copper_plate_output_positive" in code
     assert "cortex_steam_power_survives" in code
+    assert "quantity=2" in code
+    assert "sleep(45)" in code
     assert "cortex_iron_survival_growth" in code
     assert "cortex_coal_survival_growth" in code
     assert "cortex_smelting_survival_growth" in code
@@ -162,3 +164,15 @@ def test_copper_chain_source_files_parse() -> None:
         "scripts/run_cortex_f5c_copper_chain.py",
     ):
         ast.parse((ROOT/name).read_text())
+
+
+def test_copper_chain_budget_covers_all_internal_windows() -> None:
+    plan=copper_plan()
+
+    compiled=compile_structural_action(plan.prepared,settle_seconds=194)
+    assert compiled.ready is False
+    assert compiled.refusal is not None
+    assert "195" in compiled.refusal.detail
+
+    compiled=compile_structural_action(plan.prepared,settle_seconds=220)
+    assert compiled.ready is True
