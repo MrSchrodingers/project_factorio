@@ -741,16 +741,19 @@ def compile_structural_action(
                 ),
             )
         params=powered_ops[0].parameters
-        required_seconds=sum(
-            int(params.get(key) or 0)
-            for key in (
-                "coal_recovery_window_seconds",
-                "ore_recovery_window_seconds",
-                "smelt_window_seconds",
-                "research_window_seconds",
-                "manufacturing_window_seconds",
-                "survival_recovery_window_seconds",
-                "survival_window_seconds",
+        required_seconds=(
+            int(params.get("coal_cycle_seconds") or 0)
+            * int(params.get("coal_amplification_cycles") or 0)
+            + sum(
+                int(params.get(key) or 0)
+                for key in (
+                    "ore_recovery_window_seconds",
+                    "smelt_window_seconds",
+                    "research_window_seconds",
+                    "manufacturing_window_seconds",
+                    "survival_recovery_window_seconds",
+                    "survival_window_seconds",
+                )
             )
         )
         if settle < required_seconds:

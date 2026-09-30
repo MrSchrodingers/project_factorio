@@ -37,17 +37,16 @@ from factorio_ai_lab.cortex.structural_prepare import (
 SCIENCE_PACKS=10
 IRON_PLATE_TARGET=66
 COPPER_PLATE_TARGET=24
-INITIAL_COAL_DRAW=6
-IRON_MINER_REFUEL=2
-COAL_MINER_REFUEL=3
-COPPER_MINER_REFUEL=1
-COAL_RECOVERY_WINDOW_SECONDS=60
-SECONDARY_COAL_DRAW=8
-IRON_SECONDARY_REFUEL=7
-COPPER_SECONDARY_REFUEL=1
-ORE_RECOVERY_WINDOW_SECONDS=140
-SMELT_WINDOW_SECONDS=240
-RESEARCH_WINDOW_SECONDS=150
+MIN_COAL_STOCK=11
+COAL_STOCK_TARGET=30
+COAL_AMPLIFICATION_CYCLES=4
+COAL_CYCLE_SECONDS=30
+EXTRACTION_COAL_DRAW=10
+IRON_MINER_REFUEL=8
+COPPER_MINER_REFUEL=2
+ORE_RECOVERY_WINDOW_SECONDS=200
+SMELT_WINDOW_SECONDS=220
+RESEARCH_WINDOW_SECONDS=120
 MANUFACTURING_WINDOW_SECONDS=12
 SURVIVAL_RECOVERY_WINDOW_SECONDS=15
 SURVIVAL_WINDOW_SECONDS=20
@@ -208,14 +207,13 @@ def compose_powered_manufacturing_option(
         "science_packs":SCIENCE_PACKS,
         "iron_plate_target":IRON_PLATE_TARGET,
         "copper_plate_target":COPPER_PLATE_TARGET,
-        "initial_coal_draw":INITIAL_COAL_DRAW,
+        "min_coal_stock":MIN_COAL_STOCK,
+        "coal_stock_target":COAL_STOCK_TARGET,
+        "coal_amplification_cycles":COAL_AMPLIFICATION_CYCLES,
+        "coal_cycle_seconds":COAL_CYCLE_SECONDS,
+        "extraction_coal_draw":EXTRACTION_COAL_DRAW,
         "iron_miner_refuel":IRON_MINER_REFUEL,
-        "coal_miner_refuel":COAL_MINER_REFUEL,
         "copper_miner_refuel":COPPER_MINER_REFUEL,
-        "coal_recovery_window_seconds":COAL_RECOVERY_WINDOW_SECONDS,
-        "secondary_coal_draw":SECONDARY_COAL_DRAW,
-        "iron_secondary_refuel":IRON_SECONDARY_REFUEL,
-        "copper_secondary_refuel":COPPER_SECONDARY_REFUEL,
         "ore_recovery_window_seconds":ORE_RECOVERY_WINDOW_SECONDS,
         "smelt_window_seconds":SMELT_WINDOW_SECONDS,
         "research_window_seconds":RESEARCH_WINDOW_SECONDS,

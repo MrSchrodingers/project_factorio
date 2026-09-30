@@ -75,14 +75,13 @@ def compile_powered_manufacturing(
     science=_positive_int(params,"science_packs")
     iron_target=_positive_int(params,"iron_plate_target")
     copper_target=_positive_int(params,"copper_plate_target")
-    initial_coal=_positive_int(params,"initial_coal_draw")
+    min_coal_stock=_positive_int(params,"min_coal_stock")
+    coal_stock_target=_positive_int(params,"coal_stock_target")
+    coal_amplification_cycles=_positive_int(params,"coal_amplification_cycles")
+    coal_cycle_seconds=_positive_int(params,"coal_cycle_seconds")
+    extraction_coal_draw=_positive_int(params,"extraction_coal_draw")
     iron_miner_refuel=_positive_int(params,"iron_miner_refuel")
-    coal_miner_refuel=_positive_int(params,"coal_miner_refuel")
     copper_miner_refuel=_positive_int(params,"copper_miner_refuel")
-    coal_recovery=_positive_int(params,"coal_recovery_window_seconds")
-    secondary_coal=_positive_int(params,"secondary_coal_draw")
-    iron_secondary_refuel=_positive_int(params,"iron_secondary_refuel")
-    copper_secondary_refuel=_positive_int(params,"copper_secondary_refuel")
     ore_recovery=_positive_int(params,"ore_recovery_window_seconds")
     smelt_window=_positive_int(params,"smelt_window_seconds")
     research_window=_positive_int(params,"research_window_seconds")
@@ -118,33 +117,45 @@ if cortex_science_buffer_before < {science}:
     raise RuntimeError('promoted automation-science buffer is incomplete')
 
 cortex_initial_coal_available=inspect_inventory(cortex_coal_buffer)[{_prototype('coal')}]
-if cortex_initial_coal_available < {initial_coal}:
-    raise RuntimeError('endogenous coal below powered-manufacturing bootstrap')
-cortex_initial_coal_draw=extract_item(
-    {_prototype('coal')},cortex_coal_buffer,quantity={initial_coal}
+if cortex_initial_coal_available < {min_coal_stock}:
+    raise RuntimeError('endogenous coal below powered-manufacturing preflight stock')
+cortex_coal_amplification_rounds=0
+cortex_coal_amplification_growth=0
+for cortex_coal_round in range({coal_amplification_cycles}):
+    cortex_coal_stock=inspect_inventory(cortex_coal_buffer)[{_prototype('coal')}]
+    if cortex_coal_stock >= {coal_stock_target}:
+        break
+    if cortex_coal_stock < 1:
+        raise RuntimeError('coal amplification lost its endogenous seed')
+    cortex_cycle_seed=extract_item(
+        {_prototype('coal')},cortex_coal_buffer,quantity=1
+    )
+    cortex_coal_extractor=insert_item(
+        {_prototype('coal')},cortex_coal_extractor,quantity=1
+    )
+    cortex_cycle_before=inspect_inventory(cortex_coal_buffer)[{_prototype('coal')}]
+    sleep({coal_cycle_seconds})
+    cortex_cycle_after=inspect_inventory(cortex_coal_buffer)[{_prototype('coal')}]
+    cortex_cycle_growth=max(0,cortex_cycle_after-cortex_cycle_before)
+    if cortex_cycle_growth <= 0:
+        raise RuntimeError('promoted coal cycle produced no endogenous growth')
+    cortex_coal_amplification_growth+=cortex_cycle_growth
+    cortex_coal_amplification_rounds+=1
+cortex_coal_stock_after_amplification=inspect_inventory(cortex_coal_buffer)[{_prototype('coal')}]
+if cortex_coal_stock_after_amplification < {coal_stock_target}:
+    raise RuntimeError('promoted coal cycle did not reach manufacturing stock target')
+
+cortex_extraction_coal_available=inspect_inventory(cortex_coal_buffer)[{_prototype('coal')}]
+if cortex_extraction_coal_available < {extraction_coal_draw}:
+    raise RuntimeError('coal stock below extraction fuel budget')
+cortex_extraction_coal_draw=extract_item(
+    {_prototype('coal')},cortex_coal_buffer,quantity={extraction_coal_draw}
 )
 cortex_iron_extractor=insert_item(
     {_prototype('coal')},cortex_iron_extractor,quantity={iron_miner_refuel}
 )
-cortex_coal_extractor=insert_item(
-    {_prototype('coal')},cortex_coal_extractor,quantity={coal_miner_refuel}
-)
 cortex_copper_extractor=insert_item(
     {_prototype('coal')},cortex_copper_extractor,quantity={copper_miner_refuel}
-)
-
-sleep({coal_recovery})
-cortex_secondary_coal_available=inspect_inventory(cortex_coal_buffer)[{_prototype('coal')}]
-if cortex_secondary_coal_available < {secondary_coal}:
-    raise RuntimeError('endogenous coal recovery did not fund extraction expansion')
-cortex_secondary_coal_draw=extract_item(
-    {_prototype('coal')},cortex_coal_buffer,quantity={secondary_coal}
-)
-cortex_iron_extractor=insert_item(
-    {_prototype('coal')},cortex_iron_extractor,quantity={iron_secondary_refuel}
-)
-cortex_copper_extractor=insert_item(
-    {_prototype('coal')},cortex_copper_extractor,quantity={copper_secondary_refuel}
 )
 
 sleep({ore_recovery})
@@ -164,9 +175,6 @@ cortex_copper_ore_draw=extract_item(
 
 cortex_process_coal_available=inspect_inventory(cortex_coal_buffer)[{_prototype('coal')}]
 if cortex_process_coal_available < 12:
-    sleep(30)
-    cortex_process_coal_available=inspect_inventory(cortex_coal_buffer)[{_prototype('coal')}]
-if cortex_process_coal_available < 12:
     raise RuntimeError('endogenous coal did not recover for smelting/research')
 cortex_process_coal=extract_item(
     {_prototype('coal')},cortex_coal_buffer,quantity=12
@@ -178,10 +186,7 @@ cortex_copper_furnace=insert_item(
     {_prototype('coal')},cortex_copper_furnace,quantity=2
 )
 cortex_boiler=insert_item(
-    {_prototype('coal')},cortex_boiler,quantity=3
-)
-cortex_coal_extractor=insert_item(
-    {_prototype('coal')},cortex_coal_extractor,quantity=1
+    {_prototype('coal')},cortex_boiler,quantity=4
 )
 cortex_iron_furnace=insert_item(
     {_prototype('iron-ore')},cortex_iron_furnace,quantity={iron_target}
@@ -434,6 +439,9 @@ print({{
     'research_remaining_count':cortex_research_remaining_count,
     'science_buffer_before':cortex_science_buffer_before,
     'science_buffer_after':cortex_science_buffer_after,
+    'coal_amplification_rounds':cortex_coal_amplification_rounds,
+    'coal_amplification_growth':cortex_coal_amplification_growth,
+    'coal_stock_after_amplification':cortex_coal_stock_after_amplification,
     'science_replenished':cortex_science_replenished,
     'automation_science_survives':cortex_automation_science_survives,
     'lab_energy_before':cortex_lab_energy_before,

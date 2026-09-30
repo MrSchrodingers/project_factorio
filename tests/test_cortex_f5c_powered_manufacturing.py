@@ -33,7 +33,7 @@ def powered_plan() -> PoweredManufacturingOptionPlan:
             code_revision="powered-test-sha",
             run_id="powered-test-run",
         ),
-        budget=OptionBudget(requested_ticks=690*60),
+        budget=OptionBudget(requested_ticks=715*60),
         authority=ActionAuthority.SHADOW,
     )
     action=ActionRequest(
@@ -93,7 +93,7 @@ def test_powered_manufacturing_option_is_inert_and_schema_aligned() -> None:
 
 def test_compiled_powered_manufacturing_is_causal_and_dual_output() -> None:
     plan=powered_plan()
-    compiled=compile_structural_action(plan.prepared,settle_seconds=690)
+    compiled=compile_structural_action(plan.prepared,settle_seconds=715)
 
     assert compiled.ready
     assert compiled.compiled is not None
@@ -110,9 +110,9 @@ def test_compiled_powered_manufacturing_is_causal_and_dual_output() -> None:
     assert "cortex_assembler_powered" in code
     assert "cortex_gear_output" in code
     assert "cortex_circuit_output" in code
-    assert "cortex_secondary_coal_draw" in code
-    assert "sleep(60)" in code
-    assert "sleep(140)" in code
+    assert "cortex_coal_amplification_rounds" in code
+    assert "sleep(30)" in code
+    assert "sleep(200)" in code
     assert "cortex_science_replenished" in code
     assert "cortex_automation_science_survives" in code
     assert "cortex_steam_power_survives" in code
@@ -121,12 +121,12 @@ def test_compiled_powered_manufacturing_is_causal_and_dual_output() -> None:
 def test_powered_manufacturing_budget_covers_internal_windows() -> None:
     plan=powered_plan()
 
-    compiled=compile_structural_action(plan.prepared,settle_seconds=636)
+    compiled=compile_structural_action(plan.prepared,settle_seconds=706)
     assert compiled.ready is False
     assert compiled.refusal is not None
-    assert "637" in compiled.refusal.detail
+    assert "707" in compiled.refusal.detail
 
-    compiled=compile_structural_action(plan.prepared,settle_seconds=690)
+    compiled=compile_structural_action(plan.prepared,settle_seconds=715)
     assert compiled.ready is True
 
 

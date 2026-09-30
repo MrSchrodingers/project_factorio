@@ -24,7 +24,7 @@ from factorio_ai_lab.cortex.f5_authority import F5BoundedAuthorityBridge
 from factorio_ai_lab.cortex.grant_ledger import PersistentOptionGrantLedger
 from factorio_ai_lab.cortex.options import OptionBudget, OptionKind, OptionRequest
 from factorio_ai_lab.cortex.powered_manufacturing_option import (
-    INITIAL_COAL_DRAW,
+    MIN_COAL_STOCK,
     SCIENCE_PACKS,
     compose_powered_manufacturing_option,
 )
@@ -45,7 +45,7 @@ DASHBOARD_BUILD_INFO=Path("/srv/factorio-ai-dashboard-runtime/current/BUILD_INFO
 RUNTIME_BUILD_INFO=Path("/srv/factorio-ai-runtime/current/BUILD_INFO.json")
 ARENA="cortex_f5c_powered_manufacturing"
 OWNER="run_cortex_f5c_powered_manufacturing"
-DEFAULT_OPTION_SECONDS=690
+DEFAULT_OPTION_SECONDS=715
 DEFAULT_GRANT_TTL_SECONDS=900
 
 ServiceStateReader=Callable[[],dict[str,str]]
@@ -325,9 +325,9 @@ def preflight(
             f"packs, observed {science_stock}"
         )
     coal_stock=_contents_count(observed["coal_buffer"],"coal")
-    if coal_stock<INITIAL_COAL_DRAW:
+    if coal_stock<MIN_COAL_STOCK:
         raise RuntimeError(
-            f"powered manufacturing requires {INITIAL_COAL_DRAW} endogenous "
+            f"powered manufacturing requires {MIN_COAL_STOCK} endogenous "
             f"coal, observed {coal_stock}"
         )
     positions["power_pole"]=_nearest_power_pole(rows,positions["steam_engine"])
@@ -408,6 +408,8 @@ def _measure(namespace: Any,prepared: Any) -> dict[str,Any]:
     del prepared
     numeric=(
         "gear_output","circuit_output","research_remaining_count",
+        "coal_amplification_rounds","coal_amplification_growth",
+        "coal_stock_after_amplification",
         "science_buffer_before","science_buffer_after","science_replenished",
         "lab_energy_before","lab_energy_after",
         "assembler_energy_before","assembler_energy_after",
