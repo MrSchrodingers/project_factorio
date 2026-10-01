@@ -175,7 +175,7 @@ def test_exact_item_deposit_conserves_player_and_target_counts() -> None:
 
 
 def test_exact_craft_is_non_recursive_and_conservative() -> None:
-    env=FakeEnvironment("0,3,3")
+    env=FakeEnvironment("OK|0,3,3")
     result=craft_exact_item(
         env,item_name="wooden-chest",quantity=3,
     )
@@ -213,3 +213,12 @@ def test_exact_recovery_tool_binders_are_inert_until_called() -> None:
     assert bind_exact_item_deposit_tool(env)=="cortex_deposit_exact_item"
     assert bind_exact_place_tool(env)=="cortex_place_exact_entity"
     assert env.instance.rcon_client.command==""
+
+
+def test_exact_craft_reports_lua_failure() -> None:
+    env=FakeEnvironment("ERR|exact craft ingredient insufficient: stone-furnace")
+    with pytest.raises(
+        RuntimeError,
+        match="exact craft failed: exact craft ingredient insufficient: stone-furnace",
+    ):
+        craft_exact_item(env,item_name="burner-mining-drill",quantity=2)

@@ -1242,7 +1242,7 @@ def craft_exact_item(
     character_index=agent_idx+1
     item_q=json.dumps(item_name)
     command=(
-        "/c "
+        "/c local ok,result=pcall(function() "
         f"local p=storage.agent_characters[{character_index}]; "
         "if not p or not p.valid then error('agent character unavailable') end; "
         f"local item_name={item_q}; local requested={quantity}; "
@@ -1281,12 +1281,20 @@ def craft_exact_item(
         "if growth~=produced then error('exact craft inventory delta mismatch') end; "
         "storage.elapsed_ticks=(storage.elapsed_ticks or 0)+"
         "math.ceil((recipe.energy or 0.5)*60*crafts); "
-        "rcon.print(before..','..after..','..growth)"
+        "return before..','..after..','..growth "
+        "end); "
+        "if ok then rcon.print('OK|'..tostring(result)) "
+        "else rcon.print('ERR|'..tostring(result)) end"
     )
     response=instance.rcon_client.send_command(command)
     if response is None:
         raise RuntimeError("exact craft returned no measurement")
-    parts=str(response).strip().split(",")
+    raw=str(response).strip()
+    if raw.startswith("ERR|"):
+        raise RuntimeError(f"exact craft failed: {raw[4:]}")
+    if not raw.startswith("OK|"):
+        raise RuntimeError(f"unexpected exact craft response: {response!r}")
+    parts=raw[3:].split(",")
     if len(parts)!=3:
         raise RuntimeError(f"unexpected exact craft response: {response!r}")
     try:
