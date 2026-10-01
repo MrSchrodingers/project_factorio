@@ -961,8 +961,9 @@ def compile_structural_action(
         STEAM_POWER_CONTRACT_VERSION,
         COPPER_CHAIN_CONTRACT_VERSION,
         AUTOMATION_SCIENCE_CONTRACT_VERSION,
+        ROLLBACK_RECOVERY_CONTRACT_VERSION,
     }:
-        # v5-v9 contain their own causally separated validation windows.
+        # Specialized contracts contain their own causal validation windows.
         pass
     else:
         lines.extend(
