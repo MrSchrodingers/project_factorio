@@ -166,7 +166,10 @@ def test_exact_item_inspect_reads_exact_target_count() -> None:
     command=env.instance.rcon_client.command
     assert 'local target_name="wooden-chest"' in command
     assert 'local item_name="coal"' in command
-    assert "force=p.force" in command
+    assert "force=f" in command
+    assert "game.surfaces[1]" in command
+    assert "game.forces.player" in command
+    assert "ensure_valid_character" not in command
 
 
 def test_exact_item_inspect_reports_missing_target() -> None:
