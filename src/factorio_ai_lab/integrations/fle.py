@@ -150,6 +150,61 @@ def _capture_fle_entity_rows(
     return _capture_rcon_entity_rows(environment)
 
 
+def _remove_unexpected_rollback_entities(
+    environment: Any,
+    identities: list[tuple[str, float, float, int]],
+) -> int:
+    """Remove exact post-action entities that are absent from the checkpoint."""
+
+    if not identities:
+        return 0
+    unwrapped=getattr(environment,"unwrapped",environment)
+    instance=getattr(unwrapped,"instance",None)
+    rcon=getattr(instance,"rcon_client",None)
+    send=getattr(rcon,"send_command",None)
+    if not callable(send):
+        raise TypeError(
+            "rollback contains unexpected entities and no RCON remover is available"
+        )
+
+    removed=0
+    for name,x,y,direction in identities:
+        quoted=json.dumps(name)
+        command=(
+            "/c local p=storage.agent_characters and storage.agent_characters[1]; "
+            "if p and not p.valid then p=nil end; "
+            "local s=(p and p.surface) or game.surfaces[1]; "
+            "local f=(p and p.force) or game.forces.player; "
+            "if not s or not f then rcon.print('CORTEX_REMOVE_ERROR') return end; "
+            f"local target_name={quoted}; local target_x={x}; local target_y={y}; "
+            f"local target_direction={direction}; "
+            "local n=0; "
+            "for _,e in pairs(s.find_entities_filtered{"
+            "position={x=target_x,y=target_y},radius=0.25,name=target_name}) do "
+            "if e.valid "
+            "and math.abs(e.position.x-target_x)<=0.01 "
+            "and math.abs(e.position.y-target_y)<=0.01 "
+            "and (e.direction or 0)==target_direction "
+            "and (target_name=='item-on-ground' or e.force==f) then "
+            "e.destroy(); n=n+1; break end end; "
+            "rcon.print('CORTEX_REMOVE|'..n)"
+            f" -- CORTEX_REMOVE_TARGET|{name}|{x}|{y}|{direction}"
+        )
+        try:
+            response=send(command)
+        except (OSError,RuntimeError,TypeError,ValueError,AttributeError) as exc:
+            raise RuntimeError(
+                f"rollback could not remove unexpected entity {(name,x,y,direction)!r}"
+            ) from exc
+        if str(response).strip()!="CORTEX_REMOVE|1":
+            raise RuntimeError(
+                "rollback failed to remove unexpected entity "
+                f"{(name,x,y,direction)!r}: {response!r}"
+            )
+        removed+=1
+    return removed
+
+
 def _repair_missing_checkpoint_entities(
     environment: Any,
     checkpoint: Any,
@@ -189,6 +244,31 @@ def _repair_missing_checkpoint_entities(
         if str(row.get("name") or "").replace('"', "") != "character"
     }
     missing = sorted(set(expected_by_id) - actual_ids)
+    unexpected = sorted(actual_ids - set(expected_by_id))
+    removed = _remove_unexpected_rollback_entities(environment, unexpected)
+
+    if unexpected:
+        actual_after_removal=_capture_fle_entity_rows(environment)
+        if actual_after_removal is None:
+            raise RuntimeError(
+                "rollback integrity check could not recapture WORLD after extra removal"
+            )
+        actual_ids={
+            _snapshot_entity_identity(row)
+            for row in actual_after_removal
+            if str(row.get("name") or "").replace('"', "") != "character"
+        }
+        unexpected_after_removal=sorted(actual_ids-set(expected_by_id))
+        missing=sorted(set(expected_by_id)-actual_ids)
+    else:
+        unexpected_after_removal=[]
+
+    if unexpected_after_removal:
+        raise RuntimeError(
+            "FLE rollback integrity failure; unexpected entities remain: "
+            +repr(unexpected_after_removal)
+        )
+
     replayed = 0
 
     if missing:
@@ -224,11 +304,14 @@ def _repair_missing_checkpoint_entities(
         )
 
     return {
-        "status": "repaired" if missing else "verified",
+        "status": "repaired" if (missing or unexpected) else "verified",
         "expected_entities": len(expected_by_id),
         "missing_before_repair": [list(key) for key in missing],
         "missing_after_repair": [list(key) for key in remaining],
+        "unexpected_before_repair": [list(key) for key in unexpected],
+        "unexpected_after_repair": [list(key) for key in unexpected_after_removal],
         "replayed_entities": replayed,
+        "removed_entities": removed,
     }
 
 

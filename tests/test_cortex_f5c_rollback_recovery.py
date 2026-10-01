@@ -107,6 +107,7 @@ def test_compiled_recovery_rebuilds_exact_promoted_baseline_endogenously() -> No
     code=compiled.compiled.code
     ast.parse(code)
     assert "cortex_mine_exact_resource(" in code
+    assert "'wood',quantity=6,radius=3" in code
     assert "cortex_transfer_exact_item(" in code
     assert "cortex_deposit_exact_item(" in code
     assert "cortex_craft_exact_item(" in code
@@ -119,7 +120,6 @@ def test_compiled_recovery_rebuilds_exact_promoted_baseline_endogenously() -> No
     assert "'stone',quantity=10,radius=3" in code
     assert "'stone',quantity=5,radius=3" in code
     assert "'coal',quantity=10,radius=3" in code
-    assert "'wood',quantity=6,radius=24" in code
     assert "'iron-ore',quantity=18,radius=3" in code
     assert "cortex_craft_exact_item('burner-mining-drill',quantity=2)" in code
     assert "cortex_craft_exact_item('wooden-chest',quantity=3)" in code

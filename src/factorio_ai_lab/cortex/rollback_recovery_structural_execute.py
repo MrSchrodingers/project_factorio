@@ -295,7 +295,7 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
                 f"[{_prototype('wood')}]"
             ),
             "cortex_recovery_wood_harvested=cortex_mine_exact_resource(",
-            f"    {parsed['wood']},'wood',quantity={wood_required},radius=24",
+            f"    {parsed['wood']},'wood',quantity={wood_required},radius=3",
             ")",
             (
                 "cortex_recovery_wood_after=inspect_inventory()"

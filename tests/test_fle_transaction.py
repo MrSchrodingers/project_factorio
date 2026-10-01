@@ -84,6 +84,26 @@ class FakeRconClient:
         self.namespace=namespace
 
     def send_command(self, command):
+        marker="CORTEX_REMOVE_TARGET|"
+        if marker in command:
+            raw=command.split(marker,1)[1].strip()
+            name,sx,sy,sd=raw.split("|",3)
+            target=(name,float(sx),float(sy),int(sd))
+            kept=[]
+            removed=0
+            for row in self.namespace.rows:
+                identity=(
+                    str(row["name"]).replace('"',""),
+                    float(row["position"]["x"]),
+                    float(row["position"]["y"]),
+                    int(row.get("direction") or 0),
+                )
+                if removed==0 and identity==target:
+                    removed=1
+                    continue
+                kept.append(row)
+            self.namespace.rows=kept
+            return f"CORTEX_REMOVE|{removed}"
         assert "CORTEX_CAPTURE_BEGIN" in command
         lines=["CORTEX_CAPTURE_BEGIN"]
         for row in self.namespace.rows:
@@ -387,6 +407,59 @@ class TransactionalFLEExecutorTests(unittest.TestCase):
                 ("stone-furnace",-63.0,69.0),
             },
         )
+
+
+    def test_rejected_checkpoint_removes_exact_unexpected_entity(self) -> None:
+        rows=[
+            {
+                "name": '"stone-furnace"',
+                "position":{"x":"20","y":"69"},
+                "direction":0,
+            },
+        ]
+        extra={
+            "name": '"stone-furnace"',
+            "position":{"x":"-63","y":"69"},
+            "direction":0,
+        }
+        checkpoint=FakeCheckpoint(rows)
+        env=FakeRollbackEnvironment(checkpoint,lose_name="never")
+        env.instance.rcon_client=FakeRconClient(env.namespace)
+        original_reset=env.reset
+
+        def reset_with_extra(*,options=None,seed=None):
+            result=original_reset(options=options,seed=seed)
+            if options is not None and options.get("game_state") is checkpoint:
+                env.namespace.rows=[dict(rows[0]),dict(extra)]
+            return result
+
+        env.reset=reset_with_extra
+        executor=TransactionalFLEExecutor(env,action_factory=fake_action_factory)
+        executor.game_state=checkpoint
+
+        rejected=executor.execute("bad",accept=lambda _:False)
+
+        self.assertFalse(rejected.accepted)
+        integrity=executor.rollback_integrity_snapshot()
+        self.assertIsNotNone(integrity)
+        assert integrity is not None
+        self.assertEqual(integrity["status"],"repaired")
+        self.assertEqual(integrity["removed_entities"],1)
+        self.assertEqual(
+            integrity["unexpected_before_repair"],
+            [["stone-furnace",-63.0,69.0,0]],
+        )
+        self.assertEqual(integrity["unexpected_after_repair"],[])
+        identities={
+            (
+                str(row["name"]).replace('"',""),
+                float(row["position"]["x"]),
+                float(row["position"]["y"]),
+                int(row.get("direction") or 0),
+            )
+            for row in env.namespace.rows
+        }
+        self.assertEqual(identities,{("stone-furnace",20.0,69.0,0)})
 
 
     def test_intervention_counters_respect_rollback(self) -> None:
