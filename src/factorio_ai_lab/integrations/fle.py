@@ -812,7 +812,7 @@ def fast_reposition(
     character_index = agent_idx + 1
     command = (
         "/c "
-        f"local p=storage.agent_characters[{character_index}]; "
+        f"local p=storage.utils.ensure_valid_character({character_index}); "
         "if not p then error('agent character unavailable') end; "
         f"p.teleport({{x={target_x},y={target_y}}}); "
         "rcon.print(p.position.x .. ',' .. p.position.y)"
@@ -907,7 +907,7 @@ def mine_exact_resource(
     max_attempts=max(quantity*4,quantity+4)
     command=(
         "/c "
-        f"local p=storage.agent_characters[{character_index}]; "
+        f"local p=storage.utils.ensure_valid_character({character_index}); "
         "if not p or not p.valid then error('agent character unavailable') end; "
         "local inv=p.get_main_inventory(); "
         "if not inv or not inv.valid then error('agent inventory unavailable') end; "
@@ -1073,7 +1073,7 @@ def transfer_exact_item(
     item_q=json.dumps(item_name)
     command=(
         "/c "
-        f"local p=storage.agent_characters[{character_index}]; "
+        f"local p=storage.utils.ensure_valid_character({character_index}); "
         "if not p or not p.valid then error('agent character unavailable') end; "
         f"local q={{x={target_x},y={target_y}}}; "
         f"local source_name={source_q}; local item_name={item_q}; "
@@ -1351,7 +1351,7 @@ def deposit_exact_item(
     target_q=json.dumps(target_name); item_q=json.dumps(item_name)
     command=(
         "/c local ok,result=pcall(function() "
-        f"local p=storage.agent_characters[{character_index}]; "
+        f"local p=storage.utils.ensure_valid_character({character_index}); "
         "if not p or not p.valid then error('agent character unavailable') end; "
         f"local q={{x={target_x},y={target_y}}}; "
         f"local target_name={target_q}; local item_name={item_q}; "
@@ -1456,7 +1456,7 @@ def craft_exact_item(
     item_q=json.dumps(item_name)
     command=(
         "/c local ok,result=pcall(function() "
-        f"local p=storage.agent_characters[{character_index}]; "
+        f"local p=storage.utils.ensure_valid_character({character_index}); "
         "if not p or not p.valid then error('agent character unavailable') end; "
         f"local item_name={item_q}; local requested={quantity}; "
         "local recipe=p.force.recipes[item_name]; "
@@ -1566,7 +1566,7 @@ def place_exact_entity(
     direction_expr=f"defines.direction.{directions[direction]}"
     command=(
         "/c "
-        f"local p=storage.agent_characters[{character_index}]; "
+        f"local p=storage.utils.ensure_valid_character({character_index}); "
         "if not p or not p.valid then error('agent character unavailable') end; "
         f"local q={{x={target_x},y={target_y}}}; "
         f"local name={name_q}; local dir={direction_expr}; "

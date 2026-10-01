@@ -59,7 +59,7 @@ def test_exact_resource_mining_uses_native_character_mining_and_inventory_delta(
     assert result.inventory_before==0
     assert result.inventory_after==5
     command=env.instance.rcon_client.command
-    assert "storage.agent_characters[1]" in command
+    assert "storage.utils.ensure_valid_character(1)" in command
     assert "p.mine_entity(best)" in command
     assert "after_attempt<=before_attempt" in command
     assert "p.get_item_count(name)" in command
@@ -120,6 +120,7 @@ def test_exact_item_transfer_uses_exact_source_and_inventory_delta() -> None:
     assert "source.remove_item" in command
     assert "p.insert" in command
     assert "inserted~=removed" in command
+    assert "storage.utils.ensure_valid_character(1)" in command
 
 
 def test_exact_item_transfer_rejects_mismatched_delta_and_scope() -> None:
@@ -217,6 +218,7 @@ def test_exact_item_deposit_conserves_player_and_target_counts() -> None:
     assert 'local item_name="coal"' in command
     assert "target.insert" in command
     assert "exact deposit conservation mismatch" in command
+    assert "storage.utils.ensure_valid_character(1)" in command
 
 
 def test_exact_item_deposit_allows_endogenous_buffer_chest() -> None:
@@ -260,6 +262,7 @@ def test_exact_craft_is_non_recursive_and_conservative() -> None:
     assert result.inventory_before==0
     assert result.inventory_after==3
     assert result.inventory_growth==3
+    assert "storage.utils.ensure_valid_character(1)" in env.instance.rcon_client.command
     command=env.instance.rcon_client.command
     assert 'local item_name="wooden-chest"' in command
     assert "recipe.ingredients" in command

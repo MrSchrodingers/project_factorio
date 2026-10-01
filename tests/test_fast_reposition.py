@@ -40,7 +40,7 @@ class FastRepositionTests(unittest.TestCase):
         env = FakeEnvironment()
         result = fast_reposition(env, x=12.5, y=34.5)
         self.assertEqual((result.x, result.y), (12.5, 34.5))
-        self.assertIn("storage.agent_characters[1]", env.instance.rcon_client.command)
+        self.assertIn("storage.utils.ensure_valid_character(1)", env.instance.rcon_client.command)
         position = env.instance.namespaces[0].player_location
         self.assertEqual((position.x, position.y), (12.5, 34.5))
 
