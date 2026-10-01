@@ -51,6 +51,7 @@ def test_exact_resource_mining_uses_native_character_mining_and_inventory_delta(
     command=env.instance.rcon_client.command
     assert "storage.agent_characters[1]" in command
     assert "p.mine_entity(best)" in command
+    assert "after_attempt<=before_attempt" in command
     assert "p.get_item_count(name)" in command
     assert 'local name="stone"' in command
     assert "player.insert" not in command

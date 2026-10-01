@@ -1,4 +1,4 @@
-"""Typed F5 technical recovery Option for a promoted entity lost by rollback."""
+"""Typed F5 technical recovery Option for a rollback-damaged promoted baseline."""
 
 from __future__ import annotations
 
@@ -28,8 +28,16 @@ from factorio_ai_lab.cortex.structural_prepare import (
     StructuralOperation,
 )
 
-STONE_REQUIRED=5
+STONE_REQUIRED=10
+WOOD_REQUIRED=4
+COAL_BOOTSTRAP_REQUIRED=4
+IRON_PLATE_REQUIRED=9
+IRON_SMELT_SECONDS=30
+COAL_RECOVERY_SECONDS=60
+COPPER_SMELT_SECONDS=12
 RECOVERY_SETTLE_SECONDS=2
+COAL_STOCK_TARGET=14
+SCIENCE_BUFFER_MIN=10
 
 REFUSAL_KIND="f5c_rollback_recovery_option_kind"
 REFUSAL_EXECUTE="f5c_rollback_recovery_execute_forbidden"
@@ -38,14 +46,20 @@ REFUSAL_POSITIONS="f5c_rollback_recovery_positions_required"
 
 
 def _hard_postconditions() -> tuple[ActionCondition,...]:
-    return (
+    return tuple(
         ActionCondition(
-            name="promoted_entity_restored",
+            name=name,
             operator=ConditionOperator.EQUALS,
             state=ConditionState.UNKNOWN,
             expected=True,
             hard=True,
-        ),
+        )
+        for name in (
+            "promoted_baseline_restored",
+            "coal_stock_recovered",
+            "copper_smelting_restored",
+            "science_buffer_intact",
+        )
     )
 
 
@@ -142,8 +156,14 @@ def compose_rollback_recovery_option(
             ),
         )
 
+    required=(
+        "stone","wood","coal_resource",
+        "coal_extractor","coal_buffer","coal_quarantine",
+        "iron_buffer","iron_furnace",
+        "copper_buffer","copper_furnace",
+    )
     concrete: dict[str,tuple[float,float]]={}
-    for name in ("stone","copper_furnace"):
+    for name in required:
         value=_position(positions.get(name))
         if value is None:
             return RollbackRecoveryOptionResult(
@@ -157,10 +177,7 @@ def compose_rollback_recovery_option(
 
     child=replace(
         action_request,
-        provenance=replace(
-            action_request.provenance,
-            parent_action_id=option.option_id,
-        ),
+        provenance=replace(action_request.provenance,parent_action_id=option.option_id),
     )
     hard=_hard_postconditions()
     prepared=PreparedStructuralAction(
@@ -172,14 +189,22 @@ def compose_rollback_recovery_option(
         contract_version=ROLLBACK_RECOVERY_CONTRACT_VERSION,
         operations=(
             StructuralOperation(
-                op="recover_promoted_copper_furnace",
+                op="recover_promoted_baseline",
                 parameters={
                     "positions":{
                         name:{"x":pos[0],"y":pos[1]}
                         for name,pos in concrete.items()
                     },
                     "stone_required":STONE_REQUIRED,
+                    "wood_required":WOOD_REQUIRED,
+                    "coal_bootstrap_required":COAL_BOOTSTRAP_REQUIRED,
+                    "iron_plate_required":IRON_PLATE_REQUIRED,
+                    "iron_smelt_seconds":IRON_SMELT_SECONDS,
+                    "coal_recovery_seconds":COAL_RECOVERY_SECONDS,
+                    "copper_smelt_seconds":COPPER_SMELT_SECONDS,
                     "settle_seconds":RECOVERY_SETTLE_SECONDS,
+                    "coal_stock_target":COAL_STOCK_TARGET,
+                    "science_buffer_min":SCIENCE_BUFFER_MIN,
                 },
             ),
             StructuralOperation(
@@ -187,13 +212,14 @@ def compose_rollback_recovery_option(
                 parameters={"conditions":[row.to_dict() for row in hard]},
             ),
         ),
-        measurement_keys=("promoted_entity_restored",),
+        measurement_keys=tuple(row.name for row in hard),
         preflight={
             "mode":"technical_rollback_recovery",
             "promotion_credit":False,
             "external_resource_injection":False,
             "world_reset":False,
-            "stone_required":STONE_REQUIRED,
+            "bootstrap_material_origin":"endogenous_live_world",
+            "quarantine_recreated_empty":True,
         },
     )
     guards=execution_guard_conditions(prepared)
@@ -208,7 +234,11 @@ def compose_rollback_recovery_option(
                     step_id=f"{option.option_id}:prepare",
                     kind=OptionStepKind.PREPARATION,
                     component="factorio_ai_lab.cortex.rollback_recovery_option",
-                    requires=("promoted_copper_chain_evidence","live_stone_resource"),
+                    requires=(
+                        "six_promoted_capabilities",
+                        "accepted_pre_corruption_world_fingerprint",
+                        "live_endogenous_recovery_resources",
+                    ),
                     provides=("prepared_rollback_recovery_v11",),
                     details={"contract_version":ROLLBACK_RECOVERY_CONTRACT_VERSION},
                 ),

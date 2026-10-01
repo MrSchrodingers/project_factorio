@@ -24,36 +24,44 @@ ROOT=Path(__file__).resolve().parents[1]
 
 def recovery_plan() -> RollbackRecoveryOptionPlan:
     option=OptionRequest(
-        option_id="f5c-copper-furnace-recovery",
+        option_id="f5c-promoted-baseline-recovery",
         kind=OptionKind.RESTORE_PROMOTED_ENTITY,
-        goal="restore promoted copper furnace",
+        goal="restore rollback-damaged promoted baseline",
         provenance=ActionProvenance(
             requested_by="f5-c-technical-recovery",
             source_component="tests.test_cortex_f5c_rollback_recovery",
             code_revision="recovery-test-sha",
             run_id="recovery-test-run",
         ),
-        budget=OptionBudget(requested_ticks=20*60),
+        budget=OptionBudget(requested_ticks=180*60),
         authority=ActionAuthority.SHADOW,
     )
     action=ActionRequest(
-        action_id="f5c-copper-furnace-recovery-action",
+        action_id="f5c-promoted-baseline-recovery-action",
         family=ActionFamily.PLACEMENT,
-        intent="restore promoted copper furnace",
+        intent="restore promoted baseline from endogenous materials",
         provenance=ActionProvenance(
             requested_by="f5-c-technical-recovery",
             source_component="tests.test_cortex_f5c_rollback_recovery",
             code_revision="recovery-test-sha",
             run_id="recovery-test-run",
         ),
-        requires=("promoted_copper_chain_evidence","live_endogenous_stone"),
-        provides=("restored_promoted_copper_furnace",),
+        requires=("six_promoted_capabilities","pre_corruption_world_fingerprint"),
+        provides=("restored_promoted_physical_baseline",),
     )
     result=compose_rollback_recovery_option(
         option,
         action_request=action,
         positions={
             "stone":(-46.5,-0.5),
+            "wood":(0.12109375,-18.68359375),
+            "coal_resource":(15.5,-0.5),
+            "coal_extractor":(15.0,-4.0),
+            "coal_buffer":(15.5,-2.5),
+            "coal_quarantine":(15.5,-5.5),
+            "iron_buffer":(15.5,71.5),
+            "iron_furnace":(20.0,69.0),
+            "copper_buffer":(-70.5,71.5),
             "copper_furnace":(-63.0,69.0),
         },
     )
@@ -62,7 +70,7 @@ def recovery_plan() -> RollbackRecoveryOptionPlan:
     return result.plan
 
 
-def test_recovery_option_is_inert_bounded_and_has_no_generic_output_guard() -> None:
+def test_recovery_option_is_inert_bounded_and_has_no_promotion_credit() -> None:
     plan=recovery_plan()
     assert plan.request.kind is OptionKind.RESTORE_PROMOTED_ENTITY
     assert plan.world_mutation is False
@@ -70,62 +78,69 @@ def test_recovery_option_is_inert_bounded_and_has_no_generic_output_guard() -> N
     assert plan.prepared.contract_version=="cortex_structural_ops_v11"
     assert plan.prepared.preflight["promotion_credit"] is False
     assert plan.prepared.preflight["external_resource_injection"] is False
+    assert plan.prepared.preflight["quarantine_recreated_empty"] is True
     assert {row.name for row in plan.termination_conditions}=={
-        "promoted_entity_restored"
+        "promoted_baseline_restored",
+        "coal_stock_recovered",
+        "copper_smelting_restored",
+        "science_buffer_intact",
     }
     assert execution_guard_conditions(plan.prepared)==()
 
 
-def test_compiled_recovery_uses_endogenous_stone_and_exact_promoted_position() -> None:
+def test_compiled_recovery_rebuilds_exact_promoted_baseline_endogenously() -> None:
     plan=recovery_plan()
-    compiled=compile_structural_action(plan.prepared,settle_seconds=20)
+    compiled=compile_structural_action(plan.prepared,settle_seconds=180)
     assert compiled.ready
     assert compiled.compiled is not None
     code=compiled.compiled.code
     ast.parse(code)
     assert "cortex_mine_exact_resource(" in code
-    assert "harvest_resource(" not in code
-    assert "cortex_recovery_stone_inventory_growth" in code
-    assert "rollback recovery native stone mining incomplete" in code
-    assert "quantity=5" in code
-    assert "radius=1.5" in code
-    assert "Position(x=-46.5,y=-0.5)" in code
+    assert "'stone',quantity=10,radius=3" in code
+    assert "'coal',quantity=4,radius=3" in code
+    assert "harvest_resource(" in code
+    assert "quantity=4,radius=24" in code
+    assert "craft_item(Prototype.BurnerMiningDrill,quantity=1)" in code
+    assert "craft_item(Prototype.WoodenChest,quantity=2)" in code
     assert "craft_item(Prototype.StoneFurnace,quantity=1)" in code
+    assert "Position(x=15.0,y=-4.0)" in code
+    assert "Position(x=15.5,y=-2.5)" in code
+    assert "Position(x=15.5,y=-5.5)" in code
     assert "Position(x=-63.0,y=69.0)" in code
-    assert "cortex_promoted_entity_restored" in code
-    assert "insert_item(" not in code
+    assert "baseline recovery quarantine must remain empty" in code
+    assert "cortex_coal_stock_recovered" in code
+    assert "cortex_copper_smelting_restored" in code
+    assert "cortex_science_buffer_intact" in code
+    assert "cortex_coal_extractor=insert_item(" in code
+    assert "Prototype.Coal" in code
 
 
-def test_copper_furnace_recovery_runner_is_one_shot_and_no_reset() -> None:
-    source=(ROOT/"scripts"/"run_cortex_f5c_repair_copper_furnace.py").read_text()
+def test_promoted_baseline_recovery_runner_is_one_shot_no_reset_no_credit() -> None:
+    source=(ROOT/"scripts"/"run_cortex_f5c_reconcile_promoted_baseline.py").read_text()
     assert "F5BoundedAuthorityBridge" in source
     assert "FactorioWorldLease" in source
     assert "OptionKind.RESTORE_PROMOTED_ENTITY" in source
     assert '"promotion_credit":False' in source
     assert '"external_resource_injection":False' in source
     assert '"world_reset":False' in source
+    assert "use_checkpoint_for_action=False" in source
+    assert "capability_promoted" in source
+    assert '"capability_promoted":None' in source
     assert "executor.reset(" not in source
-    assert "set_research(" not in source
-    assert "STONE_POS=" in source
-    assert "bind_exact_resource_mining_tool" in source
-    assert '"fle_transactional_resource_mining_tool"' in source
-    assert 'positions["stone"]=resolved_stone' in source
-    assert '"stone_anchor"' in source
-    assert '"stone_harvest_position"' in source
 
 
-def test_supervisor_routes_missing_copper_furnace_to_technical_recovery() -> None:
+def test_supervisor_routes_any_missing_promoted_entity_to_baseline_recovery() -> None:
     source=(ROOT/"scripts"/"run_cortex_supervisor.py").read_text()
-    assert "promoted entity absent from WORLD: copper_furnace" in source
-    assert "run_cortex_f5c_repair_copper_furnace.py" in source
-    assert 'last_frontier="copper_furnace_recovery"' in source
+    assert '"promoted entity absent from WORLD:" in payload["detail"]' in source
+    assert "run_cortex_f5c_reconcile_promoted_baseline.py" in source
+    assert 'last_frontier="promoted_baseline_recovery"' in source
 
 
 def test_recovery_sources_parse() -> None:
     for name in (
         "src/factorio_ai_lab/cortex/rollback_recovery_option.py",
         "src/factorio_ai_lab/cortex/rollback_recovery_structural_execute.py",
-        "scripts/run_cortex_f5c_repair_copper_furnace.py",
+        "scripts/run_cortex_f5c_reconcile_promoted_baseline.py",
         "scripts/run_cortex_supervisor.py",
     ):
         ast.parse((ROOT/name).read_text())

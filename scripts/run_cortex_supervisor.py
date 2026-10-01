@@ -265,23 +265,22 @@ def main() -> int:
                                 refresh()
                     elif (
                         current=="powered_manufacturing"
-                        and "promoted entity absent from WORLD: copper_furnace"
-                        in payload["detail"]
+                        and "promoted entity absent from WORLD:" in payload["detail"]
                     ):
                         if (
                             last_commit==commit
-                            and last_frontier=="copper_furnace_recovery"
+                            and last_frontier=="promoted_baseline_recovery"
                             and last_result in {"failed","rejected"}
                         ):
                             payload["status"]="blocked_repair_counterexample"
                             payload["detail"]=(
-                                "same commit copper-furnace recovery already failed; "
+                                "same commit promoted-baseline recovery already failed; "
                                 "no automatic retry"
                             )
                         else:
-                            repair_script="run_cortex_f5c_repair_copper_furnace.py"
+                            repair_script="run_cortex_f5c_reconcile_promoted_baseline.py"
                             payload["status"]="repairing_prerequisite"
-                            payload["repair_frontier"]="copper_furnace"
+                            payload["repair_frontier"]="promoted_baseline"
                             payload["repair_mode"]="technical_rollback_recovery"
                             payload["runner"]=repair_script
                             payload["runner_args"]=[]
@@ -292,7 +291,7 @@ def main() -> int:
                                 write(payload)
                                 repair_result=run(repair_script,True,[])
                                 last_commit=commit
-                                last_frontier="copper_furnace_recovery"
+                                last_frontier="promoted_baseline_recovery"
                                 last_result=(
                                     "completed"
                                     if repair_result.returncode==0

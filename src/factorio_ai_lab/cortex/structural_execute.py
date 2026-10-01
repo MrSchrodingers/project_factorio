@@ -80,6 +80,7 @@ MAX_STEAM_POWER_SECONDS = 360
 MAX_COPPER_CHAIN_SECONDS = 240
 MAX_AUTOMATION_SCIENCE_SECONDS = 300
 MAX_POWERED_MANUFACTURING_SECONDS = 720
+MAX_ROLLBACK_RECOVERY_SECONDS = 180
 
 MeasurementProbe = Callable[[PreparedStructuralAction], Mapping[str, Any]]
 
@@ -521,6 +522,7 @@ def _compile_operation(operation: StructuralOperation) -> list[str]:
         "establish_copper_chain": compile_copper_chain,
         "establish_automation_science": compile_automation_science,
         "recover_promoted_copper_furnace": compile_rollback_recovery,
+        "recover_promoted_baseline": compile_rollback_recovery,
         "establish_powered_manufacturing": compile_powered_manufacturing,
     }
     if operation.op == "verify_postconditions":
@@ -572,7 +574,12 @@ def compile_structural_action(
                             MAX_AUTOMATION_SCIENCE_SECONDS
                             if prepared.contract_version
                             == AUTOMATION_SCIENCE_CONTRACT_VERSION
-                            else MAX_SETTLE_SECONDS
+                            else (
+                                MAX_ROLLBACK_RECOVERY_SECONDS
+                                if prepared.contract_version
+                                == ROLLBACK_RECOVERY_CONTRACT_VERSION
+                                else MAX_SETTLE_SECONDS
+                            )
                         )
                     )
                 )
@@ -768,6 +775,45 @@ def compile_structural_action(
                     code=REFUSAL_OPERATION_UNSUPPORTED,
                     detail=(
                         "powered manufacturing Option budget must cover internal "
+                        f"causal windows ({required_seconds}s)"
+                    ),
+                ),
+            )
+
+    if prepared.contract_version == ROLLBACK_RECOVERY_CONTRACT_VERSION:
+        recovery_ops = [
+            operation
+            for operation in prepared.operations
+            if operation.op == "recover_promoted_baseline"
+        ]
+        if len(recovery_ops) != 1:
+            return StructuralCompilationResult(
+                prepared=prepared,
+                refusal=Refusal(
+                    code=REFUSAL_OPERATION_UNSUPPORTED,
+                    detail=(
+                        "rollback recovery contract requires exactly one "
+                        "recover_promoted_baseline operation"
+                    ),
+                ),
+            )
+        params=recovery_ops[0].parameters
+        required_seconds=sum(
+            int(params.get(key) or 0)
+            for key in (
+                "iron_smelt_seconds",
+                "coal_recovery_seconds",
+                "copper_smelt_seconds",
+                "settle_seconds",
+            )
+        )
+        if settle < required_seconds:
+            return StructuralCompilationResult(
+                prepared=prepared,
+                refusal=Refusal(
+                    code=REFUSAL_OPERATION_UNSUPPORTED,
+                    detail=(
+                        "rollback recovery Option budget must cover internal "
                         f"causal windows ({required_seconds}s)"
                     ),
                 ),
