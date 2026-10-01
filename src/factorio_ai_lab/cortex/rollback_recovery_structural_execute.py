@@ -146,8 +146,8 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
             f"[{_prototype('iron-plate')}]"
         ),
         "if cortex_recovery_iron_existing>0:",
-        "    extract_item(",
-        f"        {_prototype('iron-plate')},cortex_iron_furnace,",
+        "    cortex_transfer_exact_item(",
+        f"        {parsed['iron_furnace']},'stone-furnace','iron-plate',",
         f"        quantity=min({iron_required},cortex_recovery_iron_existing),",
         "    )",
         (
@@ -169,8 +169,8 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
             " < cortex_recovery_iron_shortfall:"
         ),
         "        raise RuntimeError('baseline recovery iron reserve incomplete')",
-        "    extract_item(",
-        f"        {_prototype('iron-ore')},cortex_iron_buffer,",
+        "    cortex_transfer_exact_item(",
+        f"        {parsed['iron_buffer']},'wooden-chest','iron-ore',",
         "        quantity=cortex_recovery_iron_shortfall,",
         "    )",
         "    cortex_iron_furnace=insert_item(",
@@ -191,8 +191,8 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
             " < cortex_recovery_iron_shortfall:"
         ),
         "        raise RuntimeError('baseline recovery iron smelting incomplete')",
-        "    extract_item(",
-        f"        {_prototype('iron-plate')},cortex_iron_furnace,",
+        "    cortex_transfer_exact_item(",
+        f"        {parsed['iron_furnace']},'stone-furnace','iron-plate',",
         "        quantity=cortex_recovery_iron_shortfall,",
         "    )",
         (
@@ -232,11 +232,11 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
         ),
         "if cortex_recovery_quarantine_stock != 0:",
         "    raise RuntimeError('baseline recovery quarantine must remain empty')",
-        "cortex_recovery_copper_coal=extract_item(",
-        f"    {_prototype('coal')},cortex_coal_buffer,quantity=1,",
+        "cortex_recovery_copper_coal=cortex_transfer_exact_item(",
+        f"    {parsed['coal_buffer']},'wooden-chest','coal',quantity=1,",
         ")",
-        "cortex_recovery_copper_ore=extract_item(",
-        f"    {_prototype('copper-ore')},cortex_copper_buffer,quantity=2,",
+        "cortex_recovery_copper_ore=cortex_transfer_exact_item(",
+        f"    {parsed['copper_buffer']},'wooden-chest','copper-ore',quantity=2,",
         ")",
         f"cortex_fast_reposition({parsed['copper_furnace']})",
         "cortex_copper_furnace=place_entity(",

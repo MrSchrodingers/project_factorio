@@ -925,6 +925,170 @@ def bind_exact_resource_mining_tool(
     return tool_name
 
 
+
+@dataclass(frozen=True)
+class ExactItemTransferResult:
+    source_name: str
+    item_name: str
+    requested_quantity: int
+    inventory_before: int
+    inventory_after: int
+    inventory_growth: int
+    removed: int
+    agent_idx: int
+    raw_response: str
+
+
+def transfer_exact_item(
+    environment: Any,
+    *,
+    x: float,
+    y: float,
+    source_name: str,
+    item_name: str,
+    quantity: int,
+    agent_idx: int=0,
+) -> ExactItemTransferResult:
+    """Transfer an exact live-world item quantity into the agent inventory."""
+    import math
+
+    target_x=float(x)
+    target_y=float(y)
+    if not math.isfinite(target_x) or not math.isfinite(target_y):
+        raise ValueError("exact transfer coordinates must be finite")
+    if agent_idx<0:
+        raise ValueError("agent_idx must be non-negative")
+    if (
+        not isinstance(quantity,int)
+        or isinstance(quantity,bool)
+        or quantity<=0
+        or quantity>100
+    ):
+        raise ValueError("exact transfer quantity must be within 1..100")
+    allowed_sources={"wooden-chest","stone-furnace"}
+    allowed_items={
+        "iron-plate","iron-ore","coal","copper-ore",
+        "copper-plate","automation-science-pack",
+    }
+    if source_name not in allowed_sources:
+        raise ValueError(f"unsupported exact transfer source {source_name!r}")
+    if item_name not in allowed_items:
+        raise ValueError(f"unsupported exact transfer item {item_name!r}")
+
+    unwrapped=getattr(environment,"unwrapped",environment)
+    instance=getattr(unwrapped,"instance",None)
+    if instance is None:
+        raise TypeError("environment does not expose a FactorioInstance")
+
+    character_index=agent_idx+1
+    source_q=json.dumps(source_name)
+    item_q=json.dumps(item_name)
+    command=(
+        "/c "
+        f"local p=storage.agent_characters[{character_index}]; "
+        "if not p or not p.valid then error('agent character unavailable') end; "
+        f"local q={{x={target_x},y={target_y}}}; "
+        f"local source_name={source_q}; local item_name={item_q}; "
+        "local rows=p.surface.find_entities_filtered{"
+        "position=q,radius=0.6,name=source_name,force=p.force}; "
+        "local source=nil; local bestd=nil; "
+        "for _,e in pairs(rows) do "
+        "if e.valid then local dx=e.position.x-q.x; local dy=e.position.y-q.y; "
+        "local d=dx*dx+dy*dy; "
+        "if bestd==nil or d<bestd then source=e;bestd=d end end end; "
+        "if not source then error('exact transfer source unavailable') end; "
+        f"local requested={quantity}; "
+        "local available=source.get_item_count(item_name); "
+        "if available<requested then error('exact transfer source quantity insufficient') end; "
+        "local before=p.get_item_count(item_name); "
+        "local removed=source.remove_item{name=item_name,count=requested}; "
+        "if removed~=requested then "
+        "if removed>0 then source.insert{name=item_name,count=removed} end; "
+        "error('exact transfer remove mismatch') end; "
+        "local inserted=p.insert{name=item_name,count=removed}; "
+        "if inserted~=removed then "
+        "if inserted>0 then p.remove_item{name=item_name,count=inserted} end; "
+        "source.insert{name=item_name,count=removed}; "
+        "error('exact transfer insert mismatch') end; "
+        "local after=p.get_item_count(item_name); local growth=after-before; "
+        "rcon.print(before..','..after..','..growth..','..removed)"
+    )
+    response=instance.rcon_client.send_command(command)
+    if response is None:
+        raise RuntimeError("exact item transfer returned no measurement")
+    parts=str(response).strip().split(",")
+    if len(parts)!=4:
+        raise RuntimeError(f"unexpected exact item transfer response: {response!r}")
+    try:
+        before,after,growth,removed=(int(float(value)) for value in parts)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"invalid exact item transfer response: {response!r}"
+        ) from exc
+    if removed!=quantity or growth!=quantity:
+        raise RuntimeError(
+            f"exact item transfer mismatch: removed={removed}, growth={growth}, "
+            f"requested={quantity}"
+        )
+    return ExactItemTransferResult(
+        source_name=source_name,
+        item_name=item_name,
+        requested_quantity=quantity,
+        inventory_before=before,
+        inventory_after=after,
+        inventory_growth=growth,
+        removed=removed,
+        agent_idx=agent_idx,
+        raw_response=str(response),
+    )
+
+
+def bind_exact_item_transfer_tool(
+    environment: Any,
+    *,
+    tool_name: str="cortex_transfer_exact_item",
+) -> str:
+    """Expose exact endogenous item transfer inside a transactional Option."""
+    if not tool_name.isidentifier() or tool_name.startswith("_"):
+        raise ValueError("tool_name must be a public Python identifier")
+    unwrapped=getattr(environment,"unwrapped",environment)
+    instance=getattr(unwrapped,"instance",None)
+    if instance is None:
+        raise TypeError("environment does not expose a FactorioInstance")
+    namespaces=getattr(instance,"namespaces",None)
+    if not isinstance(namespaces,(list,tuple)) or not namespaces:
+        raise TypeError("environment does not expose FLE namespaces")
+
+    for agent_idx,namespace in enumerate(namespaces):
+        def bound(
+            position: Any,
+            source_name: str,
+            item_name: str,
+            *,
+            quantity: int,
+            _agent_idx: int=agent_idx,
+        ) -> int:
+            x=getattr(position,"x",None)
+            y=getattr(position,"y",None)
+            if not isinstance(x,(int,float)) or isinstance(x,bool):
+                raise TypeError("exact transfer position.x must be numeric")
+            if not isinstance(y,(int,float)) or isinstance(y,bool):
+                raise TypeError("exact transfer position.y must be numeric")
+            result=transfer_exact_item(
+                environment,
+                x=float(x),
+                y=float(y),
+                source_name=str(source_name),
+                item_name=str(item_name),
+                quantity=quantity,
+                agent_idx=_agent_idx,
+            )
+            return result.inventory_growth
+
+        setattr(namespace,tool_name,bound)
+    return tool_name
+
+
 def bind_fast_reposition_tool(
     environment: Any,
     *,

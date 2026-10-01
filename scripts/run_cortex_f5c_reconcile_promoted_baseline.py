@@ -32,6 +32,7 @@ from factorio_ai_lab.dashboard.state import FactorioObserver
 from factorio_ai_lab.integrations.fle import (
     TransactionalFLEExecutor,
     attach_live_factorio_environment,
+    bind_exact_item_transfer_tool,
     bind_exact_resource_mining_tool,
     bind_fast_reposition_tool,
     enforce_minimum_eval_timeout,
@@ -485,6 +486,7 @@ def run_recovery(
             enforce_minimum_eval_timeout(env,minimum_seconds=300)
             record["fle_transactional_reposition_tool"]=bind_fast_reposition_tool(env)
             record["fle_transactional_resource_mining_tool"]=bind_exact_resource_mining_tool(env)
+            record["fle_transactional_item_transfer_tool"]=bind_exact_item_transfer_tool(env)
             executor=TransactionalFLEExecutor(
                 env,
                 runtime_context=lambda:{

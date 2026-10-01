@@ -96,6 +96,8 @@ def test_compiled_recovery_rebuilds_exact_promoted_baseline_endogenously() -> No
     code=compiled.compiled.code
     ast.parse(code)
     assert "cortex_mine_exact_resource(" in code
+    assert "cortex_transfer_exact_item(" in code
+    assert "extract_item(" not in code
     assert "'stone',quantity=10,radius=3" in code
     assert "'coal',quantity=4,radius=3" in code
     assert "harvest_resource(" in code
@@ -118,6 +120,7 @@ def test_compiled_recovery_rebuilds_exact_promoted_baseline_endogenously() -> No
 def test_promoted_baseline_recovery_runner_is_one_shot_no_reset_no_credit() -> None:
     source=(ROOT/"scripts"/"run_cortex_f5c_reconcile_promoted_baseline.py").read_text()
     assert "F5BoundedAuthorityBridge" in source
+    assert "bind_exact_item_transfer_tool" in source
     assert "FactorioWorldLease" in source
     assert "OptionKind.RESTORE_PROMOTED_ENTITY" in source
     assert '"promotion_credit":False' in source
