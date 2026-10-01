@@ -145,15 +145,13 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
             "cortex_recovery_iron_existing=inspect_inventory(cortex_iron_furnace)"
             f"[{_prototype('iron-plate')}]"
         ),
+        "cortex_recovery_iron_existing_transfer=0",
         "if cortex_recovery_iron_existing>0:",
-        "    cortex_transfer_exact_item(",
+        "    cortex_recovery_iron_existing_transfer=cortex_transfer_exact_item(",
         f"        {parsed['iron_furnace']},'stone-furnace','iron-plate',",
         f"        quantity=min({iron_required},cortex_recovery_iron_existing),",
         "    )",
-        (
-            "cortex_recovery_iron_ready=inspect_inventory()"
-            f"[{_prototype('iron-plate')}]"
-        ),
+        "cortex_recovery_iron_ready=cortex_recovery_iron_existing_transfer",
         f"if cortex_recovery_iron_ready < {iron_required}:",
         (
             f"    cortex_recovery_iron_shortfall={iron_required}-"
@@ -191,16 +189,25 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
             " < cortex_recovery_iron_shortfall:"
         ),
         "        raise RuntimeError('baseline recovery iron smelting incomplete')",
-        "    cortex_transfer_exact_item(",
+        "    cortex_recovery_iron_smelt_transfer=cortex_transfer_exact_item(",
         f"        {parsed['iron_furnace']},'stone-furnace','iron-plate',",
         "        quantity=cortex_recovery_iron_shortfall,",
         "    )",
+        "else:",
+        "    cortex_recovery_iron_smelt_transfer=0",
         (
-            "cortex_recovery_iron_plates_ready=inspect_inventory()"
-            f"[{_prototype('iron-plate')}]"
+            "cortex_recovery_iron_plates_ready="
+            "cortex_recovery_iron_existing_transfer"
+            "+cortex_recovery_iron_smelt_transfer"
         ),
         f"if cortex_recovery_iron_plates_ready < {iron_required}:",
-        "    raise RuntimeError('baseline recovery construction iron incomplete')",
+        (
+            "    raise RuntimeError("
+            "f'baseline recovery construction iron incomplete: "
+            "existing={cortex_recovery_iron_existing_transfer}, "
+            "smelted={cortex_recovery_iron_smelt_transfer}, "
+            "total={cortex_recovery_iron_plates_ready}')"
+        ),
         f"craft_item({_prototype('burner-mining-drill')},quantity=1)",
         f"craft_item({_prototype('wooden-chest')},quantity=2)",
         f"craft_item({_prototype('stone-furnace')},quantity=1)",

@@ -97,6 +97,8 @@ def test_compiled_recovery_rebuilds_exact_promoted_baseline_endogenously() -> No
     ast.parse(code)
     assert "cortex_mine_exact_resource(" in code
     assert "cortex_transfer_exact_item(" in code
+    assert "cortex_recovery_iron_existing_transfer" in code
+    assert "cortex_recovery_iron_smelt_transfer" in code
     assert "extract_item(" not in code
     assert "'stone',quantity=10,radius=3" in code
     assert "'coal',quantity=4,radius=3" in code
