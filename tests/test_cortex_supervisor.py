@@ -98,3 +98,11 @@ def test_supervisor_separates_code_release_from_mutable_state() -> None:
     assert '"--protocol",str(CODE_ROOT/"configs/cortex_baseline_v1.json")' in source
     assert '"code_root":str(CODE_ROOT)' in source
     assert '"state_root":str(STATE_ROOT)' in source
+
+
+def test_supervisor_blocks_failed_promoted_baseline_recovery_preflight() -> None:
+    source=(ROOT/"scripts"/"run_cortex_supervisor.py").read_text()
+    assert '"blocked_repair_preflight"' in source
+    assert 'last_result="preflight_failed"' in source
+    assert 'last_frontier="promoted_baseline_recovery"' in source
+    assert '{"failed","rejected","preflight_failed"}' in source

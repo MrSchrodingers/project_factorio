@@ -69,7 +69,7 @@ def recovery_plan() -> RollbackRecoveryOptionPlan:
             "copper_furnace":(-63.0,69.0),
         },
         missing_components=(
-            "iron_extractor","iron_buffer",
+            "iron_extractor","iron_buffer","iron_furnace",
             "coal_extractor","coal_buffer","coal_quarantine",
             "copper_furnace",
         ),
@@ -91,6 +91,7 @@ def test_recovery_option_is_inert_bounded_and_has_no_promotion_credit() -> None:
     assert {row.name for row in plan.termination_conditions}=={
         "promoted_baseline_restored",
         "iron_extraction_restored",
+        "iron_smelting_restored",
         "coal_stock_recovered",
         "copper_smelting_restored",
         "science_buffer_intact",
@@ -123,7 +124,8 @@ def test_compiled_recovery_rebuilds_exact_promoted_baseline_endogenously() -> No
     assert "cortex_craft_exact_item('burner-mining-drill',quantity=2)" in code
     assert "cortex_craft_exact_item('wooden-chest',quantity=3)" in code
     assert "cortex_craft_exact_item('stone-furnace',quantity=2)" in code
-    assert "cortex_craft_exact_item('stone-furnace',quantity=1)" in code
+    assert code.count("cortex_craft_exact_item('stone-furnace',quantity=1)") >= 2
+    assert "Position(x=20.0,y=69.0)" in code
     assert "cortex_recovery_drill_furnaces_before_drills" in code
     assert "Position(x=15.0,y=-4.0)" in code
     assert "Position(x=15.5,y=-2.5)" in code
@@ -133,6 +135,9 @@ def test_compiled_recovery_rebuilds_exact_promoted_baseline_endogenously() -> No
     assert "Position(x=-63.0,y=69.0)" in code
     assert "baseline recovery quarantine must remain empty" in code
     assert "cortex_iron_extraction_restored" in code
+    assert "cortex_iron_smelting_restored" in code
+    assert "cortex_recovery_endogenous_coal_remainder" in code
+    assert "cortex_recovery_endogenous_coal_buffered" in code
     assert "cortex_coal_stock_recovered" in code
     assert "cortex_copper_smelting_restored" in code
     assert "cortex_science_buffer_intact" in code

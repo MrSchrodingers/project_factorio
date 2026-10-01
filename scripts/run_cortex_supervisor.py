@@ -229,7 +229,7 @@ def main() -> int:
                         if (
                             last_commit==commit
                             and last_frontier=="iron_extraction_recovery"
-                            and last_result in {"failed","rejected"}
+                            and last_result in {"failed","rejected","preflight_failed"}
                         ):
                             payload["status"]="blocked_repair_counterexample"
                             payload["detail"]=(
@@ -270,7 +270,7 @@ def main() -> int:
                         if (
                             last_commit==commit
                             and last_frontier=="promoted_baseline_recovery"
-                            and last_result in {"failed","rejected"}
+                            and last_result in {"failed","rejected","preflight_failed"}
                         ):
                             payload["status"]="blocked_repair_counterexample"
                             payload["detail"]=(
@@ -304,6 +304,17 @@ def main() -> int:
                                     or ""
                                 )[-3000:]
                                 refresh()
+                            else:
+                                last_commit=commit
+                                last_frontier="promoted_baseline_recovery"
+                                last_result="preflight_failed"
+                                payload["status"]="blocked_repair_preflight"
+                                payload["repair_returncode"]=repair_preflight.returncode
+                                payload["detail"]=(
+                                    repair_preflight.stderr
+                                    or repair_preflight.stdout
+                                    or "promoted-baseline recovery preflight failed"
+                                )[-3000:]
                 else:
                     payload["status"]="executing"
                     payload["detail"]="one bounded A2 Option in progress"

@@ -373,6 +373,11 @@ def preflight(
             round(positions["iron_buffer"][0],3),
             round(positions["iron_buffer"][1],3),
         ),
+        "iron_furnace":(
+            "stone-furnace",
+            round(positions["iron_furnace"][0],3),
+            round(positions["iron_furnace"][1],3),
+        ),
         "copper_furnace":(
             "stone-furnace",
             round(positions["copper_furnace"][0],3),
@@ -465,6 +470,7 @@ def _measure(namespace: Any,prepared: Any) -> dict[str,Any]:
         for name in (
             "promoted_baseline_restored",
             "iron_extraction_restored",
+            "iron_smelting_restored",
             "coal_stock_recovered",
             "copper_smelting_restored",
             "science_buffer_intact",
@@ -655,6 +661,7 @@ def run_recovery(
             gate={
                 "promoted_baseline_restored":after["promoted_baseline_restored"] is True,
                 "iron_extraction_restored":after["iron_extraction_restored"] is True,
+                "iron_smelting_restored":after["iron_smelting_restored"] is True,
                 "coal_stock_recovered":after["coal_stock_recovered"] is True,
                 "copper_smelting_restored":after["copper_smelting_restored"] is True,
                 "science_buffer_intact":after["science_buffer_intact"] is True,
@@ -668,6 +675,7 @@ def run_recovery(
                 for name in (
                     "promoted_baseline_restored",
                     "iron_extraction_restored",
+                    "iron_smelting_restored",
                     "coal_stock_recovered",
                     "copper_smelting_restored",
                     "science_buffer_intact",

@@ -31,6 +31,7 @@ from factorio_ai_lab.cortex.structural_prepare import (
 RECOVERABLE_COMPONENTS=(
     "iron_extractor",
     "iron_buffer",
+    "iron_furnace",
     "coal_extractor",
     "coal_buffer",
     "coal_quarantine",
@@ -66,6 +67,7 @@ def _hard_postconditions() -> tuple[ActionCondition,...]:
         for name in (
             "promoted_baseline_restored",
             "iron_extraction_restored",
+            "iron_smelting_restored",
             "coal_stock_recovered",
             "copper_smelting_restored",
             "science_buffer_intact",

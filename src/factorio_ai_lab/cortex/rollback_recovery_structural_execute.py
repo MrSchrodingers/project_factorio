@@ -13,6 +13,7 @@ from factorio_ai_lab.cortex.structural_prepare import StructuralOperation
 RECOVERABLE_COMPONENTS=frozenset({
     "iron_extractor",
     "iron_buffer",
+    "iron_furnace",
     "coal_extractor",
     "coal_buffer",
     "coal_quarantine",
@@ -109,14 +110,15 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
         if name in missing_set
     )
     missing_standalone_furnaces=1 if "copper_furnace" in missing_set else 0
+    iron_furnace_stone=stone_per_furnace if "iron_furnace" in missing_set else 0
     drill_furnace_stone=stone_per_furnace*missing_drills
     copper_furnace_stone=stone_per_furnace*missing_standalone_furnaces
     wood_required=wood_per_chest*missing_chests
     iron_required=iron_plate_per_drill*missing_drills
+    smelt_ore_required=max(iron_required,2)
     gear_required=3*missing_drills
 
     lines=[
-        f"cortex_iron_furnace=get_entity({_prototype('stone-furnace')},{parsed['iron_furnace']})",
         f"cortex_copper_buffer=get_entity({_prototype('wooden-chest')},{parsed['copper_buffer']})",
         f"cortex_boiler=get_entity({_prototype('boiler')},{parsed['boiler']})",
         f"cortex_copper_extractor=get_entity({_prototype('burner-mining-drill')},{parsed['copper_extractor']})",
@@ -127,6 +129,45 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
         "cortex_recovery_stone_harvested=0",
         "cortex_recovery_reserved_furnaces=0",
     ])
+
+    if "iron_furnace" in missing_set:
+        lines.extend([
+            f"cortex_fast_reposition({parsed['stone']})",
+            (
+                "cortex_recovery_iron_furnace_stone_before=inspect_inventory()"
+                f"[{_prototype('stone')}]"
+            ),
+            "cortex_recovery_iron_furnace_stone_harvested=cortex_mine_exact_resource(",
+            f"    {parsed['stone']},'stone',quantity={iron_furnace_stone},radius=3",
+            ")",
+            (
+                "cortex_recovery_iron_furnace_stone_after=inspect_inventory()"
+                f"[{_prototype('stone')}]"
+            ),
+            (
+                "if cortex_recovery_iron_furnace_stone_after-"
+                "cortex_recovery_iron_furnace_stone_before"
+                f" < {iron_furnace_stone}:"
+            ),
+            "    raise RuntimeError('baseline recovery iron-furnace stone incomplete')",
+            (
+                "cortex_recovery_iron_furnace_ready="
+                "cortex_craft_exact_item('stone-furnace',quantity=1)"
+            ),
+            "if cortex_recovery_iron_furnace_ready < 1:",
+            "    raise RuntimeError('baseline recovery iron furnace crafting incomplete')",
+            "cortex_place_exact_entity(",
+            f"    {parsed['iron_furnace']},'stone-furnace'",
+            ")",
+            (
+                "cortex_recovery_stone_harvested="
+                "cortex_recovery_stone_harvested+"
+                "cortex_recovery_iron_furnace_stone_harvested"
+            ),
+        ])
+    lines.append(
+        f"cortex_iron_furnace=get_entity({_prototype('stone-furnace')},{parsed['iron_furnace']})"
+    )
 
     lines.extend([
         f"cortex_fast_reposition({parsed['coal_resource']})",
@@ -148,38 +189,45 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
         "    raise RuntimeError('baseline recovery coal inventory incomplete')",
     ])
 
+    lines.extend([
+        f"cortex_fast_reposition({parsed['iron_resource']})",
+        (
+            "cortex_recovery_iron_ore_before=inspect_inventory()"
+            f"[{_prototype('iron-ore')}]"
+        ),
+        "cortex_recovery_iron_ore_harvested=cortex_mine_exact_resource(",
+        f"    {parsed['iron_resource']},'iron-ore',quantity={smelt_ore_required},radius=3",
+        ")",
+        (
+            "cortex_recovery_iron_ore_after=inspect_inventory()"
+            f"[{_prototype('iron-ore')}]"
+        ),
+        (
+            "if cortex_recovery_iron_ore_after-cortex_recovery_iron_ore_before"
+            f" < {smelt_ore_required}:"
+        ),
+        "    raise RuntimeError('baseline recovery iron-ore inventory incomplete')",
+        "cortex_recovery_iron_fuel_deposit=cortex_deposit_exact_item(",
+        f"    {parsed['iron_furnace']},'stone-furnace','coal',quantity=2",
+        ")",
+        "cortex_recovery_iron_ore_deposit=cortex_deposit_exact_item(",
+        f"    {parsed['iron_furnace']},'stone-furnace','iron-ore',quantity={smelt_ore_required}",
+        ")",
+        f"sleep({iron_smelt_seconds})",
+        (
+            "cortex_recovery_iron_smelted=inspect_inventory(cortex_iron_furnace)"
+            f"[{_prototype('iron-plate')}]"
+        ),
+        f"if cortex_recovery_iron_smelted < {smelt_ore_required}:",
+        "    raise RuntimeError('baseline recovery iron smelting incomplete')",
+        (
+            "cortex_iron_smelting_restored="
+            f"cortex_recovery_iron_smelted>={smelt_ore_required}"
+        ),
+    ])
+
     if iron_required>0:
         lines.extend([
-            f"cortex_fast_reposition({parsed['iron_resource']})",
-            (
-                "cortex_recovery_iron_ore_before=inspect_inventory()"
-                f"[{_prototype('iron-ore')}]"
-            ),
-            "cortex_recovery_iron_ore_harvested=cortex_mine_exact_resource(",
-            f"    {parsed['iron_resource']},'iron-ore',quantity={iron_required},radius=3",
-            ")",
-            (
-                "cortex_recovery_iron_ore_after=inspect_inventory()"
-                f"[{_prototype('iron-ore')}]"
-            ),
-            (
-                "if cortex_recovery_iron_ore_after-cortex_recovery_iron_ore_before"
-                f" < {iron_required}:"
-            ),
-            "    raise RuntimeError('baseline recovery iron-ore inventory incomplete')",
-            "cortex_recovery_iron_fuel_deposit=cortex_deposit_exact_item(",
-            f"    {parsed['iron_furnace']},'stone-furnace','coal',quantity=2",
-            ")",
-            "cortex_recovery_iron_ore_deposit=cortex_deposit_exact_item(",
-            f"    {parsed['iron_furnace']},'stone-furnace','iron-ore',quantity={iron_required}",
-            ")",
-            f"sleep({iron_smelt_seconds})",
-            (
-                "cortex_recovery_iron_smelted=inspect_inventory(cortex_iron_furnace)"
-                f"[{_prototype('iron-plate')}]"
-            ),
-            f"if cortex_recovery_iron_smelted < {iron_required}:",
-            "    raise RuntimeError('baseline recovery iron smelting incomplete')",
             "cortex_recovery_iron_plates_ready=cortex_transfer_exact_item(",
             f"    {parsed['iron_furnace']},'stone-furnace','iron-plate',",
             f"    quantity={iron_required}",
@@ -234,7 +282,6 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
         ])
     else:
         lines.extend([
-            "cortex_recovery_iron_ore_harvested=0",
             "cortex_recovery_iron_plates_ready=0",
             "cortex_recovery_gears_ready=0",
             "cortex_recovery_drills_ready=0",
@@ -327,6 +374,17 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
         "cortex_recovery_iron_seed=cortex_deposit_exact_item(",
         f"    {parsed['iron_extractor']},'burner-mining-drill','coal',quantity=1",
         ")",
+        (
+            "cortex_recovery_endogenous_coal_remainder="
+            f"inspect_inventory()[{_prototype('coal')}]"
+        ),
+        "if cortex_recovery_endogenous_coal_remainder>0:",
+        "    cortex_recovery_endogenous_coal_buffered=cortex_deposit_exact_item(",
+        f"        {parsed['coal_buffer']},'wooden-chest','coal',",
+        "        quantity=cortex_recovery_endogenous_coal_remainder",
+        "    )",
+        "else:",
+        "    cortex_recovery_endogenous_coal_buffered=0",
         f"sleep({recovery_window})",
         (
             "cortex_recovery_coal_stock=inspect_inventory(cortex_coal_buffer)"
@@ -444,6 +502,7 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
         "print({",
         "    'promoted_baseline_restored':cortex_promoted_baseline_restored,",
         "    'iron_extraction_restored':cortex_iron_extraction_restored,",
+        "    'iron_smelting_restored':cortex_iron_smelting_restored,",
         "    'coal_stock_recovered':cortex_coal_stock_recovered,",
         "    'copper_smelting_restored':cortex_copper_smelting_restored,",
         "    'science_buffer_intact':cortex_science_buffer_intact,",
