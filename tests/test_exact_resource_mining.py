@@ -288,31 +288,29 @@ def test_exact_place_consumes_one_item_and_freezes_position() -> None:
     assert "surface.create_entity" in command
 
 
-def test_exact_place_verifies_entity_when_mutation_response_is_missing() -> None:
-    class SequenceRcon:
-        def __init__(self) -> None:
-            self.responses=[None,"15,-4"]
-            self.commands=[]
+def test_exact_place_remains_strict_without_mutation_response() -> None:
+    env=FakeEnvironment(None)
+    with pytest.raises(RuntimeError,match="exact placement returned no position"):
+        place_exact_entity(
+            env,
+            x=15.0,
+            y=-4.0,
+            entity_name="burner-mining-drill",
+            direction="south",
+        )
 
-        def send_command(self,command: str):
-            self.commands.append(command)
-            return self.responses.pop(0)
 
-    env=FakeEnvironment()
-    seq=SequenceRcon()
-    env.instance.rcon_client=seq
-    result=place_exact_entity(
-        env,
-        x=15.0,
-        y=-4.0,
-        entity_name="burner-mining-drill",
+def test_bound_exact_place_defers_verification_to_compiled_get_entity() -> None:
+    env=FakeEnvironment(None)
+    bind_exact_place_tool(env)
+    position=Position(x=15.0,y=-4.0)
+    returned=env.instance.namespaces[0].cortex_place_exact_entity(
+        position,
+        "burner-mining-drill",
         direction="south",
     )
-    assert (result.x,result.y)==(15.0,-4.0)
-    assert len(seq.commands)==2
-    assert "surface.create_entity" in seq.commands[0]
-    assert "find_entities_filtered" in seq.commands[1]
-    assert "MISSING" in seq.commands[1]
+    assert returned is position
+    assert "surface.create_entity" in env.instance.rcon_client.command
 
 
 def test_exact_recovery_tool_binders_are_inert_until_called() -> None:

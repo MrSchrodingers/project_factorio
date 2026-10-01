@@ -1542,6 +1542,7 @@ def place_exact_entity(
     entity_name: str,
     direction: str="north",
     agent_idx: int=0,
+    defer_verification_on_no_response: bool=False,
 ) -> ExactPlaceResult:
     """Place one exact crafted entity with one-for-one inventory consumption."""
     import math
@@ -1582,23 +1583,15 @@ def place_exact_entity(
     )
     response=instance.rcon_client.send_command(command)
     if response is None or not str(response).strip():
-        verify_command=(
-            "/c "
-            f"local q={{x={target_x},y={target_y}}}; "
-            f"local name={name_q}; local dir={direction_expr}; "
-            "local s=game.surfaces[1]; local f=game.forces.player; "
-            "local found=nil; "
-            "for _,e in pairs(s.find_entities_filtered{"
-            "position=q,radius=0.25,name=name,force=f}) do "
-            "if e.valid and math.abs(e.position.x-q.x)<=0.01 "
-            "and math.abs(e.position.y-q.y)<=0.01 "
-            "and (e.direction or 0)==dir then found=e; break end end; "
-            "if found then rcon.print(found.position.x..','..found.position.y) "
-            "else rcon.print('MISSING') end"
-        )
-        response=instance.rcon_client.send_command(verify_command)
-        if response is None or str(response).strip()=="MISSING":
+        if not defer_verification_on_no_response:
             raise RuntimeError("exact placement returned no position")
+        return ExactPlaceResult(
+            entity_name=entity_name,
+            x=target_x,
+            y=target_y,
+            agent_idx=agent_idx,
+            raw_response="deferred_get_entity_verification",
+        )
     parts=str(response).strip().split(",")
     if len(parts)!=2:
         raise RuntimeError(f"unexpected exact placement response: {response!r}")
@@ -1649,6 +1642,7 @@ def _bind_exact_simple_tool(
                     environment,x=float(position.x),y=float(position.y),
                     entity_name=str(entity_name),direction=str(direction),
                     agent_idx=_agent_idx,
+                    defer_verification_on_no_response=True,
                 )
                 return position
         else:
