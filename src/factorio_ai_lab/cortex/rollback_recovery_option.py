@@ -41,6 +41,7 @@ STONE_PER_FURNACE=5
 WOOD_PER_CHEST=2
 IRON_PLATE_PER_DRILL=9
 COAL_BOOTSTRAP_REQUIRED=10
+COAL_SEED_RECOVERY_REQUIRED=8
 IRON_SMELT_SECONDS=75
 RECOVERY_WINDOW_SECONDS=65
 COPPER_SMELT_SECONDS=12
@@ -229,6 +230,7 @@ def compose_rollback_recovery_option(
                     "wood_per_chest":WOOD_PER_CHEST,
                     "iron_plate_per_drill":IRON_PLATE_PER_DRILL,
                     "coal_bootstrap_required":COAL_BOOTSTRAP_REQUIRED,
+                    "coal_seed_recovery_required":COAL_SEED_RECOVERY_REQUIRED,
                     "iron_smelt_seconds":IRON_SMELT_SECONDS,
                     "recovery_window_seconds":RECOVERY_WINDOW_SECONDS,
                     "copper_smelt_seconds":COPPER_SMELT_SECONDS,

@@ -94,6 +94,9 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
     wood_per_chest=_positive_int(params,"wood_per_chest")
     iron_plate_per_drill=_positive_int(params,"iron_plate_per_drill")
     coal_required=_positive_int(params,"coal_bootstrap_required")
+    seed_coal_required=_positive_int(params,"coal_seed_recovery_required")
+    if seed_coal_required<3:
+        raise ValueError("baseline recovery seed coal must cover both miners")
     iron_smelt_seconds=_positive_int(params,"iron_smelt_seconds")
     recovery_window=_positive_int(params,"recovery_window_seconds")
     copper_smelt_seconds=_positive_int(params,"copper_smelt_seconds")
@@ -368,6 +371,23 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
     )
 
     lines.extend([
+        f"cortex_fast_reposition({parsed['coal_resource']})",
+        (
+            "cortex_recovery_seed_coal_before=inspect_inventory()"
+            f"[{_prototype('coal')}]"
+        ),
+        "cortex_recovery_seed_coal_harvested=cortex_mine_exact_resource(",
+        f"    {parsed['coal_resource']},'coal',quantity={seed_coal_required},radius=3",
+        ")",
+        (
+            "cortex_recovery_seed_coal_after=inspect_inventory()"
+            f"[{_prototype('coal')}]"
+        ),
+        (
+            "if cortex_recovery_seed_coal_after-cortex_recovery_seed_coal_before"
+            f" < {seed_coal_required}:"
+        ),
+        "    raise RuntimeError('baseline recovery seed coal inventory incomplete')",
         "cortex_recovery_coal_seed=cortex_deposit_exact_item(",
         f"    {parsed['coal_extractor']},'burner-mining-drill','coal',quantity=2",
         ")",
@@ -509,6 +529,7 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
         "    'recovery_missing_components':cortex_recovery_missing_components,",
         "    'recovery_stone_harvested':cortex_recovery_stone_harvested,",
         "    'recovery_coal_harvested':cortex_recovery_coal_harvested,",
+        "    'recovery_seed_coal_harvested':cortex_recovery_seed_coal_harvested,",
         "    'recovery_iron_ore_harvested':cortex_recovery_iron_ore_harvested,",
         "    'recovery_wood_harvested':cortex_recovery_wood_harvested,",
         "    'recovery_iron_plates_ready':cortex_recovery_iron_plates_ready,",

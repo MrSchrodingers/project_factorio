@@ -120,6 +120,9 @@ def test_compiled_recovery_rebuilds_exact_promoted_baseline_endogenously() -> No
     assert "'stone',quantity=10,radius=3" in code
     assert "'stone',quantity=5,radius=3" in code
     assert "'coal',quantity=10,radius=3" in code
+    assert "'coal',quantity=8,radius=3" in code
+    assert "cortex_recovery_seed_coal_harvested" in code
+    assert code.index("cortex_recovery_seed_coal_harvested") < code.index("cortex_recovery_coal_seed=cortex_deposit_exact_item")
     assert "'iron-ore',quantity=18,radius=3" in code
     assert "cortex_craft_exact_item('burner-mining-drill',quantity=2)" in code
     assert "cortex_craft_exact_item('wooden-chest',quantity=3)" in code
