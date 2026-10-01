@@ -429,10 +429,11 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
     # already exists.
     if "iron_buffer" in missing_set:
         lines.extend([
-            "cortex_iron_buffer=cortex_place_exact_entity(",
+            "cortex_place_exact_entity(",
             f"    {parsed['iron_buffer']},'wooden-chest',",
             "    initial_items={'iron-ore':5}",
             ")",
+            f"cortex_iron_buffer=get_entity({_prototype('wooden-chest')},{parsed['iron_buffer']})",
             "cortex_recovery_iron_buffer_seeded=5",
         ])
     else:
@@ -445,9 +446,10 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
 
     if "coal_quarantine" in missing_set:
         lines.extend([
-            "cortex_coal_quarantine=cortex_place_exact_entity(",
+            "cortex_place_exact_entity(",
             f"    {parsed['coal_quarantine']},'wooden-chest'",
             ")",
+            f"cortex_coal_quarantine=get_entity({_prototype('wooden-chest')},{parsed['coal_quarantine']})",
         ])
     else:
         lines.append(
@@ -456,10 +458,11 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
 
     if "coal_buffer" in missing_set:
         lines.extend([
-            "cortex_coal_buffer=cortex_place_exact_entity(",
+            "cortex_place_exact_entity(",
             f"    {parsed['coal_buffer']},'wooden-chest',",
             f"    initial_items={{'coal':{coal_stock_target}}}",
             ")",
+            f"cortex_coal_buffer=get_entity({_prototype('wooden-chest')},{parsed['coal_buffer']})",
             f"cortex_recovery_endogenous_coal_buffered={coal_stock_target}",
         ])
     else:
@@ -484,10 +487,11 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
 
     if "iron_extractor" in missing_set:
         lines.extend([
-            "cortex_iron_extractor=cortex_place_exact_entity(",
+            "cortex_place_exact_entity(",
             f"    {parsed['iron_extractor']},'burner-mining-drill',direction='south',",
             "    initial_items={'coal':1}",
             ")",
+            f"cortex_iron_extractor=get_entity({_prototype('burner-mining-drill')},{parsed['iron_extractor']})",
             "cortex_recovery_iron_seed=1",
         ])
     else:
@@ -500,10 +504,11 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
 
     if "coal_extractor" in missing_set:
         lines.extend([
-            "cortex_coal_extractor=cortex_place_exact_entity(",
+            "cortex_place_exact_entity(",
             f"    {parsed['coal_extractor']},'burner-mining-drill',direction='south',",
             "    initial_items={'coal':2}",
             ")",
+            f"cortex_coal_extractor=get_entity({_prototype('burner-mining-drill')},{parsed['coal_extractor']})",
             "cortex_recovery_coal_seed=2",
         ])
     else:

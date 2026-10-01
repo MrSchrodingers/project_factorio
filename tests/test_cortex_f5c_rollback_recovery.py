@@ -165,6 +165,10 @@ def test_compiled_recovery_rebuilds_exact_promoted_baseline_endogenously() -> No
     assert code.index("cortex_recovery_iron_buffer_seed_harvested=") < iron_buffer_place
     assert iron_buffer_place < quarantine_place < coal_buffer_place
     assert coal_buffer_place < iron_extractor_place < coal_extractor_place
+    assert iron_buffer_place < code.index("cortex_iron_buffer=get_entity(") < quarantine_place
+    assert coal_buffer_place < code.index("cortex_coal_buffer=get_entity(") < iron_extractor_place
+    assert iron_extractor_place < code.index("cortex_iron_extractor=get_entity(") < coal_extractor_place
+    assert coal_extractor_place < code.index("cortex_coal_extractor=get_entity(")
     assert "initial_items={'coal':16}" in code
     assert "initial_items={'iron-ore':5}" in code
     assert "initial_items={'coal':1}" in code
