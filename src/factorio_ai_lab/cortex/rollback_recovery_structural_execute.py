@@ -405,6 +405,26 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
         "    )",
         "else:",
         "    cortex_recovery_endogenous_coal_buffered=0",
+        f"cortex_fast_reposition({parsed['iron_resource']})",
+        (
+            "cortex_recovery_iron_buffer_seed_before=inspect_inventory()"
+            f"[{_prototype('iron-ore')}]"
+        ),
+        "cortex_recovery_iron_buffer_seed_harvested=cortex_mine_exact_resource(",
+        f"    {parsed['iron_resource']},'iron-ore',quantity=5,radius=3",
+        ")",
+        (
+            "cortex_recovery_iron_buffer_seed_after=inspect_inventory()"
+            f"[{_prototype('iron-ore')}]"
+        ),
+        (
+            "if cortex_recovery_iron_buffer_seed_after-"
+            "cortex_recovery_iron_buffer_seed_before < 5:"
+        ),
+        "    raise RuntimeError('baseline recovery iron buffer seed incomplete')",
+        "cortex_recovery_iron_buffer_seeded=cortex_deposit_exact_item(",
+        f"    {parsed['iron_buffer']},'wooden-chest','iron-ore',quantity=5",
+        ")",
         f"sleep({recovery_window})",
         (
             "cortex_recovery_coal_stock=cortex_inspect_exact_item("

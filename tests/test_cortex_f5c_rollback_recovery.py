@@ -130,7 +130,7 @@ def test_compiled_recovery_rebuilds_exact_promoted_baseline_endogenously() -> No
     assert "'stone',quantity=10,radius=3" in code
     assert "'stone',quantity=5,radius=3" in code
     assert "'coal',quantity=10,radius=3" in code
-    assert "'coal',quantity=8,radius=3" in code
+    assert "'coal',quantity=19,radius=3" in code
     assert "cortex_recovery_seed_coal_harvested" in code
     assert code.index("cortex_recovery_seed_coal_harvested") < code.index("cortex_recovery_coal_seed=cortex_deposit_exact_item")
     assert "'iron-ore',quantity=18,radius=3" in code
@@ -151,6 +151,9 @@ def test_compiled_recovery_rebuilds_exact_promoted_baseline_endogenously() -> No
     assert "cortex_iron_smelting_restored" in code
     assert "cortex_recovery_endogenous_coal_remainder" in code
     assert "cortex_recovery_endogenous_coal_buffered" in code
+    assert "quantity=5,radius=3" in code
+    assert "cortex_recovery_iron_buffer_seeded" in code
+    assert "sleep(1)" in code
     assert "cortex_coal_stock_recovered" in code
     assert "cortex_copper_smelting_restored" in code
     assert "cortex_science_buffer_intact" in code
