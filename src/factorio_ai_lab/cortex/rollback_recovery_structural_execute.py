@@ -107,6 +107,13 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
             f" < {stone_required}:"
         ),
         "    raise RuntimeError('baseline recovery stone inventory incomplete')",
+        f"craft_item({_prototype('stone-furnace')},quantity=2)",
+        (
+            "cortex_recovery_reserved_furnaces=inspect_inventory()"
+            f"[{_prototype('stone-furnace')}]"
+        ),
+        "if cortex_recovery_reserved_furnaces < 2:",
+        "    raise RuntimeError('baseline recovery furnace reservation incomplete')",
         f"cortex_fast_reposition({parsed['coal_resource']})",
         (
             "cortex_recovery_coal_before=inspect_inventory()"
@@ -210,7 +217,6 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
         ),
         f"craft_item({_prototype('burner-mining-drill')},quantity=1)",
         f"craft_item({_prototype('wooden-chest')},quantity=2)",
-        f"craft_item({_prototype('stone-furnace')},quantity=1)",
         f"cortex_fast_reposition({parsed['coal_extractor']})",
         "cortex_coal_extractor=place_entity(",
         f"    {_prototype('burner-mining-drill')},",

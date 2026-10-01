@@ -106,7 +106,8 @@ def test_compiled_recovery_rebuilds_exact_promoted_baseline_endogenously() -> No
     assert "quantity=4,radius=24" in code
     assert "craft_item(Prototype.BurnerMiningDrill,quantity=1)" in code
     assert "craft_item(Prototype.WoodenChest,quantity=2)" in code
-    assert "craft_item(Prototype.StoneFurnace,quantity=1)" in code
+    assert "craft_item(Prototype.StoneFurnace,quantity=2)" in code
+    assert "cortex_recovery_reserved_furnaces" in code
     assert "Position(x=15.0,y=-4.0)" in code
     assert "Position(x=15.5,y=-2.5)" in code
     assert "Position(x=15.5,y=-5.5)" in code
@@ -115,6 +116,7 @@ def test_compiled_recovery_rebuilds_exact_promoted_baseline_endogenously() -> No
     assert "cortex_coal_stock_recovered" in code
     assert "cortex_copper_smelting_restored" in code
     assert "cortex_science_buffer_intact" in code
+    assert code.index("craft_item(Prototype.StoneFurnace,quantity=2)") < code.index("craft_item(Prototype.BurnerMiningDrill,quantity=1)")
     assert "cortex_coal_extractor=insert_item(" in code
     assert "Prototype.Coal" in code
 
