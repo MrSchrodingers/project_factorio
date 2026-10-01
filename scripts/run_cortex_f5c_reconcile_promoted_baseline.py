@@ -509,6 +509,35 @@ def run_recovery(
                 name:(float(row["x"]),float(row["y"]))
                 for name,row in raw.items()
             }
+            wood_anchor=positions["wood"]
+            wood_check=instance.rcon_client.send_command(
+                "/c local p=storage.agent_characters[1]; local s=p.surface; "
+                f"local q={{x={wood_anchor[0]},y={wood_anchor[1]}}}; "
+                "local best=nil; local bestd=nil; "
+                "for _,e in pairs(s.find_entities_filtered{position=q,radius=24,type='tree'}) do "
+                "if e.valid and e.minable then "
+                "local dx=e.position.x-q.x; local dy=e.position.y-q.y; "
+                "local d=dx*dx+dy*dy; "
+                "if bestd==nil or d<bestd then best=e; bestd=d end end end; "
+                "if best then rcon.print('WOOD_POS='..best.position.x..','..best.position.y) end"
+            )
+            marker="WOOD_POS="
+            if marker not in str(wood_check):
+                raise RuntimeError("no live wood within accepted bootstrap radius")
+            raw_wood=str(wood_check).split(marker,1)[1].splitlines()[0].strip()
+            try:
+                wood_x,wood_y=(float(value) for value in raw_wood.split(",",1))
+            except (TypeError,ValueError) as exc:
+                raise RuntimeError("invalid live wood recovery position") from exc
+            if (
+                (wood_x-wood_anchor[0])**2
+                +(wood_y-wood_anchor[1])**2
+                > 24.0001**2
+            ):
+                raise RuntimeError("resolved wood escaped accepted bootstrap radius")
+            positions["wood"]=(wood_x,wood_y)
+            record["wood_anchor"]={"x":wood_anchor[0],"y":wood_anchor[1]}
+            record["wood_harvest_position"]={"x":wood_x,"y":wood_y}
             option=_option_request(run_id=run_id,commit=commit)
             action=_action_request(run_id=run_id,commit=commit)
             composed=compose_rollback_recovery_option(

@@ -123,6 +123,9 @@ def test_promoted_baseline_recovery_runner_is_one_shot_no_reset_no_credit() -> N
     assert '"promotion_credit":False' in source
     assert '"external_resource_injection":False' in source
     assert '"world_reset":False' in source
+    assert "WOOD_POS=" in source
+    assert "no live wood within accepted bootstrap radius" in source
+    assert 'record["wood_harvest_position"]' in source
     assert "use_checkpoint_for_action=False" in source
     assert "capability_promoted" in source
     assert '"capability_promoted":None' in source
