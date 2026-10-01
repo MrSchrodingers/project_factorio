@@ -156,6 +156,7 @@ def test_compiled_recovery_rebuilds_exact_promoted_baseline_endogenously() -> No
     assert "sleep(1)" in code
     assert "cortex_coal_stock_recovered" in code
     assert "cortex_copper_smelting_restored" in code
+    assert code.index("cortex_recovery_copper_plate_count=") < code.index("cortex_recovery_seed_coal_harvested=")
     assert "cortex_science_buffer_intact" in code
     assert "cortex_processor_output" not in code
     assert code.index("cortex_craft_exact_item('stone-furnace',quantity=2)") < code.index("cortex_craft_exact_item('burner-mining-drill',quantity=2)")

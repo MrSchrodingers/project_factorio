@@ -322,6 +322,67 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
             "cortex_recovery_chests_ready=0",
         ])
 
+    # Restore and validate copper smelting before exposing the reconstructed
+    # coal/iron cells to the hostile live WORLD.
+    if "copper_furnace" in missing_set:
+        lines.extend([
+            f"cortex_fast_reposition({parsed['stone']})",
+            (
+                "cortex_recovery_copper_stone_before=inspect_inventory()"
+                f"[{_prototype('stone')}]"
+            ),
+            "cortex_recovery_copper_stone_harvested=cortex_mine_exact_resource(",
+            f"    {parsed['stone']},'stone',quantity={copper_furnace_stone},radius=3",
+            ")",
+            (
+                "cortex_recovery_copper_stone_after=inspect_inventory()"
+                f"[{_prototype('stone')}]"
+            ),
+            (
+                "if cortex_recovery_copper_stone_after-cortex_recovery_copper_stone_before"
+                f" < {copper_furnace_stone}:"
+            ),
+            "    raise RuntimeError('baseline recovery copper stone inventory incomplete')",
+            (
+                "cortex_recovery_copper_furnace_ready="
+                "cortex_craft_exact_item('stone-furnace',quantity=1)"
+            ),
+            "if cortex_recovery_copper_furnace_ready < 1:",
+            "    raise RuntimeError('baseline recovery copper furnace crafting incomplete')",
+            "cortex_place_exact_entity(",
+            f"    {parsed['copper_furnace']},'stone-furnace'",
+            ")",
+            (
+                "cortex_recovery_stone_harvested="
+                "cortex_recovery_stone_harvested+cortex_recovery_copper_stone_harvested"
+            ),
+        ])
+    lines.append(
+        f"cortex_copper_furnace=get_entity({_prototype('stone-furnace')},{parsed['copper_furnace']})"
+    )
+    lines.extend([
+        f"cortex_fast_reposition({parsed['coal_resource']})",
+        "cortex_recovery_copper_coal_harvested=cortex_mine_exact_resource(",
+        f"    {parsed['coal_resource']},'coal',quantity=1,radius=3",
+        ")",
+        "cortex_recovery_copper_ore=cortex_transfer_exact_item(",
+        f"    {parsed['copper_buffer']},'wooden-chest','copper-ore',quantity=2",
+        ")",
+        "cortex_recovery_copper_coal_deposit=cortex_deposit_exact_item(",
+        f"    {parsed['copper_furnace']},'stone-furnace','coal',quantity=1",
+        ")",
+        "cortex_recovery_copper_ore_deposit=cortex_deposit_exact_item(",
+        f"    {parsed['copper_furnace']},'stone-furnace','copper-ore',quantity=2",
+        ")",
+        f"sleep({copper_smelt_seconds})",
+        (
+            "cortex_recovery_copper_plate_count=cortex_inspect_exact_item("
+            f"{parsed['copper_furnace']},'stone-furnace','copper-plate')"
+        ),
+        "if cortex_recovery_copper_plate_count<=0:",
+        "    raise RuntimeError('baseline recovery copper smelting did not resume')",
+    ])
+
     # Exact placement is emitted only for entities absent from the accepted
     # pre-corruption fingerprint. Existing promoted entities are adopted.
     if "coal_extractor" in missing_set:
@@ -446,62 +507,7 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
         "    raise RuntimeError('baseline recovery quarantine must remain empty')",
     ])
 
-    if "copper_furnace" in missing_set:
-        lines.extend([
-            f"cortex_fast_reposition({parsed['stone']})",
-            (
-                "cortex_recovery_copper_stone_before=inspect_inventory()"
-                f"[{_prototype('stone')}]"
-            ),
-            "cortex_recovery_copper_stone_harvested=cortex_mine_exact_resource(",
-            f"    {parsed['stone']},'stone',quantity={copper_furnace_stone},radius=3",
-            ")",
-            (
-                "cortex_recovery_copper_stone_after=inspect_inventory()"
-                f"[{_prototype('stone')}]"
-            ),
-            (
-                "if cortex_recovery_copper_stone_after-cortex_recovery_copper_stone_before"
-                f" < {copper_furnace_stone}:"
-            ),
-            "    raise RuntimeError('baseline recovery copper stone inventory incomplete')",
-            (
-                "cortex_recovery_copper_furnace_ready="
-                "cortex_craft_exact_item('stone-furnace',quantity=1)"
-            ),
-            "if cortex_recovery_copper_furnace_ready < 1:",
-            "    raise RuntimeError('baseline recovery copper furnace crafting incomplete')",
-            "cortex_place_exact_entity(",
-            f"    {parsed['copper_furnace']},'stone-furnace'",
-            ")",
-            (
-                "cortex_recovery_stone_harvested="
-                "cortex_recovery_stone_harvested+cortex_recovery_copper_stone_harvested"
-            ),
-        ])
-    lines.append(
-        f"cortex_copper_furnace=get_entity({_prototype('stone-furnace')},{parsed['copper_furnace']})"
-    )
     lines.extend([
-        "cortex_recovery_copper_coal=cortex_transfer_exact_item(",
-        f"    {parsed['coal_buffer']},'wooden-chest','coal',quantity=1",
-        ")",
-        "cortex_recovery_copper_ore=cortex_transfer_exact_item(",
-        f"    {parsed['copper_buffer']},'wooden-chest','copper-ore',quantity=2",
-        ")",
-        "cortex_recovery_copper_coal_deposit=cortex_deposit_exact_item(",
-        f"    {parsed['copper_furnace']},'stone-furnace','coal',quantity=1",
-        ")",
-        "cortex_recovery_copper_ore_deposit=cortex_deposit_exact_item(",
-        f"    {parsed['copper_furnace']},'stone-furnace','copper-ore',quantity=2",
-        ")",
-        f"sleep({copper_smelt_seconds})",
-        (
-            "cortex_recovery_copper_plate_count=cortex_inspect_exact_item("
-            f"{parsed['copper_furnace']},'stone-furnace','copper-plate')"
-        ),
-        "if cortex_recovery_copper_plate_count<=0:",
-        "    raise RuntimeError('baseline recovery copper smelting did not resume')",
         (
             "cortex_recovery_coal_stock_final=cortex_inspect_exact_item("
             f"{parsed['coal_buffer']},'wooden-chest','coal')"
