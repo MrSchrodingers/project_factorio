@@ -1214,7 +1214,7 @@ def deposit_exact_item(
         or quantity<=0 or quantity>100
     ):
         raise ValueError("exact deposit quantity must be within 1..100")
-    allowed_targets={"stone-furnace","burner-mining-drill","boiler"}
+    allowed_targets={"stone-furnace","burner-mining-drill","boiler","wooden-chest"}
     allowed_items={"coal","iron-ore","copper-ore"}
     if target_name not in allowed_targets:
         raise ValueError(f"unsupported exact deposit target {target_name!r}")

@@ -174,6 +174,23 @@ def test_exact_item_deposit_conserves_player_and_target_counts() -> None:
     assert "exact deposit conservation mismatch" in command
 
 
+def test_exact_item_deposit_allows_endogenous_buffer_chest() -> None:
+    env=FakeEnvironment("OK|5,0,11,16")
+    result=deposit_exact_item(
+        env,
+        x=15.5,
+        y=-2.5,
+        target_name="wooden-chest",
+        item_name="coal",
+        quantity=5,
+    )
+    assert result.player_before==5
+    assert result.player_after==0
+    assert result.target_before==11
+    assert result.target_after==16
+    assert 'local target_name="wooden-chest"' in env.instance.rcon_client.command
+
+
 def test_exact_item_deposit_reports_lua_failure() -> None:
     env=FakeEnvironment("ERR|exact deposit target insert mismatch")
     with pytest.raises(
