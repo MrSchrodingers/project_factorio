@@ -5,11 +5,13 @@ import pytest
 from factorio_ai_lab.integrations.fle import (
     bind_exact_craft_tool,
     bind_exact_item_deposit_tool,
+    bind_exact_item_inspect_tool,
     bind_exact_item_transfer_tool,
     bind_exact_place_tool,
     bind_exact_resource_mining_tool,
     craft_exact_item,
     deposit_exact_item,
+    inspect_exact_item,
     mine_exact_resource,
     place_exact_entity,
     transfer_exact_item,
@@ -151,6 +153,46 @@ def test_bind_exact_item_transfer_is_inert_until_called() -> None:
         quantity=2,
     )
     assert growth==2
+
+
+def test_exact_item_inspect_reads_exact_target_count() -> None:
+    env=FakeEnvironment("OK|16")
+    result=inspect_exact_item(
+        env,
+        x=15.5,y=-2.5,
+        target_name="wooden-chest",item_name="coal",
+    )
+    assert result.count==16
+    command=env.instance.rcon_client.command
+    assert 'local target_name="wooden-chest"' in command
+    assert 'local item_name="coal"' in command
+    assert "force=p.force" in command
+
+
+def test_exact_item_inspect_reports_missing_target() -> None:
+    env=FakeEnvironment("ERR|exact inspect target unavailable")
+    with pytest.raises(
+        RuntimeError,
+        match="exact item inspect failed: exact inspect target unavailable",
+    ):
+        inspect_exact_item(
+            env,
+            x=15.5,y=-2.5,
+            target_name="wooden-chest",item_name="coal",
+        )
+
+
+def test_bind_exact_item_inspect_is_inert_until_called() -> None:
+    env=FakeEnvironment("OK|10")
+    name=bind_exact_item_inspect_tool(env)
+    assert name=="cortex_inspect_exact_item"
+    assert env.instance.rcon_client.command==""
+    count=env.instance.namespaces[0].cortex_inspect_exact_item(
+        Position(x=-70.5,y=71.5),
+        "wooden-chest",
+        "automation-science-pack",
+    )
+    assert count==10
 
 
 def test_exact_item_deposit_conserves_player_and_target_counts() -> None:

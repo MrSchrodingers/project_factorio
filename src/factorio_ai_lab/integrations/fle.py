@@ -1179,6 +1179,125 @@ def bind_exact_item_transfer_tool(
 
 
 @dataclass(frozen=True)
+class ExactItemInspectResult:
+    target_name: str
+    item_name: str
+    count: int
+    agent_idx: int
+    raw_response: str
+
+
+def inspect_exact_item(
+    environment: Any,
+    *,
+    x: float,
+    y: float,
+    target_name: str,
+    item_name: str,
+    agent_idx: int=0,
+) -> ExactItemInspectResult:
+    """Read one exact live entity item count without FLE entity serialization."""
+    import math
+
+    target_x=float(x); target_y=float(y)
+    if not math.isfinite(target_x) or not math.isfinite(target_y):
+        raise ValueError("exact inspect coordinates must be finite")
+    if agent_idx<0:
+        raise ValueError("agent_idx must be non-negative")
+    allowed_targets={
+        "wooden-chest","stone-furnace","burner-mining-drill","boiler",
+    }
+    allowed_items={
+        "coal","iron-ore","iron-plate","copper-ore","copper-plate",
+        "automation-science-pack",
+    }
+    if target_name not in allowed_targets:
+        raise ValueError(f"unsupported exact inspect target {target_name!r}")
+    if item_name not in allowed_items:
+        raise ValueError(f"unsupported exact inspect item {item_name!r}")
+
+    unwrapped=getattr(environment,"unwrapped",environment)
+    instance=getattr(unwrapped,"instance",None)
+    if instance is None:
+        raise TypeError("environment does not expose a FactorioInstance")
+    character_index=agent_idx+1
+    target_q=json.dumps(target_name); item_q=json.dumps(item_name)
+    command=(
+        "/c local ok,result=pcall(function() "
+        f"local p=storage.agent_characters[{character_index}]; "
+        "if not p or not p.valid then error('agent character unavailable') end; "
+        f"local q={{x={target_x},y={target_y}}}; "
+        f"local target_name={target_q}; local item_name={item_q}; "
+        "local rows=p.surface.find_entities_filtered{"
+        "position=q,radius=0.6,name=target_name,force=p.force}; "
+        "local target=nil; local bestd=nil; "
+        "for _,e in pairs(rows) do if e.valid then "
+        "local dx=e.position.x-q.x; local dy=e.position.y-q.y; "
+        "local d=dx*dx+dy*dy; "
+        "if bestd==nil or d<bestd then target=e;bestd=d end end end; "
+        "if not target then error('exact inspect target unavailable') end; "
+        "return tostring(target.get_item_count(item_name)) "
+        "end); "
+        "if ok then rcon.print('OK|'..tostring(result)) "
+        "else rcon.print('ERR|'..tostring(result)) end"
+    )
+    response=instance.rcon_client.send_command(command)
+    if response is None:
+        raise RuntimeError("exact item inspect returned no measurement")
+    raw=str(response).strip()
+    if raw.startswith("ERR|"):
+        raise RuntimeError(f"exact item inspect failed: {raw[4:]}")
+    if not raw.startswith("OK|"):
+        raise RuntimeError(f"unexpected exact item inspect response: {response!r}")
+    try:
+        count=int(float(raw[3:]))
+    except ValueError as exc:
+        raise RuntimeError(f"invalid exact item inspect response: {response!r}") from exc
+    if count<0:
+        raise RuntimeError(f"exact item inspect returned negative count: {count}")
+    return ExactItemInspectResult(
+        target_name=target_name,item_name=item_name,count=count,
+        agent_idx=agent_idx,raw_response=str(response),
+    )
+
+
+def bind_exact_item_inspect_tool(
+    environment: Any,
+    *,
+    tool_name: str="cortex_inspect_exact_item",
+) -> str:
+    """Expose exact live-world item observation inside a transactional Option."""
+    if not tool_name.isidentifier() or tool_name.startswith("_"):
+        raise ValueError("tool_name must be a public Python identifier")
+    unwrapped=getattr(environment,"unwrapped",environment)
+    instance=getattr(unwrapped,"instance",None)
+    if instance is None:
+        raise TypeError("environment does not expose a FactorioInstance")
+    namespaces=getattr(instance,"namespaces",None)
+    if not isinstance(namespaces,(list,tuple)) or not namespaces:
+        raise TypeError("environment does not expose FLE namespaces")
+
+    for agent_idx,namespace in enumerate(namespaces):
+        def bound(
+            position: Any,
+            target_name: str,
+            item_name: str,
+            *,
+            _agent_idx: int=agent_idx,
+        ) -> int:
+            result=inspect_exact_item(
+                environment,
+                x=float(position.x),y=float(position.y),
+                target_name=str(target_name),item_name=str(item_name),
+                agent_idx=_agent_idx,
+            )
+            return result.count
+
+        setattr(namespace,tool_name,bound)
+    return tool_name
+
+
+@dataclass(frozen=True)
 class ExactItemDepositResult:
     target_name: str
     item_name: str

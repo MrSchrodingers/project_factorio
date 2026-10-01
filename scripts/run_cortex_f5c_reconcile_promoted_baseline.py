@@ -34,6 +34,7 @@ from factorio_ai_lab.integrations.fle import (
     attach_live_factorio_environment,
     bind_exact_craft_tool,
     bind_exact_item_deposit_tool,
+    bind_exact_item_inspect_tool,
     bind_exact_item_transfer_tool,
     bind_exact_place_tool,
     bind_exact_resource_mining_tool,
@@ -536,6 +537,7 @@ def run_recovery(
             record["fle_transactional_resource_mining_tool"]=bind_exact_resource_mining_tool(env)
             record["fle_transactional_item_transfer_tool"]=bind_exact_item_transfer_tool(env)
             record["fle_transactional_item_deposit_tool"]=bind_exact_item_deposit_tool(env)
+            record["fle_exact_item_inspect_tool"]=bind_exact_item_inspect_tool(env)
             record["fle_transactional_craft_tool"]=bind_exact_craft_tool(env)
             record["fle_transactional_place_tool"]=bind_exact_place_tool(env)
             executor=TransactionalFLEExecutor(

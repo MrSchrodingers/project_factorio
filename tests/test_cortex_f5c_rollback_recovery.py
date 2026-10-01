@@ -109,6 +109,16 @@ def test_compiled_recovery_rebuilds_exact_promoted_baseline_endogenously() -> No
     assert "cortex_mine_exact_resource(" in code
     assert "'wood',quantity=6,radius=3" in code
     assert "cortex_transfer_exact_item(" in code
+    assert "cortex_inspect_exact_item(" in code
+    for legacy_probe in (
+        "inspect_inventory(cortex_iron_furnace)",
+        "inspect_inventory(cortex_coal_buffer)",
+        "inspect_inventory(cortex_iron_buffer)",
+        "inspect_inventory(cortex_coal_quarantine)",
+        "inspect_inventory(cortex_copper_furnace)",
+        "inspect_inventory(cortex_copper_buffer)",
+    ):
+        assert legacy_probe not in code
     assert "cortex_deposit_exact_item(" in code
     assert "cortex_craft_exact_item(" in code
     assert "cortex_place_exact_entity(" in code
@@ -154,6 +164,7 @@ def test_promoted_baseline_recovery_runner_is_one_shot_no_reset_no_credit() -> N
     source=(ROOT/"scripts"/"run_cortex_f5c_reconcile_promoted_baseline.py").read_text()
     assert "F5BoundedAuthorityBridge" in source
     assert "bind_exact_item_transfer_tool" in source
+    assert "bind_exact_item_inspect_tool" in source
     assert "bind_exact_item_deposit_tool" in source
     assert "bind_exact_craft_tool" in source
     assert "bind_exact_place_tool" in source

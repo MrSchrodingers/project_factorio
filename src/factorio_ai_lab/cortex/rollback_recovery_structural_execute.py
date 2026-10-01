@@ -218,8 +218,8 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
         ")",
         f"sleep({iron_smelt_seconds})",
         (
-            "cortex_recovery_iron_smelted=inspect_inventory(cortex_iron_furnace)"
-            f"[{_prototype('iron-plate')}]"
+            "cortex_recovery_iron_smelted=cortex_inspect_exact_item("
+            f"{parsed['iron_furnace']},'stone-furnace','iron-plate')"
         ),
         f"if cortex_recovery_iron_smelted < {smelt_ore_required}:",
         "    raise RuntimeError('baseline recovery iron smelting incomplete')",
@@ -407,21 +407,20 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
         "    cortex_recovery_endogenous_coal_buffered=0",
         f"sleep({recovery_window})",
         (
-            "cortex_recovery_coal_stock=inspect_inventory(cortex_coal_buffer)"
-            f"[{_prototype('coal')}]"
+            "cortex_recovery_coal_stock=cortex_inspect_exact_item("
+            f"{parsed['coal_buffer']},'wooden-chest','coal')"
         ),
         f"if cortex_recovery_coal_stock < {coal_stock_target}:",
         "    raise RuntimeError('baseline recovery coal stock target not reached')",
         (
-            "cortex_recovery_iron_stock=inspect_inventory(cortex_iron_buffer)"
-            f"[{_prototype('iron-ore')}]"
+            "cortex_recovery_iron_stock=cortex_inspect_exact_item("
+            f"{parsed['iron_buffer']},'wooden-chest','iron-ore')"
         ),
         "if cortex_recovery_iron_stock < 5:",
         "    raise RuntimeError('baseline recovery iron extraction did not resume')",
         (
-            "cortex_recovery_quarantine_stock="
-            "inspect_inventory(cortex_coal_quarantine)"
-            f"[{_prototype('coal')}]"
+            "cortex_recovery_quarantine_stock=cortex_inspect_exact_item("
+            f"{parsed['coal_quarantine']},'wooden-chest','coal')"
         ),
         "if cortex_recovery_quarantine_stock != 0:",
         "    raise RuntimeError('baseline recovery quarantine must remain empty')",
@@ -478,26 +477,22 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
         ")",
         f"sleep({copper_smelt_seconds})",
         (
-            "cortex_recovery_copper_plate_count="
-            "inspect_inventory(cortex_copper_furnace)"
-            f"[{_prototype('copper-plate')}]"
+            "cortex_recovery_copper_plate_count=cortex_inspect_exact_item("
+            f"{parsed['copper_furnace']},'stone-furnace','copper-plate')"
         ),
         "if cortex_recovery_copper_plate_count<=0:",
         "    raise RuntimeError('baseline recovery copper smelting did not resume')",
         (
-            "cortex_recovery_coal_stock_final="
-            "inspect_inventory(cortex_coal_buffer)"
-            f"[{_prototype('coal')}]"
+            "cortex_recovery_coal_stock_final=cortex_inspect_exact_item("
+            f"{parsed['coal_buffer']},'wooden-chest','coal')"
         ),
         (
-            "cortex_recovery_iron_stock_final="
-            "inspect_inventory(cortex_iron_buffer)"
-            f"[{_prototype('iron-ore')}]"
+            "cortex_recovery_iron_stock_final=cortex_inspect_exact_item("
+            f"{parsed['iron_buffer']},'wooden-chest','iron-ore')"
         ),
         (
-            "cortex_recovery_science_buffer="
-            "inspect_inventory(cortex_copper_buffer)"
-            f"[{_prototype('automation-science-pack')}]"
+            "cortex_recovery_science_buffer=cortex_inspect_exact_item("
+            f"{parsed['copper_buffer']},'wooden-chest','automation-science-pack')"
         ),
         f"sleep({settle_seconds})",
         "cortex_promoted_baseline_restored=(",
