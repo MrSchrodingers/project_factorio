@@ -171,7 +171,7 @@ def test_compiled_recovery_rebuilds_exact_promoted_baseline_endogenously() -> No
     assert "initial_items={'coal':2}" in code
     assert "cortex_recovery_coal_seed=cortex_deposit_exact_item" not in code
     assert "cortex_recovery_iron_seed=cortex_deposit_exact_item" not in code
-    assert "sleep(1)" in code
+    assert "sleep(1)" not in code
     assert "cortex_coal_stock_recovered" in code
     assert "cortex_copper_smelting_restored" in code
     assert code.index("cortex_recovery_copper_plate_count=") < code.index("cortex_recovery_seed_coal_harvested=")

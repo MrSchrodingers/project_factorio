@@ -98,9 +98,9 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
     if seed_coal_required<3:
         raise ValueError("baseline recovery seed coal must cover both miners")
     iron_smelt_seconds=_positive_int(params,"iron_smelt_seconds")
-    recovery_window=_positive_int(params,"recovery_window_seconds")
+    _positive_int(params,"recovery_window_seconds")
     copper_smelt_seconds=_positive_int(params,"copper_smelt_seconds")
-    settle_seconds=_positive_int(params,"settle_seconds")
+    _positive_int(params,"settle_seconds")
     coal_stock_target=_positive_int(params,"coal_stock_target")
     science_buffer_min=_positive_int(params,"science_buffer_min")
 
@@ -515,7 +515,6 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
         ])
 
     lines.extend([
-        f"sleep({recovery_window})",
         (
             "cortex_recovery_coal_stock=cortex_inspect_exact_item("
             f"{parsed['coal_buffer']},'wooden-chest','coal')"
@@ -549,7 +548,6 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
             "cortex_recovery_science_buffer=cortex_inspect_exact_item("
             f"{parsed['copper_buffer']},'wooden-chest','automation-science-pack')"
         ),
-        f"sleep({settle_seconds})",
         "cortex_promoted_baseline_restored=(",
         "    cortex_coal_extractor is not None",
         "    and cortex_coal_buffer is not None",
