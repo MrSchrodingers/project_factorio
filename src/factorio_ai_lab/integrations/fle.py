@@ -1581,8 +1581,24 @@ def place_exact_entity(
         "rcon.print(entity.position.x..','..entity.position.y)"
     )
     response=instance.rcon_client.send_command(command)
-    if response is None:
-        raise RuntimeError("exact placement returned no position")
+    if response is None or not str(response).strip():
+        verify_command=(
+            "/c "
+            f"local q={{x={target_x},y={target_y}}}; "
+            f"local name={name_q}; local dir={direction_expr}; "
+            "local s=game.surfaces[1]; local f=game.forces.player; "
+            "local found=nil; "
+            "for _,e in pairs(s.find_entities_filtered{"
+            "position=q,radius=0.25,name=name,force=f}) do "
+            "if e.valid and math.abs(e.position.x-q.x)<=0.01 "
+            "and math.abs(e.position.y-q.y)<=0.01 "
+            "and (e.direction or 0)==dir then found=e; break end end; "
+            "if found then rcon.print(found.position.x..','..found.position.y) "
+            "else rcon.print('MISSING') end"
+        )
+        response=instance.rcon_client.send_command(verify_command)
+        if response is None or str(response).strip()=="MISSING":
+            raise RuntimeError("exact placement returned no position")
     parts=str(response).strip().split(",")
     if len(parts)!=2:
         raise RuntimeError(f"unexpected exact placement response: {response!r}")

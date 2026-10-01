@@ -288,6 +288,33 @@ def test_exact_place_consumes_one_item_and_freezes_position() -> None:
     assert "surface.create_entity" in command
 
 
+def test_exact_place_verifies_entity_when_mutation_response_is_missing() -> None:
+    class SequenceRcon:
+        def __init__(self) -> None:
+            self.responses=[None,"15,-4"]
+            self.commands=[]
+
+        def send_command(self,command: str):
+            self.commands.append(command)
+            return self.responses.pop(0)
+
+    env=FakeEnvironment()
+    seq=SequenceRcon()
+    env.instance.rcon_client=seq
+    result=place_exact_entity(
+        env,
+        x=15.0,
+        y=-4.0,
+        entity_name="burner-mining-drill",
+        direction="south",
+    )
+    assert (result.x,result.y)==(15.0,-4.0)
+    assert len(seq.commands)==2
+    assert "surface.create_entity" in seq.commands[0]
+    assert "find_entities_filtered" in seq.commands[1]
+    assert "MISSING" in seq.commands[1]
+
+
 def test_exact_recovery_tool_binders_are_inert_until_called() -> None:
     env=FakeEnvironment("0,1,1")
     assert bind_exact_craft_tool(env)=="cortex_craft_exact_item"
