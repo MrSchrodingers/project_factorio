@@ -115,14 +115,16 @@ def test_compiled_recovery_rebuilds_exact_promoted_baseline_endogenously() -> No
     assert "extract_item(" not in code
     assert "craft_item(" not in code
     assert "place_entity(" not in code
-    assert "'stone',quantity=15,radius=3" in code
+    assert "'stone',quantity=10,radius=3" in code
+    assert "'stone',quantity=5,radius=3" in code
     assert "'coal',quantity=10,radius=3" in code
     assert "'wood',quantity=6,radius=24" in code
     assert "'iron-ore',quantity=18,radius=3" in code
     assert "cortex_craft_exact_item('burner-mining-drill',quantity=2)" in code
     assert "cortex_craft_exact_item('wooden-chest',quantity=3)" in code
-    assert "cortex_craft_exact_item('stone-furnace',quantity=3)" in code
-    assert "cortex_recovery_reserved_furnaces" in code
+    assert "cortex_craft_exact_item('stone-furnace',quantity=2)" in code
+    assert "cortex_craft_exact_item('stone-furnace',quantity=1)" in code
+    assert "cortex_recovery_drill_furnaces_before_drills" in code
     assert "Position(x=15.0,y=-4.0)" in code
     assert "Position(x=15.5,y=-2.5)" in code
     assert "Position(x=15.5,y=-5.5)" in code
@@ -134,7 +136,8 @@ def test_compiled_recovery_rebuilds_exact_promoted_baseline_endogenously() -> No
     assert "cortex_coal_stock_recovered" in code
     assert "cortex_copper_smelting_restored" in code
     assert "cortex_science_buffer_intact" in code
-    assert code.index("cortex_craft_exact_item('stone-furnace',quantity=3)") < code.index("cortex_craft_exact_item('burner-mining-drill',quantity=2)")
+    assert code.index("cortex_craft_exact_item('stone-furnace',quantity=2)") < code.index("cortex_craft_exact_item('burner-mining-drill',quantity=2)")
+    assert code.index("cortex_craft_exact_item('burner-mining-drill',quantity=2)") < code.rindex("cortex_craft_exact_item('stone-furnace',quantity=1)")
     assert "cortex_recovery_coal_seed=cortex_deposit_exact_item(" in code
     assert "Prototype.Coal" in code
 

@@ -109,8 +109,8 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
         if name in missing_set
     )
     missing_standalone_furnaces=1 if "copper_furnace" in missing_set else 0
-    reserved_furnaces=missing_drills+missing_standalone_furnaces
-    stone_required=stone_per_furnace*reserved_furnaces
+    drill_furnace_stone=stone_per_furnace*missing_drills
+    copper_furnace_stone=stone_per_furnace*missing_standalone_furnaces
     wood_required=wood_per_chest*missing_chests
     iron_required=iron_plate_per_drill*missing_drills
     gear_required=3*missing_drills
@@ -123,38 +123,10 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
         f"cortex_recovery_missing_components={missing!r}",
     ]
 
-    if stone_required>0:
-        lines.extend([
-            f"cortex_fast_reposition({parsed['stone']})",
-            (
-                "cortex_recovery_stone_before=inspect_inventory()"
-                f"[{_prototype('stone')}]"
-            ),
-            "cortex_recovery_stone_harvested=cortex_mine_exact_resource(",
-            f"    {parsed['stone']},'stone',quantity={stone_required},radius=3",
-            ")",
-            (
-                "cortex_recovery_stone_after=inspect_inventory()"
-                f"[{_prototype('stone')}]"
-            ),
-            (
-                "if cortex_recovery_stone_after-cortex_recovery_stone_before"
-                f" < {stone_required}:"
-            ),
-            "    raise RuntimeError('baseline recovery stone inventory incomplete')",
-            (
-                "cortex_recovery_reserved_furnaces="
-                "cortex_craft_exact_item('stone-furnace',"
-                f"quantity={reserved_furnaces})"
-            ),
-            f"if cortex_recovery_reserved_furnaces < {reserved_furnaces}:",
-            "    raise RuntimeError('baseline recovery furnace reservation incomplete')",
-        ])
-    else:
-        lines.extend([
-            "cortex_recovery_stone_harvested=0",
-            "cortex_recovery_reserved_furnaces=0",
-        ])
+    lines.extend([
+        "cortex_recovery_stone_harvested=0",
+        "cortex_recovery_reserved_furnaces=0",
+    ])
 
     lines.extend([
         f"cortex_fast_reposition({parsed['coal_resource']})",
@@ -220,9 +192,42 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
             ),
             f"if cortex_recovery_gears_ready < {gear_required}:",
             "    raise RuntimeError('baseline recovery gear crafting incomplete')",
+            f"cortex_fast_reposition({parsed['stone']})",
+            (
+                "cortex_recovery_drill_stone_before=inspect_inventory()"
+                f"[{_prototype('stone')}]"
+            ),
+            "cortex_recovery_drill_stone_harvested=cortex_mine_exact_resource(",
+            f"    {parsed['stone']},'stone',quantity={drill_furnace_stone},radius=3",
+            ")",
+            (
+                "cortex_recovery_drill_stone_after=inspect_inventory()"
+                f"[{_prototype('stone')}]"
+            ),
+            (
+                "if cortex_recovery_drill_stone_after-cortex_recovery_drill_stone_before"
+                f" < {drill_furnace_stone}:"
+            ),
+            "    raise RuntimeError('baseline recovery drill stone inventory incomplete')",
+            (
+                "cortex_recovery_drill_furnaces_ready="
+                f"cortex_craft_exact_item('stone-furnace',quantity={missing_drills})"
+            ),
+            f"if cortex_recovery_drill_furnaces_ready < {missing_drills}:",
+            "    raise RuntimeError('baseline recovery drill furnace crafting incomplete')",
+            (
+                "cortex_recovery_drill_furnaces_before_drills=inspect_inventory()"
+                f"[{_prototype('stone-furnace')}]"
+            ),
+            f"if cortex_recovery_drill_furnaces_before_drills < {missing_drills}:",
+            "    raise RuntimeError('baseline recovery drill furnaces vanished before drill craft')",
             (
                 "cortex_recovery_drills_ready="
                 f"cortex_craft_exact_item('burner-mining-drill',quantity={missing_drills})"
+            ),
+            (
+                "cortex_recovery_stone_harvested="
+                "cortex_recovery_stone_harvested+cortex_recovery_drill_stone_harvested"
             ),
             f"if cortex_recovery_drills_ready < {missing_drills}:",
             "    raise RuntimeError('baseline recovery drill crafting incomplete')",
@@ -346,9 +351,36 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
 
     if "copper_furnace" in missing_set:
         lines.extend([
+            f"cortex_fast_reposition({parsed['stone']})",
+            (
+                "cortex_recovery_copper_stone_before=inspect_inventory()"
+                f"[{_prototype('stone')}]"
+            ),
+            "cortex_recovery_copper_stone_harvested=cortex_mine_exact_resource(",
+            f"    {parsed['stone']},'stone',quantity={copper_furnace_stone},radius=3",
+            ")",
+            (
+                "cortex_recovery_copper_stone_after=inspect_inventory()"
+                f"[{_prototype('stone')}]"
+            ),
+            (
+                "if cortex_recovery_copper_stone_after-cortex_recovery_copper_stone_before"
+                f" < {copper_furnace_stone}:"
+            ),
+            "    raise RuntimeError('baseline recovery copper stone inventory incomplete')",
+            (
+                "cortex_recovery_copper_furnace_ready="
+                "cortex_craft_exact_item('stone-furnace',quantity=1)"
+            ),
+            "if cortex_recovery_copper_furnace_ready < 1:",
+            "    raise RuntimeError('baseline recovery copper furnace crafting incomplete')",
             "cortex_place_exact_entity(",
             f"    {parsed['copper_furnace']},'stone-furnace'",
             ")",
+            (
+                "cortex_recovery_stone_harvested="
+                "cortex_recovery_stone_harvested+cortex_recovery_copper_stone_harvested"
+            ),
         ])
     lines.append(
         f"cortex_copper_furnace=get_entity({_prototype('stone-furnace')},{parsed['copper_furnace']})"
