@@ -154,7 +154,7 @@ def test_bind_exact_item_transfer_is_inert_until_called() -> None:
 
 
 def test_exact_item_deposit_conserves_player_and_target_counts() -> None:
-    env=FakeEnvironment("5,3,1,3")
+    env=FakeEnvironment("OK|5,3,1,3")
     result=deposit_exact_item(
         env,
         x=20.0,
@@ -172,6 +172,22 @@ def test_exact_item_deposit_conserves_player_and_target_counts() -> None:
     assert 'local item_name="coal"' in command
     assert "target.insert" in command
     assert "exact deposit conservation mismatch" in command
+
+
+def test_exact_item_deposit_reports_lua_failure() -> None:
+    env=FakeEnvironment("ERR|exact deposit target insert mismatch")
+    with pytest.raises(
+        RuntimeError,
+        match="exact item deposit failed: exact deposit target insert mismatch",
+    ):
+        deposit_exact_item(
+            env,
+            x=15.0,
+            y=-4.0,
+            target_name="burner-mining-drill",
+            item_name="coal",
+            quantity=2,
+        )
 
 
 def test_exact_craft_is_non_recursive_and_conservative() -> None:

@@ -1228,7 +1228,7 @@ def deposit_exact_item(
     character_index=agent_idx+1
     target_q=json.dumps(target_name); item_q=json.dumps(item_name)
     command=(
-        "/c "
+        "/c local ok,result=pcall(function() "
         f"local p=storage.agent_characters[{character_index}]; "
         "if not p or not p.valid then error('agent character unavailable') end; "
         f"local q={{x={target_x},y={target_y}}}; "
@@ -1257,12 +1257,20 @@ def deposit_exact_item(
         "target.remove_item{name=item_name,count=requested}; "
         "p.insert{name=item_name,count=requested}; "
         "error('exact deposit conservation mismatch') end; "
-        "rcon.print(player_before..','..player_after..','..target_before..','..target_after)"
+        "return player_before..','..player_after..','..target_before..','..target_after "
+        "end); "
+        "if ok then rcon.print('OK|'..tostring(result)) "
+        "else rcon.print('ERR|'..tostring(result)) end"
     )
     response=instance.rcon_client.send_command(command)
     if response is None:
         raise RuntimeError("exact item deposit returned no measurement")
-    parts=str(response).strip().split(",")
+    raw=str(response).strip()
+    if raw.startswith("ERR|"):
+        raise RuntimeError(f"exact item deposit failed: {raw[4:]}")
+    if not raw.startswith("OK|"):
+        raise RuntimeError(f"unexpected exact item deposit response: {response!r}")
+    parts=raw[3:].split(",")
     if len(parts)!=4:
         raise RuntimeError(f"unexpected exact item deposit response: {response!r}")
     try:
