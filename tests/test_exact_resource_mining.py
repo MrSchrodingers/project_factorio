@@ -313,6 +313,36 @@ def test_bound_exact_place_defers_verification_to_compiled_get_entity() -> None:
     assert "surface.create_entity" in env.instance.rcon_client.command
 
 
+def test_exact_place_can_atomically_seed_created_entity() -> None:
+    env=FakeEnvironment("15,-4")
+    result=place_exact_entity(
+        env,
+        x=15.0,
+        y=-4.0,
+        entity_name="burner-mining-drill",
+        direction="south",
+        initial_items={"coal":2},
+    )
+    assert (result.x,result.y)==(15.0,-4.0)
+    command=env.instance.rcon_client.command
+    assert 'local payload={{name="coal",count=2}}' in command
+    assert "exact placement initial item unavailable" in command
+    assert "rollback_payload" in command
+    assert "entity.insert" in command
+
+
+def test_bound_exact_place_forwards_initial_items() -> None:
+    env=FakeEnvironment("15,-4")
+    bind_exact_place_tool(env)
+    env.instance.namespaces[0].cortex_place_exact_entity(
+        Position(x=15.0,y=-4.0),
+        "burner-mining-drill",
+        direction="south",
+        initial_items={"coal":2},
+    )
+    assert 'local payload={{name="coal",count=2}}' in env.instance.rcon_client.command
+
+
 def test_exact_recovery_tool_binders_are_inert_until_called() -> None:
     env=FakeEnvironment("0,1,1")
     assert bind_exact_craft_tool(env)=="cortex_craft_exact_item"

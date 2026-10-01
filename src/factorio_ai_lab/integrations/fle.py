@@ -1541,6 +1541,7 @@ def place_exact_entity(
     y: float,
     entity_name: str,
     direction: str="north",
+    initial_items: Mapping[str,int] | None=None,
     agent_idx: int=0,
     defer_verification_on_no_response: bool=False,
 ) -> ExactPlaceResult:
@@ -1558,6 +1559,24 @@ def place_exact_entity(
     directions={"north":"north","south":"south","east":"east","west":"west"}
     if direction not in directions:
         raise ValueError(f"unsupported exact placement direction {direction!r}")
+    payload=dict(initial_items or {})
+    allowed_payload={
+        "burner-mining-drill":{"coal"},
+        "wooden-chest":{"coal","iron-ore","copper-ore"},
+        "stone-furnace":{"coal","iron-ore","copper-ore"},
+    }[entity_name]
+    for item_name,count in payload.items():
+        if item_name not in allowed_payload:
+            raise ValueError(
+                f"unsupported initial item {item_name!r} for {entity_name!r}"
+            )
+        if (
+            not isinstance(count,int)
+            or isinstance(count,bool)
+            or count<=0
+            or count>100
+        ):
+            raise ValueError("initial item quantity must be within 1..100")
     unwrapped=getattr(environment,"unwrapped",environment)
     instance=getattr(unwrapped,"instance",None)
     if instance is None:
@@ -1565,13 +1584,21 @@ def place_exact_entity(
     character_index=agent_idx+1
     name_q=json.dumps(entity_name)
     direction_expr=f"defines.direction.{directions[direction]}"
+    payload_lua="{" + ",".join(
+        "{name="+json.dumps(item_name)+",count="+str(count)+"}"
+        for item_name,count in sorted(payload.items())
+    ) + "}"
     command=(
         "/c "
         f"local p=storage.utils.ensure_valid_character({character_index}); "
         "if not p or not p.valid then error('agent character unavailable') end; "
         f"local q={{x={target_x},y={target_y}}}; "
         f"local name={name_q}; local dir={direction_expr}; "
+        f"local payload={payload_lua}; "
         "if p.get_item_count(name)<1 then error('exact placement item unavailable') end; "
+        "for _,stack in ipairs(payload) do "
+        "if p.get_item_count(stack.name)<stack.count then "
+        "error('exact placement initial item unavailable: '..stack.name) end end; "
         "if not p.surface.can_place_entity{name=name,position=q,direction=dir,force=p.force} then "
         "error('exact placement target blocked') end; "
         "local removed=p.remove_item{name=name,count=1}; "
@@ -1579,6 +1606,28 @@ def place_exact_entity(
         "local entity=p.surface.create_entity{name=name,position=q,direction=dir,force=p.force}; "
         "if not entity or not entity.valid then "
         "p.insert{name=name,count=1}; error('exact placement create failed') end; "
+        "local applied={}; "
+        "local function rollback_payload() "
+        "for _,done in ipairs(applied) do "
+        "local back=entity.remove_item{name=done.name,count=done.count}; "
+        "if back>0 then p.insert{name=done.name,count=back} end end; "
+        "if entity and entity.valid then entity.destroy() end; "
+        "p.insert{name=name,count=1}; "
+        "end; "
+        "for _,stack in ipairs(payload) do "
+        "local take=p.remove_item{name=stack.name,count=stack.count}; "
+        "if take~=stack.count then "
+        "if take>0 then p.insert{name=stack.name,count=take} end; "
+        "rollback_payload(); "
+        "error('exact placement initial remove mismatch: '..stack.name) end; "
+        "local put=entity.insert{name=stack.name,count=take}; "
+        "if put~=take then "
+        "if put>0 then entity.remove_item{name=stack.name,count=put} end; "
+        "p.insert{name=stack.name,count=take}; "
+        "rollback_payload(); "
+        "error('exact placement initial insert mismatch: '..stack.name) end; "
+        "applied[#applied+1]={name=stack.name,count=take}; "
+        "end; "
         "rcon.print(entity.position.x..','..entity.position.y)"
     )
     response=instance.rcon_client.send_command(command)
@@ -1637,10 +1686,18 @@ def _bind_exact_simple_tool(
                 )
                 return result.inventory_growth
         elif mode=="place":
-            def bound(position: Any,entity_name: str,*,direction: str="north",_agent_idx: int=agent_idx) -> Any:
+            def bound(
+                position: Any,
+                entity_name: str,
+                *,
+                direction: str="north",
+                initial_items: Mapping[str,int] | None=None,
+                _agent_idx: int=agent_idx,
+            ) -> Any:
                 function(
                     environment,x=float(position.x),y=float(position.y),
                     entity_name=str(entity_name),direction=str(direction),
+                    initial_items=initial_items,
                     agent_idx=_agent_idx,
                     defer_verification_on_no_response=True,
                 )

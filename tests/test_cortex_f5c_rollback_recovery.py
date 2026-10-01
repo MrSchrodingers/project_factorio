@@ -132,7 +132,7 @@ def test_compiled_recovery_rebuilds_exact_promoted_baseline_endogenously() -> No
     assert "'coal',quantity=10,radius=3" in code
     assert "'coal',quantity=19,radius=3" in code
     assert "cortex_recovery_seed_coal_harvested" in code
-    assert code.index("cortex_recovery_seed_coal_harvested") < code.index("cortex_recovery_coal_seed=cortex_deposit_exact_item")
+    assert code.index("cortex_recovery_seed_coal_harvested") < code.index("initial_items={'coal':2}")
     assert "'iron-ore',quantity=18,radius=3" in code
     assert "cortex_craft_exact_item('burner-mining-drill',quantity=2)" in code
     assert "cortex_craft_exact_item('wooden-chest',quantity=3)" in code
@@ -149,10 +149,28 @@ def test_compiled_recovery_rebuilds_exact_promoted_baseline_endogenously() -> No
     assert "baseline recovery quarantine must remain empty" in code
     assert "cortex_iron_extraction_restored" in code
     assert "cortex_iron_smelting_restored" in code
-    assert "cortex_recovery_endogenous_coal_remainder" in code
     assert "cortex_recovery_endogenous_coal_buffered" in code
+    assert "cortex_recovery_endogenous_coal_remainder" not in code
     assert "quantity=5,radius=3" in code
     assert "cortex_recovery_iron_buffer_seeded" in code
+    assert "initial_items={'coal':2}" in code
+    assert "initial_items={'coal':1}" in code
+    assert "initial_items={'iron-ore':5}" in code
+    coal_extractor_place=code.index("Position(x=15.0,y=-4.0),'burner-mining-drill'")
+    iron_extractor_place=code.index("Position(x=15.0,y=70.0),'burner-mining-drill'")
+    coal_buffer_place=code.index("Position(x=15.5,y=-2.5),'wooden-chest'")
+    iron_buffer_place=code.index("Position(x=15.5,y=71.5),'wooden-chest'")
+    quarantine_place=code.index("Position(x=15.5,y=-5.5),'wooden-chest'")
+    assert code.index("cortex_recovery_seed_coal_harvested=") < iron_buffer_place
+    assert code.index("cortex_recovery_iron_buffer_seed_harvested=") < iron_buffer_place
+    assert iron_buffer_place < quarantine_place < coal_buffer_place
+    assert coal_buffer_place < iron_extractor_place < coal_extractor_place
+    assert "initial_items={'coal':16}" in code
+    assert "initial_items={'iron-ore':5}" in code
+    assert "initial_items={'coal':1}" in code
+    assert "initial_items={'coal':2}" in code
+    assert "cortex_recovery_coal_seed=cortex_deposit_exact_item" not in code
+    assert "cortex_recovery_iron_seed=cortex_deposit_exact_item" not in code
     assert "sleep(1)" in code
     assert "cortex_coal_stock_recovered" in code
     assert "cortex_copper_smelting_restored" in code
@@ -161,7 +179,6 @@ def test_compiled_recovery_rebuilds_exact_promoted_baseline_endogenously() -> No
     assert "cortex_processor_output" not in code
     assert code.index("cortex_craft_exact_item('stone-furnace',quantity=2)") < code.index("cortex_craft_exact_item('burner-mining-drill',quantity=2)")
     assert code.index("cortex_craft_exact_item('burner-mining-drill',quantity=2)") < code.rindex("cortex_craft_exact_item('stone-furnace',quantity=1)")
-    assert "cortex_recovery_coal_seed=cortex_deposit_exact_item(" in code
     assert "Prototype.Coal" in code
 
 
