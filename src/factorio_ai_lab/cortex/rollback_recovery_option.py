@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -28,21 +28,30 @@ from factorio_ai_lab.cortex.structural_prepare import (
     StructuralOperation,
 )
 
-STONE_REQUIRED=10
-WOOD_REQUIRED=4
-COAL_BOOTSTRAP_REQUIRED=4
-IRON_PLATE_REQUIRED=9
-IRON_SMELT_SECONDS=30
-COAL_RECOVERY_SECONDS=60
+RECOVERABLE_COMPONENTS=(
+    "iron_extractor",
+    "iron_buffer",
+    "coal_extractor",
+    "coal_buffer",
+    "coal_quarantine",
+    "copper_furnace",
+)
+STONE_PER_FURNACE=5
+WOOD_PER_CHEST=2
+IRON_PLATE_PER_DRILL=9
+COAL_BOOTSTRAP_REQUIRED=10
+IRON_SMELT_SECONDS=75
+RECOVERY_WINDOW_SECONDS=65
 COPPER_SMELT_SECONDS=12
 RECOVERY_SETTLE_SECONDS=2
-COAL_STOCK_TARGET=14
+COAL_STOCK_TARGET=16
 SCIENCE_BUFFER_MIN=10
 
 REFUSAL_KIND="f5c_rollback_recovery_option_kind"
 REFUSAL_EXECUTE="f5c_rollback_recovery_execute_forbidden"
 REFUSAL_PROVENANCE="f5c_rollback_recovery_provenance_mismatch"
 REFUSAL_POSITIONS="f5c_rollback_recovery_positions_required"
+REFUSAL_COMPONENTS="f5c_rollback_recovery_components_invalid"
 
 
 def _hard_postconditions() -> tuple[ActionCondition,...]:
@@ -56,6 +65,7 @@ def _hard_postconditions() -> tuple[ActionCondition,...]:
         )
         for name in (
             "promoted_baseline_restored",
+            "iron_extraction_restored",
             "coal_stock_recovered",
             "copper_smelting_restored",
             "science_buffer_intact",
@@ -79,6 +89,7 @@ class RollbackRecoveryOptionPlan:
     predicted_effects: tuple[ActionCondition,...]
     termination_conditions: tuple[ActionCondition,...]
     positions: Mapping[str,tuple[float,float]]
+    missing_components: tuple[str,...]
 
     @property
     def world_mutation(self) -> bool:
@@ -101,6 +112,7 @@ class RollbackRecoveryOptionPlan:
                 name:{"x":pos[0],"y":pos[1]}
                 for name,pos in self.positions.items()
             },
+            "missing_components":list(self.missing_components),
             "world_mutation":False,
             "execute_authorized":False,
         }
@@ -126,6 +138,7 @@ def compose_rollback_recovery_option(
     *,
     action_request: ActionRequest,
     positions: Mapping[str,tuple[float,float] | None],
+    missing_components: Sequence[str],
 ) -> RollbackRecoveryOptionResult:
     if option.kind is not OptionKind.RESTORE_PROMOTED_ENTITY:
         return RollbackRecoveryOptionResult(
@@ -156,11 +169,25 @@ def compose_rollback_recovery_option(
             ),
         )
 
+    missing=tuple(sorted({str(value) for value in missing_components}))
+    allowed=set(RECOVERABLE_COMPONENTS)
+    if not missing or any(value not in allowed for value in missing):
+        return RollbackRecoveryOptionResult(
+            request=option,
+            refusal=Refusal(
+                code=REFUSAL_COMPONENTS,
+                detail=(
+                    "rollback recovery requires a non-empty recoverable missing "
+                    f"subset, got {missing!r}"
+                ),
+            ),
+        )
+
     required=(
-        "stone","wood","coal_resource",
+        "stone","wood","coal_resource","iron_resource",
+        "iron_extractor","iron_buffer","iron_furnace",
         "coal_extractor","coal_buffer","coal_quarantine",
-        "iron_buffer","iron_furnace",
-        "copper_buffer","copper_furnace",
+        "boiler","copper_extractor","copper_buffer","copper_furnace",
     )
     concrete: dict[str,tuple[float,float]]={}
     for name in required:
@@ -195,12 +222,13 @@ def compose_rollback_recovery_option(
                         name:{"x":pos[0],"y":pos[1]}
                         for name,pos in concrete.items()
                     },
-                    "stone_required":STONE_REQUIRED,
-                    "wood_required":WOOD_REQUIRED,
+                    "missing_components":list(missing),
+                    "stone_per_furnace":STONE_PER_FURNACE,
+                    "wood_per_chest":WOOD_PER_CHEST,
+                    "iron_plate_per_drill":IRON_PLATE_PER_DRILL,
                     "coal_bootstrap_required":COAL_BOOTSTRAP_REQUIRED,
-                    "iron_plate_required":IRON_PLATE_REQUIRED,
                     "iron_smelt_seconds":IRON_SMELT_SECONDS,
-                    "coal_recovery_seconds":COAL_RECOVERY_SECONDS,
+                    "recovery_window_seconds":RECOVERY_WINDOW_SECONDS,
                     "copper_smelt_seconds":COPPER_SMELT_SECONDS,
                     "settle_seconds":RECOVERY_SETTLE_SECONDS,
                     "coal_stock_target":COAL_STOCK_TARGET,
@@ -220,6 +248,7 @@ def compose_rollback_recovery_option(
             "world_reset":False,
             "bootstrap_material_origin":"endogenous_live_world",
             "quarantine_recreated_empty":True,
+            "missing_components":list(missing),
         },
     )
     guards=execution_guard_conditions(prepared)
@@ -240,12 +269,16 @@ def compose_rollback_recovery_option(
                         "live_endogenous_recovery_resources",
                     ),
                     provides=("prepared_rollback_recovery_v11",),
-                    details={"contract_version":ROLLBACK_RECOVERY_CONTRACT_VERSION},
+                    details={
+                        "contract_version":ROLLBACK_RECOVERY_CONTRACT_VERSION,
+                        "missing_components":list(missing),
+                    },
                 ),
             ),
             preconditions=(),
             predicted_effects=hard,
             termination_conditions=hard+guards,
             positions=concrete,
+            missing_components=missing,
         ),
     )

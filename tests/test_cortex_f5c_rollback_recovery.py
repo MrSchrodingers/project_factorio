@@ -33,7 +33,7 @@ def recovery_plan() -> RollbackRecoveryOptionPlan:
             code_revision="recovery-test-sha",
             run_id="recovery-test-run",
         ),
-        budget=OptionBudget(requested_ticks=180*60),
+        budget=OptionBudget(requested_ticks=240*60),
         authority=ActionAuthority.SHADOW,
     )
     action=ActionRequest(
@@ -56,14 +56,23 @@ def recovery_plan() -> RollbackRecoveryOptionPlan:
             "stone":(-46.5,-0.5),
             "wood":(0.12109375,-18.68359375),
             "coal_resource":(15.5,-0.5),
+            "iron_resource":(15.5,70.5),
             "coal_extractor":(15.0,-4.0),
             "coal_buffer":(15.5,-2.5),
             "coal_quarantine":(15.5,-5.5),
+            "iron_extractor":(15.0,70.0),
             "iron_buffer":(15.5,71.5),
             "iron_furnace":(20.0,69.0),
+            "boiler":(-4.0,3.5),
+            "copper_extractor":(-71.0,70.0),
             "copper_buffer":(-70.5,71.5),
             "copper_furnace":(-63.0,69.0),
         },
+        missing_components=(
+            "iron_extractor","iron_buffer",
+            "coal_extractor","coal_buffer","coal_quarantine",
+            "copper_furnace",
+        ),
     )
     assert result.ready
     assert result.plan is not None
@@ -81,6 +90,7 @@ def test_recovery_option_is_inert_bounded_and_has_no_promotion_credit() -> None:
     assert plan.prepared.preflight["quarantine_recreated_empty"] is True
     assert {row.name for row in plan.termination_conditions}=={
         "promoted_baseline_restored",
+        "iron_extraction_restored",
         "coal_stock_recovered",
         "copper_smelting_restored",
         "science_buffer_intact",
@@ -90,34 +100,42 @@ def test_recovery_option_is_inert_bounded_and_has_no_promotion_credit() -> None:
 
 def test_compiled_recovery_rebuilds_exact_promoted_baseline_endogenously() -> None:
     plan=recovery_plan()
-    compiled=compile_structural_action(plan.prepared,settle_seconds=180)
+    compiled=compile_structural_action(plan.prepared,settle_seconds=240)
     assert compiled.ready
     assert compiled.compiled is not None
     code=compiled.compiled.code
     ast.parse(code)
     assert "cortex_mine_exact_resource(" in code
     assert "cortex_transfer_exact_item(" in code
-    assert "cortex_recovery_iron_existing_transfer" in code
-    assert "cortex_recovery_iron_smelt_transfer" in code
+    assert "cortex_deposit_exact_item(" in code
+    assert "cortex_craft_exact_item(" in code
+    assert "cortex_place_exact_entity(" in code
+    assert "cortex_recovery_iron_ore_harvested" in code
+    assert "cortex_recovery_iron_stock_final" in code
     assert "extract_item(" not in code
-    assert "'stone',quantity=10,radius=3" in code
-    assert "'coal',quantity=4,radius=3" in code
-    assert "harvest_resource(" in code
-    assert "quantity=4,radius=24" in code
-    assert "craft_item(Prototype.BurnerMiningDrill,quantity=1)" in code
-    assert "craft_item(Prototype.WoodenChest,quantity=2)" in code
-    assert "craft_item(Prototype.StoneFurnace,quantity=2)" in code
+    assert "craft_item(" not in code
+    assert "place_entity(" not in code
+    assert "'stone',quantity=15,radius=3" in code
+    assert "'coal',quantity=10,radius=3" in code
+    assert "'wood',quantity=6,radius=24" in code
+    assert "'iron-ore',quantity=18,radius=3" in code
+    assert "cortex_craft_exact_item('burner-mining-drill',quantity=2)" in code
+    assert "cortex_craft_exact_item('wooden-chest',quantity=3)" in code
+    assert "cortex_craft_exact_item('stone-furnace',quantity=3)" in code
     assert "cortex_recovery_reserved_furnaces" in code
     assert "Position(x=15.0,y=-4.0)" in code
     assert "Position(x=15.5,y=-2.5)" in code
     assert "Position(x=15.5,y=-5.5)" in code
+    assert "Position(x=15.0,y=70.0)" in code
+    assert "Position(x=15.5,y=71.5)" in code
     assert "Position(x=-63.0,y=69.0)" in code
     assert "baseline recovery quarantine must remain empty" in code
+    assert "cortex_iron_extraction_restored" in code
     assert "cortex_coal_stock_recovered" in code
     assert "cortex_copper_smelting_restored" in code
     assert "cortex_science_buffer_intact" in code
-    assert code.index("craft_item(Prototype.StoneFurnace,quantity=2)") < code.index("craft_item(Prototype.BurnerMiningDrill,quantity=1)")
-    assert "cortex_coal_extractor=insert_item(" in code
+    assert code.index("cortex_craft_exact_item('stone-furnace',quantity=3)") < code.index("cortex_craft_exact_item('burner-mining-drill',quantity=2)")
+    assert "cortex_recovery_coal_seed=cortex_deposit_exact_item(" in code
     assert "Prototype.Coal" in code
 
 
@@ -125,6 +143,9 @@ def test_promoted_baseline_recovery_runner_is_one_shot_no_reset_no_credit() -> N
     source=(ROOT/"scripts"/"run_cortex_f5c_reconcile_promoted_baseline.py").read_text()
     assert "F5BoundedAuthorityBridge" in source
     assert "bind_exact_item_transfer_tool" in source
+    assert "bind_exact_item_deposit_tool" in source
+    assert "bind_exact_craft_tool" in source
+    assert "bind_exact_place_tool" in source
     assert "FactorioWorldLease" in source
     assert "OptionKind.RESTORE_PROMOTED_ENTITY" in source
     assert '"promotion_credit":False' in source

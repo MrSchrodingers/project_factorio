@@ -80,7 +80,7 @@ MAX_STEAM_POWER_SECONDS = 360
 MAX_COPPER_CHAIN_SECONDS = 240
 MAX_AUTOMATION_SCIENCE_SECONDS = 300
 MAX_POWERED_MANUFACTURING_SECONDS = 720
-MAX_ROLLBACK_RECOVERY_SECONDS = 180
+MAX_ROLLBACK_RECOVERY_SECONDS = 240
 
 MeasurementProbe = Callable[[PreparedStructuralAction], Mapping[str, Any]]
 
@@ -802,7 +802,7 @@ def compile_structural_action(
             int(params.get(key) or 0)
             for key in (
                 "iron_smelt_seconds",
-                "coal_recovery_seconds",
+                "recovery_window_seconds",
                 "copper_smelt_seconds",
                 "settle_seconds",
             )

@@ -3,9 +3,15 @@ from __future__ import annotations
 import pytest
 
 from factorio_ai_lab.integrations.fle import (
+    bind_exact_craft_tool,
+    bind_exact_item_deposit_tool,
     bind_exact_item_transfer_tool,
+    bind_exact_place_tool,
     bind_exact_resource_mining_tool,
+    craft_exact_item,
+    deposit_exact_item,
     mine_exact_resource,
+    place_exact_entity,
     transfer_exact_item,
 )
 
@@ -72,7 +78,7 @@ def test_exact_resource_mining_restricts_resources_and_bounds() -> None:
     with pytest.raises(ValueError,match="unsupported exact resource"):
         mine_exact_resource(
             FakeEnvironment(),
-            x=0,y=0,resource_name="wood",quantity=1,
+            x=0,y=0,resource_name="uranium-ore",quantity=1,
         )
     with pytest.raises(ValueError,match="quantity must be within"):
         mine_exact_resource(
@@ -145,3 +151,65 @@ def test_bind_exact_item_transfer_is_inert_until_called() -> None:
         quantity=2,
     )
     assert growth==2
+
+
+def test_exact_item_deposit_conserves_player_and_target_counts() -> None:
+    env=FakeEnvironment("5,3,1,3")
+    result=deposit_exact_item(
+        env,
+        x=20.0,
+        y=69.0,
+        target_name="stone-furnace",
+        item_name="coal",
+        quantity=2,
+    )
+    assert result.player_before==5
+    assert result.player_after==3
+    assert result.target_before==1
+    assert result.target_after==3
+    command=env.instance.rcon_client.command
+    assert 'local target_name="stone-furnace"' in command
+    assert 'local item_name="coal"' in command
+    assert "target.insert" in command
+    assert "exact deposit conservation mismatch" in command
+
+
+def test_exact_craft_is_non_recursive_and_conservative() -> None:
+    env=FakeEnvironment("0,3,3")
+    result=craft_exact_item(
+        env,item_name="wooden-chest",quantity=3,
+    )
+    assert result.inventory_before==0
+    assert result.inventory_after==3
+    assert result.inventory_growth==3
+    command=env.instance.rcon_client.command
+    assert 'local item_name="wooden-chest"' in command
+    assert "recipe.ingredients" in command
+    assert "p.remove_item" in command
+    assert "attempt_craft" not in command
+
+
+def test_exact_place_consumes_one_item_and_freezes_position() -> None:
+    env=FakeEnvironment("15,-4")
+    result=place_exact_entity(
+        env,
+        x=15.0,
+        y=-4.0,
+        entity_name="burner-mining-drill",
+        direction="south",
+    )
+    assert result.x==15.0
+    assert result.y==-4.0
+    command=env.instance.rcon_client.command
+    assert 'local name="burner-mining-drill"' in command
+    assert "defines.direction.south" in command
+    assert "surface.can_place_entity" in command
+    assert "surface.create_entity" in command
+
+
+def test_exact_recovery_tool_binders_are_inert_until_called() -> None:
+    env=FakeEnvironment("0,1,1")
+    assert bind_exact_craft_tool(env)=="cortex_craft_exact_item"
+    assert bind_exact_item_deposit_tool(env)=="cortex_deposit_exact_item"
+    assert bind_exact_place_tool(env)=="cortex_place_exact_entity"
+    assert env.instance.rcon_client.command==""

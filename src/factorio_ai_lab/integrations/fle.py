@@ -805,7 +805,7 @@ def mine_exact_resource(
         or quantity>50
     ):
         raise ValueError("resource mining quantity must be within 1..50")
-    allowed={"stone","coal","iron-ore","copper-ore"}
+    allowed={"stone","coal","iron-ore","copper-ore","wood"}
     if resource_name not in allowed:
         raise ValueError(f"unsupported exact resource {resource_name!r}")
 
@@ -816,6 +816,11 @@ def mine_exact_resource(
 
     character_index=agent_idx+1
     quoted=json.dumps(resource_name)
+    entity_filter=(
+        f"position=q,radius={search_radius},type='tree'"
+        if resource_name=="wood"
+        else f"position=q,radius={search_radius},type='resource',name=name"
+    )
     max_attempts=max(quantity*4,quantity+4)
     command=(
         "/c "
@@ -832,7 +837,7 @@ def mine_exact_resource(
         "while (p.get_item_count(name)-before)<target and attempts<max_attempts do "
         "local best=nil; local bestd=nil; "
         "for _,e in pairs(p.surface.find_entities_filtered{"
-        f"position=q,radius={search_radius},type='resource',name=name"
+        +entity_filter+
         "}) do "
         "if e.valid and e.minable then "
         "local dx=e.position.x-q.x; local dy=e.position.y-q.y; "
@@ -1087,6 +1092,362 @@ def bind_exact_item_transfer_tool(
 
         setattr(namespace,tool_name,bound)
     return tool_name
+
+
+
+@dataclass(frozen=True)
+class ExactItemDepositResult:
+    target_name: str
+    item_name: str
+    requested_quantity: int
+    player_before: int
+    player_after: int
+    target_before: int
+    target_after: int
+    agent_idx: int
+    raw_response: str
+
+
+def deposit_exact_item(
+    environment: Any,
+    *,
+    x: float,
+    y: float,
+    target_name: str,
+    item_name: str,
+    quantity: int,
+    agent_idx: int=0,
+) -> ExactItemDepositResult:
+    """Deposit an exact conserved item quantity into an exact live entity."""
+    import math
+
+    target_x=float(x); target_y=float(y)
+    if not math.isfinite(target_x) or not math.isfinite(target_y):
+        raise ValueError("exact deposit coordinates must be finite")
+    if agent_idx<0:
+        raise ValueError("agent_idx must be non-negative")
+    if (
+        not isinstance(quantity,int) or isinstance(quantity,bool)
+        or quantity<=0 or quantity>100
+    ):
+        raise ValueError("exact deposit quantity must be within 1..100")
+    allowed_targets={"stone-furnace","burner-mining-drill","boiler"}
+    allowed_items={"coal","iron-ore","copper-ore"}
+    if target_name not in allowed_targets:
+        raise ValueError(f"unsupported exact deposit target {target_name!r}")
+    if item_name not in allowed_items:
+        raise ValueError(f"unsupported exact deposit item {item_name!r}")
+
+    unwrapped=getattr(environment,"unwrapped",environment)
+    instance=getattr(unwrapped,"instance",None)
+    if instance is None:
+        raise TypeError("environment does not expose a FactorioInstance")
+    character_index=agent_idx+1
+    target_q=json.dumps(target_name); item_q=json.dumps(item_name)
+    command=(
+        "/c "
+        f"local p=storage.agent_characters[{character_index}]; "
+        "if not p or not p.valid then error('agent character unavailable') end; "
+        f"local q={{x={target_x},y={target_y}}}; "
+        f"local target_name={target_q}; local item_name={item_q}; "
+        "local rows=p.surface.find_entities_filtered{"
+        "position=q,radius=0.6,name=target_name,force=p.force}; "
+        "local target=nil; local bestd=nil; "
+        "for _,e in pairs(rows) do if e.valid then "
+        "local dx=e.position.x-q.x; local dy=e.position.y-q.y; local d=dx*dx+dy*dy; "
+        "if bestd==nil or d<bestd then target=e;bestd=d end end end; "
+        "if not target then error('exact deposit target unavailable') end; "
+        f"local requested={quantity}; "
+        "local player_before=p.get_item_count(item_name); "
+        "local target_before=target.get_item_count(item_name); "
+        "if player_before<requested then error('exact deposit player quantity insufficient') end; "
+        "local removed=p.remove_item{name=item_name,count=requested}; "
+        "if removed~=requested then error('exact deposit player remove mismatch') end; "
+        "local inserted=target.insert{name=item_name,count=removed}; "
+        "if inserted~=removed then "
+        "if inserted>0 then target.remove_item{name=item_name,count=inserted} end; "
+        "p.insert{name=item_name,count=removed}; "
+        "error('exact deposit target insert mismatch') end; "
+        "local player_after=p.get_item_count(item_name); "
+        "local target_after=target.get_item_count(item_name); "
+        "if player_before-player_after~=requested or target_after-target_before~=requested then "
+        "target.remove_item{name=item_name,count=requested}; "
+        "p.insert{name=item_name,count=requested}; "
+        "error('exact deposit conservation mismatch') end; "
+        "rcon.print(player_before..','..player_after..','..target_before..','..target_after)"
+    )
+    response=instance.rcon_client.send_command(command)
+    if response is None:
+        raise RuntimeError("exact item deposit returned no measurement")
+    parts=str(response).strip().split(",")
+    if len(parts)!=4:
+        raise RuntimeError(f"unexpected exact item deposit response: {response!r}")
+    try:
+        player_before,player_after,target_before,target_after=(
+            int(float(value)) for value in parts
+        )
+    except ValueError as exc:
+        raise RuntimeError(
+            f"invalid exact item deposit response: {response!r}"
+        ) from exc
+    if (
+        player_before-player_after!=quantity
+        or target_after-target_before!=quantity
+    ):
+        raise RuntimeError("exact item deposit conservation mismatch")
+    return ExactItemDepositResult(
+        target_name=target_name,item_name=item_name,
+        requested_quantity=quantity,
+        player_before=player_before,player_after=player_after,
+        target_before=target_before,target_after=target_after,
+        agent_idx=agent_idx,raw_response=str(response),
+    )
+
+
+@dataclass(frozen=True)
+class ExactCraftResult:
+    item_name: str
+    requested_quantity: int
+    inventory_before: int
+    inventory_after: int
+    inventory_growth: int
+    agent_idx: int
+    raw_response: str
+
+
+def craft_exact_item(
+    environment: Any,
+    *,
+    item_name: str,
+    quantity: int,
+    agent_idx: int=0,
+) -> ExactCraftResult:
+    """Craft an exact non-recursive hand recipe with ingredient conservation."""
+    if agent_idx<0:
+        raise ValueError("agent_idx must be non-negative")
+    if (
+        not isinstance(quantity,int) or isinstance(quantity,bool)
+        or quantity<=0 or quantity>50
+    ):
+        raise ValueError("exact craft quantity must be within 1..50")
+    allowed={
+        "iron-gear-wheel","stone-furnace","wooden-chest","burner-mining-drill",
+    }
+    if item_name not in allowed:
+        raise ValueError(f"unsupported exact craft item {item_name!r}")
+    unwrapped=getattr(environment,"unwrapped",environment)
+    instance=getattr(unwrapped,"instance",None)
+    if instance is None:
+        raise TypeError("environment does not expose a FactorioInstance")
+    character_index=agent_idx+1
+    item_q=json.dumps(item_name)
+    command=(
+        "/c "
+        f"local p=storage.agent_characters[{character_index}]; "
+        "if not p or not p.valid then error('agent character unavailable') end; "
+        f"local item_name={item_q}; local requested={quantity}; "
+        "local recipe=p.force.recipes[item_name]; "
+        "if not recipe or not recipe.enabled then error('exact craft recipe unavailable') end; "
+        "local product_amount=0; "
+        "for _,product in pairs(recipe.products) do "
+        "if product.type=='item' and product.name==item_name then "
+        "product_amount=product.amount or 1; break end end; "
+        "if product_amount<=0 then error('exact craft product unavailable') end; "
+        "local crafts=math.ceil(requested/product_amount); "
+        "local before=p.get_item_count(item_name); "
+        "local consumed={}; "
+        "for _,ingredient in pairs(recipe.ingredients) do "
+        "local need=(ingredient.amount or 0)*crafts; "
+        "if p.get_item_count(ingredient.name)<need then "
+        "error('exact craft ingredient insufficient: '..ingredient.name) end; "
+        "consumed[#consumed+1]={name=ingredient.name,count=need}; "
+        "end; "
+        "for _,stack in pairs(consumed) do "
+        "local removed=p.remove_item{name=stack.name,count=stack.count}; "
+        "if removed~=stack.count then "
+        "for _,restore in pairs(consumed) do "
+        "if restore.name==stack.name then break end; "
+        "p.insert{name=restore.name,count=restore.count} end; "
+        "if removed>0 then p.insert{name=stack.name,count=removed} end; "
+        "error('exact craft ingredient remove mismatch') end end; "
+        "local produced=crafts*product_amount; "
+        "local inserted=p.insert{name=item_name,count=produced}; "
+        "if inserted~=produced then "
+        "if inserted>0 then p.remove_item{name=item_name,count=inserted} end; "
+        "for _,restore in pairs(consumed) do "
+        "p.insert{name=restore.name,count=restore.count} end; "
+        "error('exact craft output insert mismatch') end; "
+        "local after=p.get_item_count(item_name); local growth=after-before; "
+        "if growth~=produced then error('exact craft inventory delta mismatch') end; "
+        "storage.elapsed_ticks=(storage.elapsed_ticks or 0)+"
+        "math.ceil((recipe.energy or 0.5)*60*crafts); "
+        "rcon.print(before..','..after..','..growth)"
+    )
+    response=instance.rcon_client.send_command(command)
+    if response is None:
+        raise RuntimeError("exact craft returned no measurement")
+    parts=str(response).strip().split(",")
+    if len(parts)!=3:
+        raise RuntimeError(f"unexpected exact craft response: {response!r}")
+    try:
+        before,after,growth=(int(float(value)) for value in parts)
+    except ValueError as exc:
+        raise RuntimeError(f"invalid exact craft response: {response!r}") from exc
+    if growth<quantity:
+        raise RuntimeError(
+            f"exact craft produced {growth}/{quantity} {item_name}"
+        )
+    return ExactCraftResult(
+        item_name=item_name,requested_quantity=quantity,
+        inventory_before=before,inventory_after=after,
+        inventory_growth=growth,agent_idx=agent_idx,raw_response=str(response),
+    )
+
+
+@dataclass(frozen=True)
+class ExactPlaceResult:
+    entity_name: str
+    x: float
+    y: float
+    agent_idx: int
+    raw_response: str
+
+
+def place_exact_entity(
+    environment: Any,
+    *,
+    x: float,
+    y: float,
+    entity_name: str,
+    direction: str="north",
+    agent_idx: int=0,
+) -> ExactPlaceResult:
+    """Place one exact crafted entity with one-for-one inventory consumption."""
+    import math
+
+    target_x=float(x); target_y=float(y)
+    if not math.isfinite(target_x) or not math.isfinite(target_y):
+        raise ValueError("exact placement coordinates must be finite")
+    if agent_idx<0:
+        raise ValueError("agent_idx must be non-negative")
+    allowed={"burner-mining-drill","wooden-chest","stone-furnace"}
+    if entity_name not in allowed:
+        raise ValueError(f"unsupported exact placement entity {entity_name!r}")
+    directions={"north":"north","south":"south","east":"east","west":"west"}
+    if direction not in directions:
+        raise ValueError(f"unsupported exact placement direction {direction!r}")
+    unwrapped=getattr(environment,"unwrapped",environment)
+    instance=getattr(unwrapped,"instance",None)
+    if instance is None:
+        raise TypeError("environment does not expose a FactorioInstance")
+    character_index=agent_idx+1
+    name_q=json.dumps(entity_name)
+    direction_expr=f"defines.direction.{directions[direction]}"
+    command=(
+        "/c "
+        f"local p=storage.agent_characters[{character_index}]; "
+        "if not p or not p.valid then error('agent character unavailable') end; "
+        f"local q={{x={target_x},y={target_y}}}; "
+        f"local name={name_q}; local dir={direction_expr}; "
+        "if p.get_item_count(name)<1 then error('exact placement item unavailable') end; "
+        "if not p.surface.can_place_entity{name=name,position=q,direction=dir,force=p.force} then "
+        "error('exact placement target blocked') end; "
+        "local removed=p.remove_item{name=name,count=1}; "
+        "if removed~=1 then error('exact placement item remove mismatch') end; "
+        "local entity=p.surface.create_entity{name=name,position=q,direction=dir,force=p.force}; "
+        "if not entity or not entity.valid then "
+        "p.insert{name=name,count=1}; error('exact placement create failed') end; "
+        "rcon.print(entity.position.x..','..entity.position.y)"
+    )
+    response=instance.rcon_client.send_command(command)
+    if response is None:
+        raise RuntimeError("exact placement returned no position")
+    parts=str(response).strip().split(",")
+    if len(parts)!=2:
+        raise RuntimeError(f"unexpected exact placement response: {response!r}")
+    actual_x,actual_y=(float(value) for value in parts)
+    if abs(actual_x-target_x)>0.01 or abs(actual_y-target_y)>0.01:
+        raise RuntimeError("exact placement position mismatch")
+    return ExactPlaceResult(
+        entity_name=entity_name,x=actual_x,y=actual_y,
+        agent_idx=agent_idx,raw_response=str(response),
+    )
+
+
+def _bind_exact_simple_tool(
+    environment: Any,
+    *,
+    tool_name: str,
+    function: Any,
+    mode: str,
+) -> str:
+    if not tool_name.isidentifier() or tool_name.startswith("_"):
+        raise ValueError("tool_name must be a public Python identifier")
+    unwrapped=getattr(environment,"unwrapped",environment)
+    instance=getattr(unwrapped,"instance",None)
+    if instance is None:
+        raise TypeError("environment does not expose a FactorioInstance")
+    namespaces=getattr(instance,"namespaces",None)
+    if not isinstance(namespaces,(list,tuple)) or not namespaces:
+        raise TypeError("environment does not expose FLE namespaces")
+    for agent_idx,namespace in enumerate(namespaces):
+        if mode=="deposit":
+            def bound(position: Any,target_name: str,item_name: str,*,quantity: int,_agent_idx: int=agent_idx) -> int:
+                result=function(
+                    environment,x=float(position.x),y=float(position.y),
+                    target_name=str(target_name),item_name=str(item_name),
+                    quantity=quantity,agent_idx=_agent_idx,
+                )
+                return result.requested_quantity
+        elif mode=="craft":
+            def bound(item_name: str,*,quantity: int,_agent_idx: int=agent_idx) -> int:
+                result=function(
+                    environment,item_name=str(item_name),quantity=quantity,
+                    agent_idx=_agent_idx,
+                )
+                return result.inventory_growth
+        elif mode=="place":
+            def bound(position: Any,entity_name: str,*,direction: str="north",_agent_idx: int=agent_idx) -> Any:
+                function(
+                    environment,x=float(position.x),y=float(position.y),
+                    entity_name=str(entity_name),direction=str(direction),
+                    agent_idx=_agent_idx,
+                )
+                return position
+        else:
+            raise ValueError(f"unsupported exact tool binding mode {mode!r}")
+        setattr(namespace,tool_name,bound)
+    return tool_name
+
+
+def bind_exact_item_deposit_tool(
+    environment: Any,
+    *,
+    tool_name: str="cortex_deposit_exact_item",
+) -> str:
+    return _bind_exact_simple_tool(
+        environment,tool_name=tool_name,function=deposit_exact_item,mode="deposit"
+    )
+
+
+def bind_exact_craft_tool(
+    environment: Any,
+    *,
+    tool_name: str="cortex_craft_exact_item",
+) -> str:
+    return _bind_exact_simple_tool(
+        environment,tool_name=tool_name,function=craft_exact_item,mode="craft"
+    )
+
+
+def bind_exact_place_tool(
+    environment: Any,
+    *,
+    tool_name: str="cortex_place_exact_entity",
+) -> str:
+    return _bind_exact_simple_tool(
+        environment,tool_name=tool_name,function=place_exact_entity,mode="place"
+    )
 
 
 def bind_fast_reposition_tool(

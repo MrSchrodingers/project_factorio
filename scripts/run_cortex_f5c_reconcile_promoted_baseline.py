@@ -32,7 +32,10 @@ from factorio_ai_lab.dashboard.state import FactorioObserver
 from factorio_ai_lab.integrations.fle import (
     TransactionalFLEExecutor,
     attach_live_factorio_environment,
+    bind_exact_craft_tool,
+    bind_exact_item_deposit_tool,
     bind_exact_item_transfer_tool,
+    bind_exact_place_tool,
     bind_exact_resource_mining_tool,
     bind_fast_reposition_tool,
     enforce_minimum_eval_timeout,
@@ -42,7 +45,7 @@ from factorio_ai_lab.planning.fuel import TICKS_PER_SECOND
 from factorio_ai_lab.runtime import FactorioWorldLease, world_lease_state
 
 SCHEMA_VERSION="cortex_f5c_promoted_baseline_recovery_v1"
-DEFAULT_OPTION_SECONDS=180
+DEFAULT_OPTION_SECONDS=240
 DEFAULT_GRANT_TTL_SECONDS=300
 DEFAULT_LEDGER=RUNS_DIR/"authority"/"cortex_option_grants.sqlite3"
 INTERVENTION_LEDGER=RUNS_DIR/"cortex_f5_intervention_ledger.json"
@@ -238,7 +241,7 @@ def _promoted_spec(
         pos=row.get("position")
         if isinstance(resource,str) and isinstance(pos,Mapping):
             resources[resource]=(float(pos["x"]),float(pos["y"]))
-    for resource in ("stone","coal","wood"):
+    for resource in ("stone","coal","wood","iron-ore"):
         if resource not in resources:
             raise TypeError(f"accepted bootstrap resource unavailable: {resource}")
 
@@ -251,11 +254,15 @@ def _promoted_spec(
         "stone":resources["stone"],
         "wood":resources["wood"],
         "coal_resource":resources["coal"],
+        "iron_resource":resources["iron-ore"],
         "coal_extractor":coal_extractor,
         "coal_buffer":coal_buffer,
         "coal_quarantine":coal_quarantine,
+        "iron_extractor":_position_from(auto_positions,"iron_extractor"),
         "iron_buffer":_position_from(auto_positions,"iron_buffer"),
         "iron_furnace":_position_from(auto_positions,"iron_furnace"),
+        "boiler":_position_from(auto_positions,"boiler"),
+        "copper_extractor":_position_from(auto_positions,"copper_extractor"),
         "copper_buffer":_position_from(auto_positions,"copper_buffer"),
         "copper_furnace":_position_from(copper_positions,"copper_furnace"),
     }
@@ -340,19 +347,50 @@ def preflight(
     current=_physical_fingerprint(rows)
     missing=tuple(sorted(set(reference)-set(current)))
     extra=tuple(sorted(set(current)-set(reference)))
-    expected_missing=tuple(sorted((
-        ("burner-mining-drill",round(positions["coal_extractor"][0],3),round(positions["coal_extractor"][1],3)),
-        ("wooden-chest",round(positions["coal_buffer"][0],3),round(positions["coal_buffer"][1],3)),
-        ("wooden-chest",round(positions["coal_quarantine"][0],3),round(positions["coal_quarantine"][1],3)),
-        ("stone-furnace",round(positions["copper_furnace"][0],3),round(positions["copper_furnace"][1],3)),
-    )))
+    component_specs={
+        "coal_extractor":(
+            "burner-mining-drill",
+            round(positions["coal_extractor"][0],3),
+            round(positions["coal_extractor"][1],3),
+        ),
+        "iron_extractor":(
+            "burner-mining-drill",
+            round(positions["iron_extractor"][0],3),
+            round(positions["iron_extractor"][1],3),
+        ),
+        "coal_buffer":(
+            "wooden-chest",
+            round(positions["coal_buffer"][0],3),
+            round(positions["coal_buffer"][1],3),
+        ),
+        "coal_quarantine":(
+            "wooden-chest",
+            round(positions["coal_quarantine"][0],3),
+            round(positions["coal_quarantine"][1],3),
+        ),
+        "iron_buffer":(
+            "wooden-chest",
+            round(positions["iron_buffer"][0],3),
+            round(positions["iron_buffer"][1],3),
+        ),
+        "copper_furnace":(
+            "stone-furnace",
+            round(positions["copper_furnace"][0],3),
+            round(positions["copper_furnace"][1],3),
+        ),
+    }
+    reverse_specs={value:name for name,value in component_specs.items()}
     if extra:
         raise RuntimeError(f"baseline recovery refuses unexpected extra entities: {extra!r}")
-    if missing!=expected_missing:
+    unknown_missing=tuple(row for row in missing if row not in reverse_specs)
+    if unknown_missing:
         raise RuntimeError(
-            "baseline recovery requires exact diagnosed rollback damage; "
-            f"observed missing={missing!r}, expected={expected_missing!r}"
+            "baseline recovery refuses missing entities outside recoverable set: "
+            f"{unknown_missing!r}"
         )
+    missing_components=tuple(sorted(reverse_specs[row] for row in missing))
+    if not missing_components:
+        raise RuntimeError("promoted baseline already matches reference fingerprint")
     copper_buffer=_entity_at(rows,name="wooden-chest",position=positions["copper_buffer"])
     if copper_buffer is None:
         raise RuntimeError("automation-science buffer missing during baseline recovery")
@@ -370,6 +408,7 @@ def preflight(
         "reference_factory_fingerprint":[list(row) for row in reference],
         "current_factory_fingerprint":[list(row) for row in current],
         "missing_factory_entities":[list(row) for row in missing],
+        "missing_components":list(missing_components),
         "positions":{
             name:{"x":pos[0],"y":pos[1]}
             for name,pos in positions.items()
@@ -425,6 +464,7 @@ def _measure(namespace: Any,prepared: Any) -> dict[str,Any]:
         name:bool(getattr(namespace,f"cortex_{name}",False))
         for name in (
             "promoted_baseline_restored",
+            "iron_extraction_restored",
             "coal_stock_recovered",
             "copper_smelting_restored",
             "science_buffer_intact",
@@ -433,9 +473,11 @@ def _measure(namespace: Any,prepared: Any) -> dict[str,Any]:
     for name in (
         "recovery_stone_harvested",
         "recovery_coal_harvested",
+        "recovery_iron_ore_harvested",
         "recovery_wood_harvested",
         "recovery_iron_plates_ready",
         "recovery_coal_stock_final",
+        "recovery_iron_stock_final",
         "recovery_copper_plate_count",
         "recovery_science_buffer",
     ):
@@ -487,6 +529,9 @@ def run_recovery(
             record["fle_transactional_reposition_tool"]=bind_fast_reposition_tool(env)
             record["fle_transactional_resource_mining_tool"]=bind_exact_resource_mining_tool(env)
             record["fle_transactional_item_transfer_tool"]=bind_exact_item_transfer_tool(env)
+            record["fle_transactional_item_deposit_tool"]=bind_exact_item_deposit_tool(env)
+            record["fle_transactional_craft_tool"]=bind_exact_craft_tool(env)
+            record["fle_transactional_place_tool"]=bind_exact_place_tool(env)
             executor=TransactionalFLEExecutor(
                 env,
                 runtime_context=lambda:{
@@ -543,7 +588,10 @@ def run_recovery(
             option=_option_request(run_id=run_id,commit=commit)
             action=_action_request(run_id=run_id,commit=commit)
             composed=compose_rollback_recovery_option(
-                option,action_request=action,positions=positions
+                option,
+                action_request=action,
+                positions=positions,
+                missing_components=tuple(str(value) for value in pf["missing_components"]),
             )
             if not composed.ready or composed.plan is None:
                 refusal=None if composed.refusal is None else composed.refusal.to_dict()
@@ -606,6 +654,7 @@ def run_recovery(
             extra_after=tuple(sorted(set(final_fp)-set(reference)))
             gate={
                 "promoted_baseline_restored":after["promoted_baseline_restored"] is True,
+                "iron_extraction_restored":after["iron_extraction_restored"] is True,
                 "coal_stock_recovered":after["coal_stock_recovered"] is True,
                 "copper_smelting_restored":after["copper_smelting_restored"] is True,
                 "science_buffer_intact":after["science_buffer_intact"] is True,
@@ -618,6 +667,7 @@ def run_recovery(
                 bool(gate[name])
                 for name in (
                     "promoted_baseline_restored",
+                    "iron_extraction_restored",
                     "coal_stock_recovered",
                     "copper_smelting_restored",
                     "science_buffer_intact",
