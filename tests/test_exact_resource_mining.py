@@ -358,3 +358,31 @@ def test_exact_craft_reports_lua_failure() -> None:
         match="exact craft failed: exact craft ingredient insufficient: stone-furnace",
     ):
         craft_exact_item(env,item_name="burner-mining-drill",quantity=2)
+
+
+@pytest.mark.parametrize(
+    ("entity_name","response"),
+    [
+        ("lab","8.5,8.5"),
+        ("assembling-machine-1","5.5,5.5"),
+    ],
+)
+def test_exact_place_supports_powered_manufacturing_entities(
+    entity_name: str,
+    response: str,
+) -> None:
+    x,y=(float(value) for value in response.split(","))
+    env=FakeEnvironment(response)
+    result=place_exact_entity(
+        env,
+        x=x,
+        y=y,
+        entity_name=entity_name,
+    )
+    assert result.entity_name==entity_name
+    assert (result.x,result.y)==(x,y)
+    command=env.instance.rcon_client.command
+    assert f'local name="{entity_name}"' in command
+    assert "p.get_item_count(name)<1" in command
+    assert "p.remove_item{name=name,count=1}" in command
+    assert "surface.can_place_entity" in command

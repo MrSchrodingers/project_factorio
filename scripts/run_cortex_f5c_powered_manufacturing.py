@@ -33,6 +33,7 @@ from factorio_ai_lab.dashboard.state import FactorioObserver
 from factorio_ai_lab.integrations.fle import (
     TransactionalFLEExecutor,
     attach_live_factorio_environment,
+    bind_exact_place_tool,
     bind_safe_score_tool,
     bind_tick_accurate_sleep_tool,
     enforce_minimum_eval_timeout,
@@ -679,6 +680,7 @@ def run_powered_manufacturing(
             record["fle_eval_timeout_s"]=enforce_minimum_eval_timeout(
                 env,minimum_seconds=720
             )
+            record["fle_exact_place_tool"]=bind_exact_place_tool(env)
             record["fle_safe_score_tool"]=bind_safe_score_tool(env)
             record["fle_tick_accurate_sleep_tool"]=bind_tick_accurate_sleep_tool(env)
             executor=TransactionalFLEExecutor(

@@ -105,6 +105,10 @@ def test_compiled_powered_manufacturing_is_causal_and_dual_output() -> None:
     assert "force.technologies" not in code
     assert "Prototype.Lab" in code
     assert "Prototype.AssemblingMachine1" in code
+    assert "cortex_place_exact_entity(" in code
+    assert "place_entity_next_to(" not in code
+    assert "Position(x=8.5,y=8.5)" in code
+    assert "Position(x=5.5,y=5.5)" in code
     assert "Prototype.IronGearWheel" in code
     assert "Prototype.ElectronicCircuit" in code
     assert "cortex_assembler_powered" in code
@@ -152,11 +156,13 @@ def test_powered_runner_is_one_shot_no_reset_and_native_research() -> None:
     assert 'after_attach.get("entity_count")!=pf["world_entity_count"]' not in source
     assert "executor.reset(" not in source
     assert 'record["fle_attach_unpause"]=_ensure_factorio_unpaused(instance)' in source
+    assert "bind_exact_place_tool(env)" in source
     assert "bind_safe_score_tool(env)" in source
     assert "bind_tick_accurate_sleep_tool(env)" in source
     assert (
         source.index("instance=env.unwrapped.instance")
         <source.index("_ensure_factorio_unpaused(instance)")
+        <source.index("bind_exact_place_tool(env)")
         <source.index("bind_safe_score_tool(env)")
         <source.index("bind_tick_accurate_sleep_tool(env)")
     )

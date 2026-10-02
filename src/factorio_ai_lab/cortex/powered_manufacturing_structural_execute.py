@@ -41,6 +41,23 @@ def _position(raw: Mapping[str,Any]) -> str:
     return f"Position(x={float(x)!r},y={float(y)!r})"
 
 
+def _offset_position(
+    raw: Mapping[str,Any],
+    *,
+    dx: float,
+    dy: float,
+) -> str:
+    x=raw.get("x"); y=raw.get("y")
+    if (
+        not isinstance(x,Real)
+        or isinstance(x,bool)
+        or not isinstance(y,Real)
+        or isinstance(y,bool)
+    ):
+        raise TypeError(f"invalid position {dict(raw)!r}")
+    return f"Position(x={float(x)+float(dx)!r},y={float(y)+float(dy)!r})"
+
+
 def _positive_int(params: Mapping[str,Any],name: str) -> int:
     value=params.get(name)
     if (
@@ -71,6 +88,12 @@ def compile_powered_manufacturing(
         if not isinstance(raw,Mapping):
             raise TypeError(f"powered manufacturing requires position {name}")
         parsed[name]=_position(raw)
+
+    power_pole_raw=positions.get("power_pole")
+    if not isinstance(power_pole_raw,Mapping):
+        raise TypeError("powered manufacturing requires position power_pole")
+    lab_position=_offset_position(power_pole_raw,dx=3.0,dy=0.0)
+    assembler_position=_offset_position(power_pole_raw,dx=0.0,dy=-3.0)
 
     science=_positive_int(params,"science_packs")
     iron_target=_positive_int(params,"iron_plate_target")
@@ -245,22 +268,14 @@ craft_item({_prototype('iron-gear-wheel')},quantity=12)
 craft_item({_prototype('transport-belt')},quantity=4)
 craft_item({_prototype('lab')},quantity=1)
 
-cortex_lab=None
-for cortex_side in (Direction.RIGHT,Direction.UP,Direction.DOWN,Direction.LEFT):
-    try:
-        cortex_lab=place_entity_next_to(
-            {_prototype('lab')},
-            cortex_power_pole.position,
-            direction=cortex_side,
-            spacing=0,
-        )
-        break
-    except Exception:
-        pass
-if cortex_lab is None:
-    raise RuntimeError('failed to place powered Lab beside promoted power pole')
+cortex_lab_position={lab_position}
+cortex_place_exact_entity(
+    cortex_lab_position,
+    'lab',
+    direction='north',
+)
 sleep(2)
-cortex_lab=get_entity({_prototype('lab')},cortex_lab.position)
+cortex_lab=get_entity({_prototype('lab')},cortex_lab_position)
 cortex_lab_energy_before=float(cortex_lab.energy or 0)
 cortex_lab_status_before=str(cortex_lab.status)
 if cortex_lab_energy_before <= 0:
@@ -302,23 +317,15 @@ craft_item({_prototype('electronic-circuit')},quantity=3)
 craft_item({_prototype('iron-gear-wheel')},quantity=5)
 craft_item({_prototype('assembling-machine-1')},quantity=1)
 
-cortex_assembler=None
-for cortex_side in (Direction.DOWN,Direction.UP,Direction.LEFT,Direction.RIGHT):
-    try:
-        cortex_assembler=place_entity_next_to(
-            {_prototype('assembling-machine-1')},
-            cortex_power_pole.position,
-            direction=cortex_side,
-            spacing=0,
-        )
-        break
-    except Exception:
-        pass
-if cortex_assembler is None:
-    raise RuntimeError('failed to place assembling-machine-1 beside promoted power pole')
+cortex_assembler_position={assembler_position}
+cortex_place_exact_entity(
+    cortex_assembler_position,
+    'assembling-machine-1',
+    direction='north',
+)
 sleep(2)
 cortex_assembler=get_entity(
-    {_prototype('assembling-machine-1')},cortex_assembler.position
+    {_prototype('assembling-machine-1')},cortex_assembler_position
 )
 cortex_assembler_energy_before=float(cortex_assembler.energy or 0)
 cortex_assembler_status_before=str(cortex_assembler.status)

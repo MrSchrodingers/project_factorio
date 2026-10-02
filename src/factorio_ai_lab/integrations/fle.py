@@ -1572,7 +1572,13 @@ def place_exact_entity(
         raise ValueError("exact placement coordinates must be finite")
     if agent_idx<0:
         raise ValueError("agent_idx must be non-negative")
-    allowed={"burner-mining-drill","wooden-chest","stone-furnace"}
+    allowed={
+        "burner-mining-drill",
+        "wooden-chest",
+        "stone-furnace",
+        "lab",
+        "assembling-machine-1",
+    }
     if entity_name not in allowed:
         raise ValueError(f"unsupported exact placement entity {entity_name!r}")
     directions={"north":"north","south":"south","east":"east","west":"west"}
@@ -1583,6 +1589,8 @@ def place_exact_entity(
         "burner-mining-drill":{"coal"},
         "wooden-chest":{"coal","iron-ore","copper-ore"},
         "stone-furnace":{"coal","iron-ore","copper-ore"},
+        "lab":set(),
+        "assembling-machine-1":set(),
     }[entity_name]
     for item_name,count in payload.items():
         if item_name not in allowed_payload:
