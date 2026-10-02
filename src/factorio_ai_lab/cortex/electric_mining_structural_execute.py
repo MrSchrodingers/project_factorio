@@ -279,6 +279,7 @@ if cortex_iron_plate_ready < {iron_target}:
 if cortex_copper_plate_ready < {copper_target}:
     raise RuntimeError('electric-mining copper plate budget incomplete')
 
+cortex_fast_reposition({tree_position})
 cortex_wood_harvested=harvest_resource(
     {tree_position},quantity=4,radius=0.25
 )

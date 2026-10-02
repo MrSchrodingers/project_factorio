@@ -117,8 +117,10 @@ def test_compiled_electric_mining_is_causal_and_self_validating() -> None:
     assert "get_research_progress('electric-mining-drill')" in code
     assert ".researched=" not in code
     assert "force.technologies" not in code
+    assert "cortex_fast_reposition(Position(x=1.92578125,y=-18.68359375))" in code
     assert "harvest_resource(" in code
     assert "quantity=4,radius=0.25" in code
+    assert code.index("cortex_fast_reposition(")<code.index("harvest_resource(")
     assert code.count("cortex_place_exact_entity(")==3
     assert "Position(x=11.5,y=8.5)" in code
     assert "Position(x=14.5,y=8.5)" in code
@@ -173,6 +175,7 @@ def test_electric_runner_is_one_shot_with_natural_rollback() -> None:
     assert '"direct_research_completion_mutation":False' in source
     assert "OptionKind.ESTABLISH_ELECTRIC_MINING" in source
     assert "bind_exact_place_tool(env)" in source
+    assert "bind_fast_reposition_tool(env)" in source
     assert "bind_safe_score_tool(env)" in source
     assert "bind_tick_accurate_sleep_tool(env)" in source
     assert "_ensure_factorio_unpaused(instance)" in source
