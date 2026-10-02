@@ -4251,8 +4251,11 @@ def build_phase_state(
             numeric_positive=(
                 "electric_output_growth",
                 "electric_drill_energy",
-                "steam_load_after",
-                "steam_load_amount",
+                "electric_drill_electrical_id",
+                "electric_pole_electrical_id",
+                "electric_drill_survival_energy",
+                "electric_drill_survival_electrical_id",
+                "electric_pole_survival_electrical_id",
                 "science_batch_ready",
                 "wood_harvested",
                 "science_replenished",
@@ -4264,8 +4267,6 @@ def build_phase_state(
                 "smelting_survival_growth",
                 "copper_survival_growth",
                 "copper_smelting_growth",
-                "steam_survival_amount",
-                "steam_survival_energy",
             )
             positive_final=all(
                 isinstance(final.get(name),(int,float))

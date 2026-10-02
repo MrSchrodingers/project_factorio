@@ -411,6 +411,12 @@ cortex_electric_drill_energy_after=float(cortex_electric_drill.energy or 0)
 cortex_electric_drill_electrical_id=getattr(
     cortex_electric_drill,'electrical_id',None
 )
+cortex_electric_pole=get_entity(
+    {_prototype('small-electric-pole')},{parsed['electric_pole']}
+)
+cortex_electric_pole_electrical_id=getattr(
+    cortex_electric_pole,'electrical_id',None
+)
 cortex_steam_engine_live=get_entity(
     {_prototype('steam-engine')},{parsed['steam_engine']}
 )
@@ -427,8 +433,9 @@ cortex_electric_drill_powered=(
 cortex_ore_output_positive=cortex_electric_output_growth>0
 cortex_power_survives_load=(
     cortex_electric_drill_powered
-    and cortex_steam_load_after>0
-    and cortex_steam_load_amount>0
+    and cortex_ore_output_positive
+    and cortex_electric_pole_electrical_id is not None
+    and cortex_electric_drill_electrical_id==cortex_electric_pole_electrical_id
 )
 if not cortex_ore_output_positive:
     raise RuntimeError('electric mining drill produced no buffered coal output')
@@ -553,11 +560,31 @@ for cortex_fluid in (cortex_steam_engine_live.fluid_box or []):
         cortex_steam_survival_amount+=float(cortex_fluid.get('amount',0) or 0)
 cortex_steam_survival_energy=float(cortex_steam_engine_live.energy or 0)
 
+cortex_electric_drill_survival=get_entity(
+    {_prototype('electric-mining-drill')},{parsed['electric_drill']}
+)
+cortex_electric_pole_survival=get_entity(
+    {_prototype('small-electric-pole')},{parsed['electric_pole']}
+)
+cortex_electric_drill_survival_energy=float(
+    cortex_electric_drill_survival.energy or 0
+)
+cortex_electric_drill_survival_electrical_id=getattr(
+    cortex_electric_drill_survival,'electrical_id',None
+)
+cortex_electric_pole_survival_electrical_id=getattr(
+    cortex_electric_pole_survival,'electrical_id',None
+)
+
 cortex_iron_extraction_survives=cortex_iron_survival_growth>0
 cortex_coal_self_sufficiency_survives=cortex_coal_survival_growth>0
 cortex_iron_smelting_survives=cortex_smelting_survival_growth>0
 cortex_steam_power_survives=(
-    cortex_steam_survival_amount>0 and cortex_steam_survival_energy>0
+    cortex_electric_drill_survival_energy>0
+    and cortex_electric_drill_survival_electrical_id is not None
+    and cortex_electric_pole_survival_electrical_id is not None
+    and cortex_electric_drill_survival_electrical_id
+        ==cortex_electric_pole_survival_electrical_id
 )
 cortex_copper_chain_survives=(
     cortex_copper_survival_growth>0 and cortex_copper_smelting_growth>0
@@ -598,6 +625,11 @@ print({{
     'copper_smelting_growth':cortex_copper_smelting_growth,
     'steam_survival_amount':cortex_steam_survival_amount,
     'steam_survival_energy':cortex_steam_survival_energy,
+    'electric_drill_survival_energy':cortex_electric_drill_survival_energy,
+    'electric_drill_survival_electrical_id':
+        cortex_electric_drill_survival_electrical_id,
+    'electric_pole_survival_electrical_id':
+        cortex_electric_pole_survival_electrical_id,
     'steam_load_before':cortex_steam_load_before,
     'steam_load_after':cortex_steam_load_after,
     'steam_load_amount':cortex_steam_load_amount,

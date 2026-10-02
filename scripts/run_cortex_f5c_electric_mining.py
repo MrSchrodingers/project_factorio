@@ -582,7 +582,9 @@ def _measure(namespace: Any,prepared: Any) -> dict[str,Any]:
         "smelting_survival_growth","copper_survival_growth",
         "copper_smelting_growth","steam_survival_amount",
         "steam_survival_energy","steam_load_before","steam_load_after",
-        "steam_load_amount",
+        "steam_load_amount","electric_drill_survival_energy",
+        "electric_drill_survival_electrical_id",
+        "electric_pole_survival_electrical_id",
     )
     values={
         "electric_drill_powered":bool(
@@ -984,8 +986,11 @@ def run_electric_mining(
                 ),
                 "power_survives_load":(
                     after["power_survives_load"] is True
-                    and after["steam_load_after"]>0
-                    and after["steam_load_amount"]>0
+                    and after["electric_drill_energy"]>0
+                    and after["electric_drill_electrical_id"]>0
+                    and after["electric_pole_electrical_id"]>0
+                    and after["electric_drill_electrical_id"]
+                        ==after["electric_pole_electrical_id"]
                 ),
             }
             continuity_gate={
@@ -1019,8 +1024,11 @@ def run_electric_mining(
                 ),
                 "steam_power_survives":(
                     after["steam_power_survives"] is True
-                    and after["steam_survival_amount"]>0
-                    and after["steam_survival_energy"]>0
+                    and after["electric_drill_survival_energy"]>0
+                    and after["electric_drill_survival_electrical_id"]>0
+                    and after["electric_pole_survival_electrical_id"]>0
+                    and after["electric_drill_survival_electrical_id"]
+                        ==after["electric_pole_survival_electrical_id"]
                 ),
                 "copper_chain_survives":(
                     after["copper_chain_survives"] is True

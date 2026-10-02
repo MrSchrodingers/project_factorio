@@ -136,6 +136,11 @@ def test_compiled_electric_mining_is_causal_and_self_validating() -> None:
     assert "cortex_electric_output_growth" in code
     assert "cortex_electric_drill_powered" in code
     assert "cortex_power_survives_load" in code
+    assert "cortex_electric_drill_survival_energy" in code
+    assert "cortex_electric_drill_survival_electrical_id" in code
+    assert "cortex_electric_pole_survival_electrical_id" in code
+    assert "cortex_steam_survival_amount>0 and cortex_steam_survival_energy>0" not in code
+    assert "cortex_steam_load_after>0" not in code
     assert "cortex_powered_manufacturing_survives" in code
     assert "cortex_automation_science_survives" in code
     assert "for cortex_coal_round in range(6):" in code
@@ -193,6 +198,10 @@ def test_electric_runner_is_one_shot_with_natural_rollback() -> None:
     assert '"iron_guaranteed_available"' in source
     assert '"copper_guaranteed_available"' in source
     assert "promoted {key} is not electrically live" not in source
+    assert "electric_drill_survival_electrical_id" in source
+    assert "electric_pole_survival_electrical_id" in source
+    assert 'after["steam_load_after"]>0' not in source
+    assert 'after["steam_survival_energy"]>0' not in source
     assert "option_execution_attempts" in source
     assert '"automatic_retry":False' in source
     checkpoint=source.index("checkpoint=GameState.from_instance(instance)")
