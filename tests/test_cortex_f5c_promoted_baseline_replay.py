@@ -156,27 +156,32 @@ class _FakeInstance:
 
 def test_save_world_quiesces_storage_without_rehydrating() -> None:
     instance=_FakeInstance([
+        "true",
         '{"ok":true,"removed_functions":17}',
         "Saving the map",
     ])
     result=REPLAY._save_world(instance,"unit-save")
     assert result["response"]=="Saving the map"
     assert result["storage_quiesce"]["removed_functions"]==17
-    assert instance.rcon_client.commands[0].startswith("/sc ")
-    assert "scrub(storage)" in instance.rcon_client.commands[0]
-    assert "storage.__lua_script_checksums={}" in instance.rcon_client.commands[0]
-    assert instance.rcon_client.commands[1]=="/server-save unit-save"
+    assert "game.tick_paused = true" in instance.rcon_client.commands[0]
+    assert instance.rcon_client.commands[1].startswith("/sc ")
+    assert "scrub(storage)" in instance.rcon_client.commands[1]
+    assert "storage.__lua_script_checksums={}" in instance.rcon_client.commands[1]
+    assert instance.rcon_client.commands[2]=="/server-save unit-save"
     source=REPLAY._save_world.__code__.co_names
     assert "_rehydrate_fle_runtime" not in source
     assert "setup_tools" not in source
 
 
 def test_save_world_refuses_quiesce_without_removed_functions() -> None:
-    instance=_FakeInstance(['{"ok":true,"removed_functions":0}'])
+    instance=_FakeInstance([
+        "true",
+        '{"ok":true,"removed_functions":0}',
+    ])
     with pytest.raises(RuntimeError,match="removed no Lua functions"):
         REPLAY._save_world(instance,"unsafe-save")
-    assert len(instance.rcon_client.commands)==1
-    assert "/server-save" not in instance.rcon_client.commands[0]
+    assert len(instance.rcon_client.commands)==2
+    assert all("/server-save" not in command for command in instance.rcon_client.commands)
 
 
 def test_autosave_interval_parsing_and_guard() -> None:
@@ -206,6 +211,7 @@ def test_replay_source_uses_fresh_fle_environment_per_step() -> None:
     assert "_attach_replay_environment(" in source
     assert "env.close()" in source
     assert "_set_autosave_interval(control,0)" in source
+    assert "bind_tick_accurate_sleep_tool(env)" in source
     assert "save_runtime_rehydrate" not in source
     assert "_rehydrate_fle_runtime" not in source
 

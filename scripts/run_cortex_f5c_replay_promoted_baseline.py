@@ -58,6 +58,7 @@ from factorio_ai_lab.integrations.fle import (
     TransactionalFLEExecutor,
     attach_live_factorio_environment,
     bind_fast_reposition_tool,
+    bind_tick_accurate_sleep_tool,
     enforce_minimum_eval_timeout,
     enforce_pathfinding_retry_floor,
 )
@@ -72,6 +73,7 @@ INTERVENTION_LEDGER=RUNS_DIR/"cortex_f5_intervention_ledger.json"
 RUNTIME_BUILD_INFO=Path("/srv/factorio-ai-runtime/current/BUILD_INFO.json")
 DASHBOARD_BUILD_INFO=Path("/srv/factorio-ai-dashboard-runtime/current/BUILD_INFO.json")
 GRANT_TTL_SECONDS=600
+SERVER_SETTINGS=SCRIPT_DIR.parent/".fle-local"/"config"/"server-settings.json"
 
 CAPABILITY_ORDER=(
     "iron_extraction",
@@ -672,6 +674,20 @@ def preflight(
     }
 
 
+def _pause_factorio_for_quiesce(instance: Any) -> dict[str,Any]:
+    response=instance.rcon_client.send_command(
+        "/sc game.tick_paused = true; "
+        "rcon.print(game.tick_paused and 'true' or 'false')"
+    )
+    text="" if response is None else str(response).strip().lower()
+    if text!="true":
+        raise RuntimeError(f"failed to pause Factorio before storage quiesce: {text!r}")
+    game_control=getattr(instance,"game_control",None)
+    if game_control is not None and hasattr(game_control,"_is_paused"):
+        game_control._is_paused=True
+    return {"status":"paused","verified":True}
+
+
 def _quiesce_fle_storage_for_save(instance: Any) -> dict[str,Any]:
     command=r"""/sc local seen={}
 local removed=0
@@ -709,6 +725,16 @@ rcon.print(helpers.table_to_json({ok=true,removed_functions=removed}))
         "removed_functions":removed,
         "checksums_cleared":True,
     }
+
+
+def _configured_autosave_interval() -> int:
+    payload=_load(SERVER_SETTINGS)
+    value=payload.get("autosave_interval")
+    if not isinstance(value,int) or isinstance(value,bool) or value<0:
+        raise RuntimeError(
+            f"configured autosave_interval unavailable in {SERVER_SETTINGS}"
+        )
+    return value
 
 
 def _open_control_rcon() -> Any:
@@ -761,9 +787,11 @@ def _plain_server_save(client: Any,name: str) -> str:
 
 
 def _save_world(instance: Any,name: str) -> dict[str,Any]:
+    pause=_pause_factorio_for_quiesce(instance)
     quiesce=_quiesce_fle_storage_for_save(instance)
     return {
         "response":_plain_server_save(instance.rcon_client,name),
+        "pause_before_quiesce":pause,
         "storage_quiesce":quiesce,
     }
 
@@ -776,6 +804,7 @@ def _attach_replay_environment(
     enforce_minimum_eval_timeout(env,minimum_seconds=900)
     enforce_pathfinding_retry_floor(env,minimum_attempts=40)
     tool_name=bind_fast_reposition_tool(env)
+    tick_sleep_tool=bind_tick_accurate_sleep_tool(env)
     executor=TransactionalFLEExecutor(
         env,
         runtime_context=lambda:{
@@ -788,7 +817,7 @@ def _attach_replay_environment(
     instance=env.unwrapped.instance
     namespace=instance.namespace
     executor.game_state=GameState.from_instance(instance)
-    return env,executor,instance,namespace,tool_name
+    return env,executor,instance,namespace,tool_name,tick_sleep_tool
 
 def run_replay(
     *,
@@ -836,9 +865,11 @@ def run_replay(
         _write(artifact,record)
         try:
             control=_open_control_rcon()
-            autosave_original=_autosave_interval(control)
+            autosave_observed=_autosave_interval(control)
+            autosave_original=_configured_autosave_interval()
             record["autosave_guard"]={
-                "original_minutes":autosave_original,
+                "observed_before_minutes":autosave_observed,
+                "configured_restore_minutes":autosave_original,
                 "suspend":_set_autosave_interval(control,0),
                 "status":"suspended",
             }
@@ -874,10 +905,16 @@ def run_replay(
                     })
                     continue
 
-                env,executor,instance,namespace,tool_name=_attach_replay_environment(
-                    run_id=run_id
-                )
+                (
+                    env,
+                    executor,
+                    instance,
+                    namespace,
+                    tool_name,
+                    tick_sleep_tool,
+                )=_attach_replay_environment(run_id=run_id)
                 record.setdefault("fle_transactional_reposition_tool",tool_name)
+                record.setdefault("fle_tick_accurate_sleep_tool",tick_sleep_tool)
 
                 observer=FactorioObserver()
                 try:
@@ -971,6 +1008,9 @@ def run_replay(
                 step_record["save_name"]=save_name
                 save_result=_save_world(instance,save_name)
                 step_record["save_response"]=save_result["response"]
+                step_record["save_pause_before_quiesce"]=save_result[
+                    "pause_before_quiesce"
+                ]
                 step_record["save_storage_quiesce"]=save_result["storage_quiesce"]
 
                 env.close()
@@ -1061,6 +1101,9 @@ def run_replay(
             cleanup: dict[str,Any]={}
             if env is not None and instance is not None:
                 try:
+                    cleanup["pause_before_quiesce"]=_pause_factorio_for_quiesce(
+                        instance
+                    )
                     cleanup["storage_quiesce"]=_quiesce_fle_storage_for_save(instance)
                 except Exception as exc:  # noqa: BLE001
                     cleanup["storage_quiesce_error"]={
@@ -1074,25 +1117,48 @@ def run_replay(
                         "type":type(exc).__name__,
                         "message":str(exc),
                     }
-            if control is not None and autosave_original is not None:
+            if autosave_original is not None:
+                restore_client=control
+                restore_error=None
                 try:
+                    if restore_client is None:
+                        restore_client=_open_control_rcon()
                     cleanup["autosave_restore"]=_set_autosave_interval(
-                        control,
+                        restore_client,
                         autosave_original,
                     )
                     if "autosave_guard" in record:
                         record["autosave_guard"]["status"]="restored"
                 except Exception as exc:  # noqa: BLE001
-                    cleanup["autosave_restore_error"]={
-                        "type":type(exc).__name__,
-                        "message":str(exc),
-                    }
-                close=getattr(control,"close",None)
-                if callable(close):
-                    try:
-                        close()
-                    except OSError:
-                        pass
+                    restore_error=exc
+                    if restore_client is control:
+                        try:
+                            restore_client=_open_control_rcon()
+                            cleanup["autosave_restore"]=_set_autosave_interval(
+                                restore_client,
+                                autosave_original,
+                            )
+                            if "autosave_guard" in record:
+                                record["autosave_guard"]["status"]="restored"
+                            restore_error=None
+                        except Exception as retry_exc:  # noqa: BLE001
+                            restore_error=retry_exc
+                    if restore_error is not None:
+                        cleanup["autosave_restore_error"]={
+                            "type":type(restore_error).__name__,
+                            "message":str(restore_error),
+                        }
+                seen=set()
+                for client in (restore_client,control):
+                    if client is None or id(client) in seen:
+                        continue
+                    seen.add(id(client))
+                    close=getattr(client,"close",None)
+                    if callable(close):
+                        try:
+                            close()
+                        except OSError:
+                            pass
             if cleanup:
                 record["runtime_cleanup"]=cleanup
             _write(artifact,record)

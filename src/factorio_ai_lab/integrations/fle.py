@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+import time
 import zlib
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -1736,6 +1737,94 @@ def bind_exact_place_tool(
     return _bind_exact_simple_tool(
         environment,tool_name=tool_name,function=place_exact_entity,mode="place"
     )
+
+
+def _factorio_game_tick(instance: Any) -> int:
+    rcon=getattr(instance,"rcon_client",None)
+    send=getattr(rcon,"send_command",None)
+    if not callable(send):
+        raise TypeError("Factorio instance does not expose an RCON client")
+    response=send("/sc rcon.print(game.tick)")
+    text="" if response is None else str(response).strip()
+    try:
+        tick=int(text)
+    except ValueError as exc:
+        raise RuntimeError(f"invalid Factorio game.tick response: {text!r}") from exc
+    if tick<0:
+        raise RuntimeError(f"invalid negative Factorio game.tick: {tick}")
+    return tick
+
+
+def bind_tick_accurate_sleep_tool(
+    environment: Any,
+    *,
+    tool_name: str="sleep",
+    poll_interval_seconds: float=0.05,
+    wall_timeout_factor: float=4.0,
+) -> str:
+    """Replace FLE sleep with a wait measured against the real game.tick.
+
+    FLE 0.4.3 increments storage.elapsed_ticks synthetically and then
+    sleeps in wall-clock time divided by configured game speed. When the
+    server cannot sustain that target speed, the wait may return before
+    the requested number of simulation ticks actually elapsed.
+
+    The synthetic elapsed counter is still incremented after the real wait
+    to preserve FLE budget/accounting compatibility.
+    """
+    if not tool_name.isidentifier() or tool_name.startswith("_"):
+        raise ValueError("tool_name must be a public Python identifier")
+    if poll_interval_seconds<0:
+        raise ValueError("poll_interval_seconds must be non-negative")
+    if wall_timeout_factor<=0:
+        raise ValueError("wall_timeout_factor must be positive")
+
+    unwrapped=getattr(environment,"unwrapped",environment)
+    instance=getattr(unwrapped,"instance",None)
+    if instance is None:
+        raise TypeError("environment does not expose a FactorioInstance")
+    namespaces=getattr(instance,"namespaces",None)
+    if not isinstance(namespaces,(list,tuple)) or not namespaces:
+        raise TypeError("environment does not expose FLE namespaces")
+
+    for namespace in namespaces:
+        def bound(
+            seconds: Any,
+            *,
+            _instance: Any=instance,
+        ) -> bool:
+            if (
+                not isinstance(seconds,(int,float))
+                or isinstance(seconds,bool)
+                or float(seconds)<=0
+            ):
+                raise ValueError("sleep seconds must be positive")
+            duration=float(seconds)
+            ticks_required=max(1,round(duration*60.0))
+            start_tick=_factorio_game_tick(_instance)
+            target_tick=start_tick+ticks_required
+            deadline=time.monotonic()+max(30.0,duration*wall_timeout_factor)
+
+            observed=start_tick
+            while observed<target_tick:
+                if time.monotonic()>=deadline:
+                    raise TimeoutError(
+                        "tick-accurate sleep timed out: "
+                        f"requested={ticks_required} start={start_tick} "
+                        f"observed={observed} target={target_tick}"
+                    )
+                if poll_interval_seconds>0:
+                    time.sleep(poll_interval_seconds)
+                observed=_factorio_game_tick(_instance)
+
+            _instance.rcon_client.send_command(
+                "/sc storage.elapsed_ticks = (storage.elapsed_ticks or 0) + "
+                +str(ticks_required)
+            )
+            return True
+
+        setattr(namespace,tool_name,bound)
+    return tool_name
 
 
 def bind_fast_reposition_tool(
