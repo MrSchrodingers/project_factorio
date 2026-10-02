@@ -275,3 +275,55 @@ def test_ensure_factorio_unpaused_verifies_remote_state() -> None:
     assert result=={"status":"unpaused","verified":True}
     assert instance.game_control._is_paused is False
     assert "game.tick_paused = false" in instance.rcon_client.commands[0]
+
+
+def test_bootstrap_material_signature_ignores_positions_and_paths() -> None:
+    a=[
+        {
+            "resource":"stone",
+            "quantity":30,
+            "position":{"x":1.0,"y":2.0},
+            "validated_path_waypoints":10,
+        },
+        {
+            "resource":"wood",
+            "quantity":10,
+            "radius":24,
+            "position":{"x":3.0,"y":4.0},
+            "validated_path_waypoints":20,
+        },
+    ]
+    b=[
+        {
+            "resource":"stone",
+            "quantity":30,
+            "position":{"x":100.0,"y":200.0},
+            "validated_path_waypoints":99,
+        },
+        {
+            "resource":"wood",
+            "quantity":10,
+            "radius":24,
+            "position":{"x":300.0,"y":400.0},
+            "validated_path_waypoints":199,
+        },
+    ]
+    assert REPLAY._bootstrap_material_signature(a)==REPLAY._bootstrap_material_signature(b)
+
+
+def test_bootstrap_material_signature_detects_material_change() -> None:
+    baseline=[{"resource":"coal","quantity":6}]
+    changed=[{"resource":"coal","quantity":7}]
+    assert (
+        REPLAY._bootstrap_material_signature(baseline)
+        !=REPLAY._bootstrap_material_signature(changed)
+    )
+
+
+def test_replay_source_rebases_coal_before_a2_grant() -> None:
+    source=SCRIPT.read_text(encoding="utf-8")
+    rebase_at=source.index("_rebase_coal_bootstrap_plan(")
+    grant_at=source.rindex("bridge.issue_a2_grant(")
+    assert rebase_at<grant_at
+    assert "bootstrap_rebased_from_live_world" in source
+    assert "external_resource_injection" in source

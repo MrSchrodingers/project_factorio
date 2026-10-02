@@ -488,6 +488,124 @@ class ReplayOptionPlan:
         }
 
 
+def _bootstrap_material_signature(rows: object) -> tuple[tuple[str,int,float | None],...]:
+    if not isinstance(rows,(list,tuple)):
+        raise TypeError("bootstrap_resources must be a list/tuple")
+    signature=[]
+    for raw in rows:
+        if not isinstance(raw,Mapping):
+            raise TypeError("bootstrap resource row must be a mapping")
+        resource=str(raw.get("resource") or "")
+        quantity=raw.get("quantity")
+        radius=raw.get("radius")
+        if not resource:
+            raise ValueError("bootstrap resource name is empty")
+        if not isinstance(quantity,int) or isinstance(quantity,bool) or quantity<=0:
+            raise ValueError(f"invalid bootstrap quantity for {resource!r}: {quantity!r}")
+        radius_value=None if radius is None else float(radius)
+        signature.append((resource,quantity,radius_value))
+    return tuple(signature)
+
+
+def _rebase_coal_bootstrap_plan(
+    plan: ReplayOptionPlan,
+    namespace: Any,
+) -> tuple[ReplayOptionPlan,dict[str,Any]]:
+    if plan.capability!="coal_self_sufficiency":
+        raise ValueError("coal bootstrap rebase only applies to coal_self_sufficiency")
+
+    observer=FactorioObserver()
+    try:
+        overview=observer.resource_overview(max_age_s=0.0)
+    finally:
+        observer.close()
+    if overview.get("connected") is not True:
+        raise RuntimeError("coal bootstrap rebase resource overview unavailable")
+
+    route,route_end=coal_runner._plan_bootstrap_route(namespace,overview)
+    rebased_rows=[dict(row) for row in route]
+
+    original_rows=None
+    updated_operations=[]
+    target_position=None
+    for operation in plan.prepared.operations:
+        if operation.op!="establish_coal_self_sufficiency":
+            updated_operations.append(operation)
+            continue
+        params=dict(operation.parameters)
+        original_rows=params.get("bootstrap_resources")
+        params["bootstrap_resources"]=rebased_rows
+        target=params.get("target_position")
+        if not isinstance(target,Mapping):
+            raise TypeError("coal replay target_position unavailable during rebase")
+        target_position=(float(target["x"]),float(target["y"]))
+        updated_operations.append(
+            StructuralOperation(op=operation.op,parameters=params)
+        )
+
+    if original_rows is None or target_position is None:
+        raise RuntimeError("coal replay contract lacks establish_coal_self_sufficiency")
+    original_signature=_bootstrap_material_signature(original_rows)
+    rebased_signature=_bootstrap_material_signature(rebased_rows)
+    if original_signature!=rebased_signature:
+        raise RuntimeError(
+            "coal bootstrap rebase changed material requirements: "
+            f"original={original_signature!r} rebased={rebased_signature!r}"
+        )
+
+    target_waypoints=coal_runner._validated_path_waypoints(
+        namespace,
+        start=route_end,
+        finish=target_position,
+    )
+    replay_preflight=dict(plan.prepared.preflight)
+    replay_preflight.update({
+        "bootstrap_resources":rebased_rows,
+        "bootstrap_path_waypoints_total":sum(
+            int(row["validated_path_waypoints"]) for row in rebased_rows
+        ),
+        "coal_target_validated_path_waypoints":target_waypoints,
+        "bootstrap_rebased_from_live_world":True,
+    })
+    prepared=PreparedStructuralAction(
+        action_id=plan.prepared.action_id,
+        family=plan.prepared.family,
+        intent=plan.prepared.intent,
+        binding=plan.prepared.binding,
+        purpose=plan.prepared.purpose,
+        contract_version=plan.prepared.contract_version,
+        operations=tuple(updated_operations),
+        measurement_keys=plan.prepared.measurement_keys,
+        preflight=replay_preflight,
+    )
+    termination=prepared_postconditions(prepared)+execution_guard_conditions(prepared)
+    rebased=ReplayOptionPlan(
+        request=plan.request,
+        action_request=plan.action_request,
+        prepared=prepared,
+        termination_conditions=termination,
+        capability=plan.capability,
+        source_artifact=plan.source_artifact,
+    )
+    evidence={
+        "source":"live_world_replan",
+        "resource_overview_center":overview.get("center"),
+        "resource_overview_radius":overview.get("radius"),
+        "resource_overview_totals":overview.get("totals"),
+        "original_bootstrap_resources":[dict(row) for row in original_rows],
+        "rebased_bootstrap_resources":rebased_rows,
+        "material_signature":[list(row) for row in rebased_signature],
+        "target_position":{"x":target_position[0],"y":target_position[1]},
+        "target_validated_path_waypoints":target_waypoints,
+        "bootstrap_path_waypoints_total":sum(
+            int(row["validated_path_waypoints"]) for row in rebased_rows
+        ),
+        "external_resource_injection":False,
+        "promotion_credit":False,
+    }
+    return rebased,evidence
+
+
 def _plan_from_artifact(
     *,
     capability: str,
@@ -959,6 +1077,12 @@ def run_replay(
                     commit=commit,
                     run_id=run_id,
                 )
+                bootstrap_rebase=None
+                if capability=="coal_self_sufficiency":
+                    plan,bootstrap_rebase=_rebase_coal_bootstrap_plan(
+                        plan,
+                        namespace,
+                    )
                 measure=MEASURE[capability]
                 before=measure(namespace,plan.prepared)
                 step_record={
@@ -970,6 +1094,8 @@ def run_replay(
                     "measurement_before":before,
                     "promotion_credit":False,
                 }
+                if bootstrap_rebase is not None:
+                    step_record["bootstrap_rebase"]=bootstrap_rebase
                 record["steps"].append(step_record)
                 _write(artifact,record)
 
