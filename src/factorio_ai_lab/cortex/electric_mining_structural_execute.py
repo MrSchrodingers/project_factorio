@@ -100,6 +100,9 @@ def compile_electric_mining(operation: StructuralOperation) -> list[str]:
     iron_furnace_refuel=_positive_int(params,"iron_furnace_refuel")
     copper_furnace_refuel=_positive_int(params,"copper_furnace_refuel")
     boiler_refuel=_positive_int(params,"boiler_refuel")
+    electric_load_boiler_refuel=_positive_int(
+        params,"electric_load_boiler_refuel"
+    )
     ore_recovery=_positive_int(params,"ore_recovery_window_seconds")
     smelt_window=_positive_int(params,"smelt_window_seconds")
     research_window=_positive_int(params,"research_window_seconds")
@@ -118,6 +121,13 @@ def compile_electric_mining(operation: StructuralOperation) -> list[str]:
         iron_furnace_refuel+copper_furnace_refuel+boiler_refuel
     ):
         raise ValueError("electric mining process coal budget is inconsistent")
+    if coal_stock_target < (
+        extraction_coal_draw
+        + process_coal_draw
+        + electric_load_boiler_refuel
+        + 6
+    ):
+        raise ValueError("electric mining coal stock target is inconsistent")
 
     research_round=max(25,research_window//6)
     manufacturing_round=max(3,manufacturing_window//2)
@@ -318,6 +328,22 @@ craft_item({_prototype('iron-gear-wheel')},quantity=5)
 craft_item({_prototype('small-electric-pole')},quantity=1)
 craft_item({_prototype('wooden-chest')},quantity=1)
 craft_item({_prototype('electric-mining-drill')},quantity=1)
+
+cortex_electric_load_coal_available=inspect_inventory(
+    cortex_coal_buffer
+)[{_prototype('coal')}]
+if cortex_electric_load_coal_available < {electric_load_boiler_refuel}:
+    raise RuntimeError('endogenous coal below electric-load boiler reserve')
+extract_item(
+    {_prototype('coal')},
+    cortex_coal_buffer,
+    quantity={electric_load_boiler_refuel},
+)
+cortex_boiler=insert_item(
+    {_prototype('coal')},
+    cortex_boiler,
+    quantity={electric_load_boiler_refuel},
+)
 
 cortex_place_exact_entity(
     {parsed['electric_pole']},

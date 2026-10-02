@@ -91,7 +91,8 @@ def test_electric_mining_option_is_inert_and_schema_aligned() -> None:
     assert plan.prepared.contract_version=="cortex_structural_ops_v12"
     assert plan.prepared.binding=="cortex.structural.electric_mining"
     establish=plan.prepared.operations[0]
-    assert establish.parameters["coal_stock_target"]==38
+    assert establish.parameters["coal_stock_target"]==40
+    assert establish.parameters["electric_load_boiler_refuel"]==2
     assert plan.prepared.preflight["native_research_queue"] is True
     assert (
         plan.prepared.preflight["natural_resource_transaction"]
@@ -139,6 +140,8 @@ def test_compiled_electric_mining_is_causal_and_self_validating() -> None:
     assert "cortex_automation_science_survives" in code
     assert "for cortex_coal_round in range(6):" in code
     assert "sleep(30)" in code
+    assert "endogenous coal below electric-load boiler reserve" in code
+    assert "cortex_electric_load_coal_available" in code
     assert "quantity=15" in code
     assert "quantity=10" in code
     assert "quantity=7" in code
