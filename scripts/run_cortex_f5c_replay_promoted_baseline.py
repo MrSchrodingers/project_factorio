@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -71,15 +72,6 @@ INTERVENTION_LEDGER=RUNS_DIR/"cortex_f5_intervention_ledger.json"
 RUNTIME_BUILD_INFO=Path("/srv/factorio-ai-runtime/current/BUILD_INFO.json")
 DASHBOARD_BUILD_INFO=Path("/srv/factorio-ai-dashboard-runtime/current/BUILD_INFO.json")
 GRANT_TTL_SECONDS=600
-FLE_INIT_SCRIPT_ORDER=(
-    "lualib_util",
-    "utils",
-    "alerts",
-    "connection_points",
-    "recipe_fluid_connection_mappings",
-    "serialize",
-    "serialize_direction_fix",
-)
 
 CAPABILITY_ORDER=(
     "iron_extraction",
@@ -719,64 +711,84 @@ rcon.print(helpers.table_to_json({ok=true,removed_functions=removed}))
     }
 
 
-def _rehydrate_fle_runtime(instance: Any) -> dict[str,Any]:
-    manager=instance.lua_script_manager
-    previous_cache=bool(manager.cache_scripts)
-    manager.cache_scripts=False
-    try:
-        manager.tool_scripts=manager.get_tools_to_load()
-        manager.lib_scripts=manager.get_libs_to_load()
-        manager.load_init_into_game("initialise")
-        for name in FLE_INIT_SCRIPT_ORDER:
-            manager.load_init_into_game(name)
-        manager.setup_tools(instance)
-    finally:
-        manager.cache_scripts=previous_cache
+def _open_control_rcon() -> Any:
+    from factorio_rcon import RCONClient
+
+    address=os.getenv("FACTORIO_SERVER_ADDRESS") or "127.0.0.1"
+    raw_port=os.getenv("FACTORIO_SERVER_PORT")
+    port=27000 if raw_port is None else int(raw_port)
+    return RCONClient(address,port,"factorio")
+
+
+def _autosave_interval(client: Any) -> int:
+    response=client.send_command("/config get autosave-interval")
+    text="" if response is None else str(response).strip()
+    lower=text.lower()
+    if "disabled" in lower:
+        return 0
+    matches=re.findall(r"\b(\d+)\b",text)
+    if not matches:
+        raise RuntimeError(f"unable to parse autosave interval: {text!r}")
+    return int(matches[-1])
+
+
+def _set_autosave_interval(client: Any,minutes: int) -> dict[str,Any]:
+    if not isinstance(minutes,int) or isinstance(minutes,bool) or minutes<0:
+        raise ValueError("autosave interval must be a non-negative integer")
+    response=client.send_command(f"/config set autosave-interval {minutes}")
+    text="" if response is None else str(response).strip()
+    lowered=text.lower()
+    if any(token in lowered for token in ("unknown command","error","invalid")):
+        raise RuntimeError(f"failed to set autosave interval: {text!r}")
+    observed=_autosave_interval(client)
+    if observed!=minutes:
+        raise RuntimeError(
+            f"autosave interval mismatch after set: requested={minutes} observed={observed}"
+        )
     return {
-        "status":"rehydrated",
-        "cache_scripts_restored":previous_cache,
-        "init_scripts":list(FLE_INIT_SCRIPT_ORDER),
+        "requested_minutes":minutes,
+        "observed_minutes":observed,
+        "response":text,
     }
+
+
+def _plain_server_save(client: Any,name: str) -> str:
+    response=client.send_command(f"/server-save {name}")
+    text="" if response is None else str(response).strip()
+    if "Saving the map" not in text:
+        raise RuntimeError(f"Factorio save command failed for {name!r}: {text!r}")
+    return text
 
 
 def _save_world(instance: Any,name: str) -> dict[str,Any]:
     quiesce=_quiesce_fle_storage_for_save(instance)
-    response=None
-    save_error=None
-    try:
-        response=instance.rcon_client.send_command(f"/server-save {name}")
-        response_text="" if response is None else str(response).strip()
-        if "Saving the map" not in response_text:
-            raise RuntimeError(
-                f"Factorio save command failed for {name!r}: {response_text!r}"
-            )
-    except Exception as exc:  # noqa: BLE001
-        save_error=exc
-        response_text="" if response is None else str(response).strip()
-
-    try:
-        rehydrate=_rehydrate_fle_runtime(instance)
-    except Exception as rehydrate_exc:
-        if save_error is not None:
-            raise RuntimeError(
-                f"Factorio save failed for {name!r} and FLE rehydration also failed: "
-                f"save={type(save_error).__name__}: {save_error}; "
-                f"rehydrate={type(rehydrate_exc).__name__}: {rehydrate_exc}"
-            ) from rehydrate_exc
-        raise RuntimeError(
-            f"Factorio save for {name!r} did not leave a rehydratable live runtime: "
-            f"{type(rehydrate_exc).__name__}: {rehydrate_exc}"
-        ) from rehydrate_exc
-
-    if save_error is not None:
-        raise save_error
-
     return {
-        "response":response_text,
+        "response":_plain_server_save(instance.rcon_client,name),
         "storage_quiesce":quiesce,
-        "runtime_rehydrate":rehydrate,
     }
 
+
+def _attach_replay_environment(
+    *,
+    run_id: str,
+) -> tuple[Any,TransactionalFLEExecutor,Any,Any,str]:
+    env=attach_live_factorio_environment()
+    enforce_minimum_eval_timeout(env,minimum_seconds=900)
+    enforce_pathfinding_retry_floor(env,minimum_attempts=40)
+    tool_name=bind_fast_reposition_tool(env)
+    executor=TransactionalFLEExecutor(
+        env,
+        runtime_context=lambda:{
+            "run_id":run_id,
+            "arena":ARENA,
+            "stage":"promoted_baseline_replay",
+            "progress":"F5-C",
+        },
+    )
+    instance=env.unwrapped.instance
+    namespace=instance.namespace
+    executor.game_state=GameState.from_instance(instance)
+    return env,executor,instance,namespace,tool_name
 
 def run_replay(
     *,
@@ -814,39 +826,36 @@ def run_replay(
         "started_at":utc_now(),
     }
     env=None
+    instance=None
+    executor=None
+    control=None
+    autosave_original=None
+
     with FactorioWorldLease(run_id=run_id,arena=ARENA,owner=OWNER) as lease:
         record["world_lease"]=dict(lease.active_attestation())
         _write(artifact,record)
         try:
-            env=attach_live_factorio_environment()
-            enforce_minimum_eval_timeout(env,minimum_seconds=900)
-            enforce_pathfinding_retry_floor(env,minimum_attempts=40)
-            record["fle_transactional_reposition_tool"]=bind_fast_reposition_tool(env)
-            executor=TransactionalFLEExecutor(
-                env,
-                runtime_context=lambda:{
-                    "run_id":run_id,
-                    "arena":ARENA,
-                    "stage":"promoted_baseline_replay",
-                    "progress":"F5-C",
-                },
-            )
-            instance=env.unwrapped.instance
-            namespace=instance.namespace
-            executor.game_state=GameState.from_instance(instance)
+            control=_open_control_rcon()
+            autosave_original=_autosave_interval(control)
+            record["autosave_guard"]={
+                "original_minutes":autosave_original,
+                "suspend":_set_autosave_interval(control,0),
+                "status":"suspended",
+            }
+            _write(artifact,record)
 
+            positions={
+                key:(float(value["x"]),float(value["y"]))
+                for key,value in pf["positions"].items()
+            }
             observer=FactorioObserver()
             try:
                 attached=observer.snapshot()
             finally:
                 observer.close()
-            positions={
-                key:(float(value["x"]),float(value["y"]))
-                for key,value in pf["positions"].items()
-            }
             prefix=_detect_replay_prefix(attached,positions)
             if prefix!=int(pf["replay_prefix_before"]):
-                raise RuntimeError("live FLE attachment changed replay prefix")
+                raise RuntimeError("live WORLD changed replay prefix before execution")
 
             ledger=PersistentOptionGrantLedger(ledger_path)
             bridge=F5BoundedAuthorityBridge(
@@ -861,8 +870,26 @@ def run_replay(
                         "capability":capability,
                         "status":"resumed_existing",
                         "promotion_credit":False,
+                        "replay_prefix_after":index,
                     })
                     continue
+
+                env,executor,instance,namespace,tool_name=_attach_replay_environment(
+                    run_id=run_id
+                )
+                record.setdefault("fle_transactional_reposition_tool",tool_name)
+
+                observer=FactorioObserver()
+                try:
+                    after_attach=observer.snapshot()
+                finally:
+                    observer.close()
+                attached_prefix=_detect_replay_prefix(after_attach,positions)
+                if attached_prefix!=index-1:
+                    raise RuntimeError(
+                        f"live FLE attachment changed replay prefix before {capability}: "
+                        f"expected {index-1}, observed {attached_prefix}"
+                    )
 
                 plan=_plan_from_artifact(
                     capability=capability,
@@ -912,7 +939,7 @@ def run_replay(
                     grant=grant,
                     scope=scope,
                     executor=executor,
-                    measure=lambda prepared,m=measure: m(namespace,prepared),
+                    measure=lambda prepared,m=measure,ns=namespace: m(ns,prepared),
                     tick_source=env,
                     use_checkpoint_for_action=False,
                 )
@@ -945,7 +972,11 @@ def run_replay(
                 save_result=_save_world(instance,save_name)
                 step_record["save_response"]=save_result["response"]
                 step_record["save_storage_quiesce"]=save_result["storage_quiesce"]
-                step_record["save_runtime_rehydrate"]=save_result["runtime_rehydrate"]
+
+                env.close()
+                env=None
+                instance=None
+                executor=None
 
                 observer=FactorioObserver()
                 try:
@@ -995,10 +1026,21 @@ def run_replay(
             })
             if completed:
                 record["final_save_name"]="cortex-f5c-promoted-baseline"
-                final_save=_save_world(instance,record["final_save_name"])
-                record["final_save_response"]=final_save["response"]
-                record["final_save_storage_quiesce"]=final_save["storage_quiesce"]
-                record["final_save_runtime_rehydrate"]=final_save["runtime_rehydrate"]
+                record["final_save_response"]=_plain_server_save(
+                    control,
+                    record["final_save_name"],
+                )
+                observer=FactorioObserver()
+                try:
+                    post_save=observer.snapshot()
+                finally:
+                    observer.close()
+                post_save_fp=_factory_fingerprint(post_save)
+                if post_save_fp!=final_fp:
+                    raise RuntimeError(
+                        "final named save changed the canonical factory fingerprint"
+                    )
+                record["final_save_world_entity_count"]=post_save.get("entity_count")
             _write(artifact,record)
             return record
         except Exception as exc:  # noqa: BLE001
@@ -1009,16 +1051,51 @@ def run_replay(
                 "failure":{"type":type(exc).__name__,"message":str(exc)},
                 "rollback_integrity":(
                     executor.rollback_integrity_snapshot()
-                    if "executor" in locals()
+                    if executor is not None
                     else None
                 ),
             })
             _write(artifact,record)
             return record
         finally:
-            if env is not None:
-                env.close()
-
+            cleanup: dict[str,Any]={}
+            if env is not None and instance is not None:
+                try:
+                    cleanup["storage_quiesce"]=_quiesce_fle_storage_for_save(instance)
+                except Exception as exc:  # noqa: BLE001
+                    cleanup["storage_quiesce_error"]={
+                        "type":type(exc).__name__,
+                        "message":str(exc),
+                    }
+                try:
+                    env.close()
+                except Exception as exc:  # noqa: BLE001
+                    cleanup["env_close_error"]={
+                        "type":type(exc).__name__,
+                        "message":str(exc),
+                    }
+            if control is not None and autosave_original is not None:
+                try:
+                    cleanup["autosave_restore"]=_set_autosave_interval(
+                        control,
+                        autosave_original,
+                    )
+                    if "autosave_guard" in record:
+                        record["autosave_guard"]["status"]="restored"
+                except Exception as exc:  # noqa: BLE001
+                    cleanup["autosave_restore_error"]={
+                        "type":type(exc).__name__,
+                        "message":str(exc),
+                    }
+                close=getattr(control,"close",None)
+                if callable(close):
+                    try:
+                        close()
+                    except OSError:
+                        pass
+            if cleanup:
+                record["runtime_cleanup"]=cleanup
+            _write(artifact,record)
 
 def main() -> int:
     parser=argparse.ArgumentParser()

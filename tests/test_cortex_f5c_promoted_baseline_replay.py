@@ -149,39 +149,12 @@ class _FakeRcon:
         return self.responses.pop(0)
 
 
-class _FakeLuaManager:
-    def __init__(self) -> None:
-        self.cache_scripts=True
-        self.tool_scripts={"stale":"value"}
-        self.lib_scripts={"stale":"value"}
-        self.loaded_init: list[str]=[]
-        self.setup_calls=0
-
-    def get_tools_to_load(self) -> dict[str,str]:
-        assert self.cache_scripts is False
-        return {"agent/fake/server.lua":"storage.actions.fake=function() end"}
-
-    def get_libs_to_load(self) -> dict[str,str]:
-        assert self.cache_scripts is False
-        return {"initialise":"storage.actions=storage.actions or {}"}
-
-    def load_init_into_game(self,name: str) -> None:
-        assert self.cache_scripts is False
-        self.loaded_init.append(name)
-
-    def setup_tools(self,instance: Any) -> None:
-        assert self.cache_scripts is False
-        assert instance.lua_script_manager is self
-        self.setup_calls+=1
-
-
 class _FakeInstance:
     def __init__(self,responses: list[str]) -> None:
         self.rcon_client=_FakeRcon(responses)
-        self.lua_script_manager=_FakeLuaManager()
 
 
-def test_save_world_quiesces_storage_and_rehydrates_without_reset() -> None:
+def test_save_world_quiesces_storage_without_rehydrating() -> None:
     instance=_FakeInstance([
         '{"ok":true,"removed_functions":17}',
         "Saving the map",
@@ -189,30 +162,52 @@ def test_save_world_quiesces_storage_and_rehydrates_without_reset() -> None:
     result=REPLAY._save_world(instance,"unit-save")
     assert result["response"]=="Saving the map"
     assert result["storage_quiesce"]["removed_functions"]==17
-    assert result["runtime_rehydrate"]["status"]=="rehydrated"
     assert instance.rcon_client.commands[0].startswith("/sc ")
     assert "scrub(storage)" in instance.rcon_client.commands[0]
     assert "storage.__lua_script_checksums={}" in instance.rcon_client.commands[0]
     assert instance.rcon_client.commands[1]=="/server-save unit-save"
-    manager=instance.lua_script_manager
-    assert manager.cache_scripts is True
-    assert manager.setup_calls==1
-    assert manager.loaded_init==[
-        "initialise",
-        *REPLAY.FLE_INIT_SCRIPT_ORDER,
-    ]
-    source=REPLAY._rehydrate_fle_runtime.__code__.co_names
-    assert "initialise" not in source
-    assert "reset" not in source
+    source=REPLAY._save_world.__code__.co_names
+    assert "_rehydrate_fle_runtime" not in source
+    assert "setup_tools" not in source
 
 
 def test_save_world_refuses_quiesce_without_removed_functions() -> None:
     instance=_FakeInstance(['{"ok":true,"removed_functions":0}'])
     with pytest.raises(RuntimeError,match="removed no Lua functions"):
         REPLAY._save_world(instance,"unsafe-save")
-    assert instance.rcon_client.commands==[instance.rcon_client.commands[0]]
+    assert len(instance.rcon_client.commands)==1
     assert "/server-save" not in instance.rcon_client.commands[0]
 
+
+def test_autosave_interval_parsing_and_guard() -> None:
+    client=_FakeRcon([
+        "Autosave every 5 minutes.",
+        "Autosave interval changed.",
+        "Autosaving disabled.",
+        "Autosave interval changed.",
+        "Autosave every 5 minutes.",
+    ])
+    assert REPLAY._autosave_interval(client)==5
+    suspended=REPLAY._set_autosave_interval(client,0)
+    assert suspended["observed_minutes"]==0
+    restored=REPLAY._set_autosave_interval(client,5)
+    assert restored["observed_minutes"]==5
+    assert client.commands==[
+        "/config get autosave-interval",
+        "/config set autosave-interval 0",
+        "/config get autosave-interval",
+        "/config set autosave-interval 5",
+        "/config get autosave-interval",
+    ]
+
+
+def test_replay_source_uses_fresh_fle_environment_per_step() -> None:
+    source=SCRIPT.read_text(encoding="utf-8")
+    assert "_attach_replay_environment(" in source
+    assert "env.close()" in source
+    assert "_set_autosave_interval(control,0)" in source
+    assert "save_runtime_rehydrate" not in source
+    assert "_rehydrate_fle_runtime" not in source
 
 def test_prior_replay_progress_requires_persisted_prefix(
     tmp_path: pathlib.Path,
