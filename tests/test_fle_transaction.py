@@ -189,7 +189,14 @@ class FakeScoreTool:
 
 class FakeScoreNamespace:
     def __init__(self,response) -> None:
-        self.score=FakeScoreTool(response)
+        tool=FakeScoreTool(response)
+
+        def score_wrapper(*args,**kwargs):
+            response,_elapsed=tool.execute(*args,**kwargs)
+            return response
+
+        score_wrapper.__wrapped__=tool
+        self.score=score_wrapper
 
 
 class FakeScoreInstance:

@@ -153,6 +153,10 @@ def test_powered_runner_is_one_shot_no_reset_and_native_research() -> None:
     assert "executor.reset(" not in source
     assert "bind_safe_score_tool(env)" in source
     assert "bind_tick_accurate_sleep_tool(env)" in source
+    assert (
+        source.index("instance=env.unwrapped.instance")
+        <source.index("bind_safe_score_tool(env)")
+    )
     assert "_set_autosave_interval(control,0)" in source
     assert "_pause_factorio_for_quiesce(" in source
     assert "_quiesce_fle_storage(" in source

@@ -1799,9 +1799,12 @@ def bind_safe_score_tool(
 
     for namespace in namespaces:
         original=getattr(namespace,tool_name,None)
-        execute=getattr(original,"execute",None)
+        controller=getattr(original,"__wrapped__",original)
+        execute=getattr(controller,"execute",None)
         if not callable(execute):
-            raise TypeError(f"namespace {tool_name!r} does not expose execute()")
+            raise TypeError(
+                f"namespace {tool_name!r} wrapper does not expose a Tool execute()"
+            )
 
         def bound(
             *args: Any,

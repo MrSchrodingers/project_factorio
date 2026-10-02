@@ -658,6 +658,7 @@ def run_powered_manufacturing(
             _write(artifact,record)
 
             env=attach_live_factorio_environment()
+            instance=env.unwrapped.instance
             record["fle_eval_timeout_s"]=enforce_minimum_eval_timeout(
                 env,minimum_seconds=720
             )
@@ -672,7 +673,6 @@ def run_powered_manufacturing(
                     "progress":"F5-C",
                 },
             )
-            instance=env.unwrapped.instance
             namespace=instance.namespace
             observer=FactorioObserver()
             try:
