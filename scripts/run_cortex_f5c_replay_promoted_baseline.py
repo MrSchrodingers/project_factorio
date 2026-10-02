@@ -445,7 +445,7 @@ def _latest_prior_replay_progress(seed: int,current_artifact: Path) -> int:
                 break
             persisted=row.get("replay_prefix_after")
             if (
-                row.get("status")!="accepted"
+                row.get("status") not in {"accepted","resumed_existing"}
                 or not isinstance(persisted,int)
                 or isinstance(persisted,bool)
                 or persisted<index

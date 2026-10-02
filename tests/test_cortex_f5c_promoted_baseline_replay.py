@@ -448,3 +448,47 @@ def test_replay_source_saves_reserve_recovery_before_steam_a2() -> None:
     assert "steam_power_reserve_recovery" in source
     assert "physical_after_reattach" in source
     assert "OptionKind.RESTORE_PROMOTED_RESERVES" in source
+
+
+def test_prior_replay_progress_counts_resumed_existing_when_physically_proven(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    audits=tmp_path/"audits"
+    audits.mkdir()
+    monkeypatch.setattr(REPLAY,"RUNS_DIR",tmp_path)
+    prior=audits/"cortex_f5c_promoted_baseline_replay_1773655334_old.json"
+    prior.write_text(
+        __import__("json").dumps({
+            "steps":[
+                {"index":1,"status":"resumed_existing","replay_prefix_after":1},
+                {"index":2,"status":"accepted","replay_prefix_after":2},
+                {"index":3,"status":"accepted","replay_prefix_after":3},
+                {"index":4,"status":"rejected"},
+            ],
+        }),
+        encoding="utf-8",
+    )
+    current=audits/"cortex_f5c_promoted_baseline_replay_1773655334_current.json"
+    assert REPLAY._latest_prior_replay_progress(1773655334,current)==3
+
+
+def test_prior_replay_progress_does_not_trust_resumed_without_physical_prefix(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    audits=tmp_path/"audits"
+    audits.mkdir()
+    monkeypatch.setattr(REPLAY,"RUNS_DIR",tmp_path)
+    prior=audits/"cortex_f5c_promoted_baseline_replay_1773655334_old.json"
+    prior.write_text(
+        __import__("json").dumps({
+            "steps":[
+                {"index":1,"status":"resumed_existing","replay_prefix_after":0},
+                {"index":2,"status":"accepted","replay_prefix_after":2},
+            ],
+        }),
+        encoding="utf-8",
+    )
+    current=audits/"cortex_f5c_promoted_baseline_replay_1773655334_current.json"
+    assert REPLAY._latest_prior_replay_progress(1773655334,current)==0
