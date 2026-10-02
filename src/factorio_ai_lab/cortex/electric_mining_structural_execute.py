@@ -96,6 +96,10 @@ def compile_electric_mining(operation: StructuralOperation) -> list[str]:
     extraction_coal_draw=_positive_int(params,"extraction_coal_draw")
     iron_miner_refuel=_positive_int(params,"iron_miner_refuel")
     copper_miner_refuel=_positive_int(params,"copper_miner_refuel")
+    process_coal_draw=_positive_int(params,"process_coal_draw")
+    iron_furnace_refuel=_positive_int(params,"iron_furnace_refuel")
+    copper_furnace_refuel=_positive_int(params,"copper_furnace_refuel")
+    boiler_refuel=_positive_int(params,"boiler_refuel")
     ore_recovery=_positive_int(params,"ore_recovery_window_seconds")
     smelt_window=_positive_int(params,"smelt_window_seconds")
     research_window=_positive_int(params,"research_window_seconds")
@@ -110,6 +114,10 @@ def compile_electric_mining(operation: StructuralOperation) -> list[str]:
         raise ValueError("electric mining iron budget must cover causal DAG")
     if copper_target<36:
         raise ValueError("electric mining copper budget must cover causal DAG")
+    if process_coal_draw < (
+        iron_furnace_refuel+copper_furnace_refuel+boiler_refuel
+    ):
+        raise ValueError("electric mining process coal budget is inconsistent")
 
     research_round=max(25,research_window//6)
     manufacturing_round=max(3,manufacturing_window//2)
@@ -141,8 +149,19 @@ cortex_assembler=get_entity({_prototype('assembling-machine-1')},{parsed['assemb
 
 cortex_lab_energy_before=float(cortex_lab.energy or 0)
 cortex_assembler_energy_before=float(cortex_assembler.energy or 0)
-if cortex_lab_energy_before<=0 or cortex_assembler_energy_before<=0:
-    raise RuntimeError('promoted powered manufacturing is not electrically live')
+cortex_power_pole_electrical_id=getattr(cortex_power_pole,'electrical_id',None)
+cortex_lab_electrical_id_before=getattr(cortex_lab,'electrical_id',None)
+cortex_assembler_electrical_id_before=getattr(cortex_assembler,'electrical_id',None)
+if (
+    cortex_power_pole_electrical_id is None
+    or cortex_lab_electrical_id_before is None
+    or cortex_assembler_electrical_id_before is None
+    or cortex_lab_electrical_id_before!=cortex_power_pole_electrical_id
+    or cortex_assembler_electrical_id_before!=cortex_power_pole_electrical_id
+):
+    raise RuntimeError(
+        'promoted powered manufacturing is not on promoted electrical network'
+    )
 
 cortex_initial_coal_available=inspect_inventory(cortex_coal_buffer)[{_prototype('coal')}]
 if cortex_initial_coal_available < {min_coal_stock}:
@@ -204,12 +223,20 @@ if cortex_copper_ore_draw < {copper_target}:
     raise RuntimeError('electric-mining copper transfer incomplete')
 
 cortex_process_coal_available=inspect_inventory(cortex_coal_buffer)[{_prototype('coal')}]
-if cortex_process_coal_available < 14:
+if cortex_process_coal_available < {process_coal_draw}:
     raise RuntimeError('endogenous coal did not recover for electric mining')
-extract_item({_prototype('coal')},cortex_coal_buffer,quantity=14)
-cortex_iron_furnace=insert_item({_prototype('coal')},cortex_iron_furnace,quantity=6)
-cortex_copper_furnace=insert_item({_prototype('coal')},cortex_copper_furnace,quantity=3)
-cortex_boiler=insert_item({_prototype('coal')},cortex_boiler,quantity=5)
+extract_item(
+    {_prototype('coal')},cortex_coal_buffer,quantity={process_coal_draw}
+)
+cortex_iron_furnace=insert_item(
+    {_prototype('coal')},cortex_iron_furnace,quantity={iron_furnace_refuel}
+)
+cortex_copper_furnace=insert_item(
+    {_prototype('coal')},cortex_copper_furnace,quantity={copper_furnace_refuel}
+)
+cortex_boiler=insert_item(
+    {_prototype('coal')},cortex_boiler,quantity={boiler_refuel}
+)
 cortex_iron_furnace=insert_item(
     {_prototype('iron-ore')},cortex_iron_furnace,quantity={iron_batch1}
 )

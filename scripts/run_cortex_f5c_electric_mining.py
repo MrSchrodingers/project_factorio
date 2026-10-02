@@ -22,6 +22,10 @@ from factorio_ai_lab.cortex.actions import (
     ActionRequest,
 )
 from factorio_ai_lab.cortex.electric_mining_option import (
+    COPPER_MINER_REFUEL,
+    COPPER_PLATE_TARGET,
+    IRON_MINER_REFUEL,
+    IRON_PLATE_TARGET,
     MIN_COAL_STOCK,
     compose_electric_mining_option,
 )
@@ -54,6 +58,7 @@ SERVER_SETTINGS=Path("/srv/factorio-ai-lab/.fle-local/config/server-settings.jso
 ELECTRIC_POLE_POSITION=(11.5,8.5)
 ELECTRIC_DRILL_POSITION=(14.5,8.5)
 ELECTRIC_BUFFER_POSITION=(14.5,6.5)
+MIN_BURNER_ORE_PER_COAL=6
 
 ServiceStateReader=Callable[[],dict[str,str]]
 
@@ -446,14 +451,43 @@ def preflight(
             f"electric mining requires {MIN_COAL_STOCK} endogenous coal, "
             f"observed {coal_stock}"
         )
+    iron_ore_buffer=_contents_count(observed["iron_buffer"],"iron-ore")
+    copper_ore_buffer=_contents_count(observed["copper_buffer"],"copper-ore")
+    ore_budget={
+        "minimum_ore_per_refuel_coal":MIN_BURNER_ORE_PER_COAL,
+        "iron_buffer_before":iron_ore_buffer,
+        "iron_refuel_coal":IRON_MINER_REFUEL,
+        "iron_guaranteed_available":(
+            iron_ore_buffer+IRON_MINER_REFUEL*MIN_BURNER_ORE_PER_COAL
+        ),
+        "iron_target":IRON_PLATE_TARGET,
+        "copper_buffer_before":copper_ore_buffer,
+        "copper_refuel_coal":COPPER_MINER_REFUEL,
+        "copper_guaranteed_available":(
+            copper_ore_buffer+COPPER_MINER_REFUEL*MIN_BURNER_ORE_PER_COAL
+        ),
+        "copper_target":COPPER_PLATE_TARGET,
+    }
+    if ore_budget["iron_guaranteed_available"]<IRON_PLATE_TARGET:
+        raise RuntimeError(f"electric-mining iron ore budget insufficient: {ore_budget!r}")
+    if ore_budget["copper_guaranteed_available"]<COPPER_PLATE_TARGET:
+        raise RuntimeError(
+            f"electric-mining copper ore budget insufficient: {ore_budget!r}"
+        )
+
+    promoted_network_id=observed["power_pole"].get("network_id")
+    if (
+        not isinstance(promoted_network_id,int)
+        or isinstance(promoted_network_id,bool)
+        or promoted_network_id<=0
+    ):
+        raise RuntimeError("promoted power pole has no live electrical network")
     for key in ("lab","assembler"):
-        energy=observed[key].get("energy")
-        if (
-            isinstance(energy,bool)
-            or not isinstance(energy,(int,float))
-            or float(energy)<=0
-        ):
-            raise RuntimeError(f"promoted {key} is not electrically live")
+        if observed[key].get("network_id")!=promoted_network_id:
+            raise RuntimeError(
+                f"promoted {key} is not on promoted electrical network "
+                f"{promoted_network_id}"
+            )
 
     placement=_placement_probe(positions["power_pole"])
     return {
@@ -475,6 +509,8 @@ def preflight(
         "bootstrap_tree":tree,
         "placement_probe":placement,
         "coal_stock":coal_stock,
+        "ore_budget":ore_budget,
+        "promoted_network_id":promoted_network_id,
         "world_entity_count":snapshot.get("entity_count"),
         "world_factory_fingerprint":_factory_fingerprint(snapshot),
         "evolution":evolution,

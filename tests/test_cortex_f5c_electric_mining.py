@@ -123,6 +123,11 @@ def test_compiled_electric_mining_is_causal_and_self_validating() -> None:
     assert "Position(x=11.5,y=8.5)" in code
     assert "Position(x=14.5,y=8.5)" in code
     assert "Position(x=14.5,y=6.5)" in code
+    assert "cortex_power_pole_electrical_id" in code
+    assert "cortex_lab_electrical_id_before" in code
+    assert "cortex_assembler_electrical_id_before" in code
+    assert "promoted powered manufacturing is not on promoted electrical network" in code
+    assert "promoted powered manufacturing is not electrically live" not in code
     assert "cortex_electric_drop_position" in code
     assert "output chest is not aligned to drill output" in code
     assert "cortex_electric_output_growth" in code
@@ -132,6 +137,14 @@ def test_compiled_electric_mining_is_causal_and_self_validating() -> None:
     assert "cortex_automation_science_survives" in code
     assert "for cortex_coal_round in range(6):" in code
     assert "sleep(30)" in code
+    assert "quantity=15" in code
+    assert "quantity=10" in code
+    assert "quantity=7" in code
+    assert "quantity=5" in code
+    assert "quantity=3" in code
+    assert "quantity=15" in code
+    assert "quantity=10" in code
+    assert "quantity=5" in code
     assert "cortex_processor_output" not in code
     assert "cortex_expected_product" not in code
 
@@ -168,6 +181,12 @@ def test_electric_runner_is_one_shot_with_natural_rollback() -> None:
     assert "_quiesce_fle_storage(" in source
     assert "_restore_bootstrap_tree(" in source
     assert "exact_tree_restore_on_rejection" in source
+    assert 'promoted_network_id=observed["power_pole"].get("network_id")' in source
+    assert 'observed[key].get("network_id")!=promoted_network_id' in source
+    assert "MIN_BURNER_ORE_PER_COAL=6" in source
+    assert '"iron_guaranteed_available"' in source
+    assert '"copper_guaranteed_available"' in source
+    assert "promoted {key} is not electrically live" not in source
     assert "option_execution_attempts" in source
     assert '"automatic_retry":False' in source
     checkpoint=source.index("checkpoint=GameState.from_instance(instance)")
