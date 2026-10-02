@@ -4184,7 +4184,227 @@ def build_phase_state(
                 phase5c_powered_artifact=payload
                 phase5c_powered_artifact_error=error
 
+    phase5c_electric_attempts: list[dict[str,Any]]=[]
+    phase5c_electric_valid=False
+    phase5c_electric_artifact_path: Path | None=None
+    phase5c_electric_artifact: dict[str,Any]={}
+    phase5c_electric_artifact_error: str | None=None
+    if phase5c_powered_valid and phase5c_selected_seed is not None:
+        electric_pattern="cortex_f5c_continuation_*_electric_mining_*.json"
+        electric_candidates=[]
+        for electric_path in sorted(
+            (state_root/"runs"/"audits").glob(electric_pattern)
+        ):
+            payload={}
+            error: str | None=None
+            try:
+                payload=_load(electric_path)
+            except (OSError,json.JSONDecodeError,TypeError) as exc:
+                error=f"{type(exc).__name__}: {exc}"
+            preflight=payload.get("preflight")
+            if not isinstance(preflight,dict):
+                preflight={}
+            preflight_phase=preflight.get("phase_state")
+            if not isinstance(preflight_phase,dict):
+                preflight_phase={}
+            revision=payload.get("code_revision")
+            if not isinstance(revision,dict):
+                revision={}
+            gate=payload.get("capability_gate")
+            if not isinstance(gate,dict):
+                gate={}
+            continuity=payload.get("continuity_gate")
+            if not isinstance(continuity,dict):
+                continuity={}
+            survival=payload.get("survival_gate")
+            if not isinstance(survival,dict):
+                survival={}
+            final=payload.get("measurement_final")
+            if not isinstance(final,dict):
+                final={}
+            trajectory=payload.get("trajectory")
+            if not isinstance(trajectory,dict):
+                trajectory={}
+            delta=trajectory.get("capability_delta")
+            if not isinstance(delta,dict):
+                delta={}
+            started=(
+                error is None
+                and payload.get("schema_version")=="cortex_f5c_electric_mining_v1"
+                and isinstance(payload.get("base_seed"),int)
+                and not isinstance(payload.get("base_seed"),bool)
+                and payload.get("capability")=="electric_mining"
+            )
+            applies=(
+                started
+                and payload.get("base_seed")==phase5c_selected_seed
+            )
+            expected_prefix=[
+                "iron_extraction",
+                "coal_self_sufficiency",
+                "iron_smelting",
+                "steam_power",
+                "copper_chain",
+                "automation_science",
+                "powered_manufacturing",
+            ]
+            numeric_positive=(
+                "electric_output_growth",
+                "electric_drill_energy",
+                "steam_load_after",
+                "steam_load_amount",
+                "science_batch_ready",
+                "wood_harvested",
+                "science_replenished",
+                "science_buffer_after",
+                "gear_output",
+                "circuit_output",
+                "iron_survival_growth",
+                "coal_survival_growth",
+                "smelting_survival_growth",
+                "copper_survival_growth",
+                "copper_smelting_growth",
+                "steam_survival_amount",
+                "steam_survival_energy",
+            )
+            positive_final=all(
+                isinstance(final.get(name),(int,float))
+                and not isinstance(final.get(name),bool)
+                and float(final.get(name))>0
+                for name in numeric_positive
+            )
+            valid=(
+                applies
+                and payload.get("status")=="completed"
+                and payload.get("ambient_authority")=="A0"
+                and payload.get("bounded_authority")=="A2"
+                and payload.get("continuous_authority") is False
+                and payload.get("automatic_retry") is False
+                and payload.get("option_execution_attempts")==1
+                and payload.get("world_reset") is False
+                and payload.get("external_resource_injection") is False
+                and payload.get("native_research_queue") is True
+                and payload.get("direct_research_completion_mutation") is False
+                and payload.get("human_intervention_count")==0
+                and payload.get("transaction_committed") is True
+                and payload.get("capability_promoted")=="electric_mining"
+                and payload.get("natural_resource_transaction")
+                =="exact_tree_restore_on_rejection"
+                and revision.get("dirty") is False
+                and preflight.get("world_mutation") is False
+                and preflight.get("grant_issued") is False
+                and preflight.get("option_executed_live") is False
+                and preflight.get("world_reset") is False
+                and preflight.get("external_resource_injection") is False
+                and preflight.get("native_research_queue") is True
+                and preflight.get("direct_research_completion_mutation") is False
+                and preflight.get("natural_resource_transaction")
+                =="exact_tree_restore_on_rejection"
+                and preflight_phase.get("achieved_capabilities")==expected_prefix
+                and preflight_phase.get("next_capability")=="electric_mining"
+                and gate.get("electric_drill_powered") is True
+                and gate.get("ore_output_positive") is True
+                and gate.get("power_survives_load") is True
+                and continuity.get("electric_mining_research_completed") is True
+                and continuity.get("native_research_queue") is True
+                and continuity.get("direct_research_completion_mutation") is False
+                and isinstance(continuity.get("wood_harvested"),(int,float))
+                and float(continuity.get("wood_harvested"))>=4
+                and isinstance(continuity.get("science_batch_ready"),(int,float))
+                and float(continuity.get("science_batch_ready"))>=26
+                and isinstance(
+                    continuity.get("electric_output_growth"),(int,float)
+                )
+                and float(continuity.get("electric_output_growth"))>0
+                and survival.get("previously_promoted")==expected_prefix
+                and survival.get("iron_extraction_survives") is True
+                and survival.get("coal_self_sufficiency_survives") is True
+                and survival.get("iron_smelting_survives") is True
+                and survival.get("steam_power_survives") is True
+                and survival.get("copper_chain_survives") is True
+                and survival.get("automation_science_survives") is True
+                and survival.get("powered_manufacturing_survives") is True
+                and survival.get("regressed")==[]
+                and survival.get("passed") is True
+                and final.get("electric_drill_powered") is True
+                and final.get("ore_output_positive") is True
+                and final.get("power_survives_load") is True
+                and final.get("research_completed") is True
+                and isinstance(final.get("research_remaining_count"),(int,float))
+                and float(final.get("research_remaining_count"))==0
+                and final.get("automation_science_survives") is True
+                and final.get("powered_manufacturing_survives") is True
+                and final.get("iron_extraction_survives") is True
+                and final.get("coal_self_sufficiency_survives") is True
+                and final.get("iron_smelting_survives") is True
+                and final.get("steam_power_survives") is True
+                and final.get("copper_chain_survives") is True
+                and positive_final
+                and "electric_mining" in (
+                    delta.get("promoted")
+                    if isinstance(delta.get("promoted"),list)
+                    else []
+                )
+                and delta.get("regressed")==[]
+                and len(phase5_interventions)==0
+            )
+            started_at=str(payload.get("started_at") or "")
+            electric_candidates.append(
+                (
+                    started_at,
+                    electric_path,
+                    payload,
+                    error,
+                    applies,
+                    valid,
+                )
+            )
+        electric_candidates.sort(key=lambda row:(row[0],str(row[1])))
+        for (
+            started_at,
+            electric_path,
+            payload,
+            error,
+            applies,
+            valid,
+        ) in electric_candidates:
+            phase5c_electric_attempts.append({
+                "artifact_path":str(electric_path),
+                "base_seed":payload.get("base_seed"),
+                "applies_to_selected_base_seed":applies,
+                "status":payload.get("status"),
+                "started_at":started_at or None,
+                "code_commit":(
+                    payload.get("code_revision",{}).get("commit")
+                    if isinstance(payload.get("code_revision"),dict)
+                    else None
+                ),
+                "validated":valid,
+                "read_error":error,
+            })
+            if valid and not phase5c_electric_valid:
+                phase5c_electric_valid=True
+                phase5c_electric_artifact_path=electric_path
+                phase5c_electric_artifact=payload
+                phase5c_electric_artifact_error=error
+            elif applies and phase5c_electric_artifact_path is None:
+                phase5c_electric_artifact_path=electric_path
+                phase5c_electric_artifact=payload
+                phase5c_electric_artifact_error=error
+
     phase5_achieved_capabilities=(
+        [
+            "iron_extraction",
+            "coal_self_sufficiency",
+            "iron_smelting",
+            "steam_power",
+            "copper_chain",
+            "automation_science",
+            "powered_manufacturing",
+            "electric_mining",
+        ]
+        if phase5c_electric_valid
+        else (
         [
             "iron_extraction",
             "coal_self_sufficiency",
@@ -4237,6 +4457,7 @@ def build_phase_state(
                 )
                 )
             )
+        )
         )
     )
     phase5_achieved_set=set(phase5_achieved_capabilities)
@@ -4492,7 +4713,16 @@ def build_phase_state(
                 "functional_accept_sustainability_not_proven"
             )
 
-    if phase5c_powered_valid:
+    if phase5c_electric_valid:
+        action=(
+            "F5-C electric_mining capability promoted after native Electric "
+            "Mining Drill research from endogenous red science; buffered electric "
+            "coal output and steam-power survival were proven while all seven "
+            "incumbent capabilities survived; continue deterministic baseline "
+            f"with {phase5_next_capability} under ambient A0 and exactly one "
+            "expiring A2 grant per Option"
+        )
+    elif phase5c_powered_valid:
         action=(
             "F5-C powered_manufacturing capability promoted after native "
             "Automation research consumed the promoted science buffer; powered "
@@ -4959,6 +5189,33 @@ def build_phase_state(
                     "measurement_final"
                 ),
                 "read_error":phase5c_powered_artifact_error,
+            },
+            "electric_mining":{
+                "validated":phase5c_electric_valid,
+                "artifact_path":(
+                    None
+                    if phase5c_electric_artifact_path is None
+                    else str(phase5c_electric_artifact_path)
+                ),
+                "attempt_count":len(phase5c_electric_attempts),
+                "attempts":phase5c_electric_attempts,
+                "status":phase5c_electric_artifact.get("status"),
+                "capability_promoted":phase5c_electric_artifact.get(
+                    "capability_promoted"
+                ),
+                "capability_gate":phase5c_electric_artifact.get(
+                    "capability_gate"
+                ),
+                "continuity_gate":phase5c_electric_artifact.get(
+                    "continuity_gate"
+                ),
+                "survival_gate":phase5c_electric_artifact.get(
+                    "survival_gate"
+                ),
+                "measurement_final":phase5c_electric_artifact.get(
+                    "measurement_final"
+                ),
+                "read_error":phase5c_electric_artifact_error,
             },
             "external_resource_injection":phase5c_artifact.get(
                 "external_resource_injection"

@@ -1578,6 +1578,8 @@ def place_exact_entity(
         "stone-furnace",
         "lab",
         "assembling-machine-1",
+        "small-electric-pole",
+        "electric-mining-drill",
     }
     if entity_name not in allowed:
         raise ValueError(f"unsupported exact placement entity {entity_name!r}")
@@ -1591,6 +1593,8 @@ def place_exact_entity(
         "stone-furnace":{"coal","iron-ore","copper-ore"},
         "lab":set(),
         "assembling-machine-1":set(),
+        "small-electric-pole":set(),
+        "electric-mining-drill":set(),
     }[entity_name]
     for item_name,count in payload.items():
         if item_name not in allowed_payload:

@@ -365,6 +365,8 @@ def test_exact_craft_reports_lua_failure() -> None:
     [
         ("lab","8.5,8.5"),
         ("assembling-machine-1","5.5,5.5"),
+        ("small-electric-pole","11.5,8.5"),
+        ("electric-mining-drill","14.5,8.5"),
     ],
 )
 def test_exact_place_supports_powered_manufacturing_entities(
