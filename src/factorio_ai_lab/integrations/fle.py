@@ -623,6 +623,17 @@ class TransactionalFLEExecutor:
             "committed_repair": dict(self._committed_repair),
         }
 
+    def restore_checkpoint(self, checkpoint: Any) -> dict[str, Any]:
+        """Restore and verify one exact pre-action checkpoint."""
+        target=checkpoint
+        self.environment.reset(options={'game_state': target})
+        self._last_rollback_integrity=_repair_missing_checkpoint_entities(
+            self.environment,
+            target,
+        )
+        self.game_state=target
+        return dict(self._last_rollback_integrity)
+
     def _counters_for(self, purpose: str) -> tuple[dict[str, int], dict[str, int]]:
         """The (attempted, committed) pair a purpose is booked into."""
         if purpose == "infrastructure":
@@ -683,6 +694,12 @@ class TransactionalFLEExecutor:
                 self.environment.step(action)
             )
         except Exception as exc:
+            rollback_error: Exception | None=None
+            if checkpoint is not None:
+                try:
+                    self.restore_checkpoint(checkpoint)
+                except Exception as candidate_rollback_error:  # noqa: BLE001
+                    rollback_error=candidate_rollback_error
             if self._action_runtime is not None and runtime_token is not None:
                 self._action_runtime.finish(
                     runtime_token,
@@ -693,6 +710,13 @@ class TransactionalFLEExecutor:
                     info={},
                     error=exc,
                 )
+            if rollback_error is not None:
+                raise RuntimeError(
+                    "rollback integrity failure after FLE step exception; "
+                    f"original_error={type(exc).__name__}: {exc}; "
+                    f"rollback_error={type(rollback_error).__name__}: "
+                    f"{rollback_error}"
+                ) from rollback_error
             raise
         candidate_state = info.get('output_game_state')
 
@@ -730,11 +754,7 @@ class TransactionalFLEExecutor:
             # only exact missing rows from the checkpoint before calling the
             # rollback complete.
             try:
-                self.environment.reset(options={'game_state': checkpoint})
-                self._last_rollback_integrity = _repair_missing_checkpoint_entities(
-                    self.environment,
-                    checkpoint,
-                )
+                self.restore_checkpoint(checkpoint)
             except (
                 OSError,
                 RuntimeError,
@@ -751,8 +771,6 @@ class TransactionalFLEExecutor:
                     f"original_result={original_result!r}; "
                     f"rollback_error={rollback_error}"
                 ) from rollback_error
-            self.game_state = checkpoint
-
         if self._action_runtime is not None and runtime_token is not None:
             self._action_runtime.finish(
                 runtime_token,
@@ -1753,6 +1771,63 @@ def _factorio_game_tick(instance: Any) -> int:
     if tick<0:
         raise RuntimeError(f"invalid negative Factorio game.tick: {tick}")
     return tick
+
+
+def bind_safe_score_tool(
+    environment: Any,
+    *,
+    tool_name: str="score",
+) -> str:
+    """Normalize FLE 0.4.3 score responses that omit the player key.
+
+    FLE's Reward client subtracts instance.initial_score from response["player"]
+    before applying its own missing-key fallback. A score payload without the
+    player force therefore raises KeyError after an otherwise valid action.
+    This local binding preserves the intended score semantics while making the
+    missing-player case a neutral score instead of an executor failure.
+    """
+    if not tool_name.isidentifier() or tool_name.startswith("_"):
+        raise ValueError("tool_name must be a public Python identifier")
+
+    unwrapped=getattr(environment,"unwrapped",environment)
+    instance=getattr(unwrapped,"instance",None)
+    if instance is None:
+        raise TypeError("environment does not expose a FactorioInstance")
+    namespaces=getattr(instance,"namespaces",None)
+    if not isinstance(namespaces,(list,tuple)) or not namespaces:
+        raise TypeError("environment does not expose FLE namespaces")
+
+    for namespace in namespaces:
+        original=getattr(namespace,tool_name,None)
+        execute=getattr(original,"execute",None)
+        if not callable(execute):
+            raise TypeError(f"namespace {tool_name!r} does not expose execute()")
+
+        def bound(
+            *args: Any,
+            _execute: Callable[...,Any]=execute,
+            _instance: Any=instance,
+            **kwargs: Any,
+        ) -> tuple[float,float]:
+            response,_execution_time=_execute(*args,**kwargs)
+            if isinstance(response,str):
+                raise TypeError(f"could not get player score: {response}")
+            if not isinstance(response,Mapping):
+                raise TypeError(
+                    f"unexpected FLE score payload: {type(response).__name__}"
+                )
+            raw_player=response.get("player")
+            raw_automated=response.get("automated",0)
+            if raw_player is None:
+                player_score=0.0
+            else:
+                player_score=float(raw_player)
+                initial=float(getattr(_instance,"initial_score",0) or 0)
+                player_score-=initial
+            return player_score,float(raw_automated or 0)
+
+        setattr(namespace,tool_name,bound)
+    return tool_name
 
 
 def bind_tick_accurate_sleep_tool(

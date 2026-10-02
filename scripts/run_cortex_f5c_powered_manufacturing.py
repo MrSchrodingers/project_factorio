@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
@@ -32,6 +33,8 @@ from factorio_ai_lab.dashboard.state import FactorioObserver
 from factorio_ai_lab.integrations.fle import (
     TransactionalFLEExecutor,
     attach_live_factorio_environment,
+    bind_safe_score_tool,
+    bind_tick_accurate_sleep_tool,
     enforce_minimum_eval_timeout,
 )
 from factorio_ai_lab.paths import RUNS_DIR, code_revision
@@ -47,6 +50,7 @@ ARENA="cortex_f5c_powered_manufacturing"
 OWNER="run_cortex_f5c_powered_manufacturing"
 DEFAULT_OPTION_SECONDS=720
 DEFAULT_GRANT_TTL_SECONDS=900
+SERVER_SETTINGS=Path("/srv/factorio-ai-lab/.fle-local/config/server-settings.json")
 
 ServiceStateReader=Callable[[],dict[str,str]]
 
@@ -480,6 +484,115 @@ def _measure(namespace: Any,prepared: Any) -> dict[str,Any]:
     return values
 
 
+def _configured_autosave_interval() -> int:
+    payload=_load(SERVER_SETTINGS)
+    value=payload.get("autosave_interval")
+    if not isinstance(value,int) or isinstance(value,bool) or value<0:
+        raise RuntimeError(
+            f"configured autosave_interval unavailable in {SERVER_SETTINGS}"
+        )
+    return value
+
+
+def _open_control_rcon() -> Any:
+    from factorio_rcon import RCONClient
+
+    address=os.getenv("FACTORIO_SERVER_ADDRESS") or "127.0.0.1"
+    raw_port=os.getenv("FACTORIO_SERVER_PORT")
+    port=27000 if raw_port is None else int(raw_port)
+    return RCONClient(address,port,"factorio")
+
+
+def _autosave_interval(client: Any) -> int:
+    response=client.send_command("/config get autosave-interval")
+    text="" if response is None else str(response).strip()
+    if "disabled" in text.lower():
+        return 0
+    matches=re.findall(r"\b(\d+)\b",text)
+    if not matches:
+        raise RuntimeError(f"unable to parse autosave interval: {text!r}")
+    return int(matches[-1])
+
+
+def _set_autosave_interval(client: Any,minutes: int) -> dict[str,Any]:
+    if not isinstance(minutes,int) or isinstance(minutes,bool) or minutes<0:
+        raise ValueError("autosave interval must be a non-negative integer")
+    response=client.send_command(f"/config set autosave-interval {minutes}")
+    text="" if response is None else str(response).strip()
+    lowered=text.lower()
+    if any(token in lowered for token in ("unknown command","error","invalid")):
+        raise RuntimeError(f"failed to set autosave interval: {text!r}")
+    observed=_autosave_interval(client)
+    if observed!=minutes:
+        raise RuntimeError(
+            f"autosave interval mismatch: requested={minutes} observed={observed}"
+        )
+    return {
+        "requested_minutes":minutes,
+        "observed_minutes":observed,
+        "response":text,
+    }
+
+
+def _pause_factorio_for_quiesce(instance: Any) -> dict[str,Any]:
+    response=instance.rcon_client.send_command(
+        "/sc game.tick_paused = true; "
+        "rcon.print(game.tick_paused and 'true' or 'false')"
+    )
+    text="" if response is None else str(response).strip().lower()
+    if text!="true":
+        raise RuntimeError(f"failed to pause Factorio before quiesce: {text!r}")
+    game_control=getattr(instance,"game_control",None)
+    if game_control is not None and hasattr(game_control,"_is_paused"):
+        game_control._is_paused=True
+    return {"status":"paused","verified":True}
+
+
+def _quiesce_fle_storage(instance: Any) -> dict[str,Any]:
+    command=r"""/sc local seen={}
+local removed=0
+local function scrub(value)
+  if type(value)~="table" or seen[value] then return end
+  seen[value]=true
+  local drop={}
+  for key,item in pairs(value) do
+    if type(key)=="function" or type(item)=="function" then
+      drop[#drop+1]=key
+    elseif type(item)=="table" then
+      scrub(item)
+    end
+  end
+  for _,key in ipairs(drop) do
+    value[key]=nil
+    removed=removed+1
+  end
+end
+scrub(storage)
+storage.__lua_script_checksums={}
+rcon.print(helpers.table_to_json({ok=true,removed_functions=removed}))
+"""
+    response=instance.rcon_client.send_command(command)
+    payload=json.loads("" if response is None else str(response))
+    if payload.get("ok") is not True:
+        raise RuntimeError(f"FLE storage quiesce failed: {payload!r}")
+    removed=payload.get("removed_functions")
+    if not isinstance(removed,int) or isinstance(removed,bool) or removed<=0:
+        raise RuntimeError("FLE storage quiesce removed no Lua functions")
+    return {
+        "status":"quiesced",
+        "removed_functions":removed,
+        "checksums_cleared":True,
+    }
+
+
+def _server_save(client: Any,name: str) -> str:
+    response=client.send_command(f"/server-save {name}")
+    text="" if response is None else str(response).strip()
+    if "Saving the map" not in text:
+        raise RuntimeError(f"Factorio save command failed for {name!r}: {text!r}")
+    return text
+
+
 def run_powered_manufacturing(
     *,
     artifact: Path,
@@ -524,14 +637,32 @@ def run_powered_manufacturing(
         "started_at":utc_now(),
     }
     env=None
+    instance=None
+    executor=None
+    checkpoint=None
+    control=None
+    autosave_original=None
     with FactorioWorldLease(run_id=run_id,arena=ARENA,owner=OWNER) as lease:
         record["world_lease"]=dict(lease.active_attestation())
         _write(artifact,record)
         try:
+            control=_open_control_rcon()
+            autosave_observed=_autosave_interval(control)
+            autosave_original=_configured_autosave_interval()
+            record["autosave_guard"]={
+                "observed_before_minutes":autosave_observed,
+                "configured_restore_minutes":autosave_original,
+                "suspend":_set_autosave_interval(control,0),
+                "status":"suspended",
+            }
+            _write(artifact,record)
+
             env=attach_live_factorio_environment()
             record["fle_eval_timeout_s"]=enforce_minimum_eval_timeout(
                 env,minimum_seconds=720
             )
+            record["fle_safe_score_tool"]=bind_safe_score_tool(env)
+            record["fle_tick_accurate_sleep_tool"]=bind_tick_accurate_sleep_tool(env)
             executor=TransactionalFLEExecutor(
                 env,
                 runtime_context=lambda:{
@@ -718,6 +849,10 @@ def run_powered_manufacturing(
                 and continuity_gate["automation_research_completed"] is True
                 and survival_gate["passed"] is True
             )
+            outer_gate_rollback=None
+            if accepted and not promoted:
+                outer_gate_rollback=executor.restore_checkpoint(checkpoint)
+                after=_measure(namespace,plan.prepared)
             record.update({
                 "status":"completed" if promoted else "rejected",
                 "finished_at":utc_now(),
@@ -731,6 +866,7 @@ def run_powered_manufacturing(
                 ),
                 "transaction_committed":promoted,
                 "intervention_snapshot":executor.intervention_snapshot(),
+                "outer_gate_rollback":outer_gate_rollback,
                 "trajectory":{
                     "state":before,
                     "candidate_options":[plan.to_dict()],
@@ -779,8 +915,80 @@ def run_powered_manufacturing(
             _write(artifact,record)
             return record
         finally:
-            if env is not None:
-                env.close()
+            cleanup: dict[str,Any]={}
+            if env is not None and instance is not None:
+                try:
+                    cleanup["pause_before_quiesce"]=_pause_factorio_for_quiesce(
+                        instance
+                    )
+                    cleanup["storage_quiesce"]=_quiesce_fle_storage(instance)
+                    save_name=(
+                        "cortex-f5c-powered-manufacturing"
+                        if record.get("status")=="completed"
+                        else "cortex-f5c-powered-manufacturing-rollback"
+                    )
+                    cleanup["save_name"]=save_name
+                    cleanup["save_response"]=_server_save(
+                        instance.rcon_client,
+                        save_name,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    cleanup["persistence_error"]={
+                        "type":type(exc).__name__,
+                        "message":str(exc),
+                    }
+                try:
+                    env.close()
+                except Exception as exc:  # noqa: BLE001
+                    cleanup["env_close_error"]={
+                        "type":type(exc).__name__,
+                        "message":str(exc),
+                    }
+            if autosave_original is not None:
+                restore_client=control
+                restore_error=None
+                try:
+                    if restore_client is None:
+                        restore_client=_open_control_rcon()
+                    cleanup["autosave_restore"]=_set_autosave_interval(
+                        restore_client,
+                        autosave_original,
+                    )
+                    if "autosave_guard" in record:
+                        record["autosave_guard"]["status"]="restored"
+                except Exception as exc:  # noqa: BLE001
+                    restore_error=exc
+                    if restore_client is control:
+                        try:
+                            restore_client=_open_control_rcon()
+                            cleanup["autosave_restore"]=_set_autosave_interval(
+                                restore_client,
+                                autosave_original,
+                            )
+                            if "autosave_guard" in record:
+                                record["autosave_guard"]["status"]="restored"
+                            restore_error=None
+                        except Exception as retry_exc:  # noqa: BLE001
+                            restore_error=retry_exc
+                    if restore_error is not None:
+                        cleanup["autosave_restore_error"]={
+                            "type":type(restore_error).__name__,
+                            "message":str(restore_error),
+                        }
+                seen=set()
+                for client in (restore_client,control):
+                    if client is None or id(client) in seen:
+                        continue
+                    seen.add(id(client))
+                    close=getattr(client,"close",None)
+                    if callable(close):
+                        try:
+                            close()
+                        except OSError:
+                            pass
+            if cleanup:
+                record["runtime_cleanup"]=cleanup
+                _write(artifact,record)
 
 
 def main() -> int:

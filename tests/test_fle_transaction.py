@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from factorio_ai_lab.integrations.fle import (
     TransactionalFLEExecutor,
+    bind_safe_score_tool,
     enforce_minimum_eval_timeout,
     enforce_pathfinding_retry_floor,
 )
@@ -178,6 +179,39 @@ class FakeInstance:
         return expr, agent_idx, timeout
 
 
+class FakeScoreTool:
+    def __init__(self,response) -> None:
+        self.response=response
+
+    def execute(self,*args,**kwargs):
+        return self.response,0.0
+
+
+class FakeScoreNamespace:
+    def __init__(self,response) -> None:
+        self.score=FakeScoreTool(response)
+
+
+class FakeScoreInstance:
+    def __init__(self,response,initial_score: float) -> None:
+        self.initial_score=initial_score
+        self.namespaces=[FakeScoreNamespace(response)]
+
+
+class FakeScoreEnvironment:
+    def __init__(self,response,initial_score: float=0.0) -> None:
+        self.instance=FakeScoreInstance(response,initial_score)
+        self.unwrapped=self
+
+
+class RaisingEnvironment(FakeEnvironment):
+    def step(self,action):
+        assert isinstance(action,FakeAction)
+        self.last_action=action
+        self.state=f"{self.state}|{action.code}"
+        raise KeyError("player")
+
+
 class FakeWrappedEnvironment:
     def __init__(self) -> None:
         self.instance = FakeInstance()
@@ -263,6 +297,45 @@ class TransactionalFLEExecutorTests(unittest.TestCase):
         self.assertEqual(applied_again,40)
         tool.get_path(9)
         self.assertEqual(original.attempts[-1],40)
+
+    def test_safe_score_binding_handles_missing_player(self) -> None:
+        env=FakeScoreEnvironment({"automated":7},initial_score=12)
+        name=bind_safe_score_tool(env)
+
+        player,automated=env.instance.namespaces[0].score()
+
+        self.assertEqual(name,"score")
+        self.assertEqual(player,0.0)
+        self.assertEqual(automated,7.0)
+
+    def test_safe_score_binding_preserves_present_player_semantics(self) -> None:
+        env=FakeScoreEnvironment({"player":20,"automated":7},initial_score=12)
+        bind_safe_score_tool(env)
+
+        player,automated=env.instance.namespaces[0].score()
+
+        self.assertEqual(player,8.0)
+        self.assertEqual(automated,7.0)
+
+    def test_step_exception_restores_checkpoint_before_reraising(self) -> None:
+        env=RaisingEnvironment()
+        executor=TransactionalFLEExecutor(env,action_factory=fake_action_factory)
+        executor.game_state="checkpoint"
+        env.state="checkpoint"
+
+        with self.assertRaisesRegex(KeyError,"player"):
+            executor.execute(
+                "mutate()",
+                accept=lambda _:True,
+                use_checkpoint_for_action=False,
+            )
+
+        self.assertEqual(env.state,"checkpoint")
+        self.assertEqual(executor.game_state,"checkpoint")
+        integrity=executor.rollback_integrity_snapshot()
+        self.assertIsNotNone(integrity)
+        assert integrity is not None
+        self.assertEqual(integrity["status"],"not_applicable")
 
     def test_commits_accepted_state(self) -> None:
         env = FakeEnvironment()
