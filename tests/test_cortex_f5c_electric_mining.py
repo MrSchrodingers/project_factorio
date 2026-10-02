@@ -33,7 +33,7 @@ def electric_plan():
         kind=OptionKind.ESTABLISH_ELECTRIC_MINING,
         goal="prove causal powered electric extraction",
         provenance=provenance,
-        budget=OptionBudget(requested_ticks=1080*60),
+        budget=OptionBudget(requested_ticks=1140*60),
         authority=ActionAuthority.SHADOW,
     )
     action=ActionRequest(
@@ -90,6 +90,8 @@ def test_electric_mining_option_is_inert_and_schema_aligned() -> None:
     assert plan.execute_authorized is False
     assert plan.prepared.contract_version=="cortex_structural_ops_v12"
     assert plan.prepared.binding=="cortex.structural.electric_mining"
+    establish=plan.prepared.operations[0]
+    assert establish.parameters["coal_stock_target"]==38
     assert plan.prepared.preflight["native_research_queue"] is True
     assert (
         plan.prepared.preflight["natural_resource_transaction"]
@@ -105,7 +107,7 @@ def test_electric_mining_option_is_inert_and_schema_aligned() -> None:
 
 def test_compiled_electric_mining_is_causal_and_self_validating() -> None:
     plan=electric_plan()
-    compiled=compile_structural_action(plan.prepared,settle_seconds=1080)
+    compiled=compile_structural_action(plan.prepared,settle_seconds=1140)
 
     assert compiled.ready
     assert compiled.compiled is not None
@@ -128,6 +130,8 @@ def test_compiled_electric_mining_is_causal_and_self_validating() -> None:
     assert "cortex_power_survives_load" in code
     assert "cortex_powered_manufacturing_survives" in code
     assert "cortex_automation_science_survives" in code
+    assert "for cortex_coal_round in range(6):" in code
+    assert "sleep(30)" in code
     assert "cortex_processor_output" not in code
     assert "cortex_expected_product" not in code
 
@@ -135,12 +139,12 @@ def test_compiled_electric_mining_is_causal_and_self_validating() -> None:
 def test_electric_mining_budget_covers_maximum_internal_windows() -> None:
     plan=electric_plan()
 
-    refused=compile_structural_action(plan.prepared,settle_seconds=1078)
+    refused=compile_structural_action(plan.prepared,settle_seconds=1138)
     assert refused.ready is False
     assert refused.refusal is not None
-    assert "1079" in refused.refusal.detail
+    assert "1139" in refused.refusal.detail
 
-    accepted=compile_structural_action(plan.prepared,settle_seconds=1079)
+    accepted=compile_structural_action(plan.prepared,settle_seconds=1139)
     assert accepted.ready is True
 
 
