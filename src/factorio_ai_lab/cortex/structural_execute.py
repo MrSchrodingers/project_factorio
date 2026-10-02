@@ -971,6 +971,7 @@ def compile_structural_action(
         STEAM_POWER_CONTRACT_VERSION,
         COPPER_CHAIN_CONTRACT_VERSION,
         AUTOMATION_SCIENCE_CONTRACT_VERSION,
+        POWERED_MANUFACTURING_CONTRACT_VERSION,
         ROLLBACK_RECOVERY_CONTRACT_VERSION,
     }:
         # Specialized contracts contain their own causal validation windows.

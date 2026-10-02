@@ -126,6 +126,8 @@ def test_compiled_powered_manufacturing_is_causal_and_dual_output() -> None:
     assert "cortex_science_replenished" in code
     assert "cortex_automation_science_survives" in code
     assert "cortex_steam_power_survives" in code
+    assert "cortex_processor_output" not in code
+    assert "cortex_expected_product" not in code
 
 
 def test_powered_manufacturing_budget_covers_internal_windows() -> None:
