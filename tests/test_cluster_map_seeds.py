@@ -9,6 +9,7 @@ there Factorio accepts the flag and loads its shipped map anyway.
 from __future__ import annotations
 
 import importlib.util
+import json
 import pathlib
 from typing import Any
 
@@ -115,3 +116,56 @@ def test_generated_factorio_services_restart_unless_stopped(tmp_path) -> None:
         }
         for service in data["services"].values()
     )
+
+
+def test_persistent_command_loads_latest_save_before_scenario() -> None:
+    command=CLUSTER.command_with_persistent_world(
+        _BASE_COMMAND,
+        "open_world",
+    )
+    assert '--start-server-load-latest' in command
+    assert 'CORTEX_START_MODE="--start-server-load-scenario open_world"' in command
+    assert "$$CORTEX_START_MODE" in command
+    assert " $CORTEX_START_MODE " not in command
+    assert "find /factorio/saves" in command
+    assert command.count("--start-server-load-scenario open_world")==1
+
+
+def test_generated_factorio_services_persist_world_and_autosave(tmp_path) -> None:
+    path=CLUSTER.generate_compose(
+        tmp_path,
+        instances=1,
+        scenario="default_lab_scenario",
+    )
+    data=yaml.safe_load(path.read_text(encoding="utf-8"))
+    service=data["services"]["factorio_0"]
+
+    persistent=[
+        mount for mount in service["volumes"]
+        if isinstance(mount,dict) and mount.get("target")=="/factorio"
+    ]
+    assert persistent==[
+        {"type":"volume","source":"factorio_0_data","target":"/factorio"}
+    ]
+    assert data["volumes"]["factorio_0_data"]["name"]==(
+        "factorio-ai-lab-fle-factorio_0-data"
+    )
+    config_mount=[
+        mount for mount in service["volumes"]
+        if isinstance(mount,dict) and mount.get("target")=="/opt/factorio/config"
+    ]
+    assert len(config_mount)==1
+    assert pathlib.Path(config_mount[0]["source"])==tmp_path/".fle-local"/"config"
+
+    settings=json.loads(
+        (tmp_path/".fle-local"/"config"/"server-settings.json").read_text()
+    )
+    assert settings["autosave_interval"]==5
+    assert settings["autosave_slots"]==3
+    assert settings["autosave_only_on_server"] is True
+    assert settings["non_blocking_saving"] is False
+
+    command=service["command"]
+    assert "--start-server-load-latest" in command
+    assert "--start-server-load-scenario default_lab_scenario" in command
+    assert "$$CORTEX_START_MODE" in command

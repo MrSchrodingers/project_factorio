@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
+import shutil
 import subprocess
 from importlib import resources
 from pathlib import Path
@@ -21,6 +23,9 @@ CANNED_MAP_SCENARIOS = frozenset({"default_lab_scenario"})
 
 DOCKER_LOG_MAX_SIZE = "50m"
 DOCKER_LOG_MAX_FILE = "3"
+AUTOSAVE_INTERVAL_MINUTES = 5
+AUTOSAVE_SLOTS = 3
+PERSISTENT_VOLUME_PREFIX = "factorio-ai-lab-fle"
 
 _MAP_GEN_SEED_FLAG = re.compile(r"--map-gen-seed\s+\d+")
 
@@ -42,6 +47,52 @@ def command_with_map_gen_seed(command: str, seed: int) -> str:
     if anchor not in command:
         raise ValueError("service command has no anchor to insert --map-gen-seed")
     return command.replace(anchor, f" {replacement}{anchor}", 1)
+
+
+def command_with_persistent_world(command: str, scenario: str) -> str:
+    """Load the newest persisted save, falling back to the scenario once."""
+
+    startup=f"--start-server-load-scenario {scenario}"
+    if command.count(startup)!=1:
+        raise ValueError(
+            f"service command must contain exactly one {startup!r}"
+        )
+    exec_anchor="exec /opt/factorio/bin/x64/factorio "
+    if exec_anchor not in command:
+        raise ValueError("service command has no Factorio exec anchor")
+    bootstrap=(
+        'if find /factorio/saves -maxdepth 1 -type f -name "*.zip" '
+        '-print -quit 2>/dev/null | grep -q .; '
+        'then CORTEX_START_MODE="--start-server-load-latest"; '
+        f'else CORTEX_START_MODE="--start-server-load-scenario {scenario}"; fi; '
+    )
+    command=command.replace(startup,"$$CORTEX_START_MODE",1)
+    return command.replace(exec_anchor,bootstrap+exec_anchor,1)
+
+
+def _persistent_config_dir(root: Path) -> Path:
+    return root/".fle-local"/"config"
+
+
+def _prepare_persistent_config(root: Path, package_config_dir: Path) -> Path:
+    target=_persistent_config_dir(root)
+    target.mkdir(parents=True,exist_ok=True)
+    shutil.copytree(package_config_dir,target,dirs_exist_ok=True)
+    settings_path=target/"server-settings.json"
+    settings=json.loads(settings_path.read_text(encoding="utf-8"))
+    settings["autosave_interval"]=AUTOSAVE_INTERVAL_MINUTES
+    settings["autosave_slots"]=AUTOSAVE_SLOTS
+    settings["autosave_only_on_server"]=True
+    settings["non_blocking_saving"]=False
+    settings_path.write_text(
+        json.dumps(settings,indent=2,sort_keys=False)+"\n",
+        encoding="utf-8",
+    )
+    return target
+
+
+def _persistent_volume_name(service_name: str) -> str:
+    return f"{PERSISTENT_VOLUME_PREFIX}-{service_name}-data"
 
 
 def apply_map_gen_seeds(
@@ -101,8 +152,13 @@ def generate_compose(
         pkg_config_dir=Path(package_root / "config"),
     )
     data = generator.compose_dict(instances)
+    persistent_config=_prepare_persistent_config(
+        root,
+        Path(package_root/"config"),
+    )
+    declared_volumes=data.setdefault("volumes",{})
 
-    for service in data["services"].values():
+    for service_name,service in data["services"].items():
         local_ports: list[str] = []
         for mapping in service["ports"]:
             host, container_proto = mapping.split(":", 1)
@@ -116,6 +172,35 @@ def generate_compose(
                 "max-file": DOCKER_LOG_MAX_FILE,
             },
         }
+        service["command"]=command_with_persistent_world(
+            service["command"],
+            scenario,
+        )
+        volume_key=f"{service_name}_data"
+        declared_volumes[volume_key]={
+            "name":_persistent_volume_name(service_name),
+        }
+        mounts=service.setdefault("volumes",[])
+        mounts=[
+            mount
+            for mount in mounts
+            if not (
+                isinstance(mount,dict)
+                and mount.get("target")=="/factorio"
+            )
+        ]
+        for mount in mounts:
+            if (
+                isinstance(mount,dict)
+                and mount.get("target")=="/opt/factorio/config"
+            ):
+                mount["source"]=str(persistent_config)
+        mounts.append({
+            "type":"volume",
+            "source":volume_key,
+            "target":"/factorio",
+        })
+        service["volumes"]=mounts
 
     if seeds:
         apply_map_gen_seeds(data, seeds, scenario=scenario)
