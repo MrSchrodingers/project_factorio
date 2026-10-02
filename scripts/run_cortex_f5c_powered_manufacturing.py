@@ -534,6 +534,22 @@ def _set_autosave_interval(client: Any,minutes: int) -> dict[str,Any]:
     }
 
 
+def _ensure_factorio_unpaused(instance: Any) -> dict[str,Any]:
+    response=instance.rcon_client.send_command(
+        "/sc game.tick_paused = false; "
+        "rcon.print(game.tick_paused and 'true' or 'false')"
+    )
+    text="" if response is None else str(response).strip().lower()
+    if text!="false":
+        raise RuntimeError(
+            f"failed to unpause Factorio for powered manufacturing: {text!r}"
+        )
+    game_control=getattr(instance,"game_control",None)
+    if game_control is not None and hasattr(game_control,"_is_paused"):
+        game_control._is_paused=False
+    return {"status":"unpaused","verified":True}
+
+
 def _pause_factorio_for_quiesce(instance: Any) -> dict[str,Any]:
     response=instance.rcon_client.send_command(
         "/sc game.tick_paused = true; "
@@ -659,6 +675,7 @@ def run_powered_manufacturing(
 
             env=attach_live_factorio_environment()
             instance=env.unwrapped.instance
+            record["fle_attach_unpause"]=_ensure_factorio_unpaused(instance)
             record["fle_eval_timeout_s"]=enforce_minimum_eval_timeout(
                 env,minimum_seconds=720
             )
