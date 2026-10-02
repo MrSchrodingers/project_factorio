@@ -212,6 +212,7 @@ def test_replay_source_uses_fresh_fle_environment_per_step() -> None:
     assert "env.close()" in source
     assert "_set_autosave_interval(control,0)" in source
     assert "bind_tick_accurate_sleep_tool(env)" in source
+    assert "_ensure_factorio_unpaused(instance)" in source
     assert "save_runtime_rehydrate" not in source
     assert "_rehydrate_fle_runtime" not in source
 
@@ -260,3 +261,17 @@ def test_prior_replay_progress_counts_only_contiguous_persisted_prefix(
     )
     current=audits/"cortex_f5c_promoted_baseline_replay_1773655334_current.json"
     assert REPLAY._latest_prior_replay_progress(1773655334,current)==2
+
+
+class _FakeGameControl:
+    def __init__(self) -> None:
+        self._is_paused=True
+
+
+def test_ensure_factorio_unpaused_verifies_remote_state() -> None:
+    instance=_FakeInstance(["false"])
+    instance.game_control=_FakeGameControl()
+    result=REPLAY._ensure_factorio_unpaused(instance)
+    assert result=={"status":"unpaused","verified":True}
+    assert instance.game_control._is_paused is False
+    assert "game.tick_paused = false" in instance.rcon_client.commands[0]

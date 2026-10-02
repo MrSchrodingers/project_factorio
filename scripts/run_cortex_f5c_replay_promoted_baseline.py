@@ -674,6 +674,20 @@ def preflight(
     }
 
 
+def _ensure_factorio_unpaused(instance: Any) -> dict[str,Any]:
+    response=instance.rcon_client.send_command(
+        "/sc game.tick_paused = false; "
+        "rcon.print(game.tick_paused and 'true' or 'false')"
+    )
+    text="" if response is None else str(response).strip().lower()
+    if text!="false":
+        raise RuntimeError(f"failed to unpause Factorio for replay: {text!r}")
+    game_control=getattr(instance,"game_control",None)
+    if game_control is not None and hasattr(game_control,"_is_paused"):
+        game_control._is_paused=False
+    return {"status":"unpaused","verified":True}
+
+
 def _pause_factorio_for_quiesce(instance: Any) -> dict[str,Any]:
     response=instance.rcon_client.send_command(
         "/sc game.tick_paused = true; "
@@ -801,6 +815,8 @@ def _attach_replay_environment(
     run_id: str,
 ) -> tuple[Any,TransactionalFLEExecutor,Any,Any,str]:
     env=attach_live_factorio_environment()
+    instance=env.unwrapped.instance
+    unpause=_ensure_factorio_unpaused(instance)
     enforce_minimum_eval_timeout(env,minimum_seconds=900)
     enforce_pathfinding_retry_floor(env,minimum_attempts=40)
     tool_name=bind_fast_reposition_tool(env)
@@ -814,10 +830,17 @@ def _attach_replay_environment(
             "progress":"F5-C",
         },
     )
-    instance=env.unwrapped.instance
     namespace=instance.namespace
     executor.game_state=GameState.from_instance(instance)
-    return env,executor,instance,namespace,tool_name,tick_sleep_tool
+    return (
+        env,
+        executor,
+        instance,
+        namespace,
+        tool_name,
+        tick_sleep_tool,
+        unpause,
+    )
 
 def run_replay(
     *,
@@ -912,9 +935,11 @@ def run_replay(
                     namespace,
                     tool_name,
                     tick_sleep_tool,
+                    unpause,
                 )=_attach_replay_environment(run_id=run_id)
                 record.setdefault("fle_transactional_reposition_tool",tool_name)
                 record.setdefault("fle_tick_accurate_sleep_tool",tick_sleep_tool)
+                record.setdefault("fle_attach_unpause",unpause)
 
                 observer=FactorioObserver()
                 try:
