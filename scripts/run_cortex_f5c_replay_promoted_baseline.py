@@ -438,10 +438,18 @@ def _latest_prior_replay_progress(seed: int,current_artifact: Path) -> int:
         if not isinstance(steps,list):
             continue
         prefix=0
-        for row in steps:
-            if not isinstance(row,Mapping) or row.get("status")!="accepted":
+        for index,row in enumerate(steps,start=1):
+            if not isinstance(row,Mapping):
                 break
-            prefix+=1
+            persisted=row.get("replay_prefix_after")
+            if (
+                row.get("status")!="accepted"
+                or not isinstance(persisted,int)
+                or isinstance(persisted,bool)
+                or persisted<index
+            ):
+                break
+            prefix=index
         best=max(best,prefix)
     return best
 

@@ -212,3 +212,50 @@ def test_save_world_refuses_quiesce_without_removed_functions() -> None:
         REPLAY._save_world(instance,"unsafe-save")
     assert instance.rcon_client.commands==[instance.rcon_client.commands[0]]
     assert "/server-save" not in instance.rcon_client.commands[0]
+
+
+def test_prior_replay_progress_requires_persisted_prefix(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    audits=tmp_path/"audits"
+    audits.mkdir()
+    monkeypatch.setattr(REPLAY,"RUNS_DIR",tmp_path)
+    failed=audits/"cortex_f5c_promoted_baseline_replay_1773655334_old.json"
+    failed.write_text(
+        __import__("json").dumps({
+            "steps":[{
+                "index":1,
+                "capability":"iron_extraction",
+                "status":"accepted",
+                "replay_prefix_after":0,
+                "world_entity_count_after":0,
+            }],
+            "technical_replay_completed":False,
+        }),
+        encoding="utf-8",
+    )
+    current=audits/"cortex_f5c_promoted_baseline_replay_1773655334_current.json"
+    assert REPLAY._latest_prior_replay_progress(1773655334,current)==0
+
+
+def test_prior_replay_progress_counts_only_contiguous_persisted_prefix(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    audits=tmp_path/"audits"
+    audits.mkdir()
+    monkeypatch.setattr(REPLAY,"RUNS_DIR",tmp_path)
+    prior=audits/"cortex_f5c_promoted_baseline_replay_1773655334_old.json"
+    prior.write_text(
+        __import__("json").dumps({
+            "steps":[
+                {"index":1,"status":"accepted","replay_prefix_after":1},
+                {"index":2,"status":"accepted","replay_prefix_after":2},
+                {"index":3,"status":"accepted","replay_prefix_after":2},
+            ],
+        }),
+        encoding="utf-8",
+    )
+    current=audits/"cortex_f5c_promoted_baseline_replay_1773655334_current.json"
+    assert REPLAY._latest_prior_replay_progress(1773655334,current)==2
