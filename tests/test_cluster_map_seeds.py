@@ -126,7 +126,9 @@ def test_persistent_command_loads_latest_save_before_scenario() -> None:
     assert '--start-server-load-latest' in command
     assert 'CORTEX_START_MODE="--start-server-load-scenario open_world"' in command
     assert "$$CORTEX_START_MODE" in command
+    assert "mkdir -p /factorio/saves" in command
     assert " $CORTEX_START_MODE " not in command
+    assert "mkdir -p /factorio/saves" in command
     assert "find /factorio/saves" in command
     assert command.count("--start-server-load-scenario open_world")==1
 

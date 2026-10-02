@@ -61,6 +61,7 @@ def command_with_persistent_world(command: str, scenario: str) -> str:
     if exec_anchor not in command:
         raise ValueError("service command has no Factorio exec anchor")
     bootstrap=(
+        'mkdir -p /factorio/saves && '
         'if find /factorio/saves -maxdepth 1 -type f -name "*.zip" '
         '-print -quit 2>/dev/null | grep -q .; '
         'then CORTEX_START_MODE="--start-server-load-latest"; '
