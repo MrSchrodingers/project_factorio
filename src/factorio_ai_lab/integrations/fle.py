@@ -345,21 +345,57 @@ def list_environments() -> list[str]:
     return list(list_available_environments())
 
 
+_LIVE_ATTACH_INIT_SCRIPTS=(
+    "lualib_util",
+    "utils",
+    "alerts",
+    "connection_points",
+    "recipe_fluid_connection_mappings",
+    "serialize",
+    "serialize_direction_fix",
+)
+
+
+def _bootstrap_live_fle_runtime(instance: Any, *, fast: bool) -> None:
+    """Restore FLE runtime functions without resetting persistent WORLD state."""
+    instance.rcon_client.send_command(
+        f"/sc storage.fast = {str(bool(fast)).lower()}"
+    )
+    instance.first_namespace._create_agent_characters(instance.num_agents)
+    for script_name in _LIVE_ATTACH_INIT_SCRIPTS:
+        instance.lua_script_manager.load_init_into_game(script_name)
+
+
 def attach_live_factorio_environment(
     *,
     address: str | None=None,
     tcp_port: int | None=None,
 ) -> Any:
-    """Attach a FactorioGymEnv to the existing WORLD without task setup/reset.
+    """Attach FLE to the existing WORLD without invoking Factorio reset.
 
-    FLE's registry factory provisions a task by calling TaskABC.setup(), which
-    resets the Factorio instance. Continuation experiments must never use that
-    factory because the live WORLD is itself the promoted capability state.
+    FactorioInstance.__init__ normally dispatches to initialise(), whose stock
+    implementation calls the FLE reset action. Even with clear_entities=False
+    that reset clears production statistics, rewrites agent inventory,
+    regenerates resource patches and resets force research.
+
+    A local subclass overrides only initialise. It reloads the Lua functions
+    that quiesced prior runs deliberately remove, but never calls the reset,
+    chunk-generation or collision-clear paths.
     """
     import os
 
     from fle.env import FactorioInstance
     from fle.env.gym_env.environment import FactorioGymEnv
+
+    class LiveAttachFactorioInstance(FactorioInstance):
+        def initialise(
+            self,
+            fast: bool=True,
+            all_technologies_researched: bool=True,
+            clear_entities: bool=True,
+        ) -> None:
+            del all_technologies_researched,clear_entities
+            _bootstrap_live_fle_runtime(self,fast=fast)
 
     resolved_address=(
         address
@@ -372,7 +408,7 @@ def attach_live_factorio_environment(
         else os.getenv("FACTORIO_SERVER_PORT")
     )
     resolved_port=27000 if raw_port is None else int(raw_port)
-    instance=FactorioInstance(
+    instance=LiveAttachFactorioInstance(
         address=resolved_address,
         tcp_port=resolved_port,
         num_agents=1,
