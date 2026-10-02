@@ -423,10 +423,9 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
         "    raise RuntimeError('baseline recovery iron buffer seed incomplete')",
     ])
 
-    # Place buffers before miners, and create each missing vulnerable entity
-    # with its initial stock atomically. The coal extractor is placed last so
-    # the accepted drill-to-chest cell becomes live only when its destination
-    # already exists.
+    # Create each missing vulnerable entity with its initial stock atomically.
+    # The hostile coal cell is assembled at the end, with its output buffer
+    # placed last and inspected immediately.
     if "iron_buffer" in missing_set:
         lines.extend([
             "cortex_place_exact_entity(",
@@ -455,35 +454,6 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
         lines.append(
             f"cortex_coal_quarantine=get_entity({_prototype('wooden-chest')},{parsed['coal_quarantine']})"
         )
-
-    if "coal_buffer" in missing_set:
-        lines.extend([
-            "cortex_place_exact_entity(",
-            f"    {parsed['coal_buffer']},'wooden-chest',",
-            f"    initial_items={{'coal':{coal_stock_target}}}",
-            ")",
-            f"cortex_coal_buffer=get_entity({_prototype('wooden-chest')},{parsed['coal_buffer']})",
-            f"cortex_recovery_endogenous_coal_buffered={coal_stock_target}",
-        ])
-    else:
-        lines.extend([
-            (
-                "cortex_recovery_existing_coal_stock=cortex_inspect_exact_item("
-                f"{parsed['coal_buffer']},'wooden-chest','coal')"
-            ),
-            (
-                f"cortex_recovery_coal_shortfall=max(0,{coal_stock_target}-"
-                "cortex_recovery_existing_coal_stock)"
-            ),
-            "if cortex_recovery_coal_shortfall>0:",
-            "    cortex_recovery_endogenous_coal_buffered=cortex_deposit_exact_item(",
-            f"        {parsed['coal_buffer']},'wooden-chest','coal',",
-            "        quantity=cortex_recovery_coal_shortfall",
-            "    )",
-            "else:",
-            "    cortex_recovery_endogenous_coal_buffered=0",
-            f"cortex_coal_buffer=get_entity({_prototype('wooden-chest')},{parsed['coal_buffer']})",
-        ])
 
     if "iron_extractor" in missing_set:
         lines.extend([
@@ -517,6 +487,35 @@ def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
             "cortex_recovery_coal_seed=cortex_deposit_exact_item(",
             f"    {parsed['coal_extractor']},'burner-mining-drill','coal',quantity=2",
             ")",
+        ])
+
+    if "coal_buffer" in missing_set:
+        lines.extend([
+            "cortex_place_exact_entity(",
+            f"    {parsed['coal_buffer']},'wooden-chest',",
+            f"    initial_items={{'coal':{coal_stock_target}}}",
+            ")",
+            f"cortex_coal_buffer=get_entity({_prototype('wooden-chest')},{parsed['coal_buffer']})",
+            f"cortex_recovery_endogenous_coal_buffered={coal_stock_target}",
+        ])
+    else:
+        lines.extend([
+            (
+                "cortex_recovery_existing_coal_stock=cortex_inspect_exact_item("
+                f"{parsed['coal_buffer']},'wooden-chest','coal')"
+            ),
+            (
+                f"cortex_recovery_coal_shortfall=max(0,{coal_stock_target}-"
+                "cortex_recovery_existing_coal_stock)"
+            ),
+            "if cortex_recovery_coal_shortfall>0:",
+            "    cortex_recovery_endogenous_coal_buffered=cortex_deposit_exact_item(",
+            f"        {parsed['coal_buffer']},'wooden-chest','coal',",
+            "        quantity=cortex_recovery_coal_shortfall",
+            "    )",
+            "else:",
+            "    cortex_recovery_endogenous_coal_buffered=0",
+            f"cortex_coal_buffer=get_entity({_prototype('wooden-chest')},{parsed['coal_buffer']})",
         ])
 
     lines.extend([
