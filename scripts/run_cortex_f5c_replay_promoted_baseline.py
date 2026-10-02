@@ -71,6 +71,15 @@ INTERVENTION_LEDGER=RUNS_DIR/"cortex_f5_intervention_ledger.json"
 RUNTIME_BUILD_INFO=Path("/srv/factorio-ai-runtime/current/BUILD_INFO.json")
 DASHBOARD_BUILD_INFO=Path("/srv/factorio-ai-dashboard-runtime/current/BUILD_INFO.json")
 GRANT_TTL_SECONDS=600
+FLE_INIT_SCRIPT_ORDER=(
+    "lualib_util",
+    "utils",
+    "alerts",
+    "connection_points",
+    "recipe_fluid_connection_mappings",
+    "serialize",
+    "serialize_direction_fix",
+)
 
 CAPABILITY_ORDER=(
     "iron_extraction",
@@ -663,12 +672,102 @@ def preflight(
     }
 
 
-def _save_world(instance: Any,name: str) -> str:
-    response=instance.rcon_client.send_command(f"/server-save {name}")
-    text="" if response is None else str(response).strip()
-    if "Saving the map" not in text:
-        raise RuntimeError(f"Factorio save command failed for {name!r}: {text!r}")
-    return text
+def _quiesce_fle_storage_for_save(instance: Any) -> dict[str,Any]:
+    command=r"""/sc local seen={}
+local removed=0
+local function scrub(value)
+  if type(value)~="table" or seen[value] then return end
+  seen[value]=true
+  local drop={}
+  for key,item in pairs(value) do
+    if type(key)=="function" or type(item)=="function" then
+      drop[#drop+1]=key
+    elseif type(item)=="table" then
+      scrub(item)
+    end
+  end
+  for _,key in ipairs(drop) do
+    value[key]=nil
+    removed=removed+1
+  end
+end
+scrub(storage)
+storage.__lua_script_checksums={}
+rcon.print(helpers.table_to_json({ok=true,removed_functions=removed}))
+"""
+    response=instance.rcon_client.send_command(command)
+    payload=json.loads("" if response is None else str(response))
+    if payload.get("ok") is not True:
+        raise RuntimeError(f"FLE storage quiesce failed: {payload!r}")
+    removed=payload.get("removed_functions")
+    if not isinstance(removed,int) or isinstance(removed,bool) or removed<=0:
+        raise RuntimeError(
+            "FLE storage quiesce removed no Lua functions; refusing unsafe save"
+        )
+    return {
+        "status":"quiesced",
+        "removed_functions":removed,
+        "checksums_cleared":True,
+    }
+
+
+def _rehydrate_fle_runtime(instance: Any) -> dict[str,Any]:
+    manager=instance.lua_script_manager
+    previous_cache=bool(manager.cache_scripts)
+    manager.cache_scripts=False
+    try:
+        manager.tool_scripts=manager.get_tools_to_load()
+        manager.lib_scripts=manager.get_libs_to_load()
+        manager.load_init_into_game("initialise")
+        for name in FLE_INIT_SCRIPT_ORDER:
+            manager.load_init_into_game(name)
+        manager.setup_tools(instance)
+    finally:
+        manager.cache_scripts=previous_cache
+    return {
+        "status":"rehydrated",
+        "cache_scripts_restored":previous_cache,
+        "init_scripts":list(FLE_INIT_SCRIPT_ORDER),
+    }
+
+
+def _save_world(instance: Any,name: str) -> dict[str,Any]:
+    quiesce=_quiesce_fle_storage_for_save(instance)
+    response=None
+    save_error=None
+    try:
+        response=instance.rcon_client.send_command(f"/server-save {name}")
+        response_text="" if response is None else str(response).strip()
+        if "Saving the map" not in response_text:
+            raise RuntimeError(
+                f"Factorio save command failed for {name!r}: {response_text!r}"
+            )
+    except Exception as exc:  # noqa: BLE001
+        save_error=exc
+        response_text="" if response is None else str(response).strip()
+
+    try:
+        rehydrate=_rehydrate_fle_runtime(instance)
+    except Exception as rehydrate_exc:
+        if save_error is not None:
+            raise RuntimeError(
+                f"Factorio save failed for {name!r} and FLE rehydration also failed: "
+                f"save={type(save_error).__name__}: {save_error}; "
+                f"rehydrate={type(rehydrate_exc).__name__}: {rehydrate_exc}"
+            ) from rehydrate_exc
+        raise RuntimeError(
+            f"Factorio save for {name!r} did not leave a rehydratable live runtime: "
+            f"{type(rehydrate_exc).__name__}: {rehydrate_exc}"
+        ) from rehydrate_exc
+
+    if save_error is not None:
+        raise save_error
+
+    return {
+        "response":response_text,
+        "storage_quiesce":quiesce,
+        "runtime_rehydrate":rehydrate,
+    }
 
 
 def run_replay(
@@ -835,7 +934,10 @@ def run_replay(
 
                 save_name=f"cortex-f5c-replay-{index:02d}-{capability}"
                 step_record["save_name"]=save_name
-                step_record["save_response"]=_save_world(instance,save_name)
+                save_result=_save_world(instance,save_name)
+                step_record["save_response"]=save_result["response"]
+                step_record["save_storage_quiesce"]=save_result["storage_quiesce"]
+                step_record["save_runtime_rehydrate"]=save_result["runtime_rehydrate"]
 
                 observer=FactorioObserver()
                 try:
@@ -885,10 +987,10 @@ def run_replay(
             })
             if completed:
                 record["final_save_name"]="cortex-f5c-promoted-baseline"
-                record["final_save_response"]=_save_world(
-                    instance,
-                    record["final_save_name"],
-                )
+                final_save=_save_world(instance,record["final_save_name"])
+                record["final_save_response"]=final_save["response"]
+                record["final_save_storage_quiesce"]=final_save["storage_quiesce"]
+                record["final_save_runtime_rehydrate"]=final_save["runtime_rehydrate"]
             _write(artifact,record)
             return record
         except Exception as exc:  # noqa: BLE001
