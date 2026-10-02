@@ -327,3 +327,124 @@ def test_replay_source_rebases_coal_before_a2_grant() -> None:
     assert rebase_at<grant_at
     assert "bootstrap_rebased_from_live_world" in source
     assert "external_resource_injection" in source
+
+
+def _steam_plan_for_reserve_tests() -> Any:
+    prepared=REPLAY.PreparedStructuralAction(
+        action_id="steam:action",
+        family=REPLAY.ActionFamily.PLACEMENT,
+        intent="steam",
+        binding="cortex.structural.steam_power",
+        purpose="infrastructure",
+        contract_version="cortex_structural_ops_v7",
+        operations=(
+            REPLAY.StructuralOperation(
+                op="establish_steam_power",
+                parameters={
+                    "positions":{
+                        "iron_extractor":{"x":15.0,"y":70.0},
+                        "iron_buffer":{"x":15.5,"y":71.5},
+                        "coal_extractor":{"x":15.0,"y":-4.0},
+                        "coal_buffer":{"x":15.5,"y":-2.5},
+                    },
+                    "iron_trigger_ore_draw":56,
+                    "initial_coal_draw":16,
+                },
+            ),
+            REPLAY.StructuralOperation(
+                op="verify_postconditions",
+                parameters={
+                    "conditions":[{
+                        "name":"steam_generated",
+                        "operator":"equals",
+                        "state":"unknown",
+                        "expected":True,
+                        "hard":True,
+                        "evidence":[],
+                    }],
+                },
+            ),
+        ),
+        measurement_keys=("steam_generated",),
+        preflight={},
+    )
+    return REPLAY.ReplayOptionPlan(
+        request=REPLAY.OptionRequest(
+            option_id="steam",
+            kind=REPLAY.OptionKind.ESTABLISH_STEAM_POWER,
+            goal="steam",
+            provenance=REPLAY.ActionProvenance(
+                requested_by="test",
+                source_component="test",
+                code_revision="abc",
+                run_id="run",
+            ),
+            budget=REPLAY.OptionBudget(requested_ticks=21600),
+            authority=REPLAY.ActionAuthority.SHADOW,
+        ),
+        action_request=REPLAY.ActionRequest(
+            action_id="steam:action",
+            family=REPLAY.ActionFamily.PLACEMENT,
+            intent="steam",
+            provenance=REPLAY.ActionProvenance(
+                requested_by="test",
+                source_component="test",
+                code_revision="abc",
+                run_id="run",
+            ),
+        ),
+        prepared=prepared,
+        termination_conditions=(),
+        capability="steam_power",
+        source_artifact="/tmp/steam.json",
+    )
+
+
+def test_reserve_recovery_plan_preserves_promoted_steam_thresholds() -> None:
+    steam=_steam_plan_for_reserve_tests()
+    plan=REPLAY._build_reserve_recovery_plan(
+        steam_plan=steam,
+        commit="abc",
+        run_id="run",
+    )
+    assert plan.request.kind is REPLAY.OptionKind.RESTORE_PROMOTED_RESERVES
+    assert plan.request.budget.requested_seconds==REPLAY.RESERVE_RECOVERY_OPTION_SECONDS
+    operation=plan.prepared.operations[0]
+    assert operation.op=="recover_promoted_reserves"
+    assert operation.parameters["iron_target"]==56
+    assert operation.parameters["coal_floor"]==16
+    assert operation.parameters["iron_refuel_coal"]==3
+    assert operation.parameters["coal_refuel_coal"]==1
+    assert plan.prepared.preflight["external_resource_injection"] is False
+    assert plan.prepared.preflight["promotion_credit"] is False
+
+
+def test_observe_promoted_reserves_requires_both_original_thresholds() -> None:
+    steam=_steam_plan_for_reserve_tests()
+    spec=REPLAY._steam_reserve_spec(steam)
+    snapshot={
+        "entities":[
+            {
+                "name":"wooden-chest",
+                "position":{"x":15.5,"y":71.5},
+                "contents":[{"name":"iron-ore","count":56}],
+            },
+            {
+                "name":"wooden-chest",
+                "position":{"x":15.5,"y":-2.5},
+                "contents":[{"name":"coal","count":15}],
+            },
+        ],
+    }
+    observed=REPLAY._observe_promoted_reserves(snapshot,spec)
+    assert observed["iron_ready"] is True
+    assert observed["coal_ready"] is False
+    assert observed["ready"] is False
+
+
+def test_replay_source_saves_reserve_recovery_before_steam_a2() -> None:
+    source=SCRIPT.read_text(encoding="utf-8")
+    assert "cortex-f5c-replay-03b-steam-reserves" in source
+    assert "steam_power_reserve_recovery" in source
+    assert "physical_after_reattach" in source
+    assert "OptionKind.RESTORE_PROMOTED_RESERVES" in source

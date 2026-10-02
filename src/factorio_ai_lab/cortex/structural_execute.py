@@ -41,6 +41,7 @@ from factorio_ai_lab.cortex.powered_manufacturing_structural_execute import (
     compile_powered_manufacturing,
 )
 from factorio_ai_lab.cortex.rollback_recovery_structural_execute import (
+    compile_promoted_reserve_recovery,
     compile_rollback_recovery,
 )
 from factorio_ai_lab.cortex.steam_power_structural_execute import (
@@ -523,6 +524,7 @@ def _compile_operation(operation: StructuralOperation) -> list[str]:
         "establish_automation_science": compile_automation_science,
         "recover_promoted_copper_furnace": compile_rollback_recovery,
         "recover_promoted_baseline": compile_rollback_recovery,
+        "recover_promoted_reserves": compile_promoted_reserve_recovery,
         "establish_powered_manufacturing": compile_powered_manufacturing,
     }
     if operation.op == "verify_postconditions":
@@ -784,7 +786,10 @@ def compile_structural_action(
         recovery_ops = [
             operation
             for operation in prepared.operations
-            if operation.op == "recover_promoted_baseline"
+            if operation.op in {
+                "recover_promoted_baseline",
+                "recover_promoted_reserves",
+            }
         ]
         if len(recovery_ops) != 1:
             return StructuralCompilationResult(
@@ -793,20 +798,25 @@ def compile_structural_action(
                     code=REFUSAL_OPERATION_UNSUPPORTED,
                     detail=(
                         "rollback recovery contract requires exactly one "
-                        "recover_promoted_baseline operation"
+                        "recover_promoted_baseline or recover_promoted_reserves "
+                        "operation"
                     ),
                 ),
             )
-        params=recovery_ops[0].parameters
-        required_seconds=sum(
-            int(params.get(key) or 0)
-            for key in (
-                "iron_smelt_seconds",
-                "recovery_window_seconds",
-                "copper_smelt_seconds",
-                "settle_seconds",
+        recovery_op=recovery_ops[0]
+        params=recovery_op.parameters
+        if recovery_op.op=="recover_promoted_reserves":
+            required_seconds=int(params.get("recovery_window_seconds") or 0)
+        else:
+            required_seconds=sum(
+                int(params.get(key) or 0)
+                for key in (
+                    "iron_smelt_seconds",
+                    "recovery_window_seconds",
+                    "copper_smelt_seconds",
+                    "settle_seconds",
+                )
             )
-        )
         if settle < required_seconds:
             return StructuralCompilationResult(
                 prepared=prepared,

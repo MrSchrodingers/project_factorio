@@ -38,9 +38,12 @@ import run_cortex_f5c_steam_power as steam_runner
 
 from factorio_ai_lab.cortex.actions import (
     ActionAuthority,
+    ActionCondition,
     ActionFamily,
     ActionProvenance,
     ActionRequest,
+    ConditionOperator,
+    ConditionState,
 )
 from factorio_ai_lab.cortex.f5_authority import F5BoundedAuthorityBridge
 from factorio_ai_lab.cortex.grant_ledger import PersistentOptionGrantLedger
@@ -50,6 +53,7 @@ from factorio_ai_lab.cortex.structural_execute import (
     prepared_postconditions,
 )
 from factorio_ai_lab.cortex.structural_prepare import (
+    ROLLBACK_RECOVERY_CONTRACT_VERSION,
     PreparedStructuralAction,
     StructuralOperation,
 )
@@ -74,6 +78,10 @@ RUNTIME_BUILD_INFO=Path("/srv/factorio-ai-runtime/current/BUILD_INFO.json")
 DASHBOARD_BUILD_INFO=Path("/srv/factorio-ai-dashboard-runtime/current/BUILD_INFO.json")
 GRANT_TTL_SECONDS=600
 SERVER_SETTINGS=SCRIPT_DIR.parent/".fle-local"/"config"/"server-settings.json"
+RESERVE_RECOVERY_OPTION_SECONDS=90
+RESERVE_RECOVERY_WINDOW_SECONDS=60
+RESERVE_IRON_REFUEL_COAL=3
+RESERVE_COAL_REFUEL_COAL=1
 
 CAPABILITY_ORDER=(
     "iron_extraction",
@@ -606,6 +614,239 @@ def _rebase_coal_bootstrap_plan(
     return rebased,evidence
 
 
+def _steam_reserve_spec(plan: ReplayOptionPlan) -> dict[str,Any]:
+    if plan.capability!="steam_power":
+        raise ValueError("reserve spec only applies to steam_power")
+    steam_ops=[
+        operation
+        for operation in plan.prepared.operations
+        if operation.op=="establish_steam_power"
+    ]
+    if len(steam_ops)!=1:
+        raise RuntimeError("steam replay requires exactly one establish_steam_power op")
+    params=steam_ops[0].parameters
+    positions=params.get("positions")
+    if not isinstance(positions,Mapping):
+        raise TypeError("steam reserve recovery requires frozen positions")
+    required_positions=(
+        "iron_extractor",
+        "iron_buffer",
+        "coal_extractor",
+        "coal_buffer",
+    )
+    selected={}
+    for name in required_positions:
+        value=positions.get(name)
+        if not isinstance(value,Mapping):
+            raise TypeError(f"steam reserve recovery requires position {name}")
+        selected[name]={"x":float(value["x"]),"y":float(value["y"])}
+    iron_target=params.get("iron_trigger_ore_draw")
+    coal_floor=params.get("initial_coal_draw")
+    if (
+        not isinstance(iron_target,int)
+        or isinstance(iron_target,bool)
+        or iron_target<=0
+    ):
+        raise TypeError("steam iron_trigger_ore_draw must be a positive integer")
+    if (
+        not isinstance(coal_floor,int)
+        or isinstance(coal_floor,bool)
+        or coal_floor<=0
+    ):
+        raise TypeError("steam initial_coal_draw must be a positive integer")
+    return {
+        "positions":selected,
+        "iron_target":iron_target,
+        "coal_floor":coal_floor,
+    }
+
+
+def _observe_promoted_reserves(
+    snapshot: Mapping[str,Any],
+    spec: Mapping[str,Any],
+) -> dict[str,Any]:
+    positions=spec.get("positions")
+    if not isinstance(positions,Mapping):
+        raise TypeError("reserve observation requires positions")
+    iron_buffer_pos=positions["iron_buffer"]
+    coal_buffer_pos=positions["coal_buffer"]
+    iron_buffer=_entity_at(
+        snapshot.get("entities"),
+        name="wooden-chest",
+        position=(float(iron_buffer_pos["x"]),float(iron_buffer_pos["y"])),
+    )
+    coal_buffer=_entity_at(
+        snapshot.get("entities"),
+        name="wooden-chest",
+        position=(float(coal_buffer_pos["x"]),float(coal_buffer_pos["y"])),
+    )
+    iron_count=_contents_count(iron_buffer,"iron-ore")
+    coal_count=_contents_count(coal_buffer,"coal")
+    iron_target=int(spec["iron_target"])
+    coal_floor=int(spec["coal_floor"])
+    return {
+        "iron_buffer":iron_count,
+        "coal_buffer":coal_count,
+        "iron_target":iron_target,
+        "coal_floor":coal_floor,
+        "iron_ready":iron_count>=iron_target,
+        "coal_ready":coal_count>=coal_floor,
+        "ready":iron_count>=iron_target and coal_count>=coal_floor,
+    }
+
+
+def _reserve_recovery_conditions() -> tuple[ActionCondition,...]:
+    return tuple(
+        ActionCondition(
+            name=name,
+            operator=ConditionOperator.EQUALS,
+            state=ConditionState.UNKNOWN,
+            expected=True,
+            hard=True,
+        )
+        for name in (
+            "reserve_iron_ready",
+            "reserve_coal_ready",
+            "reserve_endogenous_only",
+            "reserve_capabilities_survive",
+        )
+    )
+
+
+def _build_reserve_recovery_plan(
+    *,
+    steam_plan: ReplayOptionPlan,
+    commit: str,
+    run_id: str,
+) -> ReplayOptionPlan:
+    spec=_steam_reserve_spec(steam_plan)
+    option_id=f"{run_id}:steam_power:reserve_recovery"
+    action_id=f"{option_id}:action"
+    provenance=ActionProvenance(
+        requested_by="f5-c-technical-replay",
+        source_component="scripts.run_cortex_f5c_replay_promoted_baseline",
+        code_revision=commit,
+        run_id=run_id,
+    )
+    action_provenance=ActionProvenance(
+        requested_by="f5-c-technical-replay",
+        source_component="scripts.run_cortex_f5c_replay_promoted_baseline",
+        code_revision=commit,
+        run_id=run_id,
+        parent_action_id=option_id,
+    )
+    conditions=_reserve_recovery_conditions()
+    prepared=PreparedStructuralAction(
+        action_id=action_id,
+        family=ActionFamily.RESUPPLY,
+        intent="restore promoted endogenous iron and coal reserves before steam replay",
+        binding="cortex.structural.rollback_recovery",
+        purpose=steam_plan.prepared.purpose,
+        contract_version=ROLLBACK_RECOVERY_CONTRACT_VERSION,
+        operations=(
+            StructuralOperation(
+                op="recover_promoted_reserves",
+                parameters={
+                    "positions":spec["positions"],
+                    "iron_target":spec["iron_target"],
+                    "coal_floor":spec["coal_floor"],
+                    "iron_refuel_coal":RESERVE_IRON_REFUEL_COAL,
+                    "coal_refuel_coal":RESERVE_COAL_REFUEL_COAL,
+                    "recovery_window_seconds":RESERVE_RECOVERY_WINDOW_SECONDS,
+                },
+            ),
+            StructuralOperation(
+                op="verify_postconditions",
+                parameters={
+                    "conditions":[condition.to_dict() for condition in conditions]
+                },
+            ),
+        ),
+        measurement_keys=tuple(condition.name for condition in conditions),
+        preflight={
+            "mode":"technical_promoted_reserve_recovery",
+            "promotion_credit":False,
+            "external_resource_injection":False,
+            "world_reset":False,
+            "scientific_prefix_unchanged":3,
+            "iron_target":spec["iron_target"],
+            "coal_floor":spec["coal_floor"],
+            "iron_refuel_coal":RESERVE_IRON_REFUEL_COAL,
+            "coal_refuel_coal":RESERVE_COAL_REFUEL_COAL,
+            "recovery_window_seconds":RESERVE_RECOVERY_WINDOW_SECONDS,
+            "bootstrap_material_origin":"promoted_endogenous_coal_buffer",
+        },
+    )
+    request=OptionRequest(
+        option_id=option_id,
+        kind=OptionKind.RESTORE_PROMOTED_RESERVES,
+        goal="restore endogenous promoted reserves required by steam-power replay",
+        provenance=provenance,
+        budget=OptionBudget(
+            requested_ticks=RESERVE_RECOVERY_OPTION_SECONDS*60
+        ),
+        authority=ActionAuthority.SHADOW,
+    )
+    action=ActionRequest(
+        action_id=action_id,
+        family=ActionFamily.RESUPPLY,
+        intent=prepared.intent,
+        provenance=action_provenance,
+        requires=(
+            "iron_extraction",
+            "coal_self_sufficiency",
+            "iron_smelting",
+            "endogenous_coal_buffer",
+        ),
+        provides=("promoted_reserves_ready",),
+    )
+    return ReplayOptionPlan(
+        request=request,
+        action_request=action,
+        prepared=prepared,
+        termination_conditions=conditions+execution_guard_conditions(prepared),
+        capability="steam_power_reserve_recovery",
+        source_artifact=steam_plan.source_artifact,
+    )
+
+
+def _reserve_recovery_measure(
+    namespace: Any,
+    prepared: Any,
+) -> dict[str,Any]:
+    del prepared
+    numeric=(
+        "reserve_iron_before",
+        "reserve_iron_after",
+        "reserve_coal_before",
+        "reserve_coal_after",
+        "reserve_iron_fuel_before",
+        "reserve_iron_fuel_after",
+        "reserve_coal_fuel_before",
+        "reserve_coal_fuel_after",
+        "reserve_coal_draw",
+        "reserve_iron_growth",
+        "reserve_coal_growth",
+    )
+    values={
+        "reserve_iron_ready":bool(
+            getattr(namespace,"cortex_reserve_iron_ready",False)
+        ),
+        "reserve_coal_ready":bool(
+            getattr(namespace,"cortex_reserve_coal_ready",False)
+        ),
+        "reserve_endogenous_only":bool(
+            getattr(namespace,"cortex_reserve_endogenous_only",False)
+        ),
+        "reserve_capabilities_survive":bool(
+            getattr(namespace,"cortex_reserve_capabilities_survive",False)
+        ),
+    }
+    for name in numeric:
+        values[name]=float(getattr(namespace,f"cortex_{name}",0) or 0)
+    return values
+
+
 def _plan_from_artifact(
     *,
     capability: str,
@@ -1083,6 +1324,189 @@ def run_replay(
                         plan,
                         namespace,
                     )
+
+                if capability=="steam_power":
+                    reserve_spec=_steam_reserve_spec(plan)
+                    reserve_before=_observe_promoted_reserves(
+                        after_attach,
+                        reserve_spec,
+                    )
+                    recovery_record={
+                        "capability":"steam_power",
+                        "kind":"technical_promoted_reserve_recovery",
+                        "status":"not_required" if reserve_before["ready"] else "grant_pending",
+                        "physical_before":reserve_before,
+                        "promotion_credit":False,
+                        "phase_state_mutation":False,
+                        "external_resource_injection":False,
+                    }
+                    record.setdefault("technical_recoveries",[]).append(
+                        recovery_record
+                    )
+                    _write(artifact,record)
+
+                    if not reserve_before["ready"]:
+                        recovery_plan=_build_reserve_recovery_plan(
+                            steam_plan=plan,
+                            commit=commit,
+                            run_id=run_id,
+                        )
+                        recovery_record["option_plan"]=recovery_plan.to_dict()
+                        recovery_record["measurement_before"]=_reserve_recovery_measure(
+                            namespace,
+                            recovery_plan.prepared,
+                        )
+                        recovery_scope,recovery_grant=bridge.issue_a2_grant(
+                            recovery_plan,
+                            experiment_id=run_id,
+                            reason=(
+                                "F5-C technical endogenous reserve recovery before "
+                                "steam_power replay; no promotion credit"
+                            ),
+                            ttl_seconds=GRANT_TTL_SECONDS,
+                        )
+                        recovery_validation=bridge.validate_a2(
+                            recovery_plan,
+                            grant=recovery_grant,
+                            scope=recovery_scope,
+                        )
+                        recovery_record.update({
+                            "scope":recovery_scope.to_dict(),
+                            "grant":recovery_grant.to_dict(),
+                            "grant_validation":recovery_validation.to_dict(),
+                        })
+                        if not recovery_validation.allowed:
+                            raise RuntimeError(
+                                "technical reserve recovery A2 validation refused: "
+                                +json.dumps(
+                                    recovery_validation.to_dict(),
+                                    sort_keys=True,
+                                )
+                            )
+                        recovery_record["status"]="executing"
+                        _write(artifact,record)
+
+                        recovery_execution=bridge.execute_a2(
+                            recovery_plan,
+                            grant=recovery_grant,
+                            scope=recovery_scope,
+                            executor=executor,
+                            measure=lambda prepared,ns=namespace: (
+                                _reserve_recovery_measure(ns,prepared)
+                            ),
+                            tick_source=env,
+                            use_checkpoint_for_action=False,
+                        )
+                        recovery_after=_reserve_recovery_measure(
+                            namespace,
+                            recovery_plan.prepared,
+                        )
+                        recovery_result=recovery_execution.result
+                        recovery_accepted=(
+                            recovery_execution.executed
+                            and recovery_result is not None
+                            and recovery_result.status.value=="accepted"
+                            and recovery_result.changed_world is True
+                        )
+                        recovery_record.update({
+                            "status":"accepted" if recovery_accepted else "rejected",
+                            "option_execution":recovery_execution.to_dict(),
+                            "measurement_after":recovery_after,
+                            "rollback_integrity":executor.rollback_integrity_snapshot(),
+                        })
+                        if not recovery_accepted:
+                            record.update({
+                                "status":"rejected",
+                                "finished_at":utc_now(),
+                                "failed_capability":"steam_power_reserve_recovery",
+                                "technical_replay_completed":False,
+                            })
+                            _write(artifact,record)
+                            return record
+
+                        recovery_save_name="cortex-f5c-replay-03b-steam-reserves"
+                        recovery_record["save_name"]=recovery_save_name
+                        recovery_save=_save_world(instance,recovery_save_name)
+                        recovery_record["save_response"]=recovery_save["response"]
+                        recovery_record["save_pause_before_quiesce"]=recovery_save[
+                            "pause_before_quiesce"
+                        ]
+                        recovery_record["save_storage_quiesce"]=recovery_save[
+                            "storage_quiesce"
+                        ]
+
+                        env.close()
+                        env=None
+                        instance=None
+                        executor=None
+
+                        observer=FactorioObserver()
+                        try:
+                            recovered_snapshot=observer.snapshot()
+                        finally:
+                            observer.close()
+                        recovered_prefix=_detect_replay_prefix(
+                            recovered_snapshot,
+                            positions,
+                        )
+                        reserve_after_physical=_observe_promoted_reserves(
+                            recovered_snapshot,
+                            reserve_spec,
+                        )
+                        recovery_record["physical_after"]=reserve_after_physical
+                        recovery_record["replay_prefix_after"]=recovered_prefix
+                        recovery_record["world_entity_count_after"]=(
+                            recovered_snapshot.get("entity_count")
+                        )
+                        if recovered_prefix!=index-1:
+                            raise RuntimeError(
+                                "reserve recovery changed scientific replay prefix: "
+                                f"expected {index-1}, observed {recovered_prefix}"
+                            )
+                        if not reserve_after_physical["ready"]:
+                            raise RuntimeError(
+                                "accepted reserve recovery did not persist physical "
+                                f"thresholds: {reserve_after_physical!r}"
+                            )
+                        _write(artifact,record)
+
+                        (
+                            env,
+                            executor,
+                            instance,
+                            namespace,
+                            tool_name,
+                            tick_sleep_tool,
+                            unpause,
+                        )=_attach_replay_environment(run_id=run_id)
+                        record["fle_attach_unpause"]=unpause
+                        observer=FactorioObserver()
+                        try:
+                            after_attach=observer.snapshot()
+                        finally:
+                            observer.close()
+                        attached_prefix=_detect_replay_prefix(
+                            after_attach,
+                            positions,
+                        )
+                        if attached_prefix!=index-1:
+                            raise RuntimeError(
+                                "live FLE reattachment changed replay prefix after "
+                                f"reserve recovery: expected {index-1}, "
+                                f"observed {attached_prefix}"
+                            )
+                        reserve_reattach=_observe_promoted_reserves(
+                            after_attach,
+                            reserve_spec,
+                        )
+                        recovery_record["physical_after_reattach"]=reserve_reattach
+                        if not reserve_reattach["ready"]:
+                            raise RuntimeError(
+                                "reserve recovery thresholds disappeared after "
+                                f"reattach: {reserve_reattach!r}"
+                            )
+                        _write(artifact,record)
+
                 measure=MEASURE[capability]
                 before=measure(namespace,plan.prepared)
                 step_record={

@@ -70,6 +70,154 @@ def _missing_components(raw: Any) -> tuple[str,...]:
     return missing
 
 
+def compile_promoted_reserve_recovery(
+    operation: StructuralOperation,
+) -> list[str]:
+    """Recover promoted iron/coal reserves using only endogenous coal.
+
+    This is a technical state-restoration operation. It never creates an entity,
+    never injects inventory, and refuses unless the already-promoted coal buffer
+    can fund the bounded refuel. The post-state must satisfy the original
+    downstream capability thresholds.
+    """
+    if operation.op!="recover_promoted_reserves":
+        raise ValueError(f"unexpected reserve recovery op {operation.op!r}")
+    params=operation.parameters
+    positions=params.get("positions")
+    if not isinstance(positions,Mapping):
+        raise TypeError("reserve recovery requires frozen positions")
+    required=("iron_extractor","iron_buffer","coal_extractor","coal_buffer")
+    parsed: dict[str,str]={}
+    for name in required:
+        raw=positions.get(name)
+        if not isinstance(raw,Mapping):
+            raise TypeError(f"reserve recovery requires position {name}")
+        parsed[name]=_position(raw)
+
+    iron_target=_positive_int(params,"iron_target")
+    coal_floor=_positive_int(params,"coal_floor")
+    iron_refuel=_positive_int(params,"iron_refuel_coal")
+    coal_refuel=_positive_int(params,"coal_refuel_coal")
+    recovery_window=_positive_int(params,"recovery_window_seconds")
+    total_refuel=iron_refuel+coal_refuel
+
+    return [
+        f"cortex_reserve_iron_extractor=get_entity({_prototype('burner-mining-drill')},{parsed['iron_extractor']})",
+        f"cortex_reserve_iron_buffer=get_entity({_prototype('wooden-chest')},{parsed['iron_buffer']})",
+        f"cortex_reserve_coal_extractor=get_entity({_prototype('burner-mining-drill')},{parsed['coal_extractor']})",
+        f"cortex_reserve_coal_buffer=get_entity({_prototype('wooden-chest')},{parsed['coal_buffer']})",
+        (
+            "cortex_reserve_iron_before=inspect_inventory("
+            "cortex_reserve_iron_buffer)"
+            f"[{_prototype('iron-ore')}]"
+        ),
+        (
+            "cortex_reserve_coal_before=inspect_inventory("
+            "cortex_reserve_coal_buffer)"
+            f"[{_prototype('coal')}]"
+        ),
+        (
+            "cortex_reserve_iron_fuel_before=inspect_inventory("
+            "cortex_reserve_iron_extractor)"
+            f"[{_prototype('coal')}]"
+        ),
+        (
+            "cortex_reserve_coal_fuel_before=inspect_inventory("
+            "cortex_reserve_coal_extractor)"
+            f"[{_prototype('coal')}]"
+        ),
+        (
+            "cortex_reserve_recovery_needed="
+            f"(cortex_reserve_iron_before < {iron_target} or "
+            f"cortex_reserve_coal_before < {coal_floor})"
+        ),
+        "cortex_reserve_coal_draw=0",
+        "if cortex_reserve_recovery_needed:",
+        f"    if cortex_reserve_coal_before < {total_refuel}:",
+        (
+            "        raise RuntimeError("
+            "'endogenous coal stock cannot fund reserve recovery')"
+        ),
+        "    cortex_reserve_coal_draw=extract_item(",
+        f"        {_prototype('coal')},",
+        "        cortex_reserve_coal_buffer,",
+        f"        quantity={total_refuel},",
+        "    )",
+        f"    if cortex_reserve_coal_draw != {total_refuel}:",
+        (
+            "        raise RuntimeError("
+            "'reserve recovery failed exact endogenous coal draw')"
+        ),
+        "    cortex_reserve_iron_extractor=insert_item(",
+        f"        {_prototype('coal')},",
+        "        cortex_reserve_iron_extractor,",
+        f"        quantity={iron_refuel},",
+        "    )",
+        "    cortex_reserve_coal_extractor=insert_item(",
+        f"        {_prototype('coal')},",
+        "        cortex_reserve_coal_extractor,",
+        f"        quantity={coal_refuel},",
+        "    )",
+        f"    sleep({recovery_window})",
+        (
+            "cortex_reserve_iron_after=inspect_inventory("
+            "cortex_reserve_iron_buffer)"
+            f"[{_prototype('iron-ore')}]"
+        ),
+        (
+            "cortex_reserve_coal_after=inspect_inventory("
+            "cortex_reserve_coal_buffer)"
+            f"[{_prototype('coal')}]"
+        ),
+        (
+            "cortex_reserve_iron_fuel_after=inspect_inventory("
+            "cortex_reserve_iron_extractor)"
+            f"[{_prototype('coal')}]"
+        ),
+        (
+            "cortex_reserve_coal_fuel_after=inspect_inventory("
+            "cortex_reserve_coal_extractor)"
+            f"[{_prototype('coal')}]"
+        ),
+        (
+            "cortex_reserve_iron_growth=max("
+            "0,cortex_reserve_iron_after-cortex_reserve_iron_before)"
+        ),
+        (
+            "cortex_reserve_coal_growth=max("
+            "0,cortex_reserve_coal_after-cortex_reserve_coal_before"
+            "+cortex_reserve_coal_draw)"
+        ),
+        f"cortex_reserve_iron_ready=cortex_reserve_iron_after>={iron_target}",
+        f"cortex_reserve_coal_ready=cortex_reserve_coal_after>={coal_floor}",
+        "cortex_reserve_endogenous_only=(cortex_reserve_coal_draw>=0)",
+        (
+            "cortex_reserve_capabilities_survive=("
+            "cortex_reserve_iron_extractor is not None and "
+            "cortex_reserve_iron_buffer is not None and "
+            "cortex_reserve_coal_extractor is not None and "
+            "cortex_reserve_coal_buffer is not None)"
+        ),
+        "if not cortex_reserve_iron_ready:",
+        (
+            "    raise RuntimeError("
+            "'endogenous iron reserve recovery did not reach target')"
+        ),
+        "if not cortex_reserve_coal_ready:",
+        (
+            "    raise RuntimeError("
+            "'endogenous coal reserve recovery did not preserve floor')"
+        ),
+        (
+            "print({'reserve_iron_before':cortex_reserve_iron_before,"
+            "'reserve_iron_after':cortex_reserve_iron_after,"
+            "'reserve_coal_before':cortex_reserve_coal_before,"
+            "'reserve_coal_after':cortex_reserve_coal_after,"
+            "'reserve_coal_draw':cortex_reserve_coal_draw})"
+        ),
+    ]
+
+
 def compile_rollback_recovery(operation: StructuralOperation) -> list[str]:
     params=operation.parameters
     positions=params.get("positions")
