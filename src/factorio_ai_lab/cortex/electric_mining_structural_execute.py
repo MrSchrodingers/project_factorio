@@ -464,6 +464,24 @@ cortex_automation_science_survives=(
 cortex_assembler=get_entity(
     {_prototype('assembling-machine-1')},{parsed['assembler']}
 )
+cortex_existing_circuit_output=inspect_inventory(
+    cortex_assembler
+)[{_prototype('electronic-circuit')}]
+if cortex_existing_circuit_output>0:
+    extract_item(
+        {_prototype('electronic-circuit')},
+        cortex_assembler,
+        quantity=cortex_existing_circuit_output,
+    )
+cortex_existing_gear_output=inspect_inventory(
+    cortex_assembler
+)[{_prototype('iron-gear-wheel')}]
+if cortex_existing_gear_output>0:
+    extract_item(
+        {_prototype('iron-gear-wheel')},
+        cortex_assembler,
+        quantity=cortex_existing_gear_output,
+    )
 cortex_assembler=set_entity_recipe(
     cortex_assembler,{_prototype('iron-gear-wheel')}
 )

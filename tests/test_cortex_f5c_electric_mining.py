@@ -141,6 +141,11 @@ def test_compiled_electric_mining_is_causal_and_self_validating() -> None:
     assert "cortex_electric_pole_survival_electrical_id" in code
     assert "cortex_steam_survival_amount>0 and cortex_steam_survival_energy>0" not in code
     assert "cortex_steam_load_after>0" not in code
+    assert "cortex_existing_circuit_output" in code
+    assert "cortex_existing_gear_output" in code
+    assert code.index("cortex_existing_circuit_output") < code.index(
+        "cortex_assembler=set_entity_recipe"
+    )
     assert "cortex_powered_manufacturing_survives" in code
     assert "cortex_automation_science_survives" in code
     assert "for cortex_coal_round in range(6):" in code
