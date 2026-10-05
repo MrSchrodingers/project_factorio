@@ -3107,7 +3107,157 @@ class DashboardState:
             return {}
         return loaded if isinstance(loaded, dict) else {}
 
+    def _phase5_research_projection(
+        self,
+        *,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        context = (
+            context
+            if context is not None
+            else self.experiment_context_data()
+        )
+        cortex = context.get("cortex_phase")
+        if not isinstance(cortex, dict) or cortex.get("phase") != "F5":
+            return None
+        protocol = cortex.get("phase5_protocol")
+        if not isinstance(protocol, dict):
+            return None
+
+        raw_capabilities = protocol.get("capabilities", [])
+        capabilities = [
+            str(name)
+            for name in raw_capabilities
+            if isinstance(name, str) and name
+        ]
+        raw_achieved = protocol.get("achieved_capabilities", [])
+        achieved = [
+            str(name)
+            for name in raw_achieved
+            if isinstance(name, str) and name
+        ]
+        total_raw = protocol.get("capability_total")
+        total = (
+            int(total_raw)
+            if isinstance(total_raw, (int, float))
+            and not isinstance(total_raw, bool)
+            and int(total_raw) >= 0
+            else len(capabilities)
+        )
+        next_capability = protocol.get("next_capability")
+        if not isinstance(next_capability, str) or not next_capability:
+            next_capability = None
+        complete = (
+            next_capability is None
+            and total > 0
+            and len(achieved) >= total
+        )
+        achieved_set = set(achieved)
+
+        curriculum = [
+            {
+                "name": name,
+                "status": "completed" if name in achieved_set else "pending",
+                "detail": (
+                    "Promoted by physical evidence + survival invariant."
+                    if name in achieved_set
+                    else "Awaiting bounded A2 physical validation."
+                ),
+            }
+            for name in capabilities
+        ]
+        resume = cortex.get("resume")
+        if not isinstance(resume, dict):
+            resume = {}
+        completion_detail = str(resume.get("action") or "").strip()
+        if complete:
+            next_action = (
+                "F5-C complete under ambient A0; preserve the promoted WORLD "
+                "and await the next preregistered protocol."
+            )
+            stage_name = "F5-C · capability sequence complete"
+            stage_status = "completed"
+        else:
+            next_action = (
+                f"validate {next_capability} with one bounded A2 Option"
+                if next_capability
+                else "reconcile F5-C protocol state"
+            )
+            stage_name = (
+                f"F5-C · {next_capability}"
+                if next_capability
+                else "F5-C · protocol reconciliation"
+            )
+            stage_status = "pending"
+
+        return {
+            "schema_version": "dashboard_f5_research_projection_v1",
+            "source": "cortex_phase_state",
+            "status": "completed" if complete else "frozen",
+            "objective": (
+                "Bootstrap an autonomous factory under bounded A2 Options "
+                "while preserving every promoted physical capability."
+            ),
+            "next_action": next_action,
+            "current_stage": {
+                "name": stage_name,
+                "status": stage_status,
+                "detail": (
+                    completion_detail
+                    if complete and completion_detail
+                    else (
+                        f"{len(achieved)}/{total} physical capabilities promoted; "
+                        f"frontier {next_capability or 'complete'}."
+                    )
+                ),
+            },
+            "curriculum": curriculum,
+            "arena": {
+                "mode": "f5_c_deterministic_baseline",
+                "technology": "real_technology_tree",
+                "environment": "live_factorio",
+                "promotion_scope": "physical_capabilities",
+            },
+            "engineering_progression": {
+                "achieved": achieved,
+                "validated_achieved": achieved,
+                "planning_assumptions": [],
+                "researched": [],
+                "stalled_attempts": {},
+            },
+            "online_learning": {
+                "status": "off",
+                "algorithm": None,
+                "detail": "legacy online placement learning is historical evidence",
+            },
+            "phase5_projection": {
+                "checkpoint": cortex.get("phase5_checkpoint"),
+                "next_checkpoint": cortex.get("phase5_next_checkpoint"),
+                "capabilities": capabilities,
+                "achieved_capabilities": achieved,
+                "capability_total": total,
+                "achieved_count": len(achieved),
+                "next_capability": next_capability,
+                "complete": complete,
+                "ambient_authority": protocol.get("authority_level", "A0"),
+                "continuous_authority": protocol.get(
+                    "continuous_authority",
+                    False,
+                ),
+                "legacy_evolution_loop": protocol.get(
+                    "legacy_evolution_loop",
+                    "off",
+                ),
+            },
+            "metrics": {},
+        }
+
     def research_data(self) -> dict[str, Any]:
+        context = self.experiment_context_data()
+        phase5 = self._phase5_research_projection(context=context)
+        if phase5 is not None:
+            return phase5
+
         path = self.evidence_runs_dir() / "research_state.json"
         if not path.exists():
             return {
@@ -3546,6 +3696,50 @@ class DashboardState:
     ) -> dict[str, Any]:
         world = world if world is not None else self.factorio.snapshot()
         research = research if research is not None else self.research_data()
+
+        phase5 = research.get("phase5_projection")
+        if isinstance(phase5, dict):
+            achieved = [
+                str(name)
+                for name in phase5.get("achieved_capabilities", [])
+                if isinstance(name, str) and name
+            ]
+            next_capability = phase5.get("next_capability")
+            if not isinstance(next_capability, str) or not next_capability:
+                next_capability = None
+            complete = bool(phase5.get("complete"))
+            next_goal = (
+                None
+                if complete or next_capability is None
+                else {
+                    "goal_id": next_capability,
+                    "label": next_capability.replace("_", " "),
+                    "kind": "capability",
+                    "score": 1.0,
+                    "novelty": 0.0,
+                    "retry_penalty": 0.0,
+                }
+            )
+            frontier = [next_goal] if next_goal is not None else []
+            return {
+                "source": "cortex_phase_state",
+                "achieved": achieved,
+                "validated_achieved": achieved,
+                "planning_assumptions": [],
+                "arena_mode": "f5_c_deterministic_baseline",
+                "technology_mode": "real_technology_tree",
+                "next_goal": next_goal,
+                "frontier": frontier,
+                "dependency_debt": [],
+                "stalled_attempts": {},
+                "terminal": complete,
+                "capability_total": int(
+                    phase5.get("capability_total") or len(achieved)
+                ),
+                "achieved_count": int(
+                    phase5.get("achieved_count") or len(achieved)
+                ),
+            }
 
         metrics = research.get("metrics", {})
         if not isinstance(metrics, dict):
