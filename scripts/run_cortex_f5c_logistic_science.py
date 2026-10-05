@@ -525,12 +525,22 @@ def _measure(namespace: Any,prepared: Any) -> dict[str,Any]:
         "electric_drill_survival_electrical_id",
         "electric_pole_survival_electrical_id",
     )
+    aliases={
+        "research_completed":"cortex_logistic_research_completed",
+        "research_remaining_count":"cortex_logistic_research_remaining_count",
+        "science_batch_ready":"cortex_logistic_science_batch_ready",
+        "iron_plate_ready":"cortex_logistic_iron_plate_ready",
+        "copper_plate_ready":"cortex_logistic_copper_plate_ready",
+        "logistic_second_output":"cortex_logistic_output_second",
+    }
     values={
-        name:bool(getattr(namespace,f"cortex_{name}",False))
+        name:bool(
+            getattr(namespace,aliases.get(name,f"cortex_{name}"),False)
+        )
         for name in boolean_names
     }
     for name in numeric_names:
-        raw=getattr(namespace,f"cortex_{name}",0)
+        raw=getattr(namespace,aliases.get(name,f"cortex_{name}"),0)
         values[name]=float(raw or 0)
     return values
 

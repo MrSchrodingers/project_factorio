@@ -175,3 +175,34 @@ def test_logistic_preflight_uses_electrical_topology_not_instant_energy() -> Non
     assert 'for key in ("lab","assembler","electric_pole","electric_drill")' in source
     assert "promoted electric drill is not electrically live" not in source
     assert 'observed["electric_drill"].get("energy")' not in source
+
+def test_logistic_runner_measure_reads_v13_namespace_aliases() -> None:
+    import importlib.util
+    from types import SimpleNamespace
+
+    path=(
+        __import__("pathlib").Path(__file__).resolve().parents[1]
+        /"scripts"/"run_cortex_f5c_logistic_science.py"
+    )
+    spec=importlib.util.spec_from_file_location("f5c_logistic_runner_test",path)
+    assert spec is not None and spec.loader is not None
+    module=importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    namespace=SimpleNamespace(
+        cortex_logistic_research_completed=True,
+        cortex_logistic_research_remaining_count=0,
+        cortex_logistic_science_batch_ready=77,
+        cortex_logistic_iron_plate_ready=190,
+        cortex_logistic_copper_plate_ready=95,
+        cortex_logistic_output_second=1,
+    )
+    measured=module._measure(namespace,None)
+
+    assert measured["research_completed"] is True
+    assert measured["research_remaining_count"]==0
+    assert measured["science_batch_ready"]==77
+    assert measured["iron_plate_ready"]==190
+    assert measured["copper_plate_ready"]==95
+    assert measured["logistic_second_output"]==1
+
