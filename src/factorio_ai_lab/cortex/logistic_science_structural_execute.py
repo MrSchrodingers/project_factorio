@@ -606,10 +606,10 @@ cortex_assembler=set_entity_recipe(
     cortex_assembler,{_prototype('logistic-science-pack')}
 )
 cortex_assembler=insert_item(
-    {_prototype('transport-belt')},cortex_assembler,quantity=2
+    {_prototype('transport-belt')},cortex_assembler,quantity=1
 )
 cortex_assembler=insert_item(
-    {_prototype('inserter')},cortex_assembler,quantity=2
+    {_prototype('inserter')},cortex_assembler,quantity=1
 )
 cortex_logistic_output_before=inspect_inventory(
     cortex_assembler
@@ -627,6 +627,12 @@ extract_item(
     {_prototype('logistic-science-pack')},
     cortex_assembler,
     quantity=cortex_logistic_output_first,
+)
+cortex_assembler=insert_item(
+    {_prototype('transport-belt')},cortex_assembler,quantity=1
+)
+cortex_assembler=insert_item(
+    {_prototype('inserter')},cortex_assembler,quantity=1
 )
 sleep({soak_window})
 cortex_logistic_output_second=inspect_inventory(

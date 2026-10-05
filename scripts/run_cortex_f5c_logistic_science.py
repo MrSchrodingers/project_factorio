@@ -400,9 +400,6 @@ def preflight(
             raise RuntimeError(
                 f"promoted {key} is not on electrical network {promoted_network_id}"
             )
-    if float(observed["electric_drill"].get("energy") or 0)<=0:
-        raise RuntimeError("promoted electric drill is not electrically live")
-
     research=_research_probe()
     return {
         "status":"preflight_pass",

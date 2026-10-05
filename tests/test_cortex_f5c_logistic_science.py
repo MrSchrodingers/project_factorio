@@ -118,6 +118,19 @@ def test_compiled_logistic_science_is_causal_and_self_validating() -> None:
     assert "cortex_sustainability_soak_passed" in code
     assert "cortex_logistic_first_growth" in code
     assert "cortex_logistic_output_second" in code
+    assert code.count(
+        "Prototype.TransportBelt,cortex_assembler,quantity=1"
+    )==2
+    assert code.count(
+        "Prototype.Inserter,cortex_assembler,quantity=1"
+    )==2
+    first_extract=code.index(
+        "quantity=cortex_logistic_output_first"
+    )
+    second_belt=code.rindex(
+        "Prototype.TransportBelt,cortex_assembler,quantity=1"
+    )
+    assert first_extract < second_belt
     assert "cortex_existing_circuit_output" in code
     assert "cortex_existing_gear_output" in code
     assert code.count("sleep(14)")>=2
@@ -152,3 +165,13 @@ def test_logistic_runner_eval_timeout_covers_option_budget() -> None:
         /"scripts"/"run_cortex_f5c_logistic_science.py"
     ).read_text()
     assert "minimum_seconds=max(2700,option_seconds+300)" in source
+
+
+def test_logistic_preflight_uses_electrical_topology_not_instant_energy() -> None:
+    source=(
+        __import__("pathlib").Path(__file__).resolve().parents[1]
+        /"scripts"/"run_cortex_f5c_logistic_science.py"
+    ).read_text()
+    assert 'for key in ("lab","assembler","electric_pole","electric_drill")' in source
+    assert "promoted electric drill is not electrically live" not in source
+    assert 'observed["electric_drill"].get("energy")' not in source
