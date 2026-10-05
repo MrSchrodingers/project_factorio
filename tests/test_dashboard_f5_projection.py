@@ -111,3 +111,44 @@ def test_progression_exposes_only_the_next_f5_capability() -> None:
     assert [row["goal_id"] for row in progression["frontier"]]==[
         "logistic_science"
     ]
+
+
+def test_research_projects_active_f5d_learning_frontier() -> None:
+    state=_state()
+    context=_context(achieved=CAPABILITIES,next_capability=None)
+    cortex=context["cortex_phase"]
+    cortex["phase5_checkpoint"]="F5-D"
+    cortex["phase5_next_checkpoint"]="F5-D"
+    cortex["phase5_adaptive_autonomy"]={
+        "status":"active",
+        "trajectory_count":4,
+        "policy_updates":2,
+        "last_selected_option":{
+            "action":{"key":"rebuild:reroute_producer_logistics"}
+        },
+    }
+
+    research=state._phase5_research_projection(context=context)
+    assert research is not None
+    assert research["status"]=="learning"
+    assert research["current_stage"]["name"]=="F5-D · adaptive autonomy"
+    assert research["online_learning"]["status"]=="learning"
+    assert research["online_learning"]["algorithm"]=="persistent_ucb"
+    assert research["online_learning"]["trajectory_count"]==4
+    assert research["online_learning"]["policy_updates"]==2
+    assert (
+        research["phase5_projection"]["autonomy_frontier"]
+        =="rebuild:reroute_producer_logistics"
+    )
+
+    progression=state.engineering_progression_data(
+        world={"entities":[],"production":{}},
+        research=research,
+    )
+    assert progression["terminal"] is False
+    assert progression["arena_mode"]=="f5_d_adaptive_autonomy"
+    assert (
+        progression["next_goal"]["goal_id"]
+        =="rebuild:reroute_producer_logistics"
+    )
+    assert progression["next_goal"]["kind"]=="autonomous_option"
