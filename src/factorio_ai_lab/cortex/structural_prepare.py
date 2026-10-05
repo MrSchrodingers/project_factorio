@@ -29,6 +29,7 @@ POWERED_MANUFACTURING_CONTRACT_VERSION = "cortex_structural_ops_v10"
 ROLLBACK_RECOVERY_CONTRACT_VERSION = "cortex_structural_ops_v11"
 ELECTRIC_MINING_CONTRACT_VERSION = "cortex_structural_ops_v12"
 LOGISTIC_SCIENCE_CONTRACT_VERSION = "cortex_structural_ops_v13"
+AUTONOMOUS_MAINTENANCE_CONTRACT_VERSION = "cortex_structural_ops_v14"
 SUPPORTED_CONTRACT_VERSIONS = frozenset({
     CONTRACT_VERSION,
     FUNCTIONAL_CONTRACT_VERSION,
@@ -43,8 +44,10 @@ SUPPORTED_CONTRACT_VERSIONS = frozenset({
     ROLLBACK_RECOVERY_CONTRACT_VERSION,
     ELECTRIC_MINING_CONTRACT_VERSION,
     LOGISTIC_SCIENCE_CONTRACT_VERSION,
+    AUTONOMOUS_MAINTENANCE_CONTRACT_VERSION,
 })
 PURPOSE_INFRASTRUCTURE = "infrastructure"
+PURPOSE_REPAIR = "repair"
 
 REFUSAL_BRANCH_PRECONDITION = "structural_branch_precondition_unsatisfied"
 REFUSAL_BRANCH_PLACEMENT = "structural_branch_placement_not_buildable"
@@ -91,7 +94,7 @@ class PreparedStructuralAction:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "preflight", dict(self.preflight))
-        if self.purpose != PURPOSE_INFRASTRUCTURE:
+        if self.purpose not in {PURPOSE_INFRASTRUCTURE,PURPOSE_REPAIR}:
             raise ValueError(f"unsupported structural purpose {self.purpose!r}")
         if self.contract_version not in SUPPORTED_CONTRACT_VERSIONS:
             raise ValueError(f"unsupported structural contract {self.contract_version!r}")
