@@ -46,21 +46,39 @@ def _direction(dx: int,dy: int) -> str:
         raise ValueError(f"non-cardinal belt step {(dx,dy)!r}") from exc
 
 
-def _arm_lines(prefix: str, raw: Mapping[str,Any]) -> list[str]:
+def _arm_lines(
+    prefix: str,
+    raw: Mapping[str,Any],
+    *,
+    actuator: str,
+    fuel_item: str | None=None,
+    fuel_units: int=0,
+) -> list[str]:
     position=raw.get("position")
     direction=str(raw.get("direction") or "").upper()
     if not isinstance(position,Mapping):
         raise TypeError("delivery arm requires position")
     if direction not in {"UP","DOWN","LEFT","RIGHT"}:
         raise ValueError("delivery arm requires cardinal direction")
-    return [
+    lines=[
         f"move_to({_position(position)})",
         f"{prefix}=place_entity(",
-        f"    {_prototype('inserter')},",
+        f"    {_prototype(actuator)},",
         f"    position={_position(position)},",
         f"    direction=Direction.{direction},",
         ")",
     ]
+    if fuel_item is not None:
+        if fuel_units<=0:
+            raise ValueError("burner actuator fuel units must be positive")
+        lines.extend([
+            f"{prefix}=insert_item(",
+            f"    {_prototype(fuel_item)},",
+            f"    {prefix},",
+            f"    quantity={fuel_units},",
+            ")",
+        ])
+    return lines
 
 
 def compile_autonomous_material_link(operation: StructuralOperation) -> list[str]:
@@ -71,7 +89,11 @@ def compile_autonomous_material_link(operation: StructuralOperation) -> list[str
     bootstrap=params.get("bootstrap")
     sequence=params.get("craft_sequence")
     construction=params.get("construction_items")
-    if not all(isinstance(row,Mapping) for row in (source,target,delivery,bootstrap,construction)):
+    actuator=params.get("actuator")
+    if not all(
+        isinstance(row,Mapping)
+        for row in (source,target,delivery,bootstrap,construction,actuator)
+    ):
         raise TypeError("material link frozen plan is incomplete")
     if not isinstance(sequence,Sequence) or isinstance(sequence,(str,bytes)):
         raise TypeError("material link craft sequence unavailable")
@@ -79,6 +101,30 @@ def compile_autonomous_material_link(operation: StructuralOperation) -> list[str
         raise ValueError("material link source must be wooden-chest")
     if str(target.get("entity_name") or "")!="stone-furnace":
         raise ValueError("material link target must be stone-furnace")
+
+    actuator_name=str(actuator.get("name") or "")
+    if actuator_name not in {"inserter","burner-inserter"}:
+        raise ValueError(f"unsupported material-link actuator {actuator_name!r}")
+    energy_source=str(actuator.get("energy_source") or "")
+    fuel_item: str | None=None
+    fuel_units=0
+    fuel_total=0
+    fuel_source=None
+    if energy_source=="burner":
+        fuel_item=str(actuator.get("fuel_item") or "")
+        fuel_units=int(actuator.get("fuel_units_per_actuator") or 0)
+        fuel_total=int(actuator.get("fuel_total") or 0)
+        fuel_source=actuator.get("fuel_source")
+        if (
+            actuator_name!="burner-inserter"
+            or fuel_item!="coal"
+            or fuel_units<=0
+            or fuel_total<=0
+            or not isinstance(fuel_source,Mapping)
+        ):
+            raise ValueError("invalid burner material-link actuator contract")
+    elif energy_source!="electric":
+        raise ValueError("material-link actuator energy source unavailable")
 
     iron_needed=int(bootstrap.get("iron_plate_needed") or 0)
     iron_ore_to_smelt=int(bootstrap.get("iron_ore_to_smelt") or 0)
@@ -101,6 +147,28 @@ def compile_autonomous_material_link(operation: StructuralOperation) -> list[str
             f"[{_prototype('iron-plate')}]"
         ),
     ]
+    if fuel_source is not None:
+        fuel_pos=_position(fuel_source)
+        reserve=int(actuator.get("fuel_source_reserve") or 0)
+        if reserve<0:
+            raise ValueError("material-link fuel reserve must be non-negative")
+        lines.extend([
+            f"cortex_link_fuel_source=get_entity({_prototype('wooden-chest')},{fuel_pos})",
+            (
+                "cortex_link_fuel_before=inspect_inventory(cortex_link_fuel_source)"
+                f"[{_prototype('coal')}]"
+            ),
+            f"if cortex_link_fuel_before < {fuel_total+reserve}:",
+            "    raise RuntimeError('endogenous coal below actuator fuel budget')",
+            f"move_to({fuel_pos})",
+            "cortex_link_fuel_drawn=extract_item(",
+            f"    {_prototype('coal')},",
+            "    cortex_link_fuel_source,",
+            f"    quantity={fuel_total},",
+            ")",
+        ])
+    else:
+        lines.extend(["cortex_link_fuel_before=0","cortex_link_fuel_drawn=0"])
     if iron_ore_to_smelt:
         lines.extend([
             f"move_to({source_pos})",
@@ -186,7 +254,15 @@ def compile_autonomous_material_link(operation: StructuralOperation) -> list[str
     mode=str(delivery.get("mode") or "")
     if not isinstance(lift,Mapping):
         raise TypeError("material link requires lift inserter")
-    lines.extend(_arm_lines("cortex_link_lift",lift))
+    lines.extend(
+        _arm_lines(
+            "cortex_link_lift",
+            lift,
+            actuator=actuator_name,
+            fuel_item=fuel_item,
+            fuel_units=fuel_units,
+        )
+    )
     if mode=="belt":
         if not isinstance(path,Sequence) or isinstance(path,(str,bytes)) or not path:
             raise TypeError("belt material link requires path")
@@ -215,7 +291,15 @@ def compile_autonomous_material_link(operation: StructuralOperation) -> list[str
             ])
         if not isinstance(drop,Mapping):
             raise TypeError("belt material link requires drop inserter")
-        lines.extend(_arm_lines("cortex_link_drop",drop))
+        lines.extend(
+            _arm_lines(
+                "cortex_link_drop",
+                drop,
+                actuator=actuator_name,
+                fuel_item=fuel_item,
+                fuel_units=fuel_units,
+            )
+        )
     elif mode!="inserter":
         raise ValueError(f"unsupported material link mode {mode!r}")
 

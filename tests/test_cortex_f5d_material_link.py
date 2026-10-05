@@ -39,6 +39,11 @@ def _catalog() -> RuntimeFactorioCatalog:
             _recipe("iron-plate",[("iron-ore",1)],[("iron-plate",1)],category="smelting"),
             _recipe("copper-plate",[("copper-ore",1)],[("copper-plate",1)],category="smelting"),
             _recipe("stone-furnace",[("stone",5)],[("stone-furnace",1)]),
+            _recipe(
+                "burner-inserter",
+                [("iron-plate",1),("iron-gear-wheel",1)],
+                [("burner-inserter",1)],
+            ),
             _recipe("iron-gear-wheel",[("iron-plate",2)],[("iron-gear-wheel",1)]),
             _recipe("copper-cable",[("copper-plate",1)],[("copper-cable",2)]),
             _recipe(
@@ -73,6 +78,35 @@ def _catalog() -> RuntimeFactorioCatalog:
                 "crafting_speed":1,
                 "crafting_speed_status":"measured",
             },
+            {
+                "name":"inserter",
+                "type":"inserter",
+                "energy_source_type":"electric",
+                "energy_source_status":"measured",
+                "energy_usage_per_tick_j":245,
+                "energy_usage_status":"measured",
+                "fuel_categories":[],
+                "fuel_categories_status":"absent",
+            },
+            {
+                "name":"burner-inserter",
+                "type":"inserter",
+                "energy_source_type":"burner",
+                "energy_source_status":"measured",
+                "energy_usage_per_tick_j":2400,
+                "energy_usage_status":"measured",
+                "fuel_categories":["chemical"],
+                "fuel_categories_status":"measured",
+            },
+        ],
+        "fuels":[
+            {
+                "name":"coal",
+                "fuel_value_j":4_000_000,
+                "fuel_value_status":"measured",
+                "fuel_categories":["chemical"],
+                "fuel_categories_status":"measured",
+            }
         ],
     })
 
@@ -80,7 +114,7 @@ def _catalog() -> RuntimeFactorioCatalog:
 def _world(*, iron_ore=30, iron_plates=8, copper_plates=8):
     return {
         "tick":1,
-        "entity_count":6,
+        "entity_count":7,
         "entities":[
             {
                 "name":"character",
@@ -117,6 +151,15 @@ def _world(*, iron_ore=30, iron_plates=8, copper_plates=8):
                 "fuel":[{"name":"coal","count":10}],
                 "fuel_remaining":1000.0,
                 "craft_output":[{"name":"iron-plate","count":iron_plates}],
+            },
+            {
+                "name":"wooden-chest",
+                "type":"container",
+                "unit_number":553,
+                "position":{"x":14.5,"y":6.5},
+                "status":"normal",
+                "direction":0,
+                "contents":[{"name":"coal","count":200}],
             },
             {
                 "name":"stone-furnace",
@@ -190,11 +233,18 @@ def test_f5d_plans_existing_processor_instead_of_new_furnace() -> None:
     assert plan.target_processor["node_id"]=="u566"
     assert plan.delivery.mode=="belt"
     assert plan.delivery.belt_count==3
-    assert plan.construction_items=={"inserter":2,"transport-belt":3}
-    assert plan.plate_requirements=={"iron-plate":14,"copper-plate":3}
-    assert plan.bootstrap["iron_ore_to_smelt"]==6
-    assert plan.bootstrap["copper_plate_needed"]==3
-    assert len(plan.baseline_entities)==5
+    assert plan.construction_items=={"burner-inserter":2,"transport-belt":3}
+    assert plan.plate_requirements=={"iron-plate":12}
+    assert plan.bootstrap["iron_ore_to_smelt"]==4
+    assert plan.bootstrap["copper_plate_needed"]==0
+    assert plan.actuator["name"]=="burner-inserter"
+    assert plan.actuator["energy_source"]=="burner"
+    assert plan.actuator["local_power_proven"] is False
+    assert plan.actuator["fuel_item"]=="coal"
+    assert plan.actuator["fuel_units_per_actuator"]==6
+    assert plan.actuator["fuel_total"]==12
+    assert plan.actuator["fuel_source"]["coal_before"]==200
+    assert len(plan.baseline_entities)==6
     assert {
         (row["entity_name"],row["x"],row["y"])
         for row in plan.baseline_entities
@@ -207,6 +257,21 @@ def test_f5d_plans_existing_processor_instead_of_new_furnace() -> None:
 def test_f5d_material_link_refuses_non_endogenous_bootstrap() -> None:
     plan=plan_existing_processing_link(
         _world(iron_ore=5,iron_plates=0),
+        action=_action(),
+        catalog=_catalog(),
+    )
+    assert plan is None
+
+
+
+
+def test_f5d_material_link_refuses_when_burner_actuator_has_no_endogenous_fuel() -> None:
+    world=_world()
+    for row in world["entities"]:
+        if row.get("unit_number")==553:
+            row["contents"]=[{"name":"coal","count":50}]
+    plan=plan_existing_processing_link(
+        world,
         action=_action(),
         catalog=_catalog(),
     )
@@ -269,9 +334,12 @@ def test_f5d_material_link_compiler_freezes_route_and_proves_post_bootstrap_flow
     assert "Position(x=17.5,y=70.5)" in code
     assert "Position(x=17.5,y=69.5)" in code
     assert "Position(x=18.5,y=69.5)" in code
-    assert "quantity=6" in code
-    assert "quantity=14" in code
-    assert "quantity=3" in code
+    assert "Prototype.BurnerInserter" in code
+    assert "Position(x=14.5,y=6.5)" in code
+    assert "quantity=4" in code
+    assert "quantity=12" in code
+    assert code.count("quantity=6")>=2
+    assert "Prototype.CopperPlate" not in code
     assert "cortex_link_source_preflow" in code
     assert "cortex_link_target_preflow" in code
     assert (

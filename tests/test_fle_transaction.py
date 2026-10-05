@@ -81,10 +81,26 @@ class FakeSnapshotNamespace:
 
 
 class FakeRconClient:
-    def __init__(self, namespace) -> None:
+    def __init__(self, namespace, *, production=None) -> None:
         self.namespace=namespace
+        self.production=production or {
+            "items":{"produced":{},"consumed":{}},
+            "fluids":{"produced":{},"consumed":{}},
+        }
 
     def send_command(self, command):
+        production_target="CORTEX_PRODUCTION_TARGET|"
+        if production_target in command:
+            encoded=command.split(production_target,1)[1].strip()
+            self.production=json.loads(
+                base64.b64decode(encoded).decode("utf-8")
+            )
+            return "CORTEX_PRODUCTION_RESTORE_OK"
+        if "CORTEX_PRODUCTION_CAPTURE|" in command:
+            return (
+                "CORTEX_PRODUCTION_CAPTURE|"
+                +json.dumps(self.production,sort_keys=True)
+            )
         marker="CORTEX_REMOVE_TARGET|"
         if marker in command:
             raw=command.split(marker,1)[1].strip()
@@ -541,6 +557,65 @@ class TransactionalFLEExecutorTests(unittest.TestCase):
         }
         self.assertEqual(identities,{("stone-furnace",20.0,69.0,0)})
 
+
+
+    def test_rejected_checkpoint_restores_cumulative_production_totals(self) -> None:
+        rows=[
+            {
+                "name": '"stone-furnace"',
+                "position":{"x":"20","y":"69"},
+                "direction":0,
+            },
+        ]
+        checkpoint=FakeCheckpoint(rows)
+        env=FakeRollbackEnvironment(checkpoint,lose_name="never")
+        baseline={
+            "items":{
+                "produced":{"iron-plate":192.0,"coal":954.0},
+                "consumed":{"coal":137.0},
+            },
+            "fluids":{
+                "produced":{"steam":3190.0},
+                "consumed":{"steam":1490.0},
+            },
+        }
+        rcon=FakeRconClient(env.namespace,production=baseline)
+        env.instance.rcon_client=rcon
+        original_reset=env.reset
+
+        def reset_and_clear_stats(*,options=None,seed=None):
+            result=original_reset(options=options,seed=seed)
+            if options is not None and options.get("game_state") is checkpoint:
+                rcon.production={
+                    "items":{
+                        "produced":{"coal":1.0},
+                        "consumed":{"coal":5.0},
+                    },
+                    "fluids":{
+                        "produced":{"steam":195.0},
+                        "consumed":{"steam":10.0},
+                    },
+                }
+            return result
+
+        env.reset=reset_and_clear_stats
+        executor=TransactionalFLEExecutor(
+            env,
+            action_factory=fake_action_factory,
+        )
+        executor.game_state=checkpoint
+
+        rejected=executor.execute("bad",accept=lambda _:False)
+
+        self.assertFalse(rejected.accepted)
+        integrity=executor.rollback_integrity_snapshot()
+        self.assertIsNotNone(integrity)
+        assert integrity is not None
+        telemetry=integrity["production_statistics"]
+        self.assertEqual(telemetry["status"],"restored")
+        self.assertTrue(telemetry["cumulative_totals_restored"])
+        self.assertFalse(telemetry["history_windows_restored"])
+        self.assertEqual(rcon.production,baseline)
 
     def test_intervention_counters_respect_rollback(self) -> None:
         env = FakeEnvironment()

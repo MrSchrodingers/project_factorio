@@ -151,6 +151,175 @@ def _capture_fle_entity_rows(
     return _capture_rcon_entity_rows(environment)
 
 
+
+def _production_rcon_send(environment: Any) -> Callable[[str], Any] | None:
+    unwrapped=getattr(environment,"unwrapped",environment)
+    instance=getattr(unwrapped,"instance",None)
+    ensure_connected=getattr(instance,"ensure_connected",None)
+    if callable(ensure_connected):
+        try:
+            ensure_connected()
+        except (OSError,RuntimeError,ConnectionError):
+            return None
+    rcon=getattr(instance,"rcon_client",None)
+    send=getattr(rcon,"send_command",None)
+    return send if callable(send) else None
+
+
+def _normalise_production_totals(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw,Mapping):
+        return None
+    result: dict[str,Any]={}
+    for domain in ("items","fluids"):
+        block=raw.get(domain)
+        if not isinstance(block,Mapping):
+            return None
+        out: dict[str,dict[str,float]]={}
+        for direction in ("produced","consumed"):
+            counts=block.get(direction)
+            if not isinstance(counts,Mapping):
+                return None
+            clean: dict[str,float]={}
+            for name,value in counts.items():
+                if (
+                    not isinstance(name,str)
+                    or isinstance(value,bool)
+                    or not isinstance(value,(int,float))
+                ):
+                    return None
+                amount=float(value)
+                if abs(amount)>1e-12:
+                    clean[name]=amount
+            out[direction]=clean
+        result[domain]=out
+    return result
+
+
+def _capture_production_totals(environment: Any) -> dict[str, Any] | None:
+    """Capture exact cumulative item/fluid flow totals without mutating WORLD."""
+    send=_production_rcon_send(environment)
+    if send is None:
+        return None
+    command=(
+        "/c local p=storage.agent_characters and storage.agent_characters[1]; "
+        "if p and not p.valid then p=nil end; "
+        "local s=(p and p.surface) or game.surfaces[1]; "
+        "local f=(p and p.force) or game.forces.player; "
+        "if not s or not f then rcon.print('CORTEX_PRODUCTION_ERROR') return end; "
+        "local function copy_counts(source) local out={} "
+        "for name,count in pairs(source) do if count~=0 then out[name]=count end end "
+        "return out end; "
+        "local i=f.get_item_production_statistics(s); "
+        "local fl=f.get_fluid_production_statistics(s); "
+        "local payload={items={produced=copy_counts(i.input_counts),"
+        "consumed=copy_counts(i.output_counts)},"
+        "fluids={produced=copy_counts(fl.input_counts),"
+        "consumed=copy_counts(fl.output_counts)}}; "
+        "rcon.print('CORTEX_PRODUCTION_CAPTURE|'..helpers.table_to_json(payload))"
+    )
+    try:
+        response=send(command)
+    except (OSError,RuntimeError,TypeError,ValueError,AttributeError):
+        return None
+    if response is None:
+        return None
+    line=next(
+        (
+            row for row in str(response).splitlines()
+            if row.startswith("CORTEX_PRODUCTION_CAPTURE|")
+        ),
+        None,
+    )
+    if line is None:
+        return None
+    try:
+        payload=json.loads(line.split("|",1)[1])
+    except (json.JSONDecodeError,TypeError,ValueError):
+        return None
+    return _normalise_production_totals(payload)
+
+
+def _production_totals_match(
+    expected: Mapping[str,Any],
+    observed: Mapping[str,Any],
+    *,
+    tolerance: float=1e-6,
+) -> bool:
+    for domain in ("items","fluids"):
+        for direction in ("produced","consumed"):
+            left=expected.get(domain,{}).get(direction,{})
+            right=observed.get(domain,{}).get(direction,{})
+            if not isinstance(left,Mapping) or not isinstance(right,Mapping):
+                return False
+            keys=set(left)|set(right)
+            for key in keys:
+                try:
+                    a=float(left.get(key,0.0))
+                    b=float(right.get(key,0.0))
+                except (TypeError,ValueError):
+                    return False
+                if abs(a-b)>tolerance:
+                    return False
+    return True
+
+
+def _restore_production_totals(
+    environment: Any,
+    baseline: Mapping[str,Any] | None,
+) -> dict[str, Any]:
+    """Restore cumulative flow totals after FLE reset; history windows are lost."""
+    normalised=_normalise_production_totals(baseline)
+    if normalised is None:
+        return {
+            "status":"not_applicable",
+            "cumulative_totals_restored":False,
+            "history_windows_restored":False,
+        }
+    send=_production_rcon_send(environment)
+    if send is None:
+        raise RuntimeError("production rollback has no RCON sender")
+
+    lines=[
+        "/c local p=storage.agent_characters and storage.agent_characters[1];",
+        "if p and not p.valid then p=nil end;",
+        "local s=(p and p.surface) or game.surfaces[1];",
+        "local f=(p and p.force) or game.forces.player;",
+        "if not s or not f then error('production rollback surface/force unavailable') end;",
+        "local i=f.get_item_production_statistics(s);",
+        "local fl=f.get_fluid_production_statistics(s);",
+        "i.clear(); fl.clear();",
+    ]
+    for domain,var in (("items","i"),("fluids","fl")):
+        for name,value in sorted(normalised[domain]["produced"].items()):
+            lines.append(f"{var}.on_flow({json.dumps(name)},{float(value)!r});")
+        for name,value in sorted(normalised[domain]["consumed"].items()):
+            lines.append(f"{var}.on_flow({json.dumps(name)},{-float(value)!r});")
+    encoded=base64.b64encode(
+        json.dumps(normalised,sort_keys=True,separators=(",",":")).encode("utf-8")
+    ).decode("ascii")
+    lines.append("rcon.print('CORTEX_PRODUCTION_RESTORE_OK')")
+    lines.append(f"-- CORTEX_PRODUCTION_TARGET|{encoded}")
+    try:
+        response=send(" ".join(lines))
+    except (OSError,RuntimeError,TypeError,ValueError,AttributeError) as exc:
+        raise RuntimeError("production cumulative rollback command failed") from exc
+    if "CORTEX_PRODUCTION_RESTORE_OK" not in str(response):
+        raise RuntimeError(f"production cumulative rollback refused: {response!r}")
+
+    observed=_capture_production_totals(environment)
+    if observed is None or not _production_totals_match(normalised,observed):
+        raise RuntimeError("production cumulative rollback verification failed")
+    return {
+        "status":"restored",
+        "cumulative_totals_restored":True,
+        "history_windows_restored":False,
+        "item_produced_names":len(normalised["items"]["produced"]),
+        "item_consumed_names":len(normalised["items"]["consumed"]),
+        "fluid_produced_names":len(normalised["fluids"]["produced"]),
+        "fluid_consumed_names":len(normalised["fluids"]["consumed"]),
+    }
+
+
 def _remove_unexpected_rollback_entities(
     environment: Any,
     identities: list[tuple[str, float, float, int]],
@@ -659,13 +828,21 @@ class TransactionalFLEExecutor:
             "committed_repair": dict(self._committed_repair),
         }
 
-    def restore_checkpoint(self, checkpoint: Any) -> dict[str, Any]:
-        """Restore and verify one exact pre-action checkpoint."""
+    def restore_checkpoint(
+        self,
+        checkpoint: Any,
+        *,
+        production_totals: Mapping[str,Any] | None=None,
+    ) -> dict[str, Any]:
+        """Restore physical checkpoint and cumulative production telemetry."""
         target=checkpoint
         self.environment.reset(options={'game_state': target})
         self._last_rollback_integrity=_repair_missing_checkpoint_entities(
             self.environment,
             target,
+        )
+        self._last_rollback_integrity["production_statistics"]=(
+            _restore_production_totals(self.environment,production_totals)
         )
         self.game_state=target
         return dict(self._last_rollback_integrity)
@@ -715,6 +892,11 @@ class TransactionalFLEExecutor:
                 f"got {purpose!r}"
             )
         checkpoint = self.game_state
+        rollback_production_totals=(
+            _capture_production_totals(self.environment)
+            if checkpoint is not None
+            else None
+        )
         counts = intervention_counts_from_code(code)
         attempted_counter, committed_counter = self._counters_for(purpose)
         self._accumulate(attempted_counter, counts)
@@ -733,7 +915,10 @@ class TransactionalFLEExecutor:
             rollback_error: Exception | None=None
             if checkpoint is not None:
                 try:
-                    self.restore_checkpoint(checkpoint)
+                    self.restore_checkpoint(
+                        checkpoint,
+                        production_totals=rollback_production_totals,
+                    )
                 except Exception as candidate_rollback_error:  # noqa: BLE001
                     rollback_error=candidate_rollback_error
             if self._action_runtime is not None and runtime_token is not None:
@@ -790,7 +975,10 @@ class TransactionalFLEExecutor:
             # only exact missing rows from the checkpoint before calling the
             # rollback complete.
             try:
-                self.restore_checkpoint(checkpoint)
+                self.restore_checkpoint(
+                    checkpoint,
+                    production_totals=rollback_production_totals,
+                )
             except (
                 OSError,
                 RuntimeError,
