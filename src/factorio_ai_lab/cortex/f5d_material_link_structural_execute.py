@@ -102,6 +102,17 @@ def compile_autonomous_material_link(operation: StructuralOperation) -> list[str
     if str(target.get("entity_name") or "")!="stone-furnace":
         raise ValueError("material link target must be stone-furnace")
 
+    material_name=str(params.get("material") or "")
+    product_name=str(params.get("product") or "")
+    if (material_name,product_name) not in {
+        ("iron-ore","iron-plate"),
+        ("copper-ore","copper-plate"),
+    }:
+        raise ValueError(
+            f"unsupported material-link transformation "
+            f"{material_name!r}->{product_name!r}"
+        )
+
     actuator_name=str(actuator.get("name") or "")
     if actuator_name not in {"inserter","burner-inserter"}:
         raise ValueError(f"unsupported material-link actuator {actuator_name!r}")
@@ -127,11 +138,17 @@ def compile_autonomous_material_link(operation: StructuralOperation) -> list[str
         raise ValueError("material-link actuator energy source unavailable")
 
     iron_needed=int(bootstrap.get("iron_plate_needed") or 0)
-    iron_ore_to_smelt=int(bootstrap.get("iron_ore_to_smelt") or 0)
+    construction_iron=bootstrap.get("construction_iron")
     copper_needed=int(bootstrap.get("copper_plate_needed") or 0)
-    wait=int(bootstrap.get("smelt_wait_seconds") or 0)
-    if iron_needed<=0 or iron_ore_to_smelt<0 or copper_needed<0 or wait<=0:
-        raise ValueError("invalid material-link bootstrap budget")
+    contaminants=bootstrap.get("source_contaminants",[])
+    if iron_needed<0 or copper_needed<0:
+        raise ValueError("invalid material-link construction budget")
+    if iron_needed and not isinstance(construction_iron,Mapping):
+        raise TypeError("material link requires construction iron bootstrap")
+    if not isinstance(contaminants,Sequence) or isinstance(
+        contaminants,(str,bytes)
+    ):
+        raise TypeError("material link contaminants must be a sequence")
 
     source_pos=_position(source)
     target_pos=_position(target)
@@ -140,13 +157,14 @@ def compile_autonomous_material_link(operation: StructuralOperation) -> list[str
         f"cortex_link_target=get_entity({_prototype('stone-furnace')},{target_pos})",
         (
             "cortex_link_source_before=inspect_inventory(cortex_link_source)"
-            f"[{_prototype('iron-ore')}]"
+            f"[{_prototype(material_name)}]"
         ),
         (
-            "cortex_link_target_plate_before=inspect_inventory(cortex_link_target)"
-            f"[{_prototype('iron-plate')}]"
+            "cortex_link_target_product_before=inspect_inventory(cortex_link_target)"
+            f"[{_prototype(product_name)}]"
         ),
     ]
+
     if fuel_source is not None:
         fuel_pos=_position(fuel_source)
         reserve=int(actuator.get("fuel_source_reserve") or 0)
@@ -169,44 +187,111 @@ def compile_autonomous_material_link(operation: StructuralOperation) -> list[str
         ])
     else:
         lines.extend(["cortex_link_fuel_before=0","cortex_link_fuel_drawn=0"])
-    if iron_ore_to_smelt:
+
+    for index,raw in enumerate(contaminants):
+        if not isinstance(raw,Mapping):
+            raise TypeError("material link contaminant row must be mapping")
+        item=str(raw.get("item") or "")
+        count=int(raw.get("count") or 0)
+        sink=raw.get("sink")
+        if (
+            not item.endswith("-science-pack")
+            or count<=0
+            or not isinstance(sink,Mapping)
+            or str(sink.get("entity_name") or "")!="lab"
+        ):
+            raise ValueError("unsupported material-link source contaminant")
+        sink_pos=_position(sink)
         lines.extend([
+            (
+                f"cortex_link_contaminant_sink_{index}=get_entity("
+                f"{_prototype('lab')},{sink_pos})"
+            ),
             f"move_to({source_pos})",
-            "cortex_link_bootstrap_ore=extract_item(",
-            f"    {_prototype('iron-ore')},",
+            f"cortex_link_contaminant_extract_{index}=extract_item(",
+            f"    {_prototype(item)},",
             "    cortex_link_source,",
-            f"    quantity={iron_ore_to_smelt},",
+            f"    quantity={count},",
             ")",
-            f"move_to({target_pos})",
-            "cortex_link_target=insert_item(",
-            f"    {_prototype('iron-ore')},",
-            "    cortex_link_target,",
-            f"    quantity={iron_ore_to_smelt},",
+            f"move_to({sink_pos})",
+            f"cortex_link_contaminant_insert_{index}=insert_item(",
+            f"    {_prototype(item)},",
+            f"    cortex_link_contaminant_sink_{index},",
+            f"    quantity={count},",
             ")",
-            f"sleep({wait})",
         ])
-    lines.extend([
-        (
-            "cortex_link_source_preflow=inspect_inventory(cortex_link_source)"
-            f"[{_prototype('iron-ore')}]"
-        ),
-        (
-            "cortex_link_target_plate_ready=inspect_inventory(cortex_link_target)"
-            f"[{_prototype('iron-plate')}]"
-        ),
-        f"if cortex_link_target_plate_ready < {iron_needed}:",
-        "    raise RuntimeError('endogenous iron bootstrap did not reach link budget')",
-        f"move_to({target_pos})",
-        "cortex_link_iron_drawn=extract_item(",
-        f"    {_prototype('iron-plate')},",
-        "    cortex_link_target,",
-        f"    quantity={iron_needed},",
-        ")",
-        (
-            "cortex_link_target_preflow=inspect_inventory(cortex_link_target)"
-            f"[{_prototype('iron-plate')}]"
-        ),
-    ])
+
+    if iron_needed:
+        assert isinstance(construction_iron,Mapping)
+        iron_source=construction_iron.get("source")
+        if not isinstance(iron_source,Mapping):
+            raise TypeError("construction iron source unavailable")
+        iron_source_name=str(iron_source.get("entity_name") or "")
+        if iron_source_name!="stone-furnace":
+            raise ValueError("construction iron source must be stone-furnace")
+        iron_source_pos=_position(iron_source)
+        mode=str(construction_iron.get("mode") or "")
+        wait_seconds=int(construction_iron.get("wait_seconds") or 0)
+        ore_to_smelt=int(construction_iron.get("iron_ore_to_smelt") or 0)
+        ore_source=construction_iron.get("iron_ore_source")
+        lines.append(
+            f"cortex_link_iron_source=get_entity("
+            f"{_prototype('stone-furnace')},{iron_source_pos})"
+        )
+        if mode=="manual_smelt":
+            if (
+                ore_to_smelt<=0
+                or not isinstance(ore_source,Mapping)
+                or str(ore_source.get("entity_name") or "")!="wooden-chest"
+            ):
+                raise ValueError("manual construction smelt source unavailable")
+            ore_source_pos=_position(ore_source)
+            lines.extend([
+                (
+                    f"cortex_link_iron_ore_source=get_entity("
+                    f"{_prototype('wooden-chest')},{ore_source_pos})"
+                ),
+                (
+                    "cortex_link_iron_ore_before=inspect_inventory("
+                    "cortex_link_iron_ore_source)"
+                    f"[{_prototype('iron-ore')}]"
+                ),
+                f"if cortex_link_iron_ore_before < {ore_to_smelt}:",
+                "    raise RuntimeError('endogenous iron ore below construction budget')",
+                f"move_to({ore_source_pos})",
+                "cortex_link_bootstrap_ore=extract_item(",
+                f"    {_prototype('iron-ore')},",
+                "    cortex_link_iron_ore_source,",
+                f"    quantity={ore_to_smelt},",
+                ")",
+                f"move_to({iron_source_pos})",
+                "cortex_link_iron_source=insert_item(",
+                f"    {_prototype('iron-ore')},",
+                "    cortex_link_iron_source,",
+                f"    quantity={ore_to_smelt},",
+                ")",
+            ])
+        elif mode not in {"autonomous_wait","existing_stock"}:
+            raise ValueError(f"unsupported construction iron mode {mode!r}")
+
+        if wait_seconds>0:
+            lines.append(f"sleep({wait_seconds})")
+        lines.extend([
+            (
+                "cortex_link_iron_ready=inspect_inventory(cortex_link_iron_source)"
+                f"[{_prototype('iron-plate')}]"
+            ),
+            f"if cortex_link_iron_ready < {iron_needed}:",
+            "    raise RuntimeError('endogenous iron plates did not reach link budget')",
+            f"move_to({iron_source_pos})",
+            "cortex_link_iron_drawn=extract_item(",
+            f"    {_prototype('iron-plate')},",
+            "    cortex_link_iron_source,",
+            f"    quantity={iron_needed},",
+            ")",
+        ])
+    else:
+        lines.append("cortex_link_iron_drawn=0")
 
     copper_source=bootstrap.get("copper_plate_source")
     if copper_needed:
@@ -233,6 +318,17 @@ def compile_autonomous_material_link(operation: StructuralOperation) -> list[str
         ])
     else:
         lines.extend(["cortex_link_copper_before=0","cortex_link_copper_drawn=0"])
+
+    lines.extend([
+        (
+            "cortex_link_source_preflow=inspect_inventory(cortex_link_source)"
+            f"[{_prototype(material_name)}]"
+        ),
+        (
+            "cortex_link_target_preflow=inspect_inventory(cortex_link_target)"
+            f"[{_prototype(product_name)}]"
+        ),
+    ])
 
     for index,raw in enumerate(sequence):
         if not isinstance(raw,Mapping):
@@ -307,11 +403,11 @@ def compile_autonomous_material_link(operation: StructuralOperation) -> list[str
         "sleep(20)",
         (
             "cortex_material_link_output_after=inspect_inventory(cortex_link_target)"
-            f"[{_prototype('iron-plate')}]"
+            f"[{_prototype(product_name)}]"
         ),
         (
             "cortex_material_link_source_after=inspect_inventory(cortex_link_source)"
-            f"[{_prototype('iron-ore')}]"
+            f"[{_prototype(material_name)}]"
         ),
         (
             "cortex_autonomous_material_link_succeeded=("

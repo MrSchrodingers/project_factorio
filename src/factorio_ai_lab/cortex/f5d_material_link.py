@@ -13,7 +13,11 @@ from factorio_ai_lab.cortex.actions import (
     ActionRequest,
 )
 from factorio_ai_lab.cortex.structural import plan_processing_for_buffered_output
-from factorio_ai_lab.learning.factory_graph import build_factory_graph, node_id
+from factorio_ai_lab.learning.factory_graph import (
+    MATERIAL_RELATIONS,
+    build_factory_graph,
+    node_id,
+)
 from factorio_ai_lab.learning.repair_loop import INTENT_PLACE_PROCESSING, RepairAction
 from factorio_ai_lab.planning.delivery import (
     MODE_BELT,
@@ -73,6 +77,218 @@ def _contents_count(entity: Mapping[str, Any], item: str, field: str) -> int:
         for row in raw
         if isinstance(row, Mapping) and row.get("name") == item
     )
+
+
+
+def _contents_map(entity: Mapping[str,Any],field: str) -> dict[str,int]:
+    raw=entity.get(field)
+    if not isinstance(raw,Sequence) or isinstance(raw,(str,bytes)):
+        return {}
+    result: dict[str,int]={}
+    for row in raw:
+        if not isinstance(row,Mapping):
+            continue
+        name=row.get("name")
+        count=row.get("count")
+        if (
+            not isinstance(name,str)
+            or isinstance(count,bool)
+            or not isinstance(count,(int,float))
+        ):
+            continue
+        value=max(0,int(count))
+        if value:
+            result[name]=result.get(name,0)+value
+    return result
+
+
+def _material_adjacency(graph: Mapping[str,Any]) -> dict[str,set[str]]:
+    adjacency: dict[str,set[str]]={}
+    rows=graph.get("edges")
+    if not isinstance(rows,Sequence) or isinstance(rows,(str,bytes)):
+        return adjacency
+    for row in rows:
+        if not isinstance(row,Mapping) or row.get("relation") not in MATERIAL_RELATIONS:
+            continue
+        source=row.get("source")
+        target=row.get("target")
+        if isinstance(source,str) and isinstance(target,str):
+            adjacency.setdefault(source,set()).add(target)
+    return adjacency
+
+
+def _reaches(adjacency: Mapping[str,set[str]],source: str,target: str) -> bool:
+    queue=[source]
+    seen={source}
+    while queue:
+        current=queue.pop(0)
+        for nxt in adjacency.get(current,set()):
+            if nxt==target:
+                return True
+            if nxt in seen:
+                continue
+            seen.add(nxt)
+            queue.append(nxt)
+    return False
+
+
+def _source_contaminants(
+    source: Mapping[str,Any],
+    *,
+    material: str,
+    entities: Sequence[Mapping[str,Any]],
+) -> tuple[Mapping[str,Any],...] | None:
+    contaminants={
+        name:count
+        for name,count in _contents_map(source,"contents").items()
+        if name!=material and count>0
+    }
+    if not contaminants:
+        return ()
+    labs=[row for row in entities if row.get("name")=="lab"]
+    if not labs:
+        return None
+    source_pos=_position(source)
+    lab=min(
+        labs,
+        key=lambda row:(
+            math.hypot(
+                _position(row)["x"]-source_pos["x"],
+                _position(row)["y"]-source_pos["y"],
+            ),
+            _position(row)["y"],
+            _position(row)["x"],
+        ),
+    )
+    lab_pos=_position(lab)
+    rows=[]
+    for item,count in sorted(contaminants.items()):
+        if not item.endswith("-science-pack"):
+            return None
+        rows.append({
+            "item":item,
+            "count":count,
+            "sink":{
+                "entity_name":"lab",
+                "x":lab_pos["x"],
+                "y":lab_pos["y"],
+            },
+        })
+    return tuple(rows)
+
+
+def _construction_iron_bootstrap(
+    *,
+    entities: Sequence[Mapping[str,Any]],
+    index: Mapping[str,Mapping[str,Any]],
+    graph: Mapping[str,Any],
+    target_processor_id: str,
+    target_processor: Mapping[str,Any],
+    source: Mapping[str,Any],
+    branch_material: str,
+    iron_needed: int,
+) -> Mapping[str,Any] | None:
+    if iron_needed<=0:
+        return {
+            "mode":"not_required",
+            "source":None,
+            "iron_plate_needed":0,
+            "iron_plate_available_before":0,
+            "iron_ore_to_smelt":0,
+            "iron_ore_source":None,
+            "wait_seconds":0,
+        }
+
+    adjacency=_material_adjacency(graph)
+    source_pos=_position(source)
+    candidates=[]
+    for processor_id,processor in index.items():
+        if processor.get("name")!="stone-furnace":
+            continue
+        available=_contents_count(processor,"iron-plate","craft_output")
+        fuel_count=_contents_count(processor,"coal","fuel")
+        fuel_remaining=float(processor.get("fuel_remaining") or 0.0)
+        fuel_ready=fuel_count>0 or fuel_remaining>0
+        mode=None
+        wait_seconds=0
+        ore_to_smelt=0
+        ore_source: Mapping[str,Any] | None=None
+
+        if available>=iron_needed:
+            mode="existing_stock"
+        elif fuel_ready:
+            shortfall=iron_needed-available
+            linked_sources=[]
+            for buffer_id,buffer in index.items():
+                ore=_contents_count(buffer,"iron-ore","contents")
+                if ore<shortfall:
+                    continue
+                if _reaches(adjacency,buffer_id,processor_id):
+                    linked_sources.append((ore,buffer_id,buffer))
+            if linked_sources:
+                _,buffer_id,ore_source=max(
+                    linked_sources,
+                    key=lambda row:(row[0],row[1]),
+                )
+                mode="autonomous_wait"
+                wait_seconds=max(8,math.ceil(shortfall*3.2)+5)
+                ore_source={
+                    "node_id":buffer_id,
+                    "entity_name":str(ore_source.get("name") or ""),
+                    **_position(ore_source),
+                    "iron_ore_before":_contents_count(
+                        ore_source,"iron-ore","contents"
+                    ),
+                    "autonomous_delivery":True,
+                }
+            elif (
+                branch_material=="iron-ore"
+                and processor_id==target_processor_id
+                and _contents_count(source,"iron-ore","contents")>=shortfall
+            ):
+                mode="manual_smelt"
+                wait_seconds=max(8,math.ceil(shortfall*3.2)+5)
+                ore_to_smelt=shortfall
+                ore_source={
+                    "entity_name":str(source.get("name") or ""),
+                    **source_pos,
+                    "iron_ore_before":_contents_count(
+                        source,"iron-ore","contents"
+                    ),
+                    "autonomous_delivery":False,
+                }
+
+        if mode is None:
+            continue
+        processor_pos=_position(processor)
+        rank={"existing_stock":0,"autonomous_wait":1,"manual_smelt":2}[mode]
+        candidates.append((
+            rank,
+            math.hypot(
+                processor_pos["x"]-source_pos["x"],
+                processor_pos["y"]-source_pos["y"],
+            ),
+            processor_id,
+            {
+                "mode":mode,
+                "source":{
+                    "node_id":processor_id,
+                    "entity_name":"stone-furnace",
+                    **processor_pos,
+                    "iron_plate_before":available,
+                    "fuel_count":fuel_count,
+                    "fuel_remaining":fuel_remaining,
+                },
+                "iron_plate_needed":iron_needed,
+                "iron_plate_available_before":available,
+                "iron_ore_to_smelt":ore_to_smelt,
+                "iron_ore_source":ore_source,
+                "wait_seconds":wait_seconds,
+            },
+        ))
+    if not candidates:
+        return None
+    return min(candidates,key=lambda row:(row[0],row[1],row[2]))[3]
 
 
 def _craft_requirements(
@@ -267,9 +483,10 @@ def plan_existing_processing_link(
         arguments={"producers": list(targets)},
         targets=targets,
     )
+    factory_graph=build_factory_graph(entities)
     graph_plan = plan_processing_for_buffered_output(
         probe,
-        graph=build_factory_graph(entities),
+        graph=factory_graph,
         world_entities=entities,
         catalog=catalog,
         available={},
@@ -354,12 +571,31 @@ def plan_existing_processing_link(
 
     iron_needed = int(plate_requirements.get("iron-plate", 0))
     copper_needed = int(plate_requirements.get("copper-plate", 0))
-    target_iron = _contents_count(processor, "iron-plate", "craft_output")
-    iron_shortfall = max(0, iron_needed - target_iron)
-    source_iron_ore = _contents_count(source, "iron-ore", "contents")
-    if branch.material != "iron-ore" or branch.product != "iron-plate":
+    if (branch.material,branch.product) not in {
+        ("iron-ore","iron-plate"),
+        ("copper-ore","copper-plate"),
+    }:
         return None
-    if iron_shortfall > source_iron_ore:
+
+    contaminants=_source_contaminants(
+        source,
+        material=branch.material,
+        entities=entities,
+    )
+    if contaminants is None:
+        return None
+
+    construction_iron=_construction_iron_bootstrap(
+        entities=entities,
+        index=index,
+        graph=factory_graph,
+        target_processor_id=processor_id,
+        target_processor=processor,
+        source=source,
+        branch_material=branch.material,
+        iron_needed=iron_needed,
+    )
+    if construction_iron is None:
         return None
 
     fuel_source: Mapping[str,Any] | None=None
@@ -411,14 +647,12 @@ def plan_existing_processing_link(
 
     fuel_count = _contents_count(processor, "coal", "fuel")
     fuel_remaining = float(processor.get("fuel_remaining") or 0.0)
-    if iron_shortfall and fuel_count <= 0 and fuel_remaining <= 0:
+    if fuel_count <= 0 and fuel_remaining <= 0:
         return None
 
     bootstrap = {
         "iron_plate_needed": iron_needed,
-        "iron_plate_available_before": target_iron,
-        "iron_ore_to_smelt": iron_shortfall,
-        "source_iron_ore_before": source_iron_ore,
+        "construction_iron":dict(construction_iron),
         "copper_plate_needed": copper_needed,
         "copper_plate_source": (
             None
@@ -434,7 +668,7 @@ def plan_existing_processing_link(
                 ),
             }
         ),
-        "smelt_wait_seconds": max(8, math.ceil(iron_shortfall * 3.2) + 5),
+        "source_contaminants":[dict(row) for row in contaminants],
     }
     baseline_entities=tuple(
         {

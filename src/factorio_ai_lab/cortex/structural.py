@@ -334,6 +334,7 @@ def _infer_sources(
     *,
     graph: Mapping[str, Any],
     world_entities: Sequence[Mapping[str, Any]],
+    catalog: RuntimeFactorioCatalog,
     resources: ResourceSurvey | None = None,
     footprints: Mapping[str, tuple[int, int]] | None = None,
 ) -> tuple[tuple[BufferedSource, ...], tuple[Refusal, ...]]:
@@ -442,16 +443,24 @@ def _infer_sources(
             continue
 
         if len(observed) != 1:
-            refusals.append(
-                Refusal(
-                    code=REFUSAL_BUFFER_MATERIAL_AMBIGUOUS,
-                    detail=(
-                        f"producer {producer_id} reaches buffers with multiple materials: "
-                        + ", ".join(sorted(observed))
-                    ),
+            processable={
+                material:value
+                for material,value in observed.items()
+                if _direct_recipe(catalog,material) is not None
+            }
+            if len(processable)==1:
+                observed=processable
+            else:
+                refusals.append(
+                    Refusal(
+                        code=REFUSAL_BUFFER_MATERIAL_AMBIGUOUS,
+                        detail=(
+                            f"producer {producer_id} reaches buffers with multiple materials: "
+                            + ", ".join(sorted(observed))
+                        ),
+                    )
                 )
-            )
-            continue
+                continue
 
         material, (count, buffer_id) = next(iter(observed.items()))
         evidence = EvidenceRef(
@@ -656,6 +665,7 @@ def plan_processing_for_buffered_output(
         request,
         graph=graph,
         world_entities=world_entities,
+        catalog=catalog,
         resources=resources,
         footprints=footprints,
     )

@@ -254,6 +254,35 @@ def test_ambiguous_buffer_material_is_refused() -> None:
     assert result.refusals[0].code == REFUSAL_BUFFER_MATERIAL_AMBIGUOUS
 
 
+
+
+def test_buffer_with_one_processable_material_ignores_nonprocessable_residue() -> None:
+    world = [
+        entity("burner-mining-drill", 0, 0, unit=1, direction=8),
+        entity(
+            "wooden-chest",
+            0,
+            2,
+            unit=2,
+            contents=[
+                {"name": "copper-ore", "count": 10},
+                {"name": "automation-science-pack", "count": 3},
+            ],
+        ),
+    ]
+    result = plan_processing_for_buffered_output(
+        request("u1"),
+        graph=build_factory_graph(world),
+        world_entities=world,
+        catalog=catalog(),
+    )
+
+    assert len(result.branches)==1
+    branch=result.branches[0]
+    assert branch.material=="copper-ore"
+    assert branch.product=="copper-plate"
+    assert branch.source_buffer=="u2"
+
 def test_coal_does_not_become_arbitrary_multi_input_recipe() -> None:
     world = [
         entity("burner-mining-drill", 0, 0, unit=1, direction=8),

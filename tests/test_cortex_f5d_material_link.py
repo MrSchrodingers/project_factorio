@@ -235,8 +235,13 @@ def test_f5d_plans_existing_processor_instead_of_new_furnace() -> None:
     assert plan.delivery.belt_count==3
     assert plan.construction_items=={"burner-inserter":2,"transport-belt":3}
     assert plan.plate_requirements=={"iron-plate":12}
-    assert plan.bootstrap["iron_ore_to_smelt"]==4
+    construction=plan.bootstrap["construction_iron"]
+    assert construction["mode"]=="manual_smelt"
+    assert construction["iron_ore_to_smelt"]==4
+    assert construction["source"]["node_id"]=="u566"
+    assert construction["iron_ore_source"]["x"]==15.5
     assert plan.bootstrap["copper_plate_needed"]==0
+    assert plan.bootstrap["source_contaminants"]==[]
     assert plan.actuator["name"]=="burner-inserter"
     assert plan.actuator["energy_source"]=="burner"
     assert plan.actuator["local_power_proven"] is False
@@ -252,6 +257,179 @@ def test_f5d_plans_existing_processor_instead_of_new_furnace() -> None:
         ("wooden-chest",15.5,71.5),
         ("stone-furnace",20.0,69.0),
     }
+
+
+
+def _copper_world() -> dict:
+    world=_world(iron_ore=20,iron_plates=10,copper_plates=8)
+    entities=world["entities"]
+    for row in entities:
+        if row.get("unit_number")==567:
+            row["contents"]=[
+                {"name":"automation-science-pack","count":3},
+                {"name":"copper-ore","count":44},
+            ]
+    entities.extend([
+        {
+            "name":"burner-mining-drill",
+            "type":"mining-drill",
+            "unit_number":568,
+            "position":{"x":-71.0,"y":70.0},
+            "status":"working",
+            "direction":8,
+            "fuel":[{"name":"coal","count":4}],
+        },
+        {
+            "name":"lab",
+            "type":"lab",
+            "unit_number":600,
+            "position":{"x":8.5,"y":8.5},
+            "status":"working",
+            "direction":0,
+        },
+        {
+            "name":"burner-inserter",
+            "type":"inserter",
+            "unit_number":571,
+            "position":{"x":16.5,"y":71.5},
+            "status":"working",
+            "direction":12,
+            "fuel":[{"name":"coal","count":5}],
+        },
+        {
+            "name":"transport-belt",
+            "type":"transport-belt",
+            "unit_number":572,
+            "position":{"x":17.5,"y":71.5},
+            "status":"working",
+            "direction":0,
+        },
+        {
+            "name":"transport-belt",
+            "type":"transport-belt",
+            "unit_number":573,
+            "position":{"x":17.5,"y":70.5},
+            "status":"working",
+            "direction":0,
+        },
+        {
+            "name":"transport-belt",
+            "type":"transport-belt",
+            "unit_number":574,
+            "position":{"x":17.5,"y":69.5},
+            "status":"working",
+            "direction":0,
+        },
+        {
+            "name":"burner-inserter",
+            "type":"inserter",
+            "unit_number":575,
+            "position":{"x":18.5,"y":69.5},
+            "status":"working",
+            "direction":12,
+            "fuel":[{"name":"coal","count":5}],
+        },
+    ])
+    world["entity_count"]=len(entities)
+    return world
+
+
+def _copper_action() -> RepairAction:
+    return RepairAction(
+        tool="rebuild",
+        intent=INTENT_REROUTE_PRODUCER,
+        prediction=Prediction("producers_reaching_processor","increase"),
+        provides=("material",),
+        targets=("u568",),
+        arguments={"producers":["u568"]},
+    )
+
+
+def _copper_requests() -> tuple[OptionRequest,ActionRequest]:
+    provenance=ActionProvenance(
+        requested_by="f5d-test",
+        source_component="test",
+        code_revision="copper123",
+        run_id="run-copper-link",
+    )
+    option=OptionRequest(
+        option_id="run-copper-link:maintenance",
+        kind=OptionKind.AUTONOMOUS_MAINTENANCE,
+        goal="create persistent copper flow",
+        provenance=provenance,
+        budget=OptionBudget(requested_ticks=3600),
+        authority=ActionAuthority.SHADOW,
+    )
+    action=ActionRequest(
+        action_id="run-copper-link:maintenance-action",
+        family=ActionFamily.REBUILD,
+        intent=INTENT_REROUTE_PRODUCER,
+        provenance=provenance,
+        targets=("u568",),
+    )
+    return option,action
+
+
+def test_f5d_copper_link_reuses_autonomous_iron_and_cleans_science_residue() -> None:
+    plan=plan_existing_processing_link(
+        _copper_world(),
+        action=_copper_action(),
+        catalog=_catalog(),
+    )
+    assert plan is not None
+    assert plan.material=="copper-ore"
+    assert plan.product=="copper-plate"
+    assert plan.source_buffer["node_id"]=="u567"
+    assert plan.target_processor["node_id"]=="u565"
+    assert plan.delivery.mode=="belt"
+    assert plan.delivery.belt_count==6
+    assert plan.construction_items=={
+        "burner-inserter":2,
+        "transport-belt":6,
+    }
+    assert plan.plate_requirements=={"iron-plate":15}
+    construction=plan.bootstrap["construction_iron"]
+    assert construction["mode"]=="autonomous_wait"
+    assert construction["source"]["node_id"]=="u566"
+    assert construction["iron_plate_available_before"]==10
+    assert construction["iron_ore_to_smelt"]==0
+    assert construction["iron_ore_source"]["autonomous_delivery"] is True
+    assert construction["wait_seconds"]==21
+    assert plan.bootstrap["source_contaminants"]==[
+        {
+            "item":"automation-science-pack",
+            "count":3,
+            "sink":{"entity_name":"lab","x":8.5,"y":8.5},
+        }
+    ]
+
+
+def test_f5d_copper_compiler_measures_copper_flow_after_contaminant_cleanup() -> None:
+    link=plan_existing_processing_link(
+        _copper_world(),
+        action=_copper_action(),
+        catalog=_catalog(),
+    )
+    assert link is not None
+    option,action=_copper_requests()
+    result=compose_material_link_option(option,action_request=action,link=link)
+    assert result.plan is not None
+    compiled=compile_structural_action(result.plan.prepared,settle_seconds=60)
+    assert compiled.ready is True
+    assert compiled.compiled is not None
+    code=compiled.compiled.code
+
+    assert "Prototype.CopperOre" in code
+    assert "Prototype.CopperPlate" in code
+    assert "Prototype.AutomationSciencePack" in code
+    assert "Prototype.Lab" in code
+    assert "cortex_link_contaminant_extract_0" in code
+    assert "cortex_link_contaminant_insert_0" in code
+    assert "Position(x=20.0,y=69.0)" in code
+    assert "sleep(21)" in code
+    assert "cortex_link_bootstrap_ore" not in code
+    assert "cortex_material_link_output_after>cortex_link_target_preflow" in code
+    assert "cortex_material_link_source_after<cortex_link_source_preflow" in code
 
 
 def test_f5d_material_link_refuses_non_endogenous_bootstrap() -> None:
