@@ -731,7 +731,7 @@ def run_logistic_science(
             instance=env.unwrapped.instance
             record["fle_attach_unpause"]=_ensure_factorio_unpaused(instance)
             record["fle_eval_timeout_s"]=enforce_minimum_eval_timeout(
-                env,minimum_seconds=1200
+                env,minimum_seconds=max(2700,option_seconds+300)
             )
             record["fle_safe_score_tool"]=bind_safe_score_tool(env)
             record["fle_tick_accurate_sleep_tool"]=bind_tick_accurate_sleep_tool(env)

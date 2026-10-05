@@ -144,3 +144,11 @@ def test_logistic_science_requires_eight_promoted_capabilities() -> None:
         "steam_power","copper_chain","automation_science",
         "powered_manufacturing","electric_mining",
     )
+
+
+def test_logistic_runner_eval_timeout_covers_option_budget() -> None:
+    source=(
+        __import__("pathlib").Path(__file__).resolve().parents[1]
+        /"scripts"/"run_cortex_f5c_logistic_science.py"
+    ).read_text()
+    assert "minimum_seconds=max(2700,option_seconds+300)" in source
