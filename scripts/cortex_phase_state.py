@@ -4393,7 +4393,237 @@ def build_phase_state(
                 phase5c_electric_artifact=payload
                 phase5c_electric_artifact_error=error
 
+    phase5c_logistic_attempts: list[dict[str,Any]]=[]
+    phase5c_logistic_valid=False
+    phase5c_logistic_artifact_path: Path | None=None
+    phase5c_logistic_artifact: dict[str,Any]={}
+    phase5c_logistic_artifact_error: str | None=None
+    if phase5c_electric_valid and phase5c_selected_seed is not None:
+        logistic_pattern="cortex_f5c_continuation_*_logistic_science_*.json"
+        logistic_candidates=[]
+        for logistic_path in sorted(
+            (state_root/"runs"/"audits").glob(logistic_pattern)
+        ):
+            payload={}
+            error: str | None=None
+            try:
+                payload=_load(logistic_path)
+            except (OSError,json.JSONDecodeError,TypeError) as exc:
+                error=f"{type(exc).__name__}: {exc}"
+            preflight=payload.get("preflight")
+            if not isinstance(preflight,dict):
+                preflight={}
+            preflight_phase=preflight.get("phase_state")
+            if not isinstance(preflight_phase,dict):
+                preflight_phase={}
+            revision=payload.get("code_revision")
+            if not isinstance(revision,dict):
+                revision={}
+            gate=payload.get("capability_gate")
+            if not isinstance(gate,dict):
+                gate={}
+            continuity=payload.get("continuity_gate")
+            if not isinstance(continuity,dict):
+                continuity={}
+            survival=payload.get("survival_gate")
+            if not isinstance(survival,dict):
+                survival={}
+            final=payload.get("measurement_final")
+            if not isinstance(final,dict):
+                final={}
+            trajectory=payload.get("trajectory")
+            if not isinstance(trajectory,dict):
+                trajectory={}
+            delta=trajectory.get("capability_delta")
+            if not isinstance(delta,dict):
+                delta={}
+            started=(
+                error is None
+                and payload.get("schema_version")=="cortex_f5c_logistic_science_v1"
+                and isinstance(payload.get("base_seed"),int)
+                and not isinstance(payload.get("base_seed"),bool)
+                and payload.get("capability")=="logistic_science"
+            )
+            applies=(
+                started
+                and payload.get("base_seed")==phase5c_selected_seed
+            )
+            expected_prefix=[
+                "iron_extraction",
+                "coal_self_sufficiency",
+                "iron_smelting",
+                "steam_power",
+                "copper_chain",
+                "automation_science",
+                "powered_manufacturing",
+                "electric_mining",
+            ]
+            numeric_positive=(
+                "science_batch_ready",
+                "iron_plate_ready",
+                "copper_plate_ready",
+                "electric_coal_after_accumulation",
+                "logistic_belts_ready",
+                "logistic_inserters_ready",
+                "logistic_first_growth",
+                "logistic_second_output",
+                "logistic_assembler_energy",
+                "logistic_assembler_electrical_id",
+                "science_replenished",
+                "science_buffer_after",
+                "gear_output",
+                "circuit_output",
+                "iron_survival_growth",
+                "coal_survival_growth",
+                "smelting_survival_growth",
+                "copper_survival_growth",
+                "copper_smelting_growth",
+                "electric_survival_growth",
+                "steam_survival_amount",
+                "steam_survival_energy",
+                "electric_drill_survival_energy",
+                "electric_drill_survival_electrical_id",
+                "electric_pole_survival_electrical_id",
+            )
+            positive_final=all(
+                isinstance(final.get(name),(int,float))
+                and not isinstance(final.get(name),bool)
+                and float(final.get(name))>0
+                for name in numeric_positive
+            )
+            valid=(
+                applies
+                and payload.get("status")=="completed"
+                and payload.get("ambient_authority")=="A0"
+                and payload.get("bounded_authority")=="A2"
+                and payload.get("continuous_authority") is False
+                and payload.get("automatic_retry") is False
+                and payload.get("option_execution_attempts")==1
+                and payload.get("world_reset") is False
+                and payload.get("external_resource_injection") is False
+                and payload.get("native_research_queue") is True
+                and payload.get("direct_research_completion_mutation") is False
+                and payload.get("human_intervention_count")==0
+                and payload.get("transaction_committed") is True
+                and payload.get("capability_promoted")=="logistic_science"
+                and payload.get("natural_resource_transaction")=="none_required"
+                and revision.get("dirty") is False
+                and preflight.get("world_mutation") is False
+                and preflight.get("grant_issued") is False
+                and preflight.get("option_executed_live") is False
+                and preflight.get("world_reset") is False
+                and preflight.get("external_resource_injection") is False
+                and preflight.get("native_research_queue") is True
+                and preflight.get("direct_research_completion_mutation") is False
+                and preflight.get("natural_resource_transaction")=="none_required"
+                and preflight_phase.get("achieved_capabilities")==expected_prefix
+                and preflight_phase.get("next_capability")=="logistic_science"
+                and gate.get("logistic_science_output_positive") is True
+                and gate.get("inputs_endogenous") is True
+                and gate.get("all_promoted_capabilities_alive") is True
+                and gate.get("sustainability_soak_passed") is True
+                and continuity.get("logistic_science_research_completed") is True
+                and continuity.get("native_research_queue") is True
+                and continuity.get("direct_research_completion_mutation") is False
+                and isinstance(continuity.get("science_batch_ready"),(int,float))
+                and float(continuity.get("science_batch_ready"))>=77
+                and isinstance(continuity.get("logistic_first_growth"),(int,float))
+                and float(continuity.get("logistic_first_growth"))>0
+                and isinstance(continuity.get("logistic_second_output"),(int,float))
+                and float(continuity.get("logistic_second_output"))>0
+                and survival.get("previously_promoted")==expected_prefix
+                and survival.get("iron_extraction_survives") is True
+                and survival.get("coal_self_sufficiency_survives") is True
+                and survival.get("iron_smelting_survives") is True
+                and survival.get("steam_power_survives") is True
+                and survival.get("copper_chain_survives") is True
+                and survival.get("automation_science_survives") is True
+                and survival.get("powered_manufacturing_survives") is True
+                and survival.get("electric_mining_survives") is True
+                and survival.get("regressed")==[]
+                and survival.get("passed") is True
+                and final.get("logistic_science_output_positive") is True
+                and final.get("inputs_endogenous") is True
+                and final.get("all_promoted_capabilities_alive") is True
+                and final.get("sustainability_soak_passed") is True
+                and final.get("research_completed") is True
+                and isinstance(final.get("research_remaining_count"),(int,float))
+                and float(final.get("research_remaining_count"))==0
+                and final.get("automation_science_survives") is True
+                and final.get("powered_manufacturing_survives") is True
+                and final.get("electric_mining_survives") is True
+                and final.get("iron_extraction_survives") is True
+                and final.get("coal_self_sufficiency_survives") is True
+                and final.get("iron_smelting_survives") is True
+                and final.get("steam_power_survives") is True
+                and final.get("copper_chain_survives") is True
+                and positive_final
+                and "logistic_science" in (
+                    delta.get("promoted")
+                    if isinstance(delta.get("promoted"),list)
+                    else []
+                )
+                and delta.get("regressed")==[]
+                and len(phase5_interventions)==0
+            )
+            started_at=str(payload.get("started_at") or "")
+            logistic_candidates.append(
+                (
+                    started_at,
+                    logistic_path,
+                    payload,
+                    error,
+                    applies,
+                    valid,
+                )
+            )
+        logistic_candidates.sort(key=lambda row:(row[0],str(row[1])))
+        for (
+            started_at,
+            logistic_path,
+            payload,
+            error,
+            applies,
+            valid,
+        ) in logistic_candidates:
+            phase5c_logistic_attempts.append({
+                "artifact_path":str(logistic_path),
+                "base_seed":payload.get("base_seed"),
+                "applies_to_selected_base_seed":applies,
+                "status":payload.get("status"),
+                "started_at":started_at or None,
+                "code_commit":(
+                    payload.get("code_revision",{}).get("commit")
+                    if isinstance(payload.get("code_revision"),dict)
+                    else None
+                ),
+                "validated":valid,
+                "read_error":error,
+            })
+            if valid and not phase5c_logistic_valid:
+                phase5c_logistic_valid=True
+                phase5c_logistic_artifact_path=logistic_path
+                phase5c_logistic_artifact=payload
+                phase5c_logistic_artifact_error=error
+            elif applies and phase5c_logistic_artifact_path is None:
+                phase5c_logistic_artifact_path=logistic_path
+                phase5c_logistic_artifact=payload
+                phase5c_logistic_artifact_error=error
+
     phase5_achieved_capabilities=(
+        [
+            "iron_extraction",
+            "coal_self_sufficiency",
+            "iron_smelting",
+            "steam_power",
+            "copper_chain",
+            "automation_science",
+            "powered_manufacturing",
+            "electric_mining",
+            "logistic_science",
+        ]
+        if phase5c_logistic_valid
+        else (
         [
             "iron_extraction",
             "coal_self_sufficiency",
@@ -4458,6 +4688,7 @@ def build_phase_state(
                 )
                 )
             )
+        )
         )
         )
     )
@@ -4714,7 +4945,15 @@ def build_phase_state(
                 "functional_accept_sustainability_not_proven"
             )
 
-    if phase5c_electric_valid:
+    if phase5c_logistic_valid:
+        action=(
+            "F5-C logistic_science capability promoted after native Logistic "
+            "Science Pack research from endogenous automation science; two "
+            "temporally separated green-science outputs were produced while "
+            "all eight incumbent capabilities survived; deterministic F5-C "
+            "capability sequence is complete under ambient A0"
+        )
+    elif phase5c_electric_valid:
         action=(
             "F5-C electric_mining capability promoted after native Electric "
             "Mining Drill research from endogenous red science; buffered electric "
@@ -5217,6 +5456,33 @@ def build_phase_state(
                     "measurement_final"
                 ),
                 "read_error":phase5c_electric_artifact_error,
+            },
+            "logistic_science":{
+                "validated":phase5c_logistic_valid,
+                "artifact_path":(
+                    None
+                    if phase5c_logistic_artifact_path is None
+                    else str(phase5c_logistic_artifact_path)
+                ),
+                "attempt_count":len(phase5c_logistic_attempts),
+                "attempts":phase5c_logistic_attempts,
+                "status":phase5c_logistic_artifact.get("status"),
+                "capability_promoted":phase5c_logistic_artifact.get(
+                    "capability_promoted"
+                ),
+                "capability_gate":phase5c_logistic_artifact.get(
+                    "capability_gate"
+                ),
+                "continuity_gate":phase5c_logistic_artifact.get(
+                    "continuity_gate"
+                ),
+                "survival_gate":phase5c_logistic_artifact.get(
+                    "survival_gate"
+                ),
+                "measurement_final":phase5c_logistic_artifact.get(
+                    "measurement_final"
+                ),
+                "read_error":phase5c_logistic_artifact_error,
             },
             "external_resource_injection":phase5c_artifact.get(
                 "external_resource_injection"

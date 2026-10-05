@@ -40,6 +40,9 @@ from factorio_ai_lab.cortex.electric_mining_structural_execute import (
 from factorio_ai_lab.cortex.iron_smelting_structural_execute import (
     compile_iron_smelting,
 )
+from factorio_ai_lab.cortex.logistic_science_structural_execute import (
+    compile_logistic_science,
+)
 from factorio_ai_lab.cortex.powered_manufacturing_structural_execute import (
     compile_powered_manufacturing,
 )
@@ -56,6 +59,7 @@ from factorio_ai_lab.cortex.structural_prepare import (
     COPPER_CHAIN_CONTRACT_VERSION,
     ELECTRIC_MINING_CONTRACT_VERSION,
     IRON_SMELTING_CONTRACT_VERSION,
+    LOGISTIC_SCIENCE_CONTRACT_VERSION,
     POWERED_MANUFACTURING_CONTRACT_VERSION,
     RESOURCE_EXTRACTION_CONTRACT_VERSION,
     ROLLBACK_RECOVERY_CONTRACT_VERSION,
@@ -86,6 +90,7 @@ MAX_COPPER_CHAIN_SECONDS = 240
 MAX_AUTOMATION_SCIENCE_SECONDS = 300
 MAX_POWERED_MANUFACTURING_SECONDS = 720
 MAX_ELECTRIC_MINING_SECONDS = 1140
+MAX_LOGISTIC_SCIENCE_SECONDS = 2310
 MAX_ROLLBACK_RECOVERY_SECONDS = 240
 
 MeasurementProbe = Callable[[PreparedStructuralAction], Mapping[str, Any]]
@@ -532,6 +537,7 @@ def _compile_operation(operation: StructuralOperation) -> list[str]:
         "recover_promoted_reserves": compile_promoted_reserve_recovery,
         "establish_powered_manufacturing": compile_powered_manufacturing,
         "establish_electric_mining": compile_electric_mining,
+        "establish_logistic_science": compile_logistic_science,
     }
     if operation.op == "verify_postconditions":
         return []
@@ -575,10 +581,14 @@ def compile_structural_action(
                     MAX_COPPER_CHAIN_SECONDS
                     if prepared.contract_version == COPPER_CHAIN_CONTRACT_VERSION
                     else (
-                        MAX_ELECTRIC_MINING_SECONDS
+                        MAX_LOGISTIC_SCIENCE_SECONDS
                         if prepared.contract_version
-                        == ELECTRIC_MINING_CONTRACT_VERSION
+                        == LOGISTIC_SCIENCE_CONTRACT_VERSION
                         else (
+                            MAX_ELECTRIC_MINING_SECONDS
+                            if prepared.contract_version
+                            == ELECTRIC_MINING_CONTRACT_VERSION
+                            else (
                             MAX_POWERED_MANUFACTURING_SECONDS
                             if prepared.contract_version
                             == POWERED_MANUFACTURING_CONTRACT_VERSION
@@ -592,6 +602,7 @@ def compile_structural_action(
                                 == ROLLBACK_RECOVERY_CONTRACT_VERSION
                                 else MAX_SETTLE_SECONDS
                             )
+                        )
                         )
                         )
                     )
@@ -843,6 +854,50 @@ def compile_structural_action(
                 ),
             )
 
+    if prepared.contract_version == LOGISTIC_SCIENCE_CONTRACT_VERSION:
+        logistic_ops = [
+            operation
+            for operation in prepared.operations
+            if operation.op == "establish_logistic_science"
+        ]
+        if len(logistic_ops) != 1:
+            return StructuralCompilationResult(
+                prepared=prepared,
+                refusal=Refusal(
+                    code=REFUSAL_OPERATION_UNSUPPORTED,
+                    detail=(
+                        "logistic science contract requires exactly one "
+                        "establish_logistic_science operation"
+                    ),
+                ),
+            )
+        params=logistic_ops[0].parameters
+        required_seconds=(
+            int(params.get("electric_coal_accumulation_seconds") or 0)
+            + int(params.get("ore_recovery_window_seconds") or 0)
+            + (
+                int(params.get("smelt_batch_seconds") or 0)
+                * int(params.get("smelt_batch_count") or 0)
+            )
+            + int(params.get("research_window_seconds") or 0)
+            + int(params.get("powered_manufacturing_window_seconds") or 0)
+            + int(params.get("survival_recovery_window_seconds") or 0)
+            + int(params.get("survival_window_seconds") or 0)
+            + int(params.get("logistic_output_window_seconds") or 0)
+            + int(params.get("sustainability_soak_seconds") or 0)
+        )
+        if settle < required_seconds:
+            return StructuralCompilationResult(
+                prepared=prepared,
+                refusal=Refusal(
+                    code=REFUSAL_OPERATION_UNSUPPORTED,
+                    detail=(
+                        "logistic science Option budget must cover internal "
+                        f"causal windows ({required_seconds}s)"
+                    ),
+                ),
+            )
+
     if prepared.contract_version == ROLLBACK_RECOVERY_CONTRACT_VERSION:
         recovery_ops = [
             operation
@@ -1034,6 +1089,7 @@ def compile_structural_action(
         AUTOMATION_SCIENCE_CONTRACT_VERSION,
         POWERED_MANUFACTURING_CONTRACT_VERSION,
         ELECTRIC_MINING_CONTRACT_VERSION,
+        LOGISTIC_SCIENCE_CONTRACT_VERSION,
         ROLLBACK_RECOVERY_CONTRACT_VERSION,
     }:
         # Specialized contracts contain their own causal validation windows.
@@ -1229,6 +1285,7 @@ def execution_guard_conditions(
             AUTOMATION_SCIENCE_CONTRACT_VERSION,
             POWERED_MANUFACTURING_CONTRACT_VERSION,
             ELECTRIC_MINING_CONTRACT_VERSION,
+            LOGISTIC_SCIENCE_CONTRACT_VERSION,
             ROLLBACK_RECOVERY_CONTRACT_VERSION,
         }
     ):

@@ -63,6 +63,7 @@ class OptionKind(StrEnum):
     ESTABLISH_AUTOMATION_SCIENCE = "establish_automation_science"
     ESTABLISH_POWERED_MANUFACTURING = "establish_powered_manufacturing"
     ESTABLISH_ELECTRIC_MINING = "establish_electric_mining"
+    ESTABLISH_LOGISTIC_SCIENCE = "establish_logistic_science"
     RESTORE_PROMOTED_ENTITY = "restore_promoted_entity"
     RESTORE_PROMOTED_RESERVES = "restore_promoted_reserves"
 

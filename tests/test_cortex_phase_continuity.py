@@ -4077,6 +4077,174 @@ def test_phase_state_marks_f2f4c_functional_accept_as_unsustained_when_final_no_
     )
     assert f5c_electric["phase5_protocol"]["next_capability"]=="logistic_science"
     assert "logistic_science" in f5c_electric["resume"]["action"]
+
+    logistic_artifact=(
+        audits/
+        "cortex_f5c_continuation_853367368_"
+        "logistic_science_feedfacecafe.json"
+    )
+    logistic_prefix=[
+        "iron_extraction",
+        "coal_self_sufficiency",
+        "iron_smelting",
+        "steam_power",
+        "copper_chain",
+        "automation_science",
+        "powered_manufacturing",
+        "electric_mining",
+    ]
+    logistic_payload={
+        "schema_version":"cortex_f5c_logistic_science_v1",
+        "status":"completed",
+        "base_seed":853367368,
+        "capability":"logistic_science",
+        "ambient_authority":"A0",
+        "bounded_authority":"A2",
+        "continuous_authority":False,
+        "automatic_retry":False,
+        "option_execution_attempts":1,
+        "world_reset":False,
+        "external_resource_injection":False,
+        "native_research_queue":True,
+        "direct_research_completion_mutation":False,
+        "human_intervention_count":0,
+        "transaction_committed":True,
+        "capability_promoted":"logistic_science",
+        "natural_resource_transaction":"none_required",
+        "started_at":"2026-10-03T01:30:00+00:00",
+        "code_revision":{"commit":"feedfacecafebeef","dirty":False},
+        "preflight":{
+            "world_mutation":False,
+            "grant_issued":False,
+            "option_executed_live":False,
+            "world_reset":False,
+            "external_resource_injection":False,
+            "native_research_queue":True,
+            "direct_research_completion_mutation":False,
+            "natural_resource_transaction":"none_required",
+            "phase_state":{
+                "achieved_capabilities":logistic_prefix,
+                "next_capability":"logistic_science",
+            },
+        },
+        "capability_gate":{
+            "logistic_science_output_positive":True,
+            "inputs_endogenous":True,
+            "all_promoted_capabilities_alive":True,
+            "sustainability_soak_passed":True,
+        },
+        "continuity_gate":{
+            "logistic_science_research_completed":True,
+            "native_research_queue":True,
+            "direct_research_completion_mutation":False,
+            "science_batch_ready":77.0,
+            "iron_plate_ready":190.0,
+            "copper_plate_ready":95.0,
+            "electric_coal_after_accumulation":160.0,
+            "logistic_first_growth":1.0,
+            "logistic_second_output":1.0,
+        },
+        "survival_gate":{
+            "previously_promoted":logistic_prefix,
+            "iron_extraction_survives":True,
+            "coal_self_sufficiency_survives":True,
+            "iron_smelting_survives":True,
+            "steam_power_survives":True,
+            "copper_chain_survives":True,
+            "automation_science_survives":True,
+            "powered_manufacturing_survives":True,
+            "electric_mining_survives":True,
+            "regressed":[],
+            "passed":True,
+        },
+        "measurement_final":{
+            "logistic_science_output_positive":True,
+            "inputs_endogenous":True,
+            "all_promoted_capabilities_alive":True,
+            "sustainability_soak_passed":True,
+            "research_completed":True,
+            "research_remaining_count":0.0,
+            "automation_science_survives":True,
+            "powered_manufacturing_survives":True,
+            "electric_mining_survives":True,
+            "iron_extraction_survives":True,
+            "coal_self_sufficiency_survives":True,
+            "iron_smelting_survives":True,
+            "steam_power_survives":True,
+            "copper_chain_survives":True,
+            "science_batch_ready":77.0,
+            "iron_plate_ready":190.0,
+            "copper_plate_ready":95.0,
+            "electric_coal_after_accumulation":160.0,
+            "logistic_belts_ready":2.0,
+            "logistic_inserters_ready":2.0,
+            "logistic_first_growth":1.0,
+            "logistic_second_output":1.0,
+            "logistic_assembler_energy":1000.0,
+            "logistic_assembler_electrical_id":7.0,
+            "science_replenished":1.0,
+            "science_buffer_after":2.0,
+            "gear_output":1.0,
+            "circuit_output":1.0,
+            "iron_survival_growth":4.0,
+            "coal_survival_growth":4.0,
+            "smelting_survival_growth":2.0,
+            "copper_survival_growth":4.0,
+            "copper_smelting_growth":2.0,
+            "electric_survival_growth":4.0,
+            "steam_survival_amount":180.0,
+            "steam_survival_energy":1000.0,
+            "electric_drill_survival_energy":1600.0,
+            "electric_drill_survival_electrical_id":7.0,
+            "electric_pole_survival_electrical_id":7.0,
+        },
+        "trajectory":{
+            "capability_delta":{
+                "promoted":["logistic_science"],
+                "regressed":[],
+            },
+        },
+    }
+    logistic_artifact.write_text(json.dumps(logistic_payload)+"\n")
+    f5c_logistic=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert f5c_logistic["phase5_protocol"]["achieved_capabilities"]==[
+        *logistic_prefix,
+        "logistic_science",
+    ]
+    assert f5c_logistic["phase5_protocol"]["next_capability"] is None
+    assert (
+        f5c_logistic["phase5_deterministic_baseline"]["logistic_science"][
+            "validated"
+        ]
+        is True
+    )
+    assert "sequence is complete" in f5c_logistic["resume"]["action"]
+
+    logistic_bad=dict(logistic_payload)
+    logistic_bad["survival_gate"]=dict(logistic_payload["survival_gate"])
+    logistic_bad["survival_gate"]["electric_mining_survives"]=False
+    logistic_bad["survival_gate"]["regressed"]=["electric_mining"]
+    logistic_bad["survival_gate"]["passed"]=False
+    logistic_artifact.write_text(json.dumps(logistic_bad)+"\n")
+    f5c_logistic_bad=module.build_phase_state(
+        state_root=tmp_path,
+        protocol_path=protocol,
+    )
+    assert f5c_logistic_bad["phase5_protocol"]["achieved_capabilities"]==(
+        logistic_prefix
+    )
+    assert f5c_logistic_bad["phase5_protocol"]["next_capability"]=="logistic_science"
+    assert (
+        f5c_logistic_bad["phase5_deterministic_baseline"]["logistic_science"][
+            "validated"
+        ]
+        is False
+    )
+
+    logistic_artifact.unlink()
     electric_artifact.unlink()
     powered_artifact.unlink()
     automation_artifact.unlink()

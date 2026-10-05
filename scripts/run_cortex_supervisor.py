@@ -30,6 +30,7 @@ RUNNERS={
     "automation_science":"run_cortex_f5c_automation_science.py",
     "powered_manufacturing":"run_cortex_f5c_powered_manufacturing.py",
     "electric_mining":"run_cortex_f5c_electric_mining.py",
+    "logistic_science":"run_cortex_f5c_logistic_science.py",
 }
 
 def now() -> str:
