@@ -40,6 +40,9 @@ from factorio_ai_lab.cortex.electric_mining_structural_execute import (
 from factorio_ai_lab.cortex.f5d_maintenance_structural_execute import (
     compile_autonomous_refuel,
 )
+from factorio_ai_lab.cortex.f5d_material_link_structural_execute import (
+    compile_autonomous_material_link,
+)
 from factorio_ai_lab.cortex.iron_smelting_structural_execute import (
     compile_iron_smelting,
 )
@@ -59,6 +62,7 @@ from factorio_ai_lab.cortex.steam_power_structural_execute import (
 from factorio_ai_lab.cortex.structural_prepare import (
     AUTOMATION_SCIENCE_CONTRACT_VERSION,
     AUTONOMOUS_MAINTENANCE_CONTRACT_VERSION,
+    AUTONOMOUS_MATERIAL_LINK_CONTRACT_VERSION,
     COAL_SELF_SUFFICIENCY_CONTRACT_VERSION,
     COPPER_CHAIN_CONTRACT_VERSION,
     ELECTRIC_MINING_CONTRACT_VERSION,
@@ -543,6 +547,7 @@ def _compile_operation(operation: StructuralOperation) -> list[str]:
         "establish_electric_mining": compile_electric_mining,
         "establish_logistic_science": compile_logistic_science,
         "autonomous_refuel": compile_autonomous_refuel,
+        "autonomous_material_link": compile_autonomous_material_link,
     }
     if operation.op == "verify_postconditions":
         return []
@@ -1096,6 +1101,7 @@ def compile_structural_action(
         ELECTRIC_MINING_CONTRACT_VERSION,
         LOGISTIC_SCIENCE_CONTRACT_VERSION,
         AUTONOMOUS_MAINTENANCE_CONTRACT_VERSION,
+    AUTONOMOUS_MATERIAL_LINK_CONTRACT_VERSION,
         ROLLBACK_RECOVERY_CONTRACT_VERSION,
     }:
         # Specialized contracts contain their own causal validation windows.
@@ -1293,6 +1299,7 @@ def execution_guard_conditions(
             ELECTRIC_MINING_CONTRACT_VERSION,
             LOGISTIC_SCIENCE_CONTRACT_VERSION,
             AUTONOMOUS_MAINTENANCE_CONTRACT_VERSION,
+    AUTONOMOUS_MATERIAL_LINK_CONTRACT_VERSION,
             ROLLBACK_RECOVERY_CONTRACT_VERSION,
         }
     ):

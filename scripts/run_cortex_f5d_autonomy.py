@@ -28,14 +28,21 @@ from factorio_ai_lab.cortex.actions import (
 from factorio_ai_lab.cortex.f5_authority import F5BoundedAuthorityBridge
 from factorio_ai_lab.cortex.f5_trajectory import F5TypedTransition, append_transition
 from factorio_ai_lab.cortex.f5d_autonomy import (
+    AutonomyDecision,
     PersistentUCBPolicy,
     compact_state,
     decide,
     reward_components,
-    select_supported_candidate,
 )
 from factorio_ai_lab.cortex.f5d_maintenance_option import (
     compose_autonomous_refuel_option,
+)
+from factorio_ai_lab.cortex.f5d_material_link import (
+    MaterialLinkPlan,
+    plan_existing_processing_link,
+)
+from factorio_ai_lab.cortex.f5d_material_link_option import (
+    compose_material_link_option,
 )
 from factorio_ai_lab.cortex.grant_ledger import PersistentOptionGrantLedger
 from factorio_ai_lab.cortex.options import OptionBudget, OptionKind, OptionRequest
@@ -50,6 +57,7 @@ from factorio_ai_lab.integrations.fle import (
 from factorio_ai_lab.learning.factory_graph import build_factory_graph
 from factorio_ai_lab.paths import RUNS_DIR, code_revision
 from factorio_ai_lab.planning.fuel import TICKS_PER_SECOND
+from factorio_ai_lab.planning.runtime_catalog import RuntimeFactorioCatalog
 from factorio_ai_lab.runtime import FactorioWorldLease, world_lease_state
 
 TRAJECTORY_PATH = RUNS_DIR / "cortex_f5d_trajectories.jsonl"
@@ -63,7 +71,10 @@ DASHBOARD_BUILD_INFO = Path("/srv/factorio-ai-dashboard-runtime/current/BUILD_IN
 ARENA = "cortex_f5d_autonomy"
 OWNER = "run_cortex_f5d_autonomy"
 SUPPORTED_LIVE_ACTIONS = frozenset(
-    {"resupply:insert_fuel_from_world_container"}
+    {
+        "resupply:insert_fuel_from_world_container",
+        "rebuild:reroute_producer_logistics",
+    }
 )
 REFUEL_DOSE = 8
 REFUEL_SOURCE_RESERVE = 100
@@ -185,6 +196,14 @@ def _snapshot() -> dict[str, Any]:
     observer = FactorioObserver()
     try:
         return observer.snapshot()
+    finally:
+        observer.close()
+
+
+def _game_knowledge() -> dict[str, Any]:
+    observer = FactorioObserver()
+    try:
+        return observer.game_knowledge()
     finally:
         observer.close()
 
@@ -320,7 +339,7 @@ def _option_requests(
     )
     action = ActionRequest(
         action_id=f"{run_id}:maintenance-action",
-        family=ActionFamily.RESUPPLY,
+        family=ActionFamily(selected.action.tool),
         intent=selected.action.intent,
         provenance=provenance,
         arguments=dict(selected.action.arguments),
@@ -332,7 +351,34 @@ def _option_requests(
 
 
 def _measure(namespace: Any, prepared: Any) -> dict[str, Any]:
-    del prepared
+    if prepared.binding == "cortex.f5d.autonomous_material_link":
+        return {
+            "autonomous_material_link_succeeded": bool(
+                getattr(
+                    namespace,
+                    "cortex_autonomous_material_link_succeeded",
+                    False,
+                )
+            ),
+            "material_link_output_after": float(
+                getattr(namespace, "cortex_material_link_output_after", 0) or 0
+            ),
+            "material_link_source_after": float(
+                getattr(namespace, "cortex_material_link_source_after", 0) or 0
+            ),
+            "material_link_source_preflow": float(
+                getattr(namespace, "cortex_link_source_preflow", 0) or 0
+            ),
+            "material_link_target_preflow": float(
+                getattr(namespace, "cortex_link_target_preflow", 0) or 0
+            ),
+            "material_link_iron_drawn": float(
+                getattr(namespace, "cortex_link_iron_drawn", 0) or 0
+            ),
+            "material_link_copper_drawn": float(
+                getattr(namespace, "cortex_link_copper_drawn", 0) or 0
+            ),
+        }
     return {
         "autonomous_refuel_succeeded": bool(
             getattr(namespace, "cortex_autonomous_refuel_succeeded", False)
@@ -350,6 +396,84 @@ def _measure(namespace: Any, prepared: Any) -> dict[str, Any]:
             getattr(namespace, "cortex_refuel_source_after", 0) or 0
         ),
     }
+
+
+def _manual_logistics_actions(intervention: Mapping[str, Any]) -> int:
+    total=0
+    for key in ("committed_repair","committed_infrastructure","committed"):
+        row=intervention.get(key)
+        if not isinstance(row,Mapping):
+            continue
+        value=row.get("manual_logistics_calls")
+        if isinstance(value,(int,float)) and not isinstance(value,bool):
+            total+=int(value)
+    return total
+
+
+def _resolve_live_candidate(
+    snapshot: Mapping[str, Any],
+    decision: AutonomyDecision,
+    knowledge: Mapping[str, Any],
+) -> tuple[Any | None, dict[str, Any] | None, list[dict[str, Any]]]:
+    catalog=RuntimeFactorioCatalog(knowledge)
+    feasible: list[tuple[Any,dict[str,Any]]]=[]
+    rows: list[dict[str,Any]]=[]
+    for candidate in decision.candidates:
+        key=candidate.action.key
+        if key not in SUPPORTED_LIVE_ACTIONS:
+            continue
+        context: dict[str,Any] | None=None
+        refusal: str | None=None
+        try:
+            if key=="resupply:insert_fuel_from_world_container":
+                source,targets=_freeze_refuel_inputs(
+                    snapshot,
+                    candidate.action.targets,
+                )
+                context={"kind":"refuel","source":source,"targets":targets}
+            elif key=="rebuild:reroute_producer_logistics":
+                link=plan_existing_processing_link(
+                    snapshot,
+                    action=candidate.action,
+                    catalog=catalog,
+                )
+                if link is None:
+                    refusal="no_endogenous_existing_processor_link"
+                else:
+                    context={"kind":"material_link","link":link}
+            else:
+                refusal="unsupported_live_action"
+        except (KeyError,RuntimeError,TypeError,ValueError) as exc:
+            refusal=f"{type(exc).__name__}:{exc}"
+
+        rows.append({
+            "action_key":key,
+            "symptom":candidate.symptom,
+            "feasible":context is not None,
+            "refusal":refusal,
+            "plan":(
+                None
+                if context is None
+                else (
+                    context["link"].to_dict()
+                    if isinstance(context.get("link"),MaterialLinkPlan)
+                    else {
+                        "source":context.get("source"),
+                        "targets":context.get("targets"),
+                    }
+                )
+            ),
+        })
+        if context is not None:
+            feasible.append((candidate,context))
+
+    if not feasible:
+        return None,None,rows
+    selected,context=max(
+        feasible,
+        key=lambda row:(row[0].score,row[0].severity,row[0].action.key),
+    )
+    return selected,context,rows
 
 
 def _configured_autosave_interval() -> int:
@@ -458,11 +582,16 @@ def _server_save(instance: Any, name: str) -> str:
 
 def run_shadow() -> dict[str, Any]:
     snapshot = _snapshot()
+    knowledge = _game_knowledge()
     policy = PersistentUCBPolicy(POLICY_PATH)
     decision = decide(snapshot, policy)
     state = compact_state(snapshot, decision.graph)
     priority = decision.selected
-    executable = select_supported_candidate(decision, SUPPORTED_LIVE_ACTIONS)
+    executable, context, feasibility = _resolve_live_candidate(
+        snapshot,
+        decision,
+        knowledge,
+    )
     now = utc_now()
     transition = F5TypedTransition(
         transition_id=f"f5d-shadow-{now}",
@@ -474,6 +603,7 @@ def run_shadow() -> dict[str, Any]:
             "priority_selected": (
                 None if priority is None else priority.to_dict()
             ),
+            "hard_feasibility": feasibility,
             "currently_executable": (
                 None if executable is None else executable.to_dict()
             ),
@@ -499,6 +629,18 @@ def run_shadow() -> dict[str, Any]:
             "code_revision": code_revision(),
             "continuous_authority": False,
             "policy_may_self_grant_authority": False,
+            "resolved_plan": (
+                None
+                if context is None
+                else (
+                    context["link"].to_dict()
+                    if isinstance(context.get("link"), MaterialLinkPlan)
+                    else {
+                        "source": context.get("source"),
+                        "targets": context.get("targets"),
+                    }
+                )
+            ),
         },
     )
     digest = append_transition(TRAJECTORY_PATH, transition)
@@ -513,6 +655,7 @@ def run_shadow() -> dict[str, Any]:
         "currently_executable": (
             None if executable is None else executable.to_dict()
         ),
+        "hard_feasibility": feasibility,
         "candidate_count": len(decision.candidates),
         "refusals": list(decision.refusals),
     }
@@ -521,19 +664,18 @@ def run_shadow() -> dict[str, Any]:
 def run_execute_one() -> dict[str, Any]:
     preflight = _execution_preflight()
     snapshot_before = _snapshot()
+    knowledge = _game_knowledge()
     policy = PersistentUCBPolicy(POLICY_PATH)
     decision = decide(snapshot_before, policy)
     priority = decision.selected
-    selected = select_supported_candidate(decision, SUPPORTED_LIVE_ACTIONS)
-    if selected is None:
-        raise RuntimeError("F5-D has no currently executable measured candidate")
-    if selected.action.key != "resupply:insert_fuel_from_world_container":
-        raise RuntimeError(f"unsupported live action {selected.action.key!r}")
-
-    source, targets = _freeze_refuel_inputs(
+    selected, context, feasibility = _resolve_live_candidate(
         snapshot_before,
-        selected.action.targets,
+        decision,
+        knowledge,
     )
+    if selected is None or context is None:
+        raise RuntimeError("F5-D has no hard-feasible live candidate")
+
     commit = str(preflight["revision"]["commit"])
     run_id = (
         "f5d-"
@@ -546,19 +688,40 @@ def run_execute_one() -> dict[str, Any]:
         commit=commit,
         selected=selected,
     )
-    composed = compose_autonomous_refuel_option(
-        option,
-        action_request=action,
-        source=source,
-        targets=targets,
-        dose=REFUEL_DOSE,
-        source_reserve=REFUEL_SOURCE_RESERVE,
-    )
+
+    kind=str(context["kind"])
+    source: dict[str, Any] | None=None
+    targets: list[dict[str, Any]]=[]
+    link: MaterialLinkPlan | None=None
+    if kind=="refuel":
+        source=dict(context["source"])
+        targets=[dict(row) for row in context["targets"]]
+        composed=compose_autonomous_refuel_option(
+            option,
+            action_request=action,
+            source=source,
+            targets=targets,
+            dose=REFUEL_DOSE,
+            source_reserve=REFUEL_SOURCE_RESERVE,
+        )
+    elif kind=="material_link":
+        raw_link=context.get("link")
+        if not isinstance(raw_link,MaterialLinkPlan):
+            raise TypeError("resolved material-link context is invalid")
+        link=raw_link
+        composed=compose_material_link_option(
+            option,
+            action_request=action,
+            link=link,
+        )
+    else:
+        raise RuntimeError(f"unsupported resolved F5-D context {kind!r}")
+
     if not composed.ready or composed.plan is None:
         refusal = (
             None if composed.refusal is None else composed.refusal.to_dict()
         )
-        raise RuntimeError(f"F5-D maintenance Option refused: {refusal}")
+        raise RuntimeError(f"F5-D autonomous Option refused: {refusal}")
     plan = composed.plan
 
     env = None
@@ -614,8 +777,8 @@ def run_execute_one() -> dict[str, Any]:
                 plan,
                 experiment_id=run_id,
                 reason=(
-                    "F5-D autonomous policy selected a measured executable "
-                    "maintenance action; authority remains external one-shot A2"
+                    "F5-D autonomous policy selected a measured hard-feasible "
+                    "action; authority remains external one-shot A2"
                 ),
                 ttl_seconds=GRANT_TTL_SECONDS,
             )
@@ -698,15 +861,48 @@ def run_execute_one() -> dict[str, Any]:
     graph_after = build_factory_graph(next_snapshot.get("entities") or [])
     state_before = compact_state(snapshot_before, decision.graph)
     state_after = compact_state(next_snapshot, graph_after)
-    manual_actions = len(targets) if accepted else 0
+    manual_actions = _manual_logistics_actions(intervention) if accepted else 0
     rewards = reward_components(
         state_before,
         state_after,
         manual_logistics_actions=manual_actions,
     )
-    if accepted:
+
+    before_entities={
+        tuple(row) for row in _factory_fingerprint(snapshot_before)
+    }
+    after_entities={
+        tuple(row) for row in _factory_fingerprint(next_snapshot)
+    }
+    baseline_preserved=before_entities.issubset(after_entities)
+    learning_eligible=accepted and baseline_preserved
+    if learning_eligible:
         policy.update(selected.symptom, selected.action.key, rewards["total"])
 
+    if kind=="refuel":
+        resource_cost={
+            "external_resource_injection":False,
+            "manual_logistics_by_agent":manual_actions,
+            "source_coal_before":None if source is None else source["coal_before"],
+            "coal_requested":REFUEL_DOSE*len(targets),
+            "intervention_counts":intervention,
+        }
+        autonomous_effect="fuel_recovery" if accepted else None
+        plan_metadata={"source":source,"targets":targets}
+    else:
+        assert link is not None
+        resource_cost={
+            "external_resource_injection":False,
+            "manual_logistics_by_agent":manual_actions,
+            "construction_items":dict(link.construction_items),
+            "plate_requirements":dict(link.plate_requirements),
+            "bootstrap":dict(link.bootstrap),
+            "intervention_counts":intervention,
+        }
+        autonomous_effect="persistent_material_link" if accepted else None
+        plan_metadata={"material_link":link.to_dict()}
+
+    regressed=[] if baseline_preserved else ["baseline_entity_missing"]
     transition = F5TypedTransition(
         transition_id=run_id,
         state=state_before,
@@ -717,6 +913,7 @@ def run_execute_one() -> dict[str, Any]:
             "priority_selected": (
                 None if priority is None else priority.to_dict()
             ),
+            "hard_feasibility":feasibility,
             "supported_action_keys": sorted(SUPPORTED_LIVE_ACTIONS),
         },
         selected_option=selected.to_dict(),
@@ -728,31 +925,28 @@ def run_execute_one() -> dict[str, Any]:
             "authority": execution_payload,
             "cleanup": cleanup,
         },
-        postconditions={**measurement, "accepted": accepted},
+        postconditions={
+            **measurement,
+            "accepted":accepted,
+            "baseline_entities_preserved":baseline_preserved,
+        },
         capability_delta={
             "promoted": [],
-            "regressed": [],
-            "maintenance_effect": "fuel_recovery" if accepted else None,
+            "regressed": regressed,
+            "autonomous_effect": autonomous_effect,
         },
-        resource_cost={
-            "external_resource_injection": False,
-            "manual_logistics_by_agent": manual_actions,
-            "source_coal_before": source["coal_before"],
-            "coal_requested": REFUEL_DOSE * len(targets),
-            "repair_intervention_counts": intervention,
-        },
+        resource_cost=resource_cost,
         rollback={"required": not accepted, "integrity": rollback},
         reward_components={
             **rewards,
-            "eligible_for_learning": accepted,
-            "policy_updated": accepted,
+            "eligible_for_learning": learning_eligible,
+            "policy_updated": learning_eligible,
         },
         next_state=state_after,
         metadata={
             "observed_at": utc_now(),
             "preflight": preflight,
-            "source": source,
-            "targets": targets,
+            **plan_metadata,
             "continuous_authority": False,
             "policy_may_self_grant_authority": False,
             "priority_action_key": (
@@ -764,7 +958,9 @@ def run_execute_one() -> dict[str, Any]:
     digest = append_transition(TRAJECTORY_PATH, transition)
     return {
         "status": (
-            "accepted_and_learned" if accepted else "rejected_no_learning"
+            "accepted_and_learned"
+            if learning_eligible
+            else ("accepted_not_learned" if accepted else "rejected_no_learning")
         ),
         "run_id": run_id,
         "payload_sha256": digest,
@@ -772,9 +968,11 @@ def run_execute_one() -> dict[str, Any]:
             None if priority is None else priority.to_dict()
         ),
         "executed": selected.to_dict(),
+        "hard_feasibility":feasibility,
         "measurement": measurement,
         "reward_components": rewards,
-        "policy_updated": accepted,
+        "baseline_entities_preserved":baseline_preserved,
+        "policy_updated": learning_eligible,
         "state_before": state_before,
         "state_after": state_after,
         "cleanup": cleanup,

@@ -1,0 +1,245 @@
+"""Compiler for a bounded F5-D persistent material link."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from numbers import Real
+from typing import Any
+
+from fle.env.game_types import Prototype
+
+from factorio_ai_lab.cortex.structural_prepare import StructuralOperation
+
+
+def _prototype_name(member: Any) -> str | None:
+    value=getattr(member,"value",None)
+    if isinstance(value,tuple) and value and isinstance(value[0],str):
+        return value[0]
+    return value if isinstance(value,str) else None
+
+
+def _prototype(name: str) -> str:
+    matches=[
+        key for key,member in Prototype.__members__.items()
+        if _prototype_name(member)==name
+    ]
+    if not matches:
+        raise ValueError(f"no FLE Prototype member for {name!r}")
+    return f"Prototype.{matches[0]}"
+
+
+def _position(raw: Mapping[str,Any]) -> str:
+    x=raw.get("x"); y=raw.get("y")
+    if (
+        not isinstance(x,Real) or isinstance(x,bool)
+        or not isinstance(y,Real) or isinstance(y,bool)
+    ):
+        raise TypeError(f"invalid position {dict(raw)!r}")
+    return f"Position(x={float(x)!r},y={float(y)!r})"
+
+
+def _direction(dx: int,dy: int) -> str:
+    names={(0,-1):"UP",(0,1):"DOWN",(-1,0):"LEFT",(1,0):"RIGHT"}
+    try:
+        return names[(dx,dy)]
+    except KeyError as exc:
+        raise ValueError(f"non-cardinal belt step {(dx,dy)!r}") from exc
+
+
+def _arm_lines(prefix: str, raw: Mapping[str,Any]) -> list[str]:
+    position=raw.get("position")
+    direction=str(raw.get("direction") or "").upper()
+    if not isinstance(position,Mapping):
+        raise TypeError("delivery arm requires position")
+    if direction not in {"UP","DOWN","LEFT","RIGHT"}:
+        raise ValueError("delivery arm requires cardinal direction")
+    return [
+        f"move_to({_position(position)})",
+        f"{prefix}=place_entity(",
+        f"    {_prototype('inserter')},",
+        f"    position={_position(position)},",
+        f"    direction=Direction.{direction},",
+        ")",
+    ]
+
+
+def compile_autonomous_material_link(operation: StructuralOperation) -> list[str]:
+    params=operation.parameters
+    source=params.get("source_buffer")
+    target=params.get("target_processor")
+    delivery=params.get("delivery")
+    bootstrap=params.get("bootstrap")
+    sequence=params.get("craft_sequence")
+    construction=params.get("construction_items")
+    if not all(isinstance(row,Mapping) for row in (source,target,delivery,bootstrap,construction)):
+        raise TypeError("material link frozen plan is incomplete")
+    if not isinstance(sequence,Sequence) or isinstance(sequence,(str,bytes)):
+        raise TypeError("material link craft sequence unavailable")
+    if str(source.get("entity_name") or "")!="wooden-chest":
+        raise ValueError("material link source must be wooden-chest")
+    if str(target.get("entity_name") or "")!="stone-furnace":
+        raise ValueError("material link target must be stone-furnace")
+
+    iron_needed=int(bootstrap.get("iron_plate_needed") or 0)
+    iron_ore_to_smelt=int(bootstrap.get("iron_ore_to_smelt") or 0)
+    copper_needed=int(bootstrap.get("copper_plate_needed") or 0)
+    wait=int(bootstrap.get("smelt_wait_seconds") or 0)
+    if iron_needed<=0 or iron_ore_to_smelt<0 or copper_needed<0 or wait<=0:
+        raise ValueError("invalid material-link bootstrap budget")
+
+    source_pos=_position(source)
+    target_pos=_position(target)
+    lines=[
+        f"cortex_link_source=get_entity({_prototype('wooden-chest')},{source_pos})",
+        f"cortex_link_target=get_entity({_prototype('stone-furnace')},{target_pos})",
+        (
+            "cortex_link_source_before=inspect_inventory(cortex_link_source)"
+            f"[{_prototype('iron-ore')}]"
+        ),
+        (
+            "cortex_link_target_plate_before=inspect_inventory(cortex_link_target)"
+            f"[{_prototype('iron-plate')}]"
+        ),
+    ]
+    if iron_ore_to_smelt:
+        lines.extend([
+            f"move_to({source_pos})",
+            "cortex_link_bootstrap_ore=extract_item(",
+            f"    {_prototype('iron-ore')},",
+            "    cortex_link_source,",
+            f"    quantity={iron_ore_to_smelt},",
+            ")",
+            f"move_to({target_pos})",
+            "cortex_link_target=insert_item(",
+            f"    {_prototype('iron-ore')},",
+            "    cortex_link_target,",
+            f"    quantity={iron_ore_to_smelt},",
+            ")",
+            f"sleep({wait})",
+        ])
+    lines.extend([
+        (
+            "cortex_link_source_preflow=inspect_inventory(cortex_link_source)"
+            f"[{_prototype('iron-ore')}]"
+        ),
+        (
+            "cortex_link_target_plate_ready=inspect_inventory(cortex_link_target)"
+            f"[{_prototype('iron-plate')}]"
+        ),
+        f"if cortex_link_target_plate_ready < {iron_needed}:",
+        "    raise RuntimeError('endogenous iron bootstrap did not reach link budget')",
+        f"move_to({target_pos})",
+        "cortex_link_iron_drawn=extract_item(",
+        f"    {_prototype('iron-plate')},",
+        "    cortex_link_target,",
+        f"    quantity={iron_needed},",
+        ")",
+        (
+            "cortex_link_target_preflow=inspect_inventory(cortex_link_target)"
+            f"[{_prototype('iron-plate')}]"
+        ),
+    ])
+
+    copper_source=bootstrap.get("copper_plate_source")
+    if copper_needed:
+        if not isinstance(copper_source,Mapping):
+            raise TypeError("copper plate source required by material link")
+        copper_name=str(copper_source.get("entity_name") or "")
+        if copper_name!="stone-furnace":
+            raise ValueError("copper plate source must be stone-furnace")
+        copper_pos=_position(copper_source)
+        lines.extend([
+            f"cortex_link_copper_source=get_entity({_prototype(copper_name)},{copper_pos})",
+            (
+                "cortex_link_copper_before=inspect_inventory(cortex_link_copper_source)"
+                f"[{_prototype('copper-plate')}]"
+            ),
+            f"if cortex_link_copper_before < {copper_needed}:",
+            "    raise RuntimeError('endogenous copper plates below link budget')",
+            f"move_to({copper_pos})",
+            "cortex_link_copper_drawn=extract_item(",
+            f"    {_prototype('copper-plate')},",
+            "    cortex_link_copper_source,",
+            f"    quantity={copper_needed},",
+            ")",
+        ])
+    else:
+        lines.extend(["cortex_link_copper_before=0","cortex_link_copper_drawn=0"])
+
+    for index,raw in enumerate(sequence):
+        if not isinstance(raw,Mapping):
+            raise TypeError("craft sequence row must be a mapping")
+        item=str(raw.get("item") or "")
+        quantity=int(raw.get("quantity") or 0)
+        if not item or quantity<=0:
+            raise ValueError("invalid craft sequence row")
+        lines.extend([
+            f"cortex_link_craft_{index}=craft_item(",
+            f"    {_prototype(item)},",
+            f"    quantity={quantity},",
+            ")",
+        ])
+
+    lift=delivery.get("lift")
+    drop=delivery.get("drop")
+    path=delivery.get("path")
+    mode=str(delivery.get("mode") or "")
+    if not isinstance(lift,Mapping):
+        raise TypeError("material link requires lift inserter")
+    lines.extend(_arm_lines("cortex_link_lift",lift))
+    if mode=="belt":
+        if not isinstance(path,Sequence) or isinstance(path,(str,bytes)) or not path:
+            raise TypeError("belt material link requires path")
+        points=[]
+        for raw in path:
+            if not isinstance(raw,Mapping):
+                raise TypeError("belt path row must be a mapping")
+            points.append((int(raw["x"]),int(raw["y"])))
+        for index,(x,y) in enumerate(points):
+            if index+1<len(points):
+                nx,ny=points[index+1]
+                direction=_direction(nx-x,ny-y)
+            elif index>0:
+                px,py=points[index-1]
+                direction=_direction(x-px,y-py)
+            else:
+                direction="RIGHT"
+            pos={"x":x+0.5,"y":y+0.5}
+            lines.extend([
+                f"move_to({_position(pos)})",
+                f"cortex_link_belt_{index}=place_entity(",
+                f"    {_prototype('transport-belt')},",
+                f"    position={_position(pos)},",
+                f"    direction=Direction.{direction},",
+                ")",
+            ])
+        if not isinstance(drop,Mapping):
+            raise TypeError("belt material link requires drop inserter")
+        lines.extend(_arm_lines("cortex_link_drop",drop))
+    elif mode!="inserter":
+        raise ValueError(f"unsupported material link mode {mode!r}")
+
+    lines.extend([
+        "sleep(20)",
+        (
+            "cortex_material_link_output_after=inspect_inventory(cortex_link_target)"
+            f"[{_prototype('iron-plate')}]"
+        ),
+        (
+            "cortex_material_link_source_after=inspect_inventory(cortex_link_source)"
+            f"[{_prototype('iron-ore')}]"
+        ),
+        (
+            "cortex_autonomous_material_link_succeeded=("
+            "cortex_material_link_output_after>cortex_link_target_preflow "
+            "and cortex_material_link_source_after<cortex_link_source_preflow)"
+        ),
+        (
+            "print({'cortex_material_link_output_after':"
+            "cortex_material_link_output_after,"
+            "'cortex_material_link_source_after':cortex_material_link_source_after,"
+            "'cortex_autonomous_material_link_succeeded':"
+            "cortex_autonomous_material_link_succeeded})"
+        ),
+    ])
+    return lines
