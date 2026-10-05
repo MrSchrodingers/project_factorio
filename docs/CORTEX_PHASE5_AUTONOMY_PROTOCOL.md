@@ -125,22 +125,37 @@ story; retain them only as historical evidence.
 
 Validated A2 as one transactional Option with expiring durable authority grant, exact WorldLease attestation and no ambient EXECUTE authority. Closure audit: runs/audits/cortex_f5b_authority_bridge.json.
 
-### F5-C — Deterministic Autonomous Baseline — ACTIVE / IMPLEMENTATION READY
+### F5-C — Deterministic Autonomous Baseline — COMPLETE
 
-Use the engineering stack (goal DAG, production DAG, A*, structural planner,
-resupply, memory, universal executor and rollback) to prove physical bootstrap
-without neural policy control.
+The deterministic physical baseline closed with all nine preregistered
+capabilities promoted under ambient A0 and one expiring A2 grant per Option:
+iron extraction, coal self-sufficiency, iron smelting, steam power, copper
+chain, automation science, powered manufacturing, electric mining and logistic
+science. The promoted WORLD is retained as the incumbent physical baseline.
+F5-C evidence remains immutable; F5-D may add infrastructure but may not erase
+or silently redefine an F5-C capability.
 
-The first development capability is iron_extraction on frozen seed 1619515465,
-using open_play, empty inventory, ambient A0 and one A2 grant. See
-docs/CORTEX_PHASE5_DETERMINISTIC_BASELINE.md. F5-C remains incomplete until the
-deterministic physical baseline reaches its frozen completion gate.
+### F5-D — Trajectory Dataset — ACTIVE
 
-### F5-D — Trajectory Dataset
+F5-D turns the promoted baseline into an adaptive closed-loop research arena.
+The Cortex observes the live WORLD, derives deficits without a fixed curriculum,
+expands typed candidate Options, applies hard feasibility before learned ranking,
+and persists the complete transition surface: state, candidates, retrieval,
+selection, execution, postconditions, capability delta, cost, rollback, reward
+components and next state.
 
-Persist typed transitions containing state, candidates, retrieval, selection,
-execution, postconditions, capability delta, cost, rollback, reward components
-and next state.
+The first online policy is a persistent UCB challenger. It may rank only
+hard-feasible Options and never grants its own authority. Ambient authority
+remains A0; every live mutation still crosses the external durable one-shot A2
+bridge, an exclusive WorldLease and transactional commit/rollback boundary.
+Unexecuted counterfactuals receive no reward.
+
+Current causal evidence includes two accepted endogenous refuel episodes with
+measured policy updates. The next measured frontier is persistent material-flow
+integration: reuse promoted processors and create delivery links only when the
+runtime recipe graph, endogenous construction budget and physical route all
+pass preflight. Shadow trajectories are evidence of decision generation, not
+claims of successful execution.
 
 ### F5-E — Policy Challenger
 
