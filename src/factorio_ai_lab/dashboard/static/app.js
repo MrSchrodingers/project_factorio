@@ -135,6 +135,11 @@ function renderPhase5Capabilities(operational) {
       : []
   );
   const total = Number(protocol.capability_total || capabilities.length || 9);
+  const phase5Complete = (
+    protocol.next_capability == null
+    && total > 0
+    && achieved.size >= total
+  );
   setText(
     "phase5CapabilityTitle",
     "Factory capability progression · " + achieved.size + " / " + total
@@ -155,7 +160,9 @@ function renderPhase5Capabilities(operational) {
   setClassText(
     "phase5AuthorityBadge",
     operational.phase5BaselineActive
-      ? "A0 AMBIENT · F5-C · A2 POR OPTION"
+      ? (phase5Complete
+        ? "A0 · F5-C COMPLETE · NO FRONTIER"
+        : "A0 AMBIENT · F5-C · A2 POR OPTION")
       : (operational.phase5BridgeReady
         ? "A0 AMBIENT · A2 ONE-SHOT READY"
         : String(protocol.authority_level || "A0") + " · OBSERVE ONLY"),
@@ -4437,6 +4444,11 @@ function updateMission() {
     const nextCapability = String(
       operational.phase5Protocol.next_capability || "baseline complete"
     );
+    const phase5Complete = (
+      operational.phase5Protocol.next_capability == null
+      && capabilityTotal > 0
+      && achieved >= capabilityTotal
+    );
     const supervisor = operational.supervisor || {};
     const supervisorStatus = String(supervisor.status || "unknown");
     const supervisorFrontier = String(supervisor.frontier || nextCapability);
@@ -4492,7 +4504,9 @@ function updateMission() {
             ? "CORTEX F5 · F5-C · A2 EXECUTING"
             : (counterexampleBlocked
               ? "CORTEX F5 · F5-C · COUNTEREXAMPLE BLOCKED"
-              : "CORTEX F5 · F5-C · PHYSICAL BASELINE")))
+              : (phase5Complete
+                ? "CORTEX F5 · F5-C COMPLETE · 9/9"
+                : "CORTEX F5 · F5-C · PHYSICAL BASELINE"))))
         : (operational.phase5BridgeReady
           ? "CORTEX F5 · F5-B PASS · A2 ONE-SHOT READY"
           : "CORTEX F5 · A0 OBSERVE ONLY · EVOLUTION OFF"),
