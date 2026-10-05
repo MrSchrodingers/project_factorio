@@ -352,6 +352,22 @@ def _option_requests(
 
 def _measure(namespace: Any, prepared: Any) -> dict[str, Any]:
     if prepared.binding == "cortex.f5d.autonomous_material_link":
+        expected_rows=prepared.preflight.get("baseline_entities")
+        expected={
+            (
+                str(row.get("entity_name") or ""),
+                round(float(row.get("x") or 0),3),
+                round(float(row.get("y") or 0),3),
+            )
+            for row in expected_rows
+            if isinstance(row,Mapping)
+        } if isinstance(expected_rows,Sequence) and not isinstance(
+            expected_rows,(str,bytes)
+        ) else set()
+        current={
+            tuple(row)
+            for row in _factory_fingerprint(_snapshot())
+        }
         return {
             "autonomous_material_link_succeeded": bool(
                 getattr(
@@ -377,6 +393,9 @@ def _measure(namespace: Any, prepared: Any) -> dict[str, Any]:
             ),
             "material_link_copper_drawn": float(
                 getattr(namespace, "cortex_link_copper_drawn", 0) or 0
+            ),
+            "promoted_baseline_entities_preserved": bool(
+                expected and expected.issubset(current)
             ),
         }
     return {

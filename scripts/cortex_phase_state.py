@@ -4702,6 +4702,45 @@ def build_phase_state(
         None,
     )
 
+    phase5d_trajectory_path=(
+        state_root/"runs"/"cortex_f5d_trajectories.jsonl"
+    )
+    phase5d_policy_path=state_root/"runs"/"cortex_f5d_policy.json"
+    phase5d_trajectories: list[dict[str, Any]]=[]
+    if phase5d_trajectory_path.exists():
+        try:
+            for raw in phase5d_trajectory_path.read_text(
+                encoding="utf-8"
+            ).splitlines():
+                if not raw.strip():
+                    continue
+                row=json.loads(raw)
+                if isinstance(row,dict):
+                    phase5d_trajectories.append(row)
+        except (OSError,json.JSONDecodeError,TypeError):
+            phase5d_trajectories=[]
+    phase5d_policy: dict[str, Any]={}
+    if phase5d_policy_path.exists():
+        try:
+            phase5d_policy=_load(phase5d_policy_path)
+        except (OSError,json.JSONDecodeError,TypeError):
+            phase5d_policy={}
+    phase5d_updates_raw=phase5d_policy.get("total_updates",0)
+    phase5d_policy_updates=(
+        int(phase5d_updates_raw)
+        if isinstance(phase5d_updates_raw,(int,float))
+        and not isinstance(phase5d_updates_raw,bool)
+        and int(phase5d_updates_raw)>=0
+        else 0
+    )
+    phase5d_last_transition=(
+        phase5d_trajectories[-1] if phase5d_trajectories else {}
+    )
+    phase5d_started=(
+        phase5_next_capability is None
+        and bool(phase5d_trajectories)
+    )
+
     phase2_delivery_actuator_canary_path=(
         state_root
         / "runs"
@@ -4945,7 +4984,28 @@ def build_phase_state(
                 "functional_accept_sustainability_not_proven"
             )
 
-    if phase5c_logistic_valid:
+    if phase5d_started:
+        last_selected=phase5d_last_transition.get("selected_option")
+        last_action=None
+        if isinstance(last_selected,dict):
+            last_action=last_selected.get("action")
+        action_key=(
+            last_action.get("key")
+            if isinstance(last_action,dict)
+            else None
+        )
+        action=(
+            "F5-D adaptive autonomy active: typed live trajectories are being "
+            f"recorded and {phase5d_policy_updates} measured policy update(s) "
+            "have been retained; ambient authority remains A0 and learned "
+            "policy cannot self-grant execution"
+            + (
+                f"; current autonomous frontier={action_key}"
+                if isinstance(action_key,str) and action_key
+                else ""
+            )
+        )
+    elif phase5c_logistic_valid:
         action=(
             "F5-C logistic_science capability promoted after native Logistic "
             "Science Pack research from endogenous automation science; two "
@@ -5244,19 +5304,41 @@ def build_phase_state(
             )
         ),
         "phase5_checkpoint":(
-            "F5-C"
-            if phase5c_started
+            "F5-D"
+            if phase5d_started
             else (
-                "F5-B"
-                if phase5b_valid
-                else ("F5-A" if phase5_protocol_valid else None)
+                "F5-C"
+                if phase5c_started
+                else (
+                    "F5-B"
+                    if phase5b_valid
+                    else ("F5-A" if phase5_protocol_valid else None)
+                )
             )
         ),
         "phase5_next_checkpoint":(
-            "F5-C"
-            if phase5b_valid
-            else ("F5-B" if phase5_protocol_valid else None)
+            "F5-D"
+            if phase5d_started
+            else (
+                "F5-C"
+                if phase5b_valid
+                else ("F5-B" if phase5_protocol_valid else None)
+            )
         ),
+        "phase5_adaptive_autonomy":{
+            "status":"active" if phase5d_started else "not_started",
+            "trajectory_path":str(phase5d_trajectory_path),
+            "trajectory_count":len(phase5d_trajectories),
+            "policy_path":str(phase5d_policy_path),
+            "policy_updates":phase5d_policy_updates,
+            "policy_schema_version":phase5d_policy.get("schema_version"),
+            "last_transition_id":phase5d_last_transition.get("transition_id"),
+            "last_authority_level":phase5d_last_transition.get("authority_level"),
+            "last_selected_option":phase5d_last_transition.get("selected_option"),
+            "last_execution_trace":phase5d_last_transition.get("execution_trace"),
+            "continuous_authority":False,
+            "policy_may_self_grant_authority":False,
+        },
         "phase5_deterministic_baseline":{
             "artifact_path":str(phase5c_artifact_path),
             "artifact_exists":phase5c_artifact_exists,

@@ -194,6 +194,14 @@ def test_f5d_plans_existing_processor_instead_of_new_furnace() -> None:
     assert plan.plate_requirements=={"iron-plate":14,"copper-plate":3}
     assert plan.bootstrap["iron_ore_to_smelt"]==6
     assert plan.bootstrap["copper_plate_needed"]==3
+    assert len(plan.baseline_entities)==5
+    assert {
+        (row["entity_name"],row["x"],row["y"])
+        for row in plan.baseline_entities
+    } >= {
+        ("wooden-chest",15.5,71.5),
+        ("stone-furnace",20.0,69.0),
+    }
 
 
 def test_f5d_material_link_refuses_non_endogenous_bootstrap() -> None:
@@ -217,6 +225,12 @@ def test_f5d_material_link_option_is_inert_and_external_a2_only() -> None:
     assert result.plan.prepared.purpose=="infrastructure"
     assert result.plan.action_request.provenance.parent_action_id==option.option_id
     assert result.plan.prepared.preflight["persistent_logistics_created"] is True
+    assert len(result.plan.termination_conditions)==2
+    assert (
+        result.plan.termination_conditions[1].name
+        =="promoted_baseline_entities_preserved"
+    )
+    assert result.plan.prepared.preflight["baseline_entities"]
 
     execute_option=OptionRequest(
         option_id=option.option_id,

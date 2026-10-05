@@ -3153,6 +3153,36 @@ class DashboardState:
             and len(achieved) >= total
         )
         achieved_set = set(achieved)
+        adaptive = cortex.get("phase5_adaptive_autonomy")
+        adaptive = adaptive if isinstance(adaptive, dict) else {}
+        adaptive_active = adaptive.get("status") == "active"
+        policy_updates_raw = adaptive.get("policy_updates", 0)
+        policy_updates = (
+            int(policy_updates_raw)
+            if isinstance(policy_updates_raw, (int, float))
+            and not isinstance(policy_updates_raw, bool)
+            else 0
+        )
+        trajectory_count_raw = adaptive.get("trajectory_count", 0)
+        trajectory_count = (
+            int(trajectory_count_raw)
+            if isinstance(trajectory_count_raw, (int, float))
+            and not isinstance(trajectory_count_raw, bool)
+            else 0
+        )
+        last_selected = adaptive.get("last_selected_option")
+        last_action = (
+            last_selected.get("action")
+            if isinstance(last_selected, dict)
+            else None
+        )
+        adaptive_frontier = (
+            str(last_action.get("key"))
+            if isinstance(last_action, dict)
+            and isinstance(last_action.get("key"), str)
+            and last_action.get("key")
+            else None
+        )
 
         curriculum = [
             {
@@ -3170,7 +3200,14 @@ class DashboardState:
         if not isinstance(resume, dict):
             resume = {}
         completion_detail = str(resume.get("action") or "").strip()
-        if complete:
+        if complete and adaptive_active:
+            next_action = (
+                "continue F5-D autonomous observe-decide-measure-learn episodes "
+                "under ambient A0 with one expiring A2 grant per executable Option"
+            )
+            stage_name = "F5-D · adaptive autonomy"
+            stage_status = "learning"
+        elif complete:
             next_action = (
                 "F5-C complete under ambient A0; preserve the promoted WORLD "
                 "and await the next preregistered protocol."
@@ -3193,7 +3230,11 @@ class DashboardState:
         return {
             "schema_version": "dashboard_f5_research_projection_v1",
             "source": "cortex_phase_state",
-            "status": "completed" if complete else "frozen",
+            "status": (
+                "learning"
+                if adaptive_active
+                else ("completed" if complete else "frozen")
+            ),
             "objective": (
                 "Bootstrap an autonomous factory under bounded A2 Options "
                 "while preserving every promoted physical capability."
@@ -3213,7 +3254,11 @@ class DashboardState:
             },
             "curriculum": curriculum,
             "arena": {
-                "mode": "f5_c_deterministic_baseline",
+                "mode": (
+                    "f5_d_adaptive_autonomy"
+                    if adaptive_active
+                    else "f5_c_deterministic_baseline"
+                ),
                 "technology": "real_technology_tree",
                 "environment": "live_factorio",
                 "promotion_scope": "physical_capabilities",
@@ -3226,9 +3271,21 @@ class DashboardState:
                 "stalled_attempts": {},
             },
             "online_learning": {
-                "status": "off",
-                "algorithm": None,
-                "detail": "legacy online placement learning is historical evidence",
+                "status": "learning" if adaptive_active else "off",
+                "algorithm": "persistent_ucb" if adaptive_active else None,
+                "detail": (
+                    (
+                        f"F5-D typed trajectories={trajectory_count}; "
+                        f"measured policy updates={policy_updates}; "
+                        f"frontier={adaptive_frontier or 'observing'}; "
+                        "policy ranks hard-feasible Options but cannot grant authority"
+                    )
+                    if adaptive_active
+                    else "legacy online placement learning is historical evidence"
+                ),
+                "trajectory_count": trajectory_count if adaptive_active else 0,
+                "policy_updates": policy_updates if adaptive_active else 0,
+                "frontier": adaptive_frontier if adaptive_active else None,
             },
             "phase5_projection": {
                 "checkpoint": cortex.get("phase5_checkpoint"),
@@ -3248,6 +3305,10 @@ class DashboardState:
                     "legacy_evolution_loop",
                     "off",
                 ),
+                "adaptive_autonomy_active": adaptive_active,
+                "trajectory_count": trajectory_count,
+                "policy_updates": policy_updates,
+                "autonomy_frontier": adaptive_frontier,
             },
             "metrics": {},
         }
@@ -3708,31 +3769,49 @@ class DashboardState:
             if not isinstance(next_capability, str) or not next_capability:
                 next_capability = None
             complete = bool(phase5.get("complete"))
-            next_goal = (
-                None
-                if complete or next_capability is None
-                else {
-                    "goal_id": next_capability,
-                    "label": next_capability.replace("_", " "),
-                    "kind": "capability",
+            adaptive_active = bool(phase5.get("adaptive_autonomy_active"))
+            adaptive_frontier = phase5.get("autonomy_frontier")
+            if not isinstance(adaptive_frontier, str) or not adaptive_frontier:
+                adaptive_frontier = None
+            if adaptive_active and adaptive_frontier is not None:
+                next_goal = {
+                    "goal_id": adaptive_frontier,
+                    "label": adaptive_frontier.replace("_", " "),
+                    "kind": "autonomous_option",
                     "score": 1.0,
-                    "novelty": 0.0,
+                    "novelty": 1.0,
                     "retry_penalty": 0.0,
                 }
-            )
+            else:
+                next_goal = (
+                    None
+                    if complete or next_capability is None
+                    else {
+                        "goal_id": next_capability,
+                        "label": next_capability.replace("_", " "),
+                        "kind": "capability",
+                        "score": 1.0,
+                        "novelty": 0.0,
+                        "retry_penalty": 0.0,
+                    }
+                )
             frontier = [next_goal] if next_goal is not None else []
             return {
                 "source": "cortex_phase_state",
                 "achieved": achieved,
                 "validated_achieved": achieved,
                 "planning_assumptions": [],
-                "arena_mode": "f5_c_deterministic_baseline",
+                "arena_mode": (
+                    "f5_d_adaptive_autonomy"
+                    if adaptive_active
+                    else "f5_c_deterministic_baseline"
+                ),
                 "technology_mode": "real_technology_tree",
                 "next_goal": next_goal,
                 "frontier": frontier,
                 "dependency_debt": [],
                 "stalled_attempts": {},
-                "terminal": complete,
+                "terminal": complete and not adaptive_active,
                 "capability_total": int(
                     phase5.get("capability_total") or len(achieved)
                 ),

@@ -103,6 +103,13 @@ def compose_material_link_option(
         expected=True,
         hard=True,
     )
+    baseline=ActionCondition(
+        name="promoted_baseline_entities_preserved",
+        operator=ConditionOperator.EQUALS,
+        state=ConditionState.UNKNOWN,
+        expected=True,
+        hard=True,
+    )
     frozen=link.to_dict()
     prepared=PreparedStructuralAction(
         action_id=child.action_id,
@@ -115,13 +122,16 @@ def compose_material_link_option(
             StructuralOperation(op="autonomous_material_link",parameters=frozen),
             StructuralOperation(
                 op="verify_postconditions",
-                parameters={"conditions":[hard.to_dict()]},
+                parameters={
+                    "conditions":[hard.to_dict(),baseline.to_dict()],
+                },
             ),
         ),
         measurement_keys=(
             "autonomous_material_link_succeeded",
             "material_link_output_after",
             "material_link_source_after",
+            "promoted_baseline_entities_preserved",
         ),
         preflight={
             "world_mutation":False,
@@ -130,6 +140,9 @@ def compose_material_link_option(
             "manual_logistics_by_agent":True,
             "learning_policy_grants_authority":False,
             "persistent_logistics_created":True,
+            "baseline_entities":[
+                dict(row) for row in link.baseline_entities
+            ],
         },
     )
     return F5DMaterialLinkOptionResult(
@@ -148,7 +161,7 @@ def compose_material_link_option(
                     details=frozen,
                 ),
             ),
-            termination_conditions=(hard,),
+            termination_conditions=(hard,baseline),
             frozen_plan=link,
         ),
     )

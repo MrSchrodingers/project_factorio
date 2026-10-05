@@ -37,6 +37,7 @@ class MaterialLinkPlan:
     plate_requirements: Mapping[str, int]
     craft_sequence: tuple[Mapping[str, Any], ...]
     bootstrap: Mapping[str, Any]
+    baseline_entities: tuple[Mapping[str, Any], ...]
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -50,6 +51,7 @@ class MaterialLinkPlan:
             "plate_requirements": dict(self.plate_requirements),
             "craft_sequence": [dict(row) for row in self.craft_sequence],
             "bootstrap": dict(self.bootstrap),
+            "baseline_entities": [dict(row) for row in self.baseline_entities],
         }
 
 
@@ -286,6 +288,14 @@ def plan_existing_processing_link(
         ),
         "smelt_wait_seconds": max(8, math.ceil(iron_shortfall * 3.2) + 5),
     }
+    baseline_entities=tuple(
+        {
+            "entity_name":str(row.get("name") or ""),
+            **_position(row),
+        }
+        for row in entities
+        if row.get("name")!="character"
+    )
     return MaterialLinkPlan(
         producer_id=branch.producers[0],
         material=branch.material,
@@ -308,4 +318,5 @@ def plan_existing_processing_link(
         plate_requirements=plate_requirements,
         craft_sequence=tuple(craft_sequence),
         bootstrap=bootstrap,
+        baseline_entities=baseline_entities,
     )
